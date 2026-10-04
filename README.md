@@ -2,6 +2,14 @@
 
 莲华视频导演台是 Windows PC 端的视频提示词工作台：把一句话、小说片段、场景资料和参考图整理成可编辑的结构化视频时间轴。
 
+## 下载 Windows 便携版
+
+**[下载最新便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)**
+
+打开下载页，在 Assets（附件）中选择 `莲华视频导演台-版本号-便携版.exe`，保存到可写入的文件夹后双击运行。适用于 Windows x64，无需安装开发环境。外部 AI 服务需在软件内填写自己的账号和 API 配置。更新前请保存项目并退出旧版，保留原有数据目录。
+
+页面自动生成的 Source code ZIP/TAR 是开发源码；使用软件请下载便携版 EXE。
+
 ## GitHub 项目
 
 首次创建仓库、上传源码和发布 Windows 便携版的操作见 [GitHub 发布指南](docs/github-publishing.md)。源码仓库保留程序、图标、构建配置和文档；便携版 EXE 通过 GitHub Releases 单独分发。本机交付目录、测试输出、浏览器缓存、用户数据和下载的媒体工具二进制已加入忽略规则。
