@@ -6,7 +6,7 @@
 
 **[下载最新便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)**
 
-打开下载页，在 Assets（附件）中选择 `莲华视频导演台-版本号-便携版.exe`，保存到可写入的文件夹后双击运行。适用于 Windows x64，无需安装开发环境。外部 AI 服务需在软件内填写自己的账号和 API 配置。更新前请保存项目并退出旧版，保留原有数据目录。
+打开下载页，在 Assets（附件）中选择 `lianhua-video-director-版本号-windows-x64-portable.exe`，保存到可写入的文件夹后双击运行。适用于 Windows x64，无需安装开发环境。外部 AI 服务需在软件内填写自己的账号和 API 配置。更新前请保存项目并退出旧版，保留原有数据目录。
 
 页面自动生成的 Source code ZIP/TAR 是开发源码；使用软件请下载便携版 EXE。
 
