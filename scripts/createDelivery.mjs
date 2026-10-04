@@ -69,6 +69,17 @@ if (currentVersionCollisions.length > 0 && process.env.LIANHUA_REPLACE_CURRENT_D
   );
 }
 
+// New checkouts keep release notes in docs/releases; older recovery archives
+// still have the current notes at the project root.
+const archivedReleaseNotes = path.join('docs', 'releases', releaseNotesName);
+const releaseNotesRelativePath = fs.existsSync(path.join(root, archivedReleaseNotes))
+  ? archivedReleaseNotes
+  : releaseNotesName;
+const releaseNotesSource = path.join(root, releaseNotesRelativePath);
+if (!fs.existsSync(releaseNotesSource)) {
+  throw new Error(`Release notes are missing: ${path.join(root, archivedReleaseNotes)} or ${releaseNotesSource}`);
+}
+
 function copyDirectory(source, destination) {
   fs.mkdirSync(destination, { recursive: true });
   for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
@@ -92,10 +103,28 @@ const files = [
   'index.html', 'package.json', 'package-lock.json', 'README.md', 'AGENTS.md', 'tsconfig.json', 'tsconfig.tests.json', 'vite.config.ts',
   '启动开发模式.bat', '启动莲华视频导演台-EXE.bat', '启动莲华视频导演台.bat',
   '多功能提示词模版5S.md', '多功能提示词模版10S.md', '多功能提示词模版15S.md',
-  '莲华视频导演台-完整改造方案.md', releaseNotesName, launcherSourceName,
+  '莲华视频导演台-完整改造方案.md', releaseNotesRelativePath, launcherSourceName,
 ];
+// Include the linked public documentation without copying arbitrary local
+// documents, test reports, or user data into a recovery source archive.
+for (const document of ['project-guide.md', 'github-publishing.md']) {
+  const relativePath = path.join('docs', document);
+  if (fs.existsSync(path.join(root, relativePath))) files.push(relativePath);
+}
+const releaseNotesDirectory = path.join(root, 'docs', 'releases');
+if (fs.existsSync(releaseNotesDirectory)) {
+  for (const entry of fs.readdirSync(releaseNotesDirectory, { withFileTypes: true })) {
+    if (entry.isFile() && (entry.name === 'README.md' || /^发布说明-\d+\.\d+\.\d+\.md$/u.test(entry.name))) {
+      files.push(path.join('docs', 'releases', entry.name));
+    }
+  }
+}
 for (const folder of folders) copyDirectory(path.join(root, folder), path.join(stage, folder));
-for (const file of files) fs.copyFileSync(path.join(root, file), path.join(stage, file));
+for (const file of new Set(files)) {
+  const destination = path.join(stage, file);
+  fs.mkdirSync(path.dirname(destination), { recursive: true });
+  fs.copyFileSync(path.join(root, file), destination);
+}
 
 const archive = path.join(outputDirectory, sourceName);
 const temporaryArchive = `${archive}.tmp.zip`;
@@ -113,7 +142,7 @@ if (result.status !== 0) throw new Error((result.stderr || result.stdout || 'Una
 if (fs.existsSync(archive)) fs.unlinkSync(archive);
 fs.renameSync(temporaryArchive, archive);
 fs.copyFileSync(portableSource, path.join(outputDirectory, portableName));
-fs.copyFileSync(path.join(root, releaseNotesName), path.join(outputDirectory, notesName));
+fs.copyFileSync(releaseNotesSource, path.join(outputDirectory, notesName));
 fs.writeFileSync(path.join(outputDirectory, launcherName), deliveryLauncherContents, 'utf8');
 fs.writeFileSync(path.join(outputDirectory, launcherSourceName), deliveryLauncherContents, 'utf8');
 

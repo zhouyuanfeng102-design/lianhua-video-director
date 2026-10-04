@@ -69,7 +69,11 @@ npm run pack:win
 
 ## 发布软件下载
 
+新版本的发布说明保存为 `docs/releases/发布说明-版本号.md`，并更新同目录的版本索引。根目录 README 保持简短，放软件介绍、当前版本、下载入口和文档链接；详细使用与开发记录保存在 `docs/project-guide.md`。
+
 在 GitHub 仓库的 Releases 中创建版本，填写对应版本标签、标题和发布说明，再附加已验证的便携版 EXE。第三方媒体工具随软件分发时，应先按已有 [第三方说明](../build/media-tools/win32-x64/THIRD-PARTY-NOTICES.md) 准备所需材料。
+
+GitHub 下载附件使用英文文件名，例如 `lianhua-video-director-版本号-windows-x64-portable.exe`；同步核对配套启动器中的 EXE 文件名和下载校验清单。历史本机交付文件保留原名与原内容。分享给软件使用者的入口为[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)。
 
 版本规则继续遵循根目录 [AGENTS.md](../AGENTS.md)：小版本和补丁位均为 0–9，如 `0.6.9 → 0.7.0`、`0.9.9 → 1.0.0`。可运行 `npm run next-version` 查看下一个版本建议；该命令不修改文件。不要使用普通 `npm version patch` 替代此规则。
 

@@ -40,25 +40,36 @@ test(`release metadata targets ${version}`, () => {
   assert.equal(packageInfo.scripts?.['next-version'], 'node scripts/nextVersion.mjs');
 
   const readme = fs.readFileSync(path.join(repositoryRoot, 'README.md'), 'utf8');
-  assert.equal(readme.includes(`当前开发版（${version}）`), true);
-  assert.equal(readme.includes(portableName), true);
-  assert.equal(readme.includes(`npm run deliver:${version}`), true);
-  assert.equal(readme.includes('0.6.9 → 0.7.0'), true);
-  assert.equal(readme.includes('0.9.9 → 1.0.0'), true);
-  assert.equal(readme.includes('npm run next-version'), true);
-  assert.match(readme, /应用内更新日志/u);
-  assert.match(readme, /报错日志上方/u);
-  assert.match(readme, /选择视觉风格/u);
-  assert.match(readme, /加载旧项目不主动联动/u);
-  assert.doesNotMatch(readme, /根据剧情自动匹配/u);
+  const projectGuidePath = path.join(repositoryRoot, 'docs', 'project-guide.md');
+  const projectGuide = fs.existsSync(projectGuidePath)
+    ? fs.readFileSync(projectGuidePath, 'utf8')
+    : readme;
+  if (fs.existsSync(projectGuidePath)) {
+    assert.equal(readme.includes(`当前版本：**${version}**`), true);
+    assert.match(readme, /https:\/\/github\.com\/zhouyuanfeng102-design\/lianhua-video-director\/releases\/latest/u);
+    assert.equal(readme.includes('docs/project-guide.md'), true);
+    assert.equal(readme.includes('docs/releases/README.md'), true);
+  }
+  assert.equal(projectGuide.includes(`当前开发版（${version}）`), true);
+  assert.equal(projectGuide.includes(portableName), true);
+  assert.equal(projectGuide.includes(`npm run deliver:${version}`), true);
+  assert.equal(projectGuide.includes('0.6.9 → 0.7.0'), true);
+  assert.equal(projectGuide.includes('0.9.9 → 1.0.0'), true);
+  assert.equal(projectGuide.includes('npm run next-version'), true);
+  assert.match(projectGuide, /应用内更新日志/u);
+  assert.match(projectGuide, /报错日志上方/u);
+  assert.match(projectGuide, /选择视觉风格/u);
+  assert.match(projectGuide, /加载旧项目不主动联动/u);
+  assert.doesNotMatch(projectGuide, /根据剧情自动匹配/u);
 
-  const deliveryGuide = fs.readFileSync(
-    path.join(repositoryRoot, '交付', '莲华视频导演台-交付说明.md'),
-    'utf8',
-  );
-  assert.equal(deliveryGuide.includes(`当前交付版本为 **${version}**`), true);
-  assert.equal(deliveryGuide.includes(portableName), true);
-  assert.equal(deliveryGuide.includes(`npm run deliver:${version}`), true);
+  // The delivery directory is local-only and is absent in fresh GitHub clones.
+  const deliveryGuidePath = path.join(repositoryRoot, '交付', '莲华视频导演台-交付说明.md');
+  if (fs.existsSync(deliveryGuidePath)) {
+    const deliveryGuide = fs.readFileSync(deliveryGuidePath, 'utf8');
+    assert.equal(deliveryGuide.includes(`当前交付版本为 **${version}**`), true);
+    assert.equal(deliveryGuide.includes(portableName), true);
+    assert.equal(deliveryGuide.includes(`npm run deliver:${version}`), true);
+  }
 
   const updateLog = fs.readFileSync(path.join(repositoryRoot, 'src', 'updateLog.ts'), 'utf8');
   assert.equal(/version: "([^"]+)"/u.exec(updateLog)?.[1], version);
@@ -68,7 +79,10 @@ test(`release metadata targets ${version}`, () => {
 });
 
 test(`${version} release notes identify the current release and its delivery artifacts`, () => {
-  const notes = fs.readFileSync(path.join(repositoryRoot, `发布说明-${version}.md`), 'utf8');
+  const archivedNotes = path.join(repositoryRoot, 'docs', 'releases', `发布说明-${version}.md`);
+  const notes = fs.readFileSync(fs.existsSync(archivedNotes)
+    ? archivedNotes
+    : path.join(repositoryRoot, `发布说明-${version}.md`), 'utf8');
   for (const phrase of [
     `# 莲华视频导演台 ${version} 发布说明`, '版本定位', portableName,
     `npm run deliver:${version}`, 'SHA-256',
@@ -239,6 +253,71 @@ test('createDelivery delivers and hashes the versioned release notes', () => {
     const expectedHash = createHash('sha256').update(fs.readFileSync(notes)).digest('hex');
     const checksum = fs.readFileSync(path.join(output, checksumName), 'utf8');
     assert.match(checksum, new RegExp(`^${expectedHash}  ${deliveredNotesName.replaceAll('.', '\\.')}$`, 'mu'));
+  } finally {
+    fs.rmSync(fixture.base, { recursive: true, force: true });
+  }
+});
+
+for (const rootNotesState of ['absent', 'stale']) {
+  test(`createDelivery packages archived notes and linked public docs with ${rootNotesState} root notes`, () => {
+    const fixture = createFixture();
+    try {
+      if (rootNotesState === 'absent') fs.unlinkSync(path.join(fixture.root, `发布说明-${version}.md`));
+      const output = path.join(fixture.base, 'delivery-output');
+      const documentation = [
+        ['docs/project-guide.md', '# Project guide'],
+        ['docs/github-publishing.md', '# Publishing guide'],
+        ['docs/releases/README.md', '# Releases'],
+        [`docs/releases/发布说明-${version}.md`, '# Archived current release notes'],
+        ['docs/releases/发布说明-0.5.160.md', '# Preserved legacy release notes'],
+      ];
+      for (const [relativePath, contents] of documentation) {
+        writeFile(path.join(fixture.root, relativePath), contents);
+      }
+      const excludedFiles = [
+        'docs/private-project.json',
+        'docs/releases/local-debug.log',
+        'docs/releases/local-notes.md',
+        'docs/releases/user-data/发布说明-0.5.160.md',
+        'user-data/project.json',
+      ];
+      for (const relativePath of excludedFiles) {
+        writeFile(path.join(fixture.root, relativePath), 'PRIVATE-DATA-SENTINEL');
+      }
+
+      runDelivery(fixture.root, output);
+
+      const entries = listZipEntries(path.join(output, sourceName));
+      for (const [relativePath] of documentation) {
+        assert.equal(entries.includes(relativePath), true, `${relativePath} must be recoverable`);
+      }
+      for (const relativePath of excludedFiles) {
+        assert.equal(entries.includes(relativePath), false, `${relativePath} must not be published`);
+      }
+      assert.equal(entries.includes(`发布说明-${version}.md`), false,
+        'a stale root-level note must not override the archived current note');
+      assert.equal(fs.readFileSync(path.join(output, deliveredNotesName), 'utf8'), '# Archived current release notes');
+      const expectedHash = createHash('sha256').update('# Archived current release notes').digest('hex');
+      const checksum = fs.readFileSync(path.join(output, checksumName), 'utf8');
+      assert.match(checksum, new RegExp(`^${expectedHash}  ${deliveredNotesName.replaceAll('.', '\\.')}$`, 'mu'));
+    } finally {
+      fs.rmSync(fixture.base, { recursive: true, force: true });
+    }
+  });
+}
+
+test('createDelivery rejects missing release notes before writing any output', () => {
+  const fixture = createFixture();
+  try {
+    fs.unlinkSync(path.join(fixture.root, `发布说明-${version}.md`));
+    const output = path.join(fixture.base, 'delivery-output');
+
+    const result = executeDelivery(fixture.root, output);
+
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, /Release notes are missing/u);
+    assert.equal(fs.existsSync(output), false);
+    assert.equal(fs.existsSync(path.join(fixture.root, `.delivery-source-${version}`)), false);
   } finally {
     fs.rmSync(fixture.base, { recursive: true, force: true });
   }
