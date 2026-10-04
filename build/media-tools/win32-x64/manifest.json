@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "name": "FFmpeg essentials Windows x86-64",
+  "version": "8.1.2-essentials_build-www.gyan.dev",
+  "platform": "win32",
+  "arch": "x64",
+  "distributor": "Gyan Doshi (gyan.dev)",
+  "license": "GPL-3.0-or-later",
+  "licenseFile": "LICENSE.FFmpeg.GPLv3.txt",
+  "upstreamReadmeFile": "UPSTREAM-README.txt",
+  "verifiedAt": "2026-09-13",
+  "officialDownloadPage": "https://ffmpeg.org/download.html#build-windows",
+  "releaseUrl": "https://github.com/GyanD/codexffmpeg/releases/tag/8.1.2",
+  "archive": {
+    "url": "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-8.1.2-essentials_build.zip",
+    "mirrorUrl": "https://github.com/GyanD/codexffmpeg/releases/download/8.1.2/ffmpeg-8.1.2-essentials_build.zip",
+    "checksumUrl": "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-8.1.2-essentials_build.zip.sha256",
+    "sha256": "db580001caa24ac104c8cb856cd113a87b0a443f7bdf47d8c12b1d740584a2ec",
+    "bytes": 109728040
+  },
+  "coreSource": {
+    "commit": "38b88335f99e76ed89ff3c93f877fdefce736c13",
+    "url": "https://ffmpeg.org/releases/ffmpeg-8.1.2.tar.xz",
+    "sha256": "464beb5e7bf0c311e68b45ae2f04e9cc2af88851abb4082231742a74d97b524c",
+    "bytes": 11710924,
+    "includesAllExternalDependencySources": false
+  },
+  "files": [
+    {
+      "name": "ffmpeg.exe",
+      "bytes": 101897728,
+      "sha256": "1326dde4c84ff1f96fe6b8916c5bed29e163e9b5dccf995f6f3db069d143ec5e"
+    },
+    {
+      "name": "ffprobe.exe",
+      "bytes": 101692928,
+      "sha256": "b49ccc7c6547b141ad5a2f6ec69cc04323d7133d7704d70b331b904c63eecb07"
+    },
+    {
+      "name": "LICENSE.FFmpeg.GPLv3.txt",
+      "bytes": 35147,
+      "sha256": "8ceb4b9ee5adedde47b31e975c1d90c73ad27b6b165a1dcd80c7c545eb65b903"
+    },
+    {
+      "name": "UPSTREAM-README.txt",
+      "bytes": 41440,
+      "sha256": "9172433fb251059a58d2ff11ba8c6132e04819136ed96e809563911ff0d13816"
+    }
+  ]
+}

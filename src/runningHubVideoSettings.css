@@ -1,0 +1,75 @@
+.runninghub-video-settings .vgs-card-title h3 { display: flex; align-items: center; gap: 7px; }
+.runninghub-video-settings .rhv-connection-title { flex-wrap: wrap; gap: 6px 12px; }
+.rhv-connection-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; min-width: 0; }
+.runninghub-video-settings .rhv-invite-link { min-height: 28px; text-decoration: none; color: #b73f78; border-color: #efbed4; background: #fff4f8; white-space: normal; }
+.runninghub-video-settings .rhv-invite-link:hover { color: #a22e65; border-color: #dc8caf; background: #ffebf3; }
+.runninghub-video-settings .rhv-invite-link:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
+.rhv-connection-title > .rhv-enable { margin-left: auto; }
+.video-settings-redesign .runninghub-video-settings .rhv-connection-fields { grid-template-columns: minmax(140px,.75fr) minmax(0,1.2fr) minmax(0,1fr); }
+.runninghub-video-settings .rhv-enable { display: flex; align-items: center; gap: 6px; white-space: nowrap; color: #466374; font-size: calc(11px * var(--ui-font-scale,1)); }
+.runninghub-video-settings .rhv-enable input { width: 16px; height: 16px; min-height: 0; margin: 0; }
+.runninghub-video-settings .rhv-main-note { margin: 0; color: #68768b; line-height: 1.5; font-size: calc(10px * var(--ui-font-scale,1)); }
+.runninghub-video-settings .rhv-main-note.error { color: #ad3157; }
+.rhv-manager .rhv-tabs { grid-template-columns: repeat(6,minmax(0,1fr)); }
+.rhv-manager .rhv-tabs button { padding: 7px 3px; font-size: .9em; }
+.rhv-manager .rhv-two-fields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 9px; }
+.rhv-manager .rhv-issues { padding: 9px 12px; border: 1px solid #f0d7ac; border-radius: 8px; background: #fffaf0; color: #885d24; font-size: .88em; }
+.rhv-manager .rhv-issues p { margin-top: 5px; overflow-wrap: anywhere; }
+.rhv-manager .rhv-cost-note { border: 1px solid #efd2a3; border-radius: 9px; padding: 11px; background: #fff9eb; font-size: .91em; }
+.rhv-manager .rhv-cost-note > strong { color: #966110; }
+.rhv-manager .rhv-cost-note p { margin: 6px 0 9px; color: #75674f; font-size: .92em; line-height: 1.5; }
+.rhv-manager .vwm-library-item > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rhv-manager .vwm-value-type { min-width: 0; overflow-wrap: anywhere; text-align: right; }
+.rhv-manager .vwm-confirm-backdrop { z-index: 4; }
+.rhv-import-backdrop { position: absolute; inset: 0; z-index: 3; display: grid; place-items: center; padding: 24px; background: rgb(24 37 55 / 34%); }
+.rhv-import-dialog { width: min(850px,100%); height: min(610px,100%); min-height: 0; display: grid; grid-template-rows: auto auto auto minmax(0,1fr) auto auto; gap: 10px; padding: 18px; border: 1px solid #dce2eb; border-radius: 12px; background: white; box-shadow: 0 12px 40px rgb(17 36 56 / 20%); }
+.rhv-import-dialog > header,
+.rhv-import-dialog > footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.rhv-import-dialog > footer > div { display: flex; gap: 7px; }
+.rhv-manager .rhv-import-source { min-height: 0; }
+.rhv-manager .rhv-import-source textarea { flex: 1; min-height: 0; resize: none; font: calc(12px * var(--ui-font-scale,1))/1.5 Consolas,monospace; }
+.rhv-import-feedback { min-height: 20px; max-height: 60px; overflow: auto; font-size: .85em; color: #60748c; overflow-wrap: anywhere; }
+.rhv-import-feedback[role="alert"] { color: #ad3157; }
+.rhv-manager .rhv-node-tools { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 7px 12px; flex-wrap: wrap; padding: 8px 10px; border: 1px solid #c8e1e5; border-radius: 8px; background: #f1fafb; }
+.rhv-node-tools > div:first-child { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.rhv-node-tools strong { font-size: .88em; }
+.rhv-node-tools span { color: #60838a; font-size: .77em; overflow-wrap: anywhere; }
+.rhv-node-tools > div:last-child { display: flex; gap: 5px; flex-wrap: wrap; }
+.rhv-node-tools .btn { background: #fff; }
+.rhv-manager .rhv-field-filters { display: grid; grid-template-columns: minmax(170px,.8fr) minmax(0,1.3fr); gap: 8px; flex-shrink: 0; }
+.rhv-manager .rhv-output-fields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; align-items: start; min-width: 0; }
+.rhv-manager .rhv-output-tabs button { white-space: normal; }
+.rhv-manager .rhv-output-field { display: flex; flex-direction: column; gap: 7px; min-width: 0; padding: 8px; border: 1px solid var(--vwm-border); border-radius: 9px; background: #fafbfd; }
+.rhv-manager .rhv-output-field .vwm-row { margin: 0; }
+.rhv-manager .rhv-control-settings { border-top: 1px solid var(--vwm-border); padding-top: 7px; font-size: .85em; }
+.rhv-manager .rhv-control-settings > summary { cursor: pointer; color: #466374; }
+.rhv-manager .rhv-control-fields { display: flex; flex-direction: column; gap: 7px; padding-top: 8px; }
+.rhv-manager .rhv-control-range { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 6px; }
+.rhv-manager .rhv-control-fields textarea { min-height: 52px; resize: vertical; }
+.rhv-manager .rhv-control-fields .vwm-row { flex-wrap: wrap; gap: 5px; }
+.rhv-manager .vwm-info.rhv-runtime-help { padding: 7px 9px; line-height: 1.4; }
+.rhv-manager .vwm-info.rhv-runtime-help p { margin-top: 3px; }
+.rhv-manager .rhv-node-dialog { grid-template-rows: auto auto minmax(0,1fr) auto auto; height: min(580px,100%); }
+.rhv-manager .rhv-node-dialog.manual { height: min(420px,100%); }
+.rhv-manual-fields { display: flex; flex-direction: column; justify-content: center; gap: 14px; min-height: 0; overflow: auto; }
+.rhv-manager .vwm-parameter-item .vwm-help { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.rhv-manager .rhv-image-slot-grid { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); align-content: start; gap: 8px; min-width: 0; }
+.rhv-manager .rhv-image-slot-card { min-width: 0; display: flex; flex-direction: column; gap: 5px; border: 1px solid var(--vwm-border); border-radius: 8px; padding: 8px; background: #fafbfd; }
+.rhv-manager .rhv-image-slot-heading { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 3px 6px; min-width: 0; font-size: .86em; }
+.rhv-manager .rhv-image-slot-heading code { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #637288; font-size: .9em; }
+.rhv-manager .rhv-image-slot-card .field > span { font-size: .78em; }
+.rhv-manager .rhv-image-slot-card select { font-size: .88em; }
+.rhv-manager .rhv-slot-warning { color: #a23e4f; overflow-wrap: anywhere; }
+@media (max-height: 800px) {
+  .rhv-manager .vwm-info { padding: 9px; }
+  .rhv-manager .vwm-info p { margin-top: 5px; }
+  .rhv-manager .rhv-cost-note { padding: 9px; }
+  .rhv-import-dialog { padding: 14px; gap: 8px; }
+  .rhv-manager .rhv-node-tools { padding: 6px 8px; }
+  .rhv-manager .rhv-image-slot-grid { gap: 6px; }
+  .rhv-manager .rhv-image-slot-card { padding: 6px; gap: 3px; }
+}
+@media (max-width: 1050px) {
+  .video-settings-redesign .runninghub-video-settings .rhv-connection-fields { grid-template-columns: minmax(0,1fr) minmax(0,1fr); }
+  .runninghub-video-settings .rhv-connection-fields .field:last-child { grid-column: 1 / -1; }
+}

@@ -1,0 +1,71 @@
+.video-output-parameters { min-width: 0; margin: 7px 0; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.vop-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 3px 8px; margin-bottom: 6px; font-size: calc(11px * var(--ui-font-scale, 1)); }
+.vop-heading > span { color: var(--muted); font-size: calc(9px * var(--ui-font-scale, 1)); }
+.vop-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; min-width: 0; align-items: start; }
+.video-output-parameters .vop-fields .vop-field,
+.video-director-view .video-output-parameters .vop-fields .vop-field { min-width: 0; margin: 0; gap: 3px; }
+.vop-field-label { min-width: 0; display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 2px 5px; font-size: calc(10px * var(--ui-font-scale, 1)); line-height: 1.3; overflow-wrap: anywhere; }
+.vop-field input { min-width: 0; width: 100%; padding: 4px 6px; min-height: 29px; font-size: calc(11px * var(--ui-font-scale, 1)); }
+.vop-value-editor { min-width: 0; display: grid; gap: 3px; }
+.vop-value-editor select { min-width: 0; width: 100%; padding: 4px 6px; min-height: 29px; font-size: calc(11px * var(--ui-font-scale, 1)); }
+.vop-control-hint { color: var(--muted); font-size: calc(9px * var(--ui-font-scale, 1)); line-height: 1.35; overflow-wrap: anywhere; }
+.vop-clear { border: 0; background: transparent; color: var(--muted); padding: 0; min-height: 0; font-size: calc(9px * var(--ui-font-scale, 1)); line-height: 1.3; cursor: pointer; }
+.vop-clear:hover { color: var(--pink); text-decoration: underline; }
+.vop-clear:disabled { cursor: default; opacity: .5; }
+.vop-help, .vop-unavailable, .vop-error, .vop-stale { margin: 5px 0 0; font-size: calc(9px * var(--ui-font-scale, 1)); line-height: 1.35; overflow-wrap: anywhere; }
+.vop-help, .vop-unavailable, .vop-stale { color: var(--muted); }
+.vop-help-details > summary { cursor: pointer; }
+.vop-help-details > p { margin: 4px 0 0; }
+.vop-unavailable { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 6px; }
+.vop-unavailable .btn { margin: 0; padding: 3px 5px; font-size: calc(9px * var(--ui-font-scale, 1)); min-height: 24px; }
+.vop-request-summary { color: var(--text); font-size: calc(10px * var(--ui-font-scale, 1)); line-height: 1.45; overflow-wrap: anywhere; }
+.vop-dimensions { margin-top: 6px; min-width: 0; font-size: calc(10px * var(--ui-font-scale, 1)); }
+.vop-dimensions > summary { cursor: pointer; color: var(--muted); margin-bottom: 5px; }
+.vop-batch .vop-dimensions { flex: 1 0 100%; }
+.vop-batch { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; margin: 0; padding: 6px; }
+.vop-batch .vop-heading { flex: 0 1 auto; margin: 0; }
+.vop-batch .vop-fields { flex: 1 1 440px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+.vop-batch .vop-fields .vop-field { grid-template-columns: auto minmax(64px, 1fr); align-items: center; }
+.vop-batch .vop-field-label { flex-direction: column; align-items: flex-start; gap: 1px; }
+.vop-batch .vop-field .vop-stale { grid-column: 1 / -1; }
+.vop-batch-notes { flex: 1 0 100%; min-width: 0; display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; }
+.vop-batch-notes > .vop-help, .vop-batch-notes > .vop-unavailable { margin: 0; }
+.vop-batch-notes > .vop-help-details[open] { flex-basis: 100%; }
+.vop-batch > .vop-error { flex-basis: 100%; margin: 0; }
+.vd-tracking-note { margin: 6px 0; color: var(--muted); font-size: calc(10px * var(--ui-font-scale, 1)); line-height: 1.4; }
+.vd-tracking-note > summary { cursor: pointer; }
+.vd-tracking-note > p { margin: 4px 0; }
+
+/* Compact desktop layout: retain the generation controls and fee note in the viewport. */
+@media (max-height: 850px) and (min-width: 1000px) {
+  .video-director-view > .section-heading { align-items: flex-start; gap: 6px; }
+  .video-director-view > .section-heading p { display: none; }
+  .video-director-view .vd-generation-mode { margin-bottom: 6px; }
+  .video-director-view .vd-layout { gap: 9px; }
+  .video-director-view .vd-layout > .vd-stack { gap: 7px; }
+  .video-director-view .vd-prompt-card > .field-hint { display: none; }
+  .video-director-view .vd-prompt-editor { min-height: 140px; height: clamp(140px, calc(100vh - 500px), 260px); resize: vertical; }
+  .video-director-view .vd-reference-card > .vd-empty { padding: 8px; font-size: calc(10px * var(--ui-font-scale, 1)); line-height: 1.4; }
+  .video-director-view .vd-reference-card > .field-hint { margin: 4px 0; }
+  .video-director-view .vd-settings-card > .field-hint { margin: 5px 0; }
+  .video-director-view .vd-settings-card .vd-backend-switch { margin: 5px 0 8px; gap: 5px; }
+  .video-director-view .vd-settings-card .vd-backend-switch .btn { padding: 5px 6px; min-height: 29px; font-size: calc(10px * var(--ui-font-scale, 1)); }
+  .video-director-view .vd-settings-card > .vd-details { margin: 7px 0; padding-top: 6px; }
+  .video-director-view .vd-settings-card > .vd-details > summary { font-size: calc(10px * var(--ui-font-scale, 1)); }
+  .video-director-view .vd-settings-card > .vd-notice { margin: 5px 0; padding: 5px; font-size: calc(10px * var(--ui-font-scale, 1)); line-height: 1.35; }
+  .video-director-view .vd-settings-card .vd-generate-button { min-height: 33px; margin-top: 4px; }
+  .video-director-view .video-output-parameters { margin: 6px 0; padding: 6px; }
+  .video-director-view .vop-heading { margin-bottom: 4px; }
+  .video-director-view .vop-fields[data-count="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .video-director-view .vop-batch { margin: 0; }
+  .video-director-view .vop-batch .vop-heading { margin: 0; }
+  .video-director-view .vop-batch .vop-fields[data-count="3"] { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+  .video-director-view .vd-batch-controls { gap: 4px; }
+  .video-director-view .vd-batch-configuration { gap: 6px; }
+  .video-director-view .vd-batch-toolbar { gap: 4px; }
+  .video-director-view .vd-batch-toolbar .btn { min-height: 26px; padding: 4px 6px; font-size: calc(10px * var(--ui-font-scale, 1)); }
+}
+@media (max-width: 700px) {
+  .vop-fields { grid-template-columns: minmax(0, 1fr); }
+  .vop-batch .vop-fields { grid-template-columns: minmax(0, 1fr); }
+}

@@ -1,0 +1,20 @@
+.image-output-size-controls { position: relative; flex: 0 0 auto; min-width: 0; padding: 5px 7px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2, #f8f7fb); }
+.image-output-size-row { display: flex; gap: 6px; min-width: 0; align-items: flex-end; }
+.image-output-size-row label { flex: 1 1 0; min-width: 0; display: flex; align-items: center; gap: 4px; }
+.image-output-size-row label > span { flex: 0 0 auto; font-size: calc(10px * var(--ui-font-scale, 1)); color: var(--muted); }
+.image-output-size-row .image-output-size-number { flex: .6 1 0; }
+.image-output-size-row select, .image-output-size-row input { width: 100%; min-width: 0; min-height: 28px; height: 28px; padding: 3px 5px; font-size: calc(11px * var(--ui-font-scale, 1)); }
+.image-output-size-summary { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; margin-top: 4px; font-size: calc(10px * var(--ui-font-scale, 1)); line-height: 1.35; }
+.image-output-size-summary > span { min-width: 0; overflow-wrap: anywhere; }
+.image-output-size-summary > details { flex: 0 0 auto; }
+.image-output-size-summary summary { cursor: pointer; color: var(--muted); }
+.image-output-size-summary details p { position: absolute; z-index: 5; inset: auto 0 calc(100% + 4px); margin: 0; padding: 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel, white); box-shadow: 0 4px 16px #0002; max-height: 110px; overflow: auto; overflow-wrap: anywhere; }
+.image-output-size-error { margin: 4px 0 0; color: #b43f62; font-size: calc(10px * var(--ui-font-scale, 1)); line-height: 1.4; overflow-wrap: anywhere; }
+@media (max-height: 800px) {
+  .image-view .image-output-head .card-title p { display: none; }
+  .image-view .image-selected-reference-preview { min-height: 30px; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 5px; padding: 2px 5px; }
+  .image-view .image-selected-reference-preview img { width: 24px; height: 24px; }
+}
+@media (max-height: 760px) {
+  .image-view .image-private-generation-note { display: none; }
+}

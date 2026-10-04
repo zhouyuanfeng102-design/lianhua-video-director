@@ -1,0 +1,48 @@
+.storyboard-i2i-panel {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  gap: 8px;
+  overflow: hidden;
+  container-type: inline-size;
+  font-size: clamp(10px, 1.1vw, 12px);
+}
+
+.storyboard-i2i-panel * { box-sizing: border-box; }
+.director-side-panel > .storyboard-i2i-panel { flex: 1 1 0; min-height: 0; }
+.storyboard-image-workbench-panel > .storyboard-i2i-panel { height: auto; min-height: 0; }
+.storyboard-i2i-header { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 6px; min-width: 0; }
+.storyboard-i2i-header h4 { display: flex; flex-direction: column; gap: 3px; min-width: 0; margin: 0; font-size: 12px; line-height: 1.35; color: #50426f; }
+.storyboard-i2i-header h4 > span { font-weight: 400; font-size: 10px; color: #6f7485; overflow-wrap: anywhere; }
+.storyboard-i2i-tools { display: flex; align-items: center; gap: 4px; flex: 0 1 auto; min-width: 0; }
+.storyboard-i2i-panel .btn { min-width: 0; min-height: 26px; padding: 4px 7px; font-size: 10px; line-height: 1.35; }
+.storyboard-i2i-tools .btn { flex: 0 1 auto; white-space: nowrap; }
+.storyboard-i2i-file, .storyboard-i2i-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.storyboard-i2i-search { display: block; flex: 0 0 auto; min-width: 0; }
+.storyboard-i2i-search input { display: block; width: 100%; min-width: 0; height: 29px; padding: 4px 7px; border: 1px solid #daddE8; border-radius: 6px; font: inherit; }
+.storyboard-i2i-asset-list { display: grid; flex: 1 1 0; grid-template-columns: repeat(auto-fill, minmax(min(100%, 160px), 1fr)); grid-auto-rows: max-content; align-content: start; gap: 7px; min-width: 0; min-height: 0; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; scrollbar-gutter: stable; padding-right: 2px; }
+.storyboard-i2i-asset { position: relative; display: flex; flex-direction: column; gap: 6px; min-width: 0; margin: 0; padding: 6px; border: 1px solid #e4e5eb; border-radius: 7px; background: #fff; cursor: pointer; }
+.storyboard-i2i-panel input[type="checkbox"] { position: absolute; z-index: 1; top: 10px; left: 10px; appearance: auto; width: 15px; height: 15px; min-height: 0; margin: 0; accent-color: #b64992; }
+.storyboard-i2i-asset.is-selected { border-color: #b68ad7; background: #faf5ff; }
+.storyboard-i2i-thumb { display: flex; width: 100%; height: clamp(80px, 24cqw, 150px); align-items: center; justify-content: center; background: #f3f4f8; border-radius: 5px; overflow: hidden; color: #8b8e9c; font-size: 10px; }
+.storyboard-i2i-thumb img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.storyboard-i2i-asset-info { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.storyboard-i2i-asset-info > span:last-child { font-size: 10px; color: #858a9b; overflow-wrap: anywhere; }
+.storyboard-i2i-panel .reference-image-name { width: 100%; min-width: 0; }
+.storyboard-i2i-panel .reference-image-name-text { white-space: normal; overflow-wrap: anywhere; word-break: normal; }
+.storyboard-i2i-hint { flex: 0 0 auto; margin: 0; padding-top: 6px; border-top: 1px solid #e9e5f0; color: #6f7485; font-size: 10px; line-height: 1.5; overflow-wrap: anywhere; }
+.storyboard-i2i-empty { grid-column: 1 / -1; padding: 12px 4px; color: #959aaa; text-align: center; line-height: 1.6; font-size: 11px; }
+.storyboard-i2i-error, .storyboard-i2i-warning { flex: 0 1 auto; max-height: 64px; min-height: 24px; padding: 5px 6px; border-radius: 5px; overflow-y: auto; overflow-wrap: anywhere; font-size: 10px; line-height: 1.4; }
+.storyboard-i2i-error { color: #ac3157; background: #fff0f3; }
+.storyboard-i2i-warning { display: flex; align-items: center; justify-content: space-between; gap: 6px; color: #98652e; background: #fff7e8; }
+
+@container (max-width: 290px) {
+  .storyboard-i2i-header { align-items: flex-start; gap: 4px; }
+  .storyboard-i2i-header h4 { font-size: 11px; }
+  .storyboard-i2i-tools { gap: 3px; }
+  .storyboard-i2i-tools .btn { padding: 4px; font-size: 9px; }
+  .storyboard-i2i-asset-list { grid-template-columns: minmax(0, 1fr); }
+}

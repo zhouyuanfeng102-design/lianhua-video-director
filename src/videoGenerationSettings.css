@@ -1,0 +1,76 @@
+.settings-panel-stage[data-active-panel="video"] > .video-generation-settings.video-settings-redesign { display: flex; flex-direction: column; gap: 9px; padding: 12px; border: 1px solid #c9d8e7; border-radius: 12px; background: #f6f9fc; overflow: hidden; }
+.video-settings-redesign .vgs-header { display: flex; align-items: center; justify-content: space-between; gap: 18px; flex: 0 0 auto; }
+.video-settings-redesign .vgs-header h2 { display: flex; align-items: center; gap: 7px; margin: 0; font-size: calc(14px * var(--ui-font-scale, 1)); }
+.video-settings-redesign .vgs-header p { margin: 4px 0 0; font-size: calc(10px * var(--ui-font-scale, 1)); color: var(--muted); }
+.video-settings-redesign .vgs-default { width: 168px; flex: 0 0 auto; }
+.video-settings-redesign .vgs-tabs { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #dbe3ec; padding-bottom: 9px; flex: 0 0 auto; }
+.video-settings-redesign .vgs-tabs > span { color: var(--muted); font-size: calc(10px * var(--ui-font-scale, 1)); margin-left: 4px; }
+.video-settings-redesign .vgs-main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; min-height: 0; align-content: start; flex: 1 1 auto; }
+.video-settings-redesign .vgs-card { min-width: 0; border: 1px solid #dce3ec; background: #fff; border-radius: 10px; padding: 12px; display: grid; align-content: start; gap: 10px; }
+.video-settings-redesign .vgs-card-title { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.video-settings-redesign .vgs-card-title h3 { font-size: calc(12px * var(--ui-font-scale, 1)); margin: 0; }
+.video-settings-redesign .vgs-card-title > span { font-size: calc(10px * var(--ui-font-scale, 1)); color: var(--muted); }
+.video-settings-redesign .field { min-width: 0; margin: 0; display: grid; gap: 4px; font-size: calc(11px * var(--ui-font-scale, 1)); }
+.video-settings-redesign .field + .field { margin: 0; }
+.video-settings-redesign .field > span { line-height: 1.4; }
+.video-settings-redesign .field :is(input,select) { width: 100%; min-width: 0; min-height: 31px; height: 31px; margin: 0; padding: 4px 8px; font-size: calc(11px * var(--ui-font-scale, 1)); }
+.video-settings-redesign .vgs-fields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px 12px; align-content: start; }
+.video-settings-redesign .vgs-fields-three { grid-template-columns: repeat(3,minmax(0,1fr)); }
+.video-settings-redesign .vgs-profile-row { display: grid; grid-template-columns: minmax(0,1.15fr) minmax(0,.85fr) auto; gap: 10px; align-items: end; }
+.video-settings-redesign .vgs-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.video-settings-redesign .vgs-connection-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding-top: 2px; }
+.video-settings-redesign .vgs-permission { font-size: calc(10px * var(--ui-font-scale, 1)); margin: 0; }
+.video-settings-redesign .vgs-provider-note { display: flex; align-items: center; gap: 8px; justify-content: space-between; background: #f5f7fb; padding: 6px 8px; border-radius: 7px; font-size: calc(10px * var(--ui-font-scale, 1)); color: var(--muted); }
+.video-settings-redesign .vgs-provider-note > span { min-width: 0; }
+.video-settings-redesign .vgs-workflow-row { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: end; gap: 12px; }
+.video-settings-redesign .vgs-workflow-summary { background: #edf8fb; border: 1px solid #c7e5ed; color: #28697b; padding: 9px 10px; border-radius: 8px; display: flex; flex-wrap: wrap; gap: 5px; font-size: calc(11px * var(--ui-font-scale, 1)); }
+.video-settings-redesign .vgs-workflow-summary > span { min-width: 0; overflow-wrap: anywhere; }
+.video-settings-redesign .vgs-summary-tags { margin-left: auto; color: #62808d; font-size: calc(10px * var(--ui-font-scale, 1)); }
+.video-settings-redesign .vgs-workflow-help { margin: 0; color: var(--muted); font-size: calc(10px * var(--ui-font-scale, 1)); line-height: 1.45; }
+.video-settings-redesign .vgs-feedback { min-height: 17px; flex: 0 0 auto; color: var(--muted); font-size: calc(10px * var(--ui-font-scale, 1)); overflow-wrap: anywhere; }
+.video-settings-redesign .vgs-feedback p { margin: 0; }
+.vgs-modal-backdrop { position: fixed; inset: 0; z-index: 120; padding: 16px; display: grid; place-items: center; background: #101c3459; }
+.vgs-api-dialog { width: min(1040px,100%); height: min(700px,100%); min-height: 0; background: white; border: 1px solid #d6dce6; border-radius: 14px; padding: 16px; box-shadow: 0 20px 70px #18244133; display: grid; grid-template-rows: auto auto minmax(0,1fr) auto; gap: 12px; }
+.vgs-api-dialog > header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.vgs-api-dialog h2 { margin: 0; font-size: calc(16px * var(--ui-font-scale, 1)); }
+.vgs-api-dialog p { margin: 5px 0 0; font-size: calc(10px * var(--ui-font-scale, 1)); color: var(--muted); line-height: 1.5; }
+.vgs-dialog-tabs { display: flex; gap: 7px; }
+.vgs-dialog-content { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.vgs-request-editor { height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 7px; }
+.vgs-request-editor > .field { flex: 1 1 auto; min-height: 0; grid-template-rows: auto minmax(0,1fr); }
+.vgs-request-editor textarea { min-height: 130px; height: 100%; resize: none; font: calc(12px * var(--ui-font-scale, 1))/1.6 Consolas,monospace; padding: 10px; }
+.vgs-api-dialog > footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 9px; border-top: 1px solid #e1e5ec; font-size: calc(10px * var(--ui-font-scale, 1)); }
+.vgs-api-dialog > footer > div { min-width: 0; }
+.vgs-api-dialog > footer p { margin: 0; color: #b42343; }
+@media (max-height: 820px) {
+  .settings-panel-stage[data-active-panel="video"] > .video-generation-settings.video-settings-redesign { padding: 9px; gap: 6px; }
+  .video-settings-redesign .vgs-card { padding: 8px 9px; gap: 7px; }
+  .video-settings-redesign .vgs-main { gap: 7px; }
+  .video-settings-redesign .vgs-fields { gap: 7px 10px; }
+  .video-settings-redesign .vgs-tabs { padding-bottom: 6px; }
+  .video-settings-redesign .vgs-workflow-summary { padding: 6px 8px; }
+  .vgs-api-dialog { padding: 12px; gap: 9px; }
+}
+@media (max-width: 1050px) {
+  .video-settings-redesign .vgs-profile-row { grid-template-columns: minmax(0,1fr) minmax(0,1fr); }
+  .video-settings-redesign .vgs-profile-row > .vgs-actions { grid-column: 1/-1; }
+  .video-settings-redesign .vgs-fields-three { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .video-settings-redesign .vgs-tabs > span { display: none; }
+}
+.rhtv-settings { display: grid; gap: 12px; min-width: 0; }
+.video-settings-redesign .vgs-main:has(.rhtv-settings) { overflow: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
+.rhtv-settings p { margin: 0; overflow-wrap: anywhere; }
+.rhtv-readonly { min-height: 31px; display: flex; align-items: center; overflow-wrap: anywhere; }
+.video-settings-redesign .rhtv-automation-toggle { display: flex; gap: 8px; align-items: center; min-height: 31px; }
+.video-settings-redesign .rhtv-automation-toggle input { appearance: none; position: relative; flex: 0 0 32px; width: 32px; height: 18px; min-height: 18px; padding: 0; margin: 0; border: 1px solid #87969f; border-radius: 9px; background: #e2e7eb; cursor: pointer; }
+.video-settings-redesign .rhtv-automation-toggle input::before { content: ''; position: absolute; top: 2px; left: 2px; width: 12px; height: 12px; border-radius: 50%; background: #51616c; }
+.video-settings-redesign .rhtv-automation-toggle input:checked { background: #2e8093; border-color: #2e8093; }
+.video-settings-redesign .rhtv-automation-toggle input:checked::before { left: 16px; background: #fff; }
+.video-settings-redesign .rhtv-automation-toggle input:disabled { cursor: not-allowed; opacity: 0.5; }
+.rhtv-jobs { min-width: 0; border-top: 1px solid var(--border, #ddd); }
+.rhtv-job { padding: 12px 0; border-bottom: 1px solid var(--border, #ddd); overflow-wrap: anywhere; }
+.rhtv-job p, .rhtv-job .vgs-actions { margin-top: 8px; }
+.rhtv-job small { opacity: 0.7; }
+@media (max-width: 600px) {
+  .video-settings-redesign .rhtv-settings .vgs-fields-three { grid-template-columns: minmax(0, 1fr); }
+}

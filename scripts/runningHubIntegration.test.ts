@@ -1,0 +1,67 @@
+import assert from 'node:assert/strict';
+import { createRequire } from 'node:module';
+import { readFileSync } from 'node:fs';
+import { createInitialState, normalizeState } from '../src/storage';
+import { defaultRunningHubVideoConfig, createRunningHubTutorialVideoWorkflow, compileRunningHubVideoApi } from '../src/runningHubVideo';
+import { emptyVideoDraft } from '../src/videoDirectorDraft';
+import { videoConfiguredApiState, videoDraftSource, videoSourceDraftPatch } from '../src/videoGenerationSource';
+import { videoBatchConnectionIdentity, videoBatchRequestFingerprint } from '../src/videoBatch';
+import { getVideoTailReferencePlacements } from '../src/videoTailReference';
+import type { VideoGenerationDraft } from '../src/videoGenerationTypes';
+
+const require = createRequire(import.meta.url);
+const { prepareStateForSave, hydrateStateSecrets } = require('../electron/stateSerialization.cjs');
+const state = createInitialState();
+const originalApi = structuredClone(state.settings.videoTaskApi);
+const originalComfy = structuredClone(state.settings.comfyuiVideo);
+const workflow = createRunningHubTutorialVideoWorkflow();
+state.settings.runningHubVideo = { ...defaultRunningHubVideoConfig, enabled: true, apiKey: 'isolated-rh-secret', workflows: [workflow], activeWorkflowId: workflow.id };
+state.settings.videoSource = 'runninghub';
+const restored = normalizeState(JSON.parse(JSON.stringify(state)));
+assert.equal(restored.settings.videoSource, 'runninghub');
+assert.equal(restored.settings.runningHubVideo?.workflows[0].remoteId, '2084261333662810113');
+assert.deepEqual(restored.settings.videoTaskApi, originalApi);
+assert.deepEqual(restored.settings.comfyuiVideo, originalComfy);
+
+const draft: VideoGenerationDraft = { ...emptyVideoDraft(restored.settings), prompt: '只用于内存回归，不提交', references: [{ assetId: 'image-a', role: 'general' }] };
+assert.equal(draft.backend, 'api');
+assert.equal(videoDraftSource(draft), 'runninghub');
+assert.equal(draft.runningHubWorkflowId, workflow.id);
+const connection = videoConfiguredApiState(restored.settings, draft);
+assert.equal(connection.issue, '');
+assert.match(connection.api!.endpoint, /\/openapi\/v2\/run\/ai-app\/2084261333662810113$/u);
+const ordinary = { ...draft, ...videoSourceDraftPatch('api', restored.settings) };
+assert.equal(videoDraftSource(ordinary), 'api');
+assert.equal(ordinary.runningHubWorkflowId, undefined);
+assert.deepEqual(restored.settings.videoTaskApi, originalApi, 'switching source does not mutate another connection');
+const missing = videoConfiguredApiState(restored.settings, { ...draft, runningHubWorkflowId: 'missing' });
+assert.ok(missing.issue); assert.equal(missing.api, undefined, 'a deleted cloud workflow cannot silently use the ordinary API');
+assert.ok(videoConfiguredApiState(restored.settings, { ...draft, runningHubWorkflowId: '__runninghub_unselected__' }).issue);
+assert.ok(videoConfiguredApiState(restored.settings, { ...draft, runningHubWorkflowId: '' }).issue, 'empty cloud selection is not ordinary API authorization');
+
+const identity = videoBatchConnectionIdentity(restored.settings, draft);
+const changed = structuredClone(restored.settings);
+changed.runningHubVideo!.workflows[0].remoteId = '1923539279828742146';
+changed.runningHubVideo!.workflows[0].runKind = 'workflow';
+const requestA = videoBatchRequestFingerprint(draft, [], identity);
+assert.notEqual(videoBatchRequestFingerprint(draft, [], videoBatchConnectionIdentity(changed, draft)), requestA, 'different cloud ID/type cannot reuse another batch result');
+changed.runningHubVideo = { ...restored.settings.runningHubVideo!, apiKey: 'changed-private-key' };
+assert.equal(videoBatchRequestFingerprint(draft, [], videoBatchConnectionIdentity(changed, draft)), requestA, 'secret rotation does not leak into public request fingerprints');
+
+const api = compileRunningHubVideoApi(restored.settings.runningHubVideo!, workflow.id);
+const replace = getVideoTailReferencePlacements({ backend: 'api', api, references: [{ assetId: 'a', role: 'subject' }, { assetId: 'b', role: 'composition' }] });
+assert.equal(replace.options.length, 1); assert.equal(replace.options[0].mode, 'replace-all');
+assert.equal(replace.options[0].semantics, 'reference', 'ordinary cloud image nodes do not claim forced first-frame semantics');
+const firstFrame = getVideoTailReferencePlacements({ backend: 'api', api: { ...api, runningHubImageRoles: ['first-frame'] }, references: [] });
+assert.equal(firstFrame.options[0].role, 'first-frame'); assert.equal(firstFrame.options[0].semantics, 'first-frame');
+
+const prepared = prepareStateForSave(JSON.stringify(restored));
+assert.equal(prepared.secrets.current.runningHubVideo, 'isolated-rh-secret');
+assert.ok(!prepared.payload.includes('isolated-rh-secret'), 'project-state and automatic snapshots contain no cloud connection secret');
+const hydrated = hydrateStateSecrets(JSON.parse(prepared.payload), prepared.secrets);
+assert.equal(hydrated.settings.runningHubVideo.apiKey, 'isolated-rh-secret');
+assert.equal(restored.settings.runningHubVideo?.apiKey, 'isolated-rh-secret', 'stripping must not mutate the live connection');
+const appSource = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
+assert.match(appSource, /safeState\.settings\.runningHubVideo\.apiKey = ""/u, 'project export clears the cloud credential');
+assert.match(appSource, /runningHubVideo: settings\.runningHubVideo \? \{ \.\.\.settings\.runningHubVideo, apiKey: "" \}/u, 'clear all keys includes the independent cloud key');
+console.log('RunningHub integration: independent storage/source, batch identity, cloud tail slots and secret-vault boundaries passed');

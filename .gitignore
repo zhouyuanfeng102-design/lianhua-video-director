@@ -1,0 +1,57 @@
+node_modules/
+dist/
+release/
+.pack-temp/
+.builder-cache/
+.electron-cache/
+.vite/
+*.log
+.qa-*
+.delivery-source-*
+莲华视频导演台数据/
+
+# Local deliveries and generated build / test output (keep historical files on disk).
+/release-*/
+/交付/
+/output/
+/.test-dist/
+
+# Browser profiles, diagnostics, and local tool caches.
+/.asar-inspect-*/
+/.chrome-*/
+/.edge-*/
+/.electron-builder-cache*/
+/.npm-cache/
+/.cleanup-reports/
+/.codex-diagnostics/
+/.path-test-*/
+/.playwright-cli/
+/.runtime-temp*/
+/.superpowers/
+/.temp/
+/.visual-test-data/
+/%SystemDrive%/
+/NVIDIA Corporation/
+
+# Local screenshots and scratch files; application icons remain in build/ and public/.
+/dashboard-compact-check*.png
+/project-library-review.png
+/.package-*-window.png
+/.visual-director.png
+/.delivery-icon-probe.ico
+/.vd-toolbar*
+/[{]console.error(e)
+
+# Downloaded media binaries / source archives; keep notices, checksums, and icons.
+/build/media-tools/win32-x64/*.exe
+/build/media-tools/sources/*.tar.xz
+
+# Machine-specific credentials and environment settings.
+.env
+.env.*
+!.env.example
+!.env.*.example
+*.pem
+*.key
+*.p12
+*.pfx

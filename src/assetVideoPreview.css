@@ -1,0 +1,16 @@
+.asset-video-thumbnail { position: relative; display: grid; place-items: center; width: 100%; height: 100%; min-width: 0; min-height: 0; padding: 0; border: 0; border-radius: 5px; overflow: hidden; background: #18212e; color: #fff; cursor: pointer; }
+.asset-video-thumbnail > img { display: block; width: 100%; height: 100%; object-fit: contain; }
+.asset-video-thumbnail:focus-visible { outline: 3px solid var(--pink); outline-offset: -3px; }
+.asset-video-thumbnail:disabled { cursor: not-allowed; opacity: .55; }
+.asset-video-placeholder { display: grid; place-items: center; gap: 7px; color: #b9c8dd; }
+.asset-video-play { position: absolute; bottom: 9px; left: 9px; display: flex; align-items: center; gap: 6px; padding: 6px 9px; border-radius: 7px; background: #000b; color: white; font-size: calc(11px * var(--ui-font-scale, 1)); }
+.asset-video-thumbnail:hover .asset-video-play { background: #a54278; }
+.asset-video-duration { position: absolute; bottom: 12px; right: 9px; padding: 3px 6px; background: #000b; border-radius: 4px; font-size: 11px; }
+.asset-video-backdrop { position: fixed; inset: 0; z-index: 100; display: grid; place-items: center; padding: 16px; background: #0e142ba3; }
+.asset-video-dialog { width: min(960px, 100%); max-height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 10px; padding: 14px; border-radius: 14px; background: var(--panel, white); box-shadow: 0 20px 80px #0005; }
+.asset-video-dialog > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex: 0 0 auto; }
+.asset-video-dialog > header > div { min-width: 0; }
+.asset-video-dialog h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; }
+.asset-video-dialog p { margin: 4px 0 0; color: var(--muted); font-size: calc(11px * var(--ui-font-scale, 1)); }
+.asset-video-dialog video { display: block; width: 100%; min-height: 0; max-height: calc(100dvh - 150px); object-fit: contain; background: #111; border-radius: 6px; }
+.asset-video-dialog .asset-video-error { flex: 0 0 auto; color: #b42343; }

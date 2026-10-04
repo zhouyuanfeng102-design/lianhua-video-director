@@ -1,0 +1,111 @@
+.model-picker-backdrop {
+  --model-picker-scale: var(--ui-font-scale, 1);
+  position: fixed;
+  z-index: 1000;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: clamp(12px, 3vh, 28px);
+  overflow: hidden;
+  background: rgba(31, 25, 42, .42);
+  font-size: calc(13px * var(--model-picker-scale));
+}
+
+.model-picker-modal {
+  display: flex;
+  flex-direction: column;
+  width: min(720px, 100%);
+  max-height: calc(100vh - clamp(24px, 6vh, 56px));
+  overflow: hidden;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: var(--panel, #fff);
+  color: var(--text, #26212d);
+  box-shadow: 0 20px 54px rgba(31, 25, 42, .28);
+}
+
+.model-picker-header,
+.model-picker-footer {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: calc(13px * var(--model-picker-scale)) calc(16px * var(--model-picker-scale));
+}
+
+.model-picker-header { border-bottom: 1px solid var(--line); }
+.model-picker-header h2 { margin: 0; font-size: calc(16px * var(--model-picker-scale)); line-height: 1.25; }
+
+.model-picker-close,
+.model-picker-cancel {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--panel-2, #f8f7fb);
+  color: var(--muted, #665f70);
+}
+.model-picker-close { width: calc(28px * var(--model-picker-scale)); height: calc(28px * var(--model-picker-scale)); padding: 0; font-size: calc(22px * var(--model-picker-scale)); line-height: 1; }
+.model-picker-cancel { padding: 6px 12px; }
+.model-picker-close:hover, .model-picker-cancel:hover { border-color: color-mix(in srgb, var(--violet, #6f63cf) 45%, var(--line)); color: var(--violet, #6f63cf); }
+
+.model-picker-search-wrap {
+  flex: 0 0 auto;
+  display: grid;
+  gap: 6px;
+  padding: calc(12px * var(--model-picker-scale)) calc(16px * var(--model-picker-scale));
+  border-bottom: 1px solid var(--line);
+}
+.model-picker-search-label { color: var(--muted, #665f70); font-size: calc(12px * var(--model-picker-scale)); font-weight: 700; }
+.model-picker-search {
+  min-width: 0;
+  width: 100%;
+  padding: calc(8px * var(--model-picker-scale)) calc(10px * var(--model-picker-scale));
+  border: 1px solid var(--line-strong);
+  border-radius: 7px;
+  outline: none;
+  background: #fff;
+  color: inherit;
+}
+.model-picker-search:focus { border-color: var(--violet, #6f63cf); box-shadow: 0 0 0 3px color-mix(in srgb, var(--violet, #6f63cf) 16%, transparent); }
+.model-picker-count { margin: 0; color: var(--faint, #898291); font-size: calc(11px * var(--model-picker-scale)); }
+
+.model-picker-list {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: calc(8px * var(--model-picker-scale));
+  scrollbar-gutter: stable;
+}
+.model-picker-option {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  margin: 0 0 calc(4px * var(--model-picker-scale));
+  padding: calc(9px * var(--model-picker-scale)) calc(10px * var(--model-picker-scale));
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  line-height: 1.35;
+  white-space: normal;
+}
+.model-picker-option:hover { border-color: color-mix(in srgb, var(--violet, #6f63cf) 24%, var(--line)); background: #f7f5ff; }
+.model-picker-option[aria-selected="true"] { border-color: color-mix(in srgb, var(--violet, #6f63cf) 46%, var(--line)); background: #eeeafd; color: #4e439b; font-weight: 700; }
+.model-picker-option:focus-visible { outline: 2px solid var(--violet, #6f63cf); outline-offset: -2px; }
+.model-picker-empty { padding: 24px 12px; color: var(--muted, #665f70); text-align: center; }
+
+.model-picker-footer {
+  border-top: 1px solid var(--line);
+  color: var(--faint, #898291);
+  font-size: calc(11px * var(--model-picker-scale));
+}
+
+@media (max-height: 460px) {
+  .model-picker-header, .model-picker-footer { padding-top: 8px; padding-bottom: 8px; }
+  .model-picker-search-wrap { padding-top: 8px; padding-bottom: 8px; }
+}
