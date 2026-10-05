@@ -862,9 +862,12 @@ const changedSourceResult = replaceProjectSourceDocument(sourceFixtureProject, {
   updatedAt: 2,
 });
 assert.equal(changedSourceResult.sourceChanged, true);
-assert.deepEqual(changedSourceResult.project.scenes, []);
-assert.deepEqual(changedSourceResult.project.storyboards, []);
-assert.deepEqual(changedSourceResult.project.sequencePlans, []);
+assert.equal(changedSourceResult.project.scenes.length, sourceFixtureProject.scenes.length);
+assert.equal(changedSourceResult.project.storyboards.length, sourceFixtureProject.storyboards.length);
+assert.equal(changedSourceResult.project.sequencePlans.length, sourceFixtureProject.sequencePlans.length);
+assert.ok(changedSourceResult.project.scenes.every((scene) => scene.sourceStale));
+assert.ok(changedSourceResult.project.storyboards.every((board) => board.sourceStale));
+assert.ok(changedSourceResult.project.sequencePlans.every((plan) => plan.sourceStale));
 assert.deepEqual(
   changedSourceResult.invalidatedStoryboardIds,
   sourceFixtureProject.storyboards.map((board) => board.id),
@@ -902,9 +905,9 @@ assert.equal(
   true,
   'source replacement must recompute the old body hash instead of trusting stale persisted metadata',
 );
-assert.deepEqual(stalePersistedHashResult.project.scenes, []);
-assert.deepEqual(stalePersistedHashResult.project.storyboards, []);
-assert.deepEqual(stalePersistedHashResult.project.sequencePlans, []);
+assert.ok(stalePersistedHashResult.project.scenes.every((scene) => scene.sourceStale));
+assert.ok(stalePersistedHashResult.project.storyboards.every((board) => board.sourceStale));
+assert.ok(stalePersistedHashResult.project.sequencePlans.every((plan) => plan.sourceStale));
 
 const makeVideoShot = (overrides: Partial<VideoShot> = {}): VideoShot => ({
   id: 'shot-fixture',

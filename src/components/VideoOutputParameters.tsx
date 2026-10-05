@@ -25,6 +25,7 @@ export function VideoOutputParameters({ scope, source, parameterText, availableK
   const supported = (key: VideoOutputParameterKey) => available.has(key) || !requiresMapping && hasValue(key);
   const pixelKeys = (['width', 'height'] as const).filter((key) => controls[key]?.unit === 'MP' && (available.has(key) || hasValue(key)));
   const dimensions = (['width', 'height'] as const).some((key) => controls[key]?.unit !== 'MP' && (available.has(key) || hasValue(key)));
+  const showAspectRatio = available.has('aspect_ratio') || hasValue('aspect_ratio');
   const showResolution = available.has('resolution') || hasValue('resolution') || !dimensions && !pixelKeys.length;
   const missing = [!available.has('duration') ? '视频时长' : '', !available.has('resolution') && !available.has('width') && !available.has('height') ? '分辨率' : ''].filter(Boolean);
   const field = (key: VideoOutputParameterKey, label: string, ariaLabel: string) => {
@@ -68,13 +69,14 @@ export function VideoOutputParameters({ scope, source, parameterText, availableK
   };
   const notes = <>
     {scope === 'batch' && <p className="vop-help">每段统一覆盖时长，不是全片总时长；留空保持原参数。</p>}
-    <details className="vop-help vop-help-details"><summary>参数填写说明</summary><p>时长单位为秒，不自动换算帧数；分辨率按接口原格式填写，不自动计算宽高。</p></details>
-    {requiresMapping && missing.length > 0 && <div className="vop-unavailable"><span>{source === 'api' ? '接口模板尚未提供' : '尚未绑定'}{missing.join('、')}。</span>{onOpenSettings && <button className="btn small" type="button" disabled={disabled} onClick={onOpenSettings}>配置时长与分辨率</button>}</div>}
+    <details className="vop-help vop-help-details"><summary>参数填写说明</summary><p>时长单位为秒，不自动换算帧数；画面比例按工作流提供的完整选项值提交；分辨率按接口原格式填写，不自动计算宽高。</p></details>
+    {requiresMapping && missing.length > 0 && <div className="vop-unavailable"><span>{source === 'api' ? '接口模板尚未提供' : '尚未绑定'}{missing.join('、')}。</span>{onOpenSettings && <button className="btn small" type="button" disabled={disabled} onClick={onOpenSettings}>配置时长、比例与分辨率</button>}</div>}
   </>;
-  return <section className={`video-output-parameters${scope === 'batch' ? ' vop-batch' : ''}`} aria-label={`${prefix}时长与分辨率`}>
-    <div className="vop-heading"><strong>{scope === 'batch' ? '批量视频时长与分辨率' : '视频时长与分辨率'}</strong><span>留空保持原值</span></div>
-    <div className="vop-fields" data-count={1 + Number(showResolution) + pixelKeys.length}>
+  return <section className={`video-output-parameters${scope === 'batch' ? ' vop-batch' : ''}`} aria-label={`${prefix}时长、比例与分辨率`}>
+    <div className="vop-heading"><strong>{scope === 'batch' ? '批量视频时长、比例与分辨率' : '视频时长、比例与分辨率'}</strong><span>留空保持原值</span></div>
+    <div className="vop-fields" data-count={1 + Number(showAspectRatio) + Number(showResolution) + pixelKeys.length}>
       {field('duration', '视频时长（秒）', '视频时长（秒）')}
+      {showAspectRatio && field('aspect_ratio', '画面比例', '视频画面比例')}
       {showResolution && field('resolution', '分辨率', '视频分辨率')}
       {pixelKeys.map((key) => field(key, '像素', key === 'width' ? '视频宽度（像素）' : '视频高度（像素）'))}
     </div>

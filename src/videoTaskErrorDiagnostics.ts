@@ -71,7 +71,9 @@ export const videoProviderErrorDiagnostics = (response: unknown, options: ErrorD
     const messageParts = ['errorMessage', 'error_message', 'message', 'error_description', 'detail', 'msg', 'reason', 'exception_message', 'status_msg']
       .map((key) => textValue(dataProperty(value, key))).filter(Boolean);
     const nodeId = textValue(dataProperty(value, 'node_id') ?? dataProperty(value, 'nodeId'));
-    const nodeType = textValue(dataProperty(value, 'node_type') ?? dataProperty(value, 'nodeType'));
+    // RunningHub also reports the failing ComfyUI class as node_name.
+    const nodeType = ['node_type', 'nodeType', 'node_name', 'nodeName']
+      .map((key) => textValue(dataProperty(value, key))).find(Boolean) || '';
     const exceptionType = textValue(dataProperty(value, 'exception_type'));
     const node = [nodeId ? `节点：${nodeId}` : '', nodeType ? `节点类型：${nodeType}` : '', exceptionType ? `异常类型：${exceptionType}` : ''].filter(Boolean).join('；');
     for (const message of messageParts) {

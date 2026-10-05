@@ -1,0 +1,41 @@
+.chapter-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 10px; margin-bottom: 10px; border: 1px solid var(--line); border-radius: 8px; background: #f8f7ff; }
+.chapter-toolbar > label { display: flex; align-items: center; gap: 7px; flex: 1 1 240px; min-width: 0; font-weight: 600; }
+.chapter-toolbar > label > span { white-space: nowrap; }
+.chapter-toolbar select { flex: 1; min-width: 110px; width: 100%; max-width: 550px; }
+.chapter-toolbar-actions, .chapter-row-actions, .chapter-pagination, .chapter-preview-tools { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+.chapter-notice { padding: 9px 12px; border: 1px solid #edc1cd; border-radius: 7px; color: #a34263; background: #fff6f8; font-size: .9em; overflow-wrap: anywhere; }
+.chapter-backdrop { position: fixed; inset: 0; z-index: 80; padding: 24px; background: rgba(38,33,45,.42); display: grid; place-items: center; }
+.chapter-dialog { display: flex; flex-direction: column; gap: 12px; width: min(1060px,100%); max-height: calc(100vh - 48px); padding: 20px; border: 1px solid var(--line); border-radius: 12px; background: white; box-shadow: 0 24px 80px rgba(38,33,45,.24); overflow: hidden; outline: none; }
+.chapter-dialog-header, .chapter-dialog-footer { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; flex-shrink: 0; }
+.chapter-dialog-header h2 { margin: 0; font-size: 1.25em; }
+.chapter-dialog-header p, .chapter-import-hint { margin: 5px 0 0; color: var(--muted); font-size: .9em; }
+.chapter-dialog-header > div { flex: 1; min-width: 0; }
+.chapter-dialog-header p { overflow-wrap: anywhere; }
+.chapter-search { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
+.chapter-search > input { flex: 1 1 220px; }
+.chapter-search label { display: flex; align-items: center; gap: 5px; white-space: nowrap; font-size: .9em; }
+.chapter-search input[type="checkbox"] { width: auto; }
+.chapter-management-list { overflow: auto; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+.chapter-management-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; }
+.chapter-management-row.selected { border-color: #c84b88; background: #fff6fa; }
+.chapter-row-main { flex: 1 1 300px; min-width: 0; }
+.chapter-row-main input { width: 100%; font-weight: 600; }
+.chapter-row-main p { margin: 6px 0 0; color: var(--muted); font-size: .85em; }
+.chapter-row-main strong { color: #b3447c; }
+.chapter-empty { padding: 30px; text-align: center; color: var(--muted); }
+.chapter-dialog-footer { padding-top: 10px; border-top: 1px solid var(--line); }
+.chapter-dialog-footer > span { color: var(--muted); font-size: .86em; }
+.chapter-pagination { justify-content: center; font-size: .86em; flex-wrap: nowrap; }
+.chapter-import-dialog { width: min(1200px,100%); height: min(820px,calc(100vh - 48px)); }
+.chapter-import-content { display: grid; grid-template-columns: minmax(200px, .65fr) minmax(0, 1.35fr); flex: 1; min-height: 0; gap: 12px; }
+.chapter-preview-list { overflow: auto; min-height: 0; display: flex; flex-direction: column; gap: 5px; }
+.chapter-preview-list > button { border: 1px solid var(--line); border-radius: 7px; padding: 10px; background: white; color: inherit; text-align: left; }
+.chapter-preview-list > button.selected { background: #f1edff; border-color: #7966cf; }
+.chapter-preview-list strong { display: block; overflow-wrap: anywhere; }
+.chapter-preview-list small { display: block; color: var(--muted); margin-top: 4px; }
+.chapter-preview-list .chapter-pagination { position: sticky; bottom: 0; padding: 8px 0; background: white; margin-top: auto; }
+.chapter-preview-editor { display: flex; flex-direction: column; gap: 9px; min-height: 0; min-width: 0; }
+.chapter-preview-editor > label { display: grid; gap: 5px; font-size: .9em; }
+.chapter-preview-editor textarea { flex: 1; width: 100%; min-height: 120px; resize: none; line-height: 1.7; }
+.chapter-preview-tools > span { color: var(--muted); font-size: .82em; }
+@media (max-width: 760px) { .chapter-backdrop { padding: 12px; } .chapter-dialog { padding: 13px; max-height: calc(100vh - 24px); } .chapter-import-content { grid-template-columns: 1fr; grid-template-rows: minmax(90px,.35fr) minmax(180px,1fr); } .chapter-dialog-footer .chapter-pagination { width: 100%; } }

@@ -29,8 +29,10 @@ export type ImageGenerationTaskPatch = Partial<Pick<
   | 'error'
   | 'bindingWarning'
   | 'imagePromptRuleSetId'
+  | 'imagePromptRuleSetName'
   | 'imagePromptRuleSetVersion'
   | 'imagePromptPresetId'
+  | 'imagePromptPresetName'
   | 'imagePromptPresetVersion'
   | 'imagePromptFormat'
 >>;

@@ -419,6 +419,7 @@ export async function generateSingleSegmentPrompt(
     const reviewedBoard: Storyboard = {
       ...synchronized,
       officialPromptZh: prompt,
+      ...(prompt !== synchronized.officialPromptZh ? { seedance25Output: undefined } : {}),
       targetOutput: synchronized.targetOutput ? { ...synchronized.targetOutput, prompt, generatedAt: input.now?.() ?? Date.now() } : synchronized.targetOutput,
       officialPromptEn: '', officialPromptEnSource: '', officialPromptEnError: '',
       h3IdentityBindings: delivery.identityBindings, h3IdentityBindingsEn: undefined,

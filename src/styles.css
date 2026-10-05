@@ -716,6 +716,9 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
 .job-card-copy { min-width: 0; display: grid; gap: 4px; }
 .job-card-actions { flex: 0 0 auto; justify-content: flex-end; }
 .job-prompt { max-width: 860px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.image-task-prompt-config { display: flex; flex-wrap: wrap; gap: 3px 16px; margin-top: 2px; }
+.image-task-prompt-config > span { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
+.image-task-prompt-config strong { color: var(--muted); font-weight: 600; }
 .image-job-summary { min-width: 0; display: flex; align-items: flex-start; gap: 9px; }
 .image-job-preview { width: 56px; height: 56px; flex: 0 0 56px; border-radius: 7px; border: 1px solid var(--line); object-fit: cover; background: #f6f7f9; }
 .regeneratable-image-task > .job-card-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 14px; }

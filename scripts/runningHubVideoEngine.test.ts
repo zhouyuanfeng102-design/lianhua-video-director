@@ -187,6 +187,64 @@ for (const invalidDraft of [{ ...draft(), runningHubWorkflowId: 'deleted' }, { .
   h.engine.dispose();
 }
 
+// The verified Minimax-H3 app accepts a dense prefix of five images for one
+// segment and all six image slots for another. The count node and the final
+// slot must follow each segment independently; a tail reference is just one
+// of the selected images and does not require the frame-extraction chain.
+{
+  const h = makeHarness(async (request, holder) => {
+    if (request.url.endsWith('/media/upload/binary')) {
+      const dataUrl = request.multipart?.files[0].dataUrl || '';
+      const match = /segment-image-(\d+)-sha/u.exec(dataUrl);
+      const imageNumber = match?.[1] || String(holder.uploadCount + 1);
+      holder.uploadCount += 1;
+      return response({ code: 0, data: { fileName: `openapi/segment-image-${imageNumber}.png`, download_url: 'https://cdn.example.test/segment-image.png' } });
+    }
+    return defaultRequest(request, holder);
+  });
+  h.holder.queryStatus = 'SUCCESS';
+  const base = h.holder.state.settings.runningHubVideo!.workflows[0];
+  const imageNodes = ['438', '435', '437', '439', '431', '429'];
+  const request = JSON.parse(base.requestTemplate);
+  request.nodeInfoList = request.nodeInfoList.filter((node: { nodeId: string }) => node.nodeId !== '137');
+  request.nodeInfoList.push(...imageNodes.map((nodeId) => ({ nodeId, fieldName: 'image', fieldValue: 'None' })),
+    { nodeId: '827', fieldName: 'value', fieldValue: '1' });
+  const workflow: RunningHubVideoWorkflow = {
+    ...base,
+    id: 'minimax-h3-exact-app',
+    name: 'Minimax-H3 精确应用可变图片数',
+    remoteId: '2104753059472990209',
+    requestTemplate: JSON.stringify(request),
+    mapping: {
+      ...base.mapping,
+      prompt: [{ nodeId: '138', inputName: 'value' }],
+      images: imageNodes.map((nodeId) => ({ nodeId, inputName: 'image', role: 'general' as const })),
+      imageCount: { nodeId: '827', inputName: 'value' },
+    },
+  };
+  h.holder.state.settings.runningHubVideo!.workflows = [workflow];
+  h.holder.state.settings.runningHubVideo!.activeWorkflowId = workflow.id;
+  const assets = Array.from({ length: 6 }, (_, index) => ({ ...image, id: `segment-image-${index + 1}`, name: `分段图片${index + 1}`, checksum: `segment-image-${index + 1}-sha` }));
+  h.holder.state.project.assets.push(...assets);
+  const firstReferences = assets.slice(0, 5).map((asset) => ({ assetId: asset.id, role: 'general' as const }));
+  const secondReferences = [...firstReferences, { assetId: assets[5].id, role: 'last-frame' as const }];
+  const result = await h.engine.startBatch({ projectId: h.holder.state.project.id, label: '精确应用五图到六图', concurrency: 1, items: [
+    { itemKey: 'h3-segment-5', draft: { ...draft(workflow.id, 1), prompt: '现合成普通文本：第一段剧情使用五张参考图。', references: firstReferences } },
+    { itemKey: 'h3-segment-6', draft: { ...draft(workflow.id, 2), prompt: '现合成普通文本：第二段剧情追加尾帧参考图。', references: secondReferences } },
+  ] });
+  await waitFor(() => result.taskIds.every((id) => Boolean(task(h.holder, id).resultAssetId)), 'exact Minimax-H3 variable-image batch did not complete');
+  const posts = generationRequests(h.holder);
+  assert.equal(posts.length, 2);
+  assert.equal(nodeValue(posts[0], '827', 'value'), '5');
+  assert.equal(nodeValue(posts[0], '429', 'image'), 'example.png');
+  assert.equal(nodeValue(posts[1], '827', 'value'), '6');
+  assert.equal(nodeValue(posts[1], '429', 'image'), 'openapi/segment-image-6.png');
+  assert.equal(nodeValue(posts[0], '138', 'value'), '现合成普通文本：第一段剧情使用五张参考图。');
+  assert.equal(nodeValue(posts[1], '138', 'value'), '现合成普通文本：第二段剧情追加尾帧参考图。');
+  assert.equal(h.holder.generationCount, 2, 'variable-image verification must submit exactly two cloud jobs');
+  h.engine.dispose();
+}
+
 // Old tasks retain their cloud request even after a workflow has been deleted;
 // explicit parameter edits are rebound from frozen mapping, not ignored.
 {
@@ -256,6 +314,58 @@ for (const [alterEndpoint, alterRemoteId, legacySnapshot] of [
     assert.equal(next.headers?.Authorization, 'Bearer replacement-cloud-key');
   }
   assert.equal(h.holder.generationCount, 1);
+  restored.dispose();
+}
+
+// Automatic image-count discovery must not strand already submitted jobs whose
+// old frozen connection has no count binding and whose task vault was lost.
+for (const change of ['automatic-upgrade', 'different-host', 'explicit-count'] as const) {
+  const h = makeHarness();
+  const original = h.holder.state.settings.runningHubVideo!.workflows[0];
+  const imageNodes = ['438', '435', '437', '439', '431', '429'];
+  const request = JSON.parse(original.requestTemplate);
+  request.nodeInfoList = request.nodeInfoList.filter((node: { nodeId: string }) => node.nodeId !== '137');
+  request.nodeInfoList.push(...imageNodes.map((nodeId) => ({ nodeId, fieldName: 'image', fieldValue: 'example.png' })),
+    { nodeId: '827', fieldName: 'value', fieldValue: '1' });
+  const legacyWorkflow: RunningHubVideoWorkflow = { ...original, remoteId: '2104753059472990209',
+    requestTemplate: JSON.stringify(request), mapping: { ...original.mapping,
+      images: imageNodes.map((nodeId) => ({ nodeId, inputName: 'image', role: 'general' })), imageCount: null,
+    },
+  };
+  h.holder.state.settings.runningHubVideo!.workflows = [legacyWorkflow];
+  const taskId = await h.engine.start(draft(legacyWorkflow.id));
+  await waitFor(() => h.holder.requests.some((entry) => entry.url.endsWith('/query')), 'legacy known-app task did not start querying');
+  h.engine.dispose();
+  const saved = task(h.holder, taskId);
+  assert.equal(saved.videoJob!.snapshot.connection.api!.runningHubMappedFields!.some((field) => field.kind === 'image-count'), false);
+  for (const field of saved.videoJob!.snapshot.connection.api!.runningHubMappedFields!) delete field.emptyValue;
+  const frozen = structuredClone(saved.videoJob!.snapshot);
+  const remoteTaskId = saved.remoteTaskId;
+  h.holder.checkpoints.set(taskId, structuredClone(saved));
+  h.holder.credentials.clear();
+  delete legacyWorkflow.mapping.imageCount;
+  if (change === 'explicit-count') legacyWorkflow.mapping.imageCount = { nodeId: '827', inputName: 'value' };
+  h.holder.state.settings.runningHubVideo!.apiKey = 'recovered-known-app-key';
+  if (change === 'different-host') h.holder.state.settings.runningHubVideo!.baseUrl = 'https://unrelated-cloud.example.test';
+  assert.ok(compileRunningHubVideoApi(h.holder.state.settings.runningHubVideo!, legacyWorkflow.id).runningHubMappedFields!.some((field) => field.kind === 'image-count'));
+  const settingsBefore = structuredClone(h.holder.state.settings.runningHubVideo);
+  const before = h.holder.requests.length;
+  const restored = new VideoGenerationEngine(h.options);
+  if (change === 'automatic-upgrade') {
+    await restored.resume(taskId);
+    await waitFor(() => h.holder.requests.length > before, 'automatic count upgrade did not recover the old task credential');
+    const query = h.holder.requests[before];
+    assert.ok(query.url.endsWith('/openapi/v2/query'));
+    assert.equal(JSON.parse(query.body || '{}').taskId, remoteTaskId);
+    assert.equal(query.headers?.Authorization, 'Bearer recovered-known-app-key');
+    assert.ok(h.holder.requests.slice(before).every((entry) => entry.url.endsWith('/openapi/v2/query')));
+  } else {
+    await assert.rejects(() => restored.resume(taskId), /密钥|凭据|API\s*Key/iu);
+    assert.equal(h.holder.requests.length, before, 'a changed host or explicit binding cannot borrow the legacy task credential');
+  }
+  assert.equal(h.holder.generationCount, 1, 'restoring an old known-app task never posts another generation');
+  assert.deepEqual(task(h.holder, taskId).videoJob!.snapshot, frozen, 'the submitted request snapshot remains frozen');
+  assert.deepEqual(h.holder.state.settings.runningHubVideo, settingsBefore, 'the compatibility candidate never changes saved settings');
   restored.dispose();
 }
 

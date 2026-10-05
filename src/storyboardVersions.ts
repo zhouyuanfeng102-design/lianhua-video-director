@@ -8,6 +8,7 @@ import type {
   PromptPlanSnapshot,
   PromptTrace,
   ShotMode,
+  Seedance25Output,
 } from './types';
 import { normalizeSequencePromptHandoffStamp } from './sequencePromptHandoffStamp';
 import { normalizeH3IdentityBindings } from './h3IdentityBindings';
@@ -52,6 +53,7 @@ export interface StoryboardRevisionSource {
   /** Target model paired with the saved adapted prompt, when any. */
   targetModelId?: string;
   targetOutput?: VersionTargetOutput;
+  seedance25Output?: Seedance25Output;
   shots?: readonly VersionShotLike[];
   updatedAt?: number;
   createdAt?: number;
@@ -85,6 +87,7 @@ export interface StoryboardRevision {
   /** Target model paired with the saved adapted prompt, when any. */
   targetModelId?: string;
   targetOutput?: VersionTargetOutput;
+  seedance25Output?: Seedance25Output;
   shots: VersionShotLike[];
   metadata?: Readonly<Record<string, unknown>>;
 }
@@ -226,6 +229,7 @@ export function createStoryboardRevision(
       : {}),
     ...(source.targetModelId !== undefined ? { targetModelId: textOf(source.targetModelId) } : {}),
     ...(source.targetOutput !== undefined ? { targetOutput: clone(source.targetOutput) } : {}),
+    ...(source.seedance25Output !== undefined ? { seedance25Output: clone(source.seedance25Output) } : {}),
     shots,
     ...(options.metadata ? { metadata: clone(options.metadata) } : {})
   };
@@ -291,6 +295,7 @@ export function restoreStoryboardRevisionSnapshot<
     } : {}),
     targetModelId: revision.targetModelId,
     targetOutput: clone(revision.targetOutput),
+    seedance25Output: clone(revision.seedance25Output),
     shots: revision.shots.map((shot) => clone(shot)),
     // Missing legacy evidence stays missing; never borrow a newer trace or
     // manufacture an API-complete marker for historical text.

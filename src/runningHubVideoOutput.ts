@@ -2,10 +2,12 @@ import type { RunningHubVideoFieldControl, RunningHubVideoInputBinding, RunningH
 import { ensureRunningHubVideoRequestNode } from './runningHubVideo';
 import { isRunningHubMegapixelsField, listRunningHubVideoNodes, normalizeRunningHubVideoFieldControl, normalizeRunningHubVideoFieldControls, resolveRunningHubVideoFieldControl } from './runningHubVideoNodes';
 import { selectRunningHubVideoFieldChoices } from './runningHubVideoFieldChoices';
+import { resolveRunningHubVideoImageProtocol } from './runningHubImageProtocol';
 
-export type RunningHubVideoOutputKey = 'duration' | 'resolution' | 'width' | 'height';
+export type RunningHubVideoOutputKey = 'duration' | 'aspect_ratio' | 'resolution' | 'width' | 'height';
 export const runningHubVideoOutputFields: ReadonlyArray<{ key: RunningHubVideoOutputKey; label: string; hint: string }> = [
   { key: 'duration', label: '视频时长', hint: '单位秒，不是帧数或实例保留时间。' },
+  { key: 'aspect_ratio', label: '画面比例', hint: '按云端字段的完整选项值提交，例如 9:16 (Portrait Widescreen)。' },
   { key: 'resolution', label: '分辨率', hint: '按云端原格式填写，如 720P / 1080P；megapixels 使用百万像素（MP），不自动换算宽高。' },
   { key: 'width', label: '像素宽度', hint: '像素宽度，不自动计算宽高比。' },
   { key: 'height', label: '像素高度', hint: '像素高度；采用档位时可不绑定。' },
@@ -14,12 +16,14 @@ const same = (left: RunningHubVideoInputBinding, right: RunningHubVideoInputBind
 const normalize = (text: string) => text.replace(/([a-z0-9])([A-Z])/gu, '$1_$2').toLowerCase().replace(/[\s_-]+/gu, '');
 const names: Record<RunningHubVideoOutputKey, RegExp> = {
   duration: /^(?:duration|durationsec|durationseconds|videoduration|seconds|时长|视频时长|秒数)$/u,
+  aspect_ratio: /^(?:aspectratio|ratio|画面比例|宽高比|纵横比)$/u,
   resolution: /^(?:resolution|imageresolution|videoresolution|outputresolution|megapixels?|百万像素|分辨率|清晰度)$/u,
   width: /^(?:(?:image|video|output|target|frame)?width|宽度|像素宽度|画面宽度)$/u,
   height: /^(?:(?:image|video|output|target|frame)?height|高度|像素高度|画面高度)$/u,
 };
 const descriptions: Record<RunningHubVideoOutputKey, RegExp> = {
   duration: /duration|seconds|时长|秒数/u,
+  aspect_ratio: /aspect.?ratio|ratio|画面比例|宽高比|纵横比/u,
   resolution: /resolution|megapixels?|百万像素|分辨率|清晰度/u,
   width: /width|宽度|像素宽/u,
   height: /height|高度|像素高/u,
@@ -96,6 +100,8 @@ export const runningHubVideoOutputCandidates = (
 };
 
 export const runningHubVideoOutputConflict = (workflow: RunningHubVideoWorkflow, key: RunningHubVideoOutputKey, binding: RunningHubVideoInputBinding): string => {
+  const imageCount = resolveRunningHubVideoImageProtocol(workflow).imageCount;
+  if (imageCount && same(imageCount, binding)) return '每段实际图片数量';
   if (workflow.mapping.prompt.some((entry) => same(entry, binding))) return '提示词输入';
   if (workflow.mapping.images.some((entry) => same(entry, binding))) return '参考图片槽';
   const other = Object.entries(workflow.mapping.parameters || {}).find(([name, entry]) => name !== key && same(entry, binding));

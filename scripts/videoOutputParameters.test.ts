@@ -76,6 +76,22 @@ test('普通 API 可编辑时长与分辨率，云端只显示真实显式映射
   assert.deepEqual(output.availableVideoParameterKeys('runninghub', api), ['duration', 'resolution']);
   assert.deepEqual(output.availableVideoParameterKeys('api', api), ['duration', 'resolution']);
 });
+test('RunningHub 比例节点保留完整 COMBO 值并显示可选下拉', () => {
+  const api = { provider: 'runninghub' as const, runningHubMappedFields: [
+    { nodeId: '462', fieldName: 'aspect_ratio', kind: 'parameter' as const, parameter: 'aspect_ratio', originalValue: '9:16 (Portrait Widescreen)' },
+  ], runningHubParameterControls: { aspect_ratio: { kind: 'select' as const, options: ['1:1 (Square)', '9:16 (Portrait Widescreen)', '16:9 (Widescreen)'] } } };
+  assert.deepEqual(output.availableVideoParameterKeys('runninghub', api), ['aspect_ratio']);
+  const changes: unknown[] = [];
+  const tree = Output({ scope: 'single', source: 'runninghub', availableKeys: ['aspect_ratio'], parameterText: '{}', ...output.videoOutputParameterPresentation(api, {}), onChange: (...args) => changes.push(args) });
+  const select = nodesOf(tree).find((node) => node.type === 'select' && node.props['aria-label'] === '本次视频画面比例选项');
+  assert.ok(select); assert.equal(select.props.value, '__default__');
+  const optionValues = nodesOf(select).filter((node) => node.type === 'option').map((node) => node.props.value).filter(Boolean);
+  assert.ok(optionValues.includes('value:9:16 (Portrait Widescreen)'));
+  select.props.onChange({ target: { value: 'value:16:9 (Widescreen)' } });
+  assert.deepEqual(changes, [['aspect_ratio', '16:9 (Widescreen)']]);
+  assert.deepEqual(output.changeVideoParameterText('{}', 'aspect_ratio', '16:9 (Widescreen)').value, { aspect_ratio: '16:9 (Widescreen)' });
+  assert.equal(output.videoOutputParameterSummary({ aspect_ratio: '16:9 (Widescreen)' }), '请求画面比例 16:9 (Widescreen)');
+});
 test('time/seconds/size 和帧数不被猜成秒数或分辨率', () => {
   const keys = output.availableVideoParameterKeys('comfyui', undefined, { mapping: { prompt: [], images: [], parameters: {
     time: { nodeId: '1', inputName: 'value' }, seconds: { nodeId: '2', inputName: 'value' }, size: { nodeId: '3', inputName: 'value' }, frames: { nodeId: '4', inputName: 'value' },

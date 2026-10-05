@@ -4,6 +4,7 @@ import { formatUserFacingError } from '../userFacingError';
 import { getSafeErrorDiagnostics } from '../errorDiagnostics';
 import { videoTaskDiagnosticEntries, videoTaskErrorOptions } from '../videoTaskErrorDiagnostics';
 import { TaskErrorDetails } from './TaskErrorDetails';
+import { activeChapter, chapterPlans, chapterWorkspace } from '../chapters';
 import { ReferenceImageName } from './ReferenceImageName';
 import { canRecoverRunningHubResult, runningHubRemoteSucceeded } from '../videoResultRecovery';
 import { canRecoverComfyPreviewResult } from '../comfyuiVideo';
@@ -20,7 +21,8 @@ import { useCurrentVideoDraftImages, videoDraftReferenceAsset } from '../videoDi
 import {
   addVideoDraftAssets, applyVideoPromptChoice, applyVideoReferenceRoleOverrides, draftFromVideoTask, emptyVideoDraft,
   formatVideoElapsed, isVideoDirectorImage, videoExecutionElapsedMs, videoPromptChoices,
-  type VideoDirectorLaunchRequest, videoImageRole,
+  chapterIdForVideoLaunch, readVideoDirectorChapterDraft, videoDirectorChapterKey,
+  type VideoDirectorLaunchRequest, type VideoDirectorChapterDraft, type VideoDirectorBatchDraft, videoImageRole,
 } from '../videoDirectorDraft';
 import {
   allVideoBatchChoiceKeys, buildVideoBatchRows, findVideoBatchDuplicate, toggleVideoBatchChoice,
@@ -44,6 +46,9 @@ import '../videoDirector.css';
 export type { VideoDirectorLaunchRequest } from '../videoDirectorDraft';
 export interface VideoDirectorViewProps {
   project: Project;
+  chapterId?: string;
+  chapterDraft?: VideoDirectorChapterDraft;
+  onChapterDraftChange?: (projectId: string, chapterId: string, draft: VideoDirectorChapterDraft) => void;
   settings: AppSettings;
   controller: VideoGenerationController;
   tailFrameTools?: TailFrameTools;
@@ -127,7 +132,7 @@ const stageLabels: Record<VideoGenerationStage, string> = {
   preparing: '准备素材', submitting: '正在提交', queued: '排队中', running: '生成中', reconnecting: '连接中断，恢复状态中',
   downloading: '生成成功，正在保存', succeeded: '已完成', failed: '生成失败', 'submission-unknown': '提交结果待确认', stopped: '已停止本地追踪',
 };
-const draftCache = new Map<string, { draft: VideoGenerationDraft; parameterText: string; parameterDrafts: Map<string, string> }>();
+const draftCache = new Map<string, VideoDirectorChapterDraft>();
 const consumedLaunchIds = new Set<string>();
 
 // General request deduplication deliberately prefers content checksums. A
@@ -609,8 +614,11 @@ function useOneClickVideoTail(input: {
   return { busy, select, cancel: stop };
 }
 
-function VideoBatchPanel({ project, settings, controller, tailFrameTools, initialDraft, initialParameterText, retryTaskIds, onOpenSettings, onOpenJobs, onSubmittingChange, onRepairIdentityBindings }: {
+function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, settings, controller, tailFrameTools, initialDraft, initialParameterText, retryTaskIds, onOpenSettings, onOpenJobs, onSubmittingChange, onRepairIdentityBindings }: {
   project: Project;
+  chapterId?: string;
+  savedBatch?: VideoDirectorBatchDraft;
+  onBatchDraftChange: (draft: VideoDirectorBatchDraft) => void;
   settings: AppSettings;
   controller: VideoGenerationController;
   tailFrameTools?: TailFrameTools;
@@ -622,20 +630,21 @@ function VideoBatchPanel({ project, settings, controller, tailFrameTools, initia
   onSubmittingChange: (submitting: boolean) => void;
   onRepairIdentityBindings?: VideoDirectorViewProps['onRepairIdentityBindings'];
 }) {
-  const plans = useMemo(() => [...project.sequencePlans].filter((plan) => plan.segments.length).sort((left, right) => right.updatedAt - left.updatedAt), [project.sequencePlans]);
-  const retryEntries = useMemo(() => videoBatchRetryEntries(project, retryTaskIds), [project, retryTaskIds]);
+  const plans = useMemo(() => [...(chapterId ? chapterPlans(project, chapterId) : project.sequencePlans)].filter((plan) => plan.segments.length && !plan.sourceStale).sort((left, right) => right.updatedAt - left.updatedAt), [project, chapterId]);
+  const retryEntries = useMemo(() => videoBatchRetryEntries(project, retryTaskIds).filter((entry) => plans.some((plan) => plan.id === entry.planId)), [project, retryTaskIds, plans]);
   const retryPrimary = retryEntries[0];
+  const initialBatch = !retryPrimary ? savedBatch : undefined;
   const retryParameterBaselineText = retryPrimary ? JSON.stringify(retryPrimary.draft.parameters, null, 2) : '';
-  const [planId, setPlanId] = useState(() => plans.find((plan) => plan.id === (retryPrimary?.planId || initialDraft.source?.sequencePlanId))?.id || plans[0]?.id || '');
-  const [backend, setBackend] = useState(retryPrimary?.draft.backend || initialDraft.backend);
+  const [planId, setPlanId] = useState(() => plans.find((plan) => plan.id === (retryPrimary?.planId || initialBatch?.planId || initialDraft.source?.sequencePlanId))?.id || plans[0]?.id || '');
+  const [backend, setBackend] = useState(retryPrimary?.draft.backend || initialBatch?.backend || initialDraft.backend);
   const [workflowId, setWorkflowId] = useState(() => retryPrimary
     ? retryPrimary.draft.workflowId || ''
-    : initialDraft.workflowId || settings.comfyuiVideo?.activeWorkflowId || settings.comfyuiVideo?.workflows[0]?.id || '');
-  const [apiProfileId, setApiProfileId] = useState(retryPrimary?.draft.apiProfileId || initialDraft.apiProfileId || '');
-  const [runningHubWorkflowId, setRunningHubWorkflowId] = useState(retryPrimary ? retryPrimary.draft.runningHubWorkflowId : initialDraft.runningHubWorkflowId);
+    : initialBatch?.workflowId ?? initialDraft.workflowId ?? settings.comfyuiVideo?.activeWorkflowId ?? settings.comfyuiVideo?.workflows[0]?.id ?? '');
+  const [apiProfileId, setApiProfileId] = useState(retryPrimary?.draft.apiProfileId ?? initialBatch?.apiProfileId ?? initialDraft.apiProfileId ?? '');
+  const [runningHubWorkflowId, setRunningHubWorkflowId] = useState(retryPrimary ? retryPrimary.draft.runningHubWorkflowId : initialBatch ? initialBatch.runningHubWorkflowId : initialDraft.runningHubWorkflowId);
   const sourceKind = videoDraftSource({ backend, runningHubWorkflowId });
-  const [parameterText, setParameterText] = useState(() => retryPrimary ? retryParameterBaselineText : initialParameterText);
-  const parameterDrafts = useRef(new Map<string, string>());
+  const [parameterText, setParameterText] = useState(() => retryPrimary ? retryParameterBaselineText : initialBatch?.parameterText ?? initialParameterText);
+  const parameterDrafts = useRef(new Map<string, string>(initialBatch?.parameterDrafts));
   const switchParameterConnection = (patch: Partial<Pick<VideoGenerationDraft, 'backend' | 'workflowId' | 'apiProfileId' | 'runningHubWorkflowId'>>) => {
     const current = { backend, workflowId, apiProfileId, runningHubWorkflowId };
     const next = { ...current, ...patch };
@@ -647,22 +656,18 @@ function VideoBatchPanel({ project, settings, controller, tailFrameTools, initia
     }
     setBackend(next.backend); setWorkflowId(next.workflowId); setApiProfileId(next.apiProfileId); setRunningHubWorkflowId(next.runningHubWorkflowId);
   };
-  const [settingsCollapsed, setSettingsCollapsed] = useState(false);
-  const [query, setQuery] = useState('');
-  const [selectedKeys, setSelectedKeys] = useState<Set<VideoPromptChoiceKey>>(() => new Set(retryEntries.map((entry) => entry.key)));
-  const [languages, setLanguages] = useState<Record<string, 'zh' | 'en'>>(() => Object.fromEntries(retryEntries.map((entry) => [entry.segmentId, entry.language])));
-  const [referenceOverrides, setReferenceOverrides] = useState<Record<string, VideoImageReference[]>>({});
-  const [referenceRoleOverrides, setReferenceRoleOverrides] = useState<Record<string, ReferenceRole[]>>({});
-  const [automaticTails, setAutomaticTails] = useState<Record<string, AutomaticVideoTailConfiguration>>({});
+  const [settingsCollapsed, setSettingsCollapsed] = useState(initialBatch?.settingsCollapsed || false);
+  const [query, setQuery] = useState(initialBatch?.query || '');
+  const [selectedKeys, setSelectedKeys] = useState<Set<VideoPromptChoiceKey>>(() => new Set((initialBatch?.selectedKeys as VideoPromptChoiceKey[] | undefined) || retryEntries.map((entry) => entry.key)));
+  const [languages, setLanguages] = useState<Record<string, 'zh' | 'en'>>(() => initialBatch?.languages || Object.fromEntries(retryEntries.map((entry) => [entry.segmentId, entry.language])));
+  const [referenceOverrides, setReferenceOverrides] = useState<Record<string, VideoImageReference[]>>(initialBatch?.referenceOverrides || {});
+  const [referenceRoleOverrides, setReferenceRoleOverrides] = useState<Record<string, ReferenceRole[]>>(initialBatch?.referenceRoleOverrides || {});
+  const [automaticTails, setAutomaticTails] = useState<Record<string, AutomaticVideoTailConfiguration>>(initialBatch?.automaticTails || {});
   // Derive the composite draft from the untouched original. Disabling the mode
   // restores both pictures and Picture numbering without deleting any assets.
-  const [tailCharacterModes, setTailCharacterModes] = useState<Record<string, {
-    kind: 'automatic' | 'static'; connectionScope: string; sequenceFingerprint: string;
-    tailAssetId?: string; tailRole?: ReferenceRole; tailFingerprint?: string; sourceFingerprint?: string;
-    editedReferences?: true;
-  }>>({});
-  const [previewSegmentId, setPreviewSegmentId] = useState(retryPrimary?.segmentId || '');
-  const [previewPane, setPreviewPane] = useState<'prompt' | 'references'>('prompt');
+  const [tailCharacterModes, setTailCharacterModes] = useState<VideoDirectorBatchDraft['tailCharacterModes']>(initialBatch?.tailCharacterModes || {});
+  const [previewSegmentId, setPreviewSegmentId] = useState(retryPrimary?.segmentId || initialBatch?.previewSegmentId || '');
+  const [previewPane, setPreviewPane] = useState<'prompt' | 'references'>(initialBatch?.previewPane || 'prompt');
   const [compactPane, setCompactPane] = useState<'list' | 'preview'>('list');
   const [imageSegmentId, setImageSegmentId] = useState('');
   const [tailSelecting, setTailSelecting] = useState(false);
@@ -675,6 +680,15 @@ function VideoBatchPanel({ project, settings, controller, tailFrameTools, initia
   const [notice, setNotice] = useState(() => retryEntries.length
     ? `已回填 ${retryEntries.length} 个失败任务的原提示词、参数和冻结参考图；这里只是复核，尚未提交。`
     : '');
+  const batchDraftChangeRef = useRef(onBatchDraftChange);
+  batchDraftChangeRef.current = onBatchDraftChange;
+  useEffect(() => {
+    batchDraftChangeRef.current({ planId, backend, workflowId, apiProfileId, runningHubWorkflowId, parameterText,
+      parameterDrafts: [...parameterDrafts.current], selectedKeys: [...selectedKeys], languages,
+      referenceOverrides, referenceRoleOverrides, automaticTails, tailCharacterModes,
+      previewSegmentId, previewPane, settingsCollapsed, query });
+  }, [planId, backend, workflowId, apiProfileId, runningHubWorkflowId, parameterText, selectedKeys, languages,
+    referenceOverrides, referenceRoleOverrides, automaticTails, tailCharacterModes, previewSegmentId, previewPane, settingsCollapsed, query]);
   const submittingRef = useRef(false);
   const mountedRef = useRef(true);
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
@@ -1283,14 +1297,22 @@ function VideoBatchPanel({ project, settings, controller, tailFrameTools, initia
   </section>;
 }
 
-export function VideoDirectorView({ project, settings, controller, tailFrameTools, launchRequest, onOpenSettings, onOpenPrompt, onOpenVideoAssets, onOpenJobs, onChangeExecution, onRepairIdentityBindings }: VideoDirectorViewProps) {
-  const initial = draftCache.get(project.id);
-  const [generationMode, setGenerationMode] = useState<'single' | 'batch'>('single');
+export function VideoDirectorView(props: VideoDirectorViewProps) {
+  const chapterId = props.chapterId || activeChapter(props.project)?.id;
+  // The controller remains outside this keyed view. Leaving a chapter unmounts
+  // only its editor; a late form callback cannot edit another chapter's draft.
+  return <ChapterVideoDirectorView key={videoDirectorChapterKey(props.project.id, chapterId)} {...props} chapterId={chapterId} />;
+}
+
+function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterDraftChange, settings, controller, tailFrameTools, launchRequest, onOpenSettings, onOpenPrompt, onOpenVideoAssets, onOpenJobs, onChangeExecution, onRepairIdentityBindings }: VideoDirectorViewProps) {
+  const draftScope = videoDirectorChapterKey(project.id, chapterId);
+  const initial = readVideoDirectorChapterDraft(chapterDraft || (chapterId ? chapterWorkspace(project, chapterId)?.videoDirector : undefined)) || draftCache.get(draftScope);
+  const [generationMode, setGenerationMode] = useState<'single' | 'batch'>(initial?.generationMode || 'single');
+  const [batchDraft, setBatchDraft] = useState<VideoDirectorBatchDraft | undefined>(initial?.batch);
   const [batchSubmitting, setBatchSubmitting] = useState(false);
   const [identityRepairing, setIdentityRepairing] = useState(false);
   const [identityRepairResult, setIdentityRepairResult] = useState<{ projectId: string; storyboardId: string; language: 'zh' | 'en'; prompt: string; canRefresh: boolean }>();
   const [draft, setDraft] = useState<VideoGenerationDraft>(() => initial?.draft || emptyVideoDraft(settings));
-  const [draftProjectId, setDraftProjectId] = useState(project.id);
   const [parameterText, setParameterText] = useState(initial?.parameterText || JSON.stringify(initial?.draft.parameters || {}, null, 2));
   const parameterDrafts = useRef(new Map(initial?.parameterDrafts));
   const [picker, setPicker] = useState<'prompt' | 'images' | undefined>();
@@ -1307,7 +1329,9 @@ export function VideoDirectorView({ project, settings, controller, tailFrameTool
   const [notice, setNotice] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const projectIdRef = useRef(project.id);
-  const choices = useMemo(() => videoPromptChoices(project), [project.storyboards, project.sequencePlans, project.scenes, project.assets, project.characters, project.locations, project.props]);
+  const mountedRef = useRef(true);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
+  const choices = useMemo(() => videoPromptChoices(project, chapterId), [project, chapterId]);
   const images = useMemo(() => project.assets.filter(isVideoDirectorImage), [project.assets]);
   const reusedSnapshot = draft.reuseTaskId ? findReusableVideoTask(project, draft.reuseTaskId)?.videoJob?.snapshot : undefined;
   const reusedConnection = reusedSnapshot?.connection.backend === draft.backend && reusedSnapshot.draft.runningHubWorkflowId === draft.runningHubWorkflowId ? reusedSnapshot.connection : undefined;
@@ -1320,12 +1344,17 @@ export function VideoDirectorView({ project, settings, controller, tailFrameTool
   const effectiveReferences = videoReferenceUsage(draft.references, referenceUsageContext);
   const delivery = useMemo(() => prepareVideoH3ReferenceDraft(project, { ...draft,
     references: videoReferenceUsage(draft.references, referenceUsageContext) }, referenceUsageContext), [project, draft, referenceUsageContext]);
+  const sourceStale = !draft.reuseTaskId && Boolean(
+    project.storyboards.find((board) => board.id === draft.source?.storyboardId)?.sourceStale
+    || project.sequencePlans.find((plan) => plan.id === draft.source?.sequencePlanId)?.sourceStale,
+  );
   const repairSingleIdentityBindings: VideoDirectorViewProps['onRepairIdentityBindings'] = onRepairIdentityBindings ? async (storyboardId, language, characterIds) => {
     const board = project.storyboards.find((item) => item.id === storyboardId);
     const sourcePrompt = language === 'en' ? board?.officialPromptEn : board?.officialPromptZh;
     const canRefresh = draft.prompt === sourcePrompt || Boolean(draft.h3ReferenceBinding
       && draft.h3ReferenceBinding.basePrompt === sourcePrompt && draft.prompt === draft.h3ReferenceBinding.renderedPrompt);
     await onRepairIdentityBindings(storyboardId, language, characterIds);
+    if (!mountedRef.current) return;
     setIdentityRepairResult({ projectId: project.id, storyboardId, language, prompt: draft.prompt, canRefresh });
   } : undefined;
   useEffect(() => {
@@ -1386,19 +1415,21 @@ export function VideoDirectorView({ project, settings, controller, tailFrameTool
     setDraft({ ...next, parameters: readVideoParameterText(nextText).value });
     setParameterText(nextText); setError(''); setNotice('');
   };
+  const draftChangeRef = useRef(onChapterDraftChange);
+  draftChangeRef.current = onChapterDraftChange;
+  const persistedSignature = useRef('');
   useEffect(() => {
-    if (projectIdRef.current === project.id) return;
-    projectIdRef.current = project.id;
-    const cached = draftCache.get(project.id);
-    parameterDrafts.current = new Map(cached?.parameterDrafts);
-    setDraftProjectId(project.id);
-    setDraft(cached?.draft || emptyVideoDraft(settings));
-    setParameterText(cached?.parameterText || JSON.stringify(cached?.draft.parameters || {}, null, 2));
-    setPicker(undefined); setPreviewAsset(undefined); setError(''); setNotice(''); setSubmitting(false);
-  }, [project.id, settings]);
-  useEffect(() => { if (draftProjectId === project.id) draftCache.set(project.id, { draft, parameterText, parameterDrafts: new Map(parameterDrafts.current) }); }, [project.id, draftProjectId, draft, parameterText]);
+    const next: VideoDirectorChapterDraft = { draft, parameterText, parameterDrafts: [...parameterDrafts.current], generationMode, batch: batchDraft };
+    const signature = JSON.stringify(next);
+    if (signature === persistedSignature.current) return;
+    persistedSignature.current = signature;
+    draftCache.set(draftScope, next);
+    if (chapterId) draftChangeRef.current?.(project.id, chapterId, next);
+  }, [draftScope, project.id, chapterId, draft, parameterText, generationMode, batchDraft]);
   useEffect(() => {
     if (!launchRequest || consumedLaunchIds.has(launchRequest.id)) return;
+    const launchChapterId = chapterIdForVideoLaunch(project, launchRequest);
+    if (launchChapterId && launchChapterId !== chapterId) return;
     consumedLaunchIds.add(launchRequest.id);
     if (launchRequest.batchTaskIds?.length) {
       setGenerationMode('batch');
@@ -1408,7 +1439,7 @@ export function VideoDirectorView({ project, settings, controller, tailFrameTool
       return;
     }
     setGenerationMode('single');
-    let next = draftCache.get(project.id)?.draft || emptyVideoDraft(settings);
+    let next = draftCache.get(draftScope)?.draft || emptyVideoDraft(settings);
     if (launchRequest.taskId) {
       const task = findReusableVideoTask(project, launchRequest.taskId);
       const saved = task && draftFromVideoTask(task);
@@ -1424,7 +1455,7 @@ export function VideoDirectorView({ project, settings, controller, tailFrameTool
     next = applyVideoReferenceRoleOverrides(next, launchRequest.referenceRoleOverrides);
     setDraft(next); setParameterText(JSON.stringify(next.parameters, null, 2));
     setNotice('内容已带入本次生成草稿；确认并点击“生成视频”后才会提交任务。');
-  }, [launchRequest, project, choices, settings]);
+  }, [launchRequest, project, chapterId, draftScope, choices, settings]);
   const updateParameter = (key: string, text: string) => {
     const next = changeVideoParameterText(parameterText, key, text);
     if (next.issue) { setError(next.issue); return; }
@@ -1432,7 +1463,7 @@ export function VideoDirectorView({ project, settings, controller, tailFrameTool
   };
   const singleTail = useOneClickVideoTail({
     project, tools: tailFrameTools,
-    scopeKey: JSON.stringify([project.id, generationMode, draft, parameterText, activeWorkflow, activeApi ? { ...activeApi, runningHubParameterControls: undefined } : undefined,
+    scopeKey: JSON.stringify([project.id, chapterId, generationMode, draft, parameterText, activeWorkflow, activeApi ? { ...activeApi, runningHubParameterControls: undefined } : undefined,
       draft.source?.sequencePlanId ? videoTailSequenceFingerprint(project, draft.source.sequencePlanId) : '',
       draft.references.map((reference) => { const asset = videoDraftReferenceAsset(project, reference, reusedSnapshot);
         return [reference.assetId, asset?.relativePath, asset?.checksum, asset?.missing]; })]),
@@ -1452,6 +1483,7 @@ export function VideoDirectorView({ project, settings, controller, tailFrameTool
   };
   const generate = async () => {
     if (submitting || batchSubmitting || singleTail.busy || tailFrameTools?.busy) return;
+    if (sourceStale) { setError('本章原文已更新，请更新来源提示词后再生成。历史稿保留，可查看原稿。'); return; }
     setError(''); setNotice('');
     const parsed = readVideoParameterText(parameterText);
     if (parsed.issue) { setError(parsed.issue); return; }
@@ -1459,10 +1491,12 @@ export function VideoDirectorView({ project, settings, controller, tailFrameTool
     const requestedProjectId = project.id;
     setSubmitting(true);
     try {
-      await controller.start({ ...delivery.draft, references: effectiveReferences, workflowId: draft.backend === 'comfyui' ? activeWorkflow?.id || draft.workflowId : draft.workflowId, parameters });
-      if (projectIdRef.current === requestedProjectId) { patchDraft({ parameters }); setNotice('任务已建立。请到“生成任务”查看进度；切换页面不会停止后台追踪，完成后自动存入视频资产库。'); }
-    } catch (cause) { if (projectIdRef.current === requestedProjectId) setError(cause instanceof Error ? cause.message : String(cause)); }
-    finally { if (projectIdRef.current === requestedProjectId) setSubmitting(false); }
+      await controller.start({ ...delivery.draft,
+        source: { ...delivery.draft.source, chapterId },
+        references: effectiveReferences, workflowId: draft.backend === 'comfyui' ? activeWorkflow?.id || draft.workflowId : draft.workflowId, parameters });
+      if (mountedRef.current && projectIdRef.current === requestedProjectId) { patchDraft({ parameters }); setNotice('任务已建立。请到“生成任务”查看进度；切换页面或章节不会停止后台追踪，完成后自动存入视频资产库。'); }
+    } catch (cause) { if (mountedRef.current && projectIdRef.current === requestedProjectId) setError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { if (mountedRef.current && projectIdRef.current === requestedProjectId) setSubmitting(false); }
   };
   const visibleChoices = choices.filter((choice) => (promptLanguage === 'all' || choice.language === promptLanguage) && `${choice.label} ${choice.segmentIndex ? `第${choice.segmentIndex}段 第 ${choice.segmentIndex} 段` : '单段'} ${choice.prompt}`.toLocaleLowerCase('zh-CN').includes(promptQuery.trim().toLocaleLowerCase('zh-CN')));
   const pickedChoice = choices.find((choice) => choice.id === pickedPromptId);
@@ -1477,9 +1511,11 @@ export function VideoDirectorView({ project, settings, controller, tailFrameTool
 
   return <div className="video-director-view" data-mode={generationMode}>
     <div className="section-heading"><div><h1>视频导演台</h1><p>直接选择已有提示词和图片资产，生成后自动存入视频资产库。这里的编辑不会改动原分镜或原提示词。</p></div>{generationMode === 'batch' && generationModeTabs}<div className="vd-toolbar">{onOpenSettings && <button className="btn" type="button" onClick={onOpenSettings}>视频连接设置</button>}{onOpenVideoAssets && <button className="btn" type="button" onClick={onOpenVideoAssets}>视频资产库</button>}{onOpenJobs && <button className="btn" type="button" onClick={onOpenJobs}>查看生成任务</button>}</div></div>
+    {chapterId && <p className="field-hint vd-chapter-context">当前章节：{project.sourceDocuments.find((chapter) => chapter.id === chapterId)?.name || '未命名章节'} · 提示词和分段按本章显示，参考图片全项目共用。</p>}
+    {sourceStale && <p className="vd-notice">本章原文已更新，当前历史提示词需要重新生成后才能提交；已提交的视频任务继续运行。</p>}
     {generationMode === 'single' && generationModeTabs}
     {onChangeExecution && <VideoExecutionControls settings={settings} onChange={onChangeExecution} />}
-    {generationMode === 'batch' && <div id="vd-batch-generation-panel" role="tabpanel" className="vd-batch-host"><VideoBatchPanel key={`${project.id}:${launchRequest?.batchTaskIds?.length ? launchRequest.id : 'standard-batch'}`} project={project} settings={settings} controller={controller} tailFrameTools={tailFrameTools} initialDraft={draft} initialParameterText={parameterText} retryTaskIds={launchRequest?.batchTaskIds} onOpenSettings={onOpenSettings} onOpenJobs={onOpenJobs} onSubmittingChange={setBatchSubmitting} onRepairIdentityBindings={onRepairIdentityBindings} /></div>}
+    {generationMode === 'batch' && <div id="vd-batch-generation-panel" role="tabpanel" className="vd-batch-host"><VideoBatchPanel key={`${draftScope}:${launchRequest?.batchTaskIds?.length ? launchRequest.id : 'standard-batch'}`} project={project} chapterId={chapterId} savedBatch={batchDraft} onBatchDraftChange={setBatchDraft} settings={settings} controller={controller} tailFrameTools={tailFrameTools} initialDraft={draft} initialParameterText={parameterText} retryTaskIds={launchRequest?.batchTaskIds} onOpenSettings={onOpenSettings} onOpenJobs={onOpenJobs} onSubmittingChange={setBatchSubmitting} onRepairIdentityBindings={onRepairIdentityBindings} /></div>}
     <div id="vd-single-generation-panel" role="tabpanel" className="vd-layout" hidden={generationMode !== 'single'}><div className="vd-stack">
       <section className="card vd-prompt-card"><div className="card-title"><h2>1. 本次视频提示词</h2><button className="btn small" type="button" onClick={() => { setPicker('prompt'); setPickedPromptId(draft.source?.storyboardId ? `${draft.source.storyboardId}:${draft.source.language || 'zh'}` : ''); }}>从提示词导演台选择</button></div>
         <label className="field"><span>视频名称</span><input value={draft.name} onChange={(event) => patchDraft({ name: event.target.value })} placeholder="为本次生成的视频命名" /></label>
@@ -1511,7 +1547,7 @@ export function VideoDirectorView({ project, settings, controller, tailFrameTool
         <VideoOutputParameters scope="single" source={sourceKind} parameterText={parameterText} availableKeys={parameterKeys} {...videoOutputParameterPresentation(presentationApi, parsedParameters.value)} requiresMapping={sourceKind !== 'api' || activeApi?.provider === 'runninghub'} disabled={submitting || batchSubmitting} onChange={updateParameter} onOpenSettings={onOpenSettings} />
         <details className="vd-details"><summary>可选参数覆盖（不填保持原值）</summary><div className="vd-stack"><p className="field-hint">高级参数：默认不覆盖种子、采样、尺寸和音频连接。只填写你要改变的值；留空恢复工作流 / 接口默认值。</p><div className="vd-parameter-grid">{parameterKeys.filter((key) => !isVideoOutputParameterKey(key)).map((key) => <label className="field" key={key}><span>{{ seed: '种子', steps: '采样步数', cfg: 'CFG', fps: '帧率' }[key] || key}</span><input value={videoParameterInputText(parsedParameters.value[key])} disabled={Boolean(parsedParameters.issue)} placeholder="保留原值" onChange={(event) => updateParameter(key, event.target.value)} /></label>)}</div><label className="field"><span>额外参数 JSON（仅显式覆盖字段）</span><textarea aria-label="本次额外参数 JSON" className="vd-code" rows={5} value={parameterText} onChange={(event) => setParameterText(event.target.value)} onBlur={() => { const parsed = readVideoParameterText(parameterText); if (!parsed.issue) patchDraft({ parameters: parsed.value }); }} /></label><button type="button" className="btn small" onClick={() => { patchDraft({ parameters: {} }); setParameterText('{}'); }}>清除本次参数覆盖</button></div></details>
         <details className="vd-tracking-note"><summary>任务追踪说明</summary><p>不设置等待超时。界面只显示后端提供的真实进度和已耗时，切换页面仍继续追踪。</p></details>
-        <button className="btn primary vd-generate-button" type="button" disabled={submitting || batchSubmitting || identityRepairing || singleTail.busy || tailFrameTools?.busy || !draft.prompt.trim() || Boolean(slotMismatch)} onClick={() => { void generate(); }}>{submitting ? '正在建立任务…' : '生成视频'}</button><p className="field-hint">点击才会提交生成，API 可能产生费用；不会自动重复提交结果不明的任务。</p>
+        <button className="btn primary vd-generate-button" type="button" disabled={submitting || batchSubmitting || identityRepairing || singleTail.busy || tailFrameTools?.busy || sourceStale || !draft.prompt.trim() || Boolean(slotMismatch)} onClick={() => { void generate(); }}>{submitting ? '正在建立任务…' : '生成视频'}</button><p className="field-hint">点击才会提交生成，API 可能产生费用；不会自动重复提交结果不明的任务。</p>
         {error && <p className="vd-error" role="alert">{formatUserFacingError(error)}</p>}{notice && <p className="vd-success" role="status">{notice}</p>}
       </section>
     </div></div>
@@ -1520,7 +1556,7 @@ export function VideoDirectorView({ project, settings, controller, tailFrameTool
         <div className="vd-toolbar"><span className="field-hint">当前为单段选择；多个视频段请进入批量清单。</span><button type="button" className="btn small" onClick={() => { setPicker(undefined); setGenerationMode('batch'); }}>长剧情批量</button></div>
         <div className="vd-toolbar"><label className="field vd-grow"><span>搜索剧情、场景或段号</span><input type="search" value={promptQuery} onChange={(event) => setPromptQuery(event.target.value)} placeholder="名称、段号、提示词内容" /></label><label className="field"><span>描述语言</span><select aria-label="描述语言" value={promptLanguage} onChange={(event) => setPromptLanguage(event.target.value as 'all' | 'zh' | 'en')}><option value="all">全部已有稿件</option><option value="zh">中文</option><option value="en">英文描述</option></select></label></div>
       </div>
-      <div className="vd-prompt-picker"><div className="vd-choice-list">{visibleChoices.length ? visibleChoices.map((choice) => <button type="button" className={`vd-choice ${pickedPromptId === choice.id ? 'selected' : ''}`} aria-pressed={pickedPromptId === choice.id} key={choice.id} onClick={() => setPickedPromptId(choice.id)}><strong>{choice.label}</strong><span>{choice.segmentIndex ? `长剧情 · 第 ${choice.segmentIndex} 段` : '单段'} · {choice.durationSec} 秒 · {choice.language === 'zh' ? '中文' : '英文描述'}</span><small>{choice.version} · {new Date(choice.updatedAt).toLocaleString('zh-CN')}</small></button>) : <div className="vd-empty">当前项目没有符合条件的已有提示词。</div>}</div><div className="vd-choice-preview">{pickedChoice ? <><h3>{pickedChoice.label}{pickedChoice.segmentIndex ? ` · 第 ${pickedChoice.segmentIndex} 段` : ''}</h3><pre className="vd-prompt-preview">{pickedChoice.prompt}</pre></> : <div className="vd-empty">选择一项预览完整提示词。</div>}</div></div>
+      <div className="vd-prompt-picker"><div className="vd-choice-list">{visibleChoices.length ? visibleChoices.map((choice) => <button type="button" className={`vd-choice ${pickedPromptId === choice.id ? 'selected' : ''}`} aria-pressed={pickedPromptId === choice.id} key={choice.id} onClick={() => setPickedPromptId(choice.id)}><strong>{choice.label}</strong><span>{choice.segmentIndex ? `长剧情 · 第 ${choice.segmentIndex} 段` : '单段'} · {choice.durationSec} 秒 · {choice.language === 'zh' ? '中文' : '英文描述'}</span><small>{choice.version} · {new Date(choice.updatedAt).toLocaleString('zh-CN')}</small></button>) : <div className="vd-empty">当前章节没有符合条件的已有提示词。</div>}</div><div className="vd-choice-preview">{pickedChoice ? <><h3>{pickedChoice.label}{pickedChoice.segmentIndex ? ` · 第 ${pickedChoice.segmentIndex} 段` : ''}</h3><pre className="vd-prompt-preview">{pickedChoice.prompt}</pre></> : <div className="vd-empty">选择一项预览完整提示词。</div>}</div></div>
       <div className="vd-modal-footer"><label className="check-row"><input type="checkbox" checked={includeReferences} onChange={(event) => setIncludeReferences(event.target.checked)} />一并带入该提示词已有的图片参考（保留当前选图）</label><button className="btn primary" type="button" disabled={!pickedChoice} onClick={() => { if (pickedChoice) { setDraft((current) => applyVideoPromptChoice(includeReferences ? { ...current, reuseTaskId: undefined } : current, pickedChoice, project, includeReferences)); setNotice('已复制所选单段提示词；一并带入的图片使用当前资产。原稿和对白未改动，也没有提交生成。'); setPicker(undefined); } }}>使用这段提示词</button></div>
     </VideoPickerDialog>}
     {picker === 'images' && <VideoPickerDialog title="从图片资产库选择生成参考图" className="vd-reference-picker-dialog" onClose={() => setPicker(undefined)}>

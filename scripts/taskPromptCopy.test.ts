@@ -8,6 +8,7 @@ import { getImageVariantGenerationSpec } from '../src/imageGeneration';
 import { canRegenerateImageTask, imageRegenerationRootId } from '../src/imageRegeneration';
 import { assetPreviewUrl } from '../src/media';
 import { formatUserFacingError } from '../src/userFacingError';
+import { imageTaskRuleMetadata } from '../src/imageTaskRuleMetadata';
 import type { ImageGenerationTask } from '../src/types';
 
 // Exercise the real task-card JSX and click handler, including the shared native
@@ -64,7 +65,8 @@ const setup = (taskList: ImageGenerationTask[], copy: (text: string) => Promise<
   const dependencies = {
     React, state, tasks: taskList, assetPreviewUrl,
     getImageVariantGenerationSpec, canRegenerateImageTask, imageRegenerationRootId,
-    imageAssetKindLabel, imageGenerationStatusLabel, formatUserFacingError,
+    imageAssetKindLabel, imageGenerationStatusLabel, formatUserFacingError, imageTaskRuleMetadata,
+    taskChapterLabel: () => '项目共享 / 历史任务',
     storyboardImageBatchLifecycle: { isActive: () => false },
     Copy: () => null, RefreshCw: () => null, X: () => null, Trash2: () => null, Eye: () => null,
     copyText: async (text: string) => { copied.push(text); return copy(text); },

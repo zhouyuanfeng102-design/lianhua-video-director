@@ -2,7 +2,7 @@ import type { VideoTaskApiConfig } from './types';
 import type { ComfyVideoWorkflowPreset, VideoGenerationSource } from './videoGenerationTypes';
 import type { RunningHubVideoFieldControl } from './runningHubVideoTypes';
 
-export const videoOutputParameterKeys = ['duration', 'resolution', 'width', 'height'] as const;
+export const videoOutputParameterKeys = ['duration', 'aspect_ratio', 'resolution', 'width', 'height'] as const;
 export type VideoOutputParameterKey = typeof videoOutputParameterKeys[number];
 
 export const isVideoOutputParameterKey = (key: string): key is VideoOutputParameterKey =>
@@ -25,7 +25,7 @@ export const availableVideoParameterKeys = (
     const found = new Set<string>();
     const visit = (value: unknown) => {
       if (typeof value === 'string') {
-        for (const match of value.matchAll(/\{\{(duration|resolution|width|height|seed)\}\}/gu)) found.add(match[1]);
+        for (const match of value.matchAll(/\{\{(duration|aspect_ratio|resolution|width|height|seed)\}\}/gu)) found.add(match[1]);
       } else if (Array.isArray(value)) value.forEach(visit);
       else if (value && typeof value === 'object') Object.values(value).forEach(visit);
     };
@@ -108,6 +108,7 @@ export const videoOutputParameterSummary = (
       const size = control.optionLabels?.[option];
       return `请求像素 ${value} MP${size ? `（${size}）` : ''}`;
     }
+    if (key === 'aspect_ratio') return `请求画面比例 ${value}`;
     if (key === 'resolution') return `请求分辨率 ${value}`;
     return `${key === 'width' ? '请求宽度' : '请求高度'} ${value} 像素`;
   }).join(' · ');
@@ -126,7 +127,7 @@ export const changeVideoParameterText = (
   }
   const value = { ...parsed.value };
   if (!input.trim()) delete value[key];
-  else if (key === 'resolution') value[key] = input;
+  else if (key === 'resolution' || key === 'aspect_ratio') value[key] = input;
   else {
     let next: unknown = input;
     try {

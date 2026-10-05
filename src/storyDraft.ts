@@ -1,4 +1,5 @@
 import type { Project, StoryDraft } from './types';
+import { activeChapter, chapterWorkspace, withChapterWorkspace } from './chapters';
 
 export interface StoryEditorDraft {
   storyInput: string;
@@ -19,33 +20,35 @@ export const normalizeStoryDraft = (value: unknown): StoryDraft | undefined => {
 };
 
 export const readProjectStoryDraft = (
-  project: Pick<Project, 'sourceDocuments' | 'storyDraft'>,
+  project: Pick<Project, 'sourceDocuments' | 'storyDraft'> & Partial<Pick<Project, 'activeChapterId' | 'chapterWorkspaces'>>,
 ): StoryEditorDraft => {
-  const draft = normalizeStoryDraft(project.storyDraft);
-  const source = project.sourceDocuments[0];
+  const draft = normalizeStoryDraft(chapterWorkspace(project).storyDraft ?? project.storyDraft);
+  const source = activeChapter(project);
   return {
     storyInput: draft?.content ?? source?.content ?? '',
-    storyName: draft?.name ?? source?.name ?? '剧情原文',
+    storyName: draft?.name ?? source?.name ?? '第 1 章',
   };
 };
 
 /** Preserve an exact, possibly empty draft without touching source-derived
  * scenes, plans, boards, media or their confirmation/revision metadata. */
-export const withProjectStoryDraft = <T extends Pick<Project, 'sourceDocuments' | 'storyDraft'>>(
+export const withProjectStoryDraft = <T extends Pick<Project, 'sourceDocuments' | 'storyDraft'> & Partial<Pick<Project, 'activeChapterId' | 'chapterWorkspaces'>>>(
   project: T,
   draft: StoryEditorDraft,
   now = Date.now(),
 ): T => {
-  const source = project.sourceDocuments[0];
+  const source = activeChapter(project);
+  const currentDraft = chapterWorkspace(project).storyDraft ?? project.storyDraft;
   if (draft.storyInput === (source?.content ?? '')
-    && draft.storyName === (source?.name ?? '剧情原文')) {
-    if (project.storyDraft === undefined) return project;
+    && draft.storyName === (source?.name ?? '第 1 章')) {
+    if (currentDraft === undefined) return project;
     const { storyDraft: _draft, ...withoutDraft } = project;
-    return withoutDraft as T;
+    return withChapterWorkspace(withoutDraft as T, { storyDraft: undefined });
   }
-  if (project.storyDraft?.content === draft.storyInput
-    && project.storyDraft.name === draft.storyName) return project;
-  return { ...project, storyDraft: { name: draft.storyName, content: draft.storyInput, updatedAt: now } };
+  if (currentDraft?.content === draft.storyInput
+    && currentDraft.name === draft.storyName) return project;
+  const storyDraft = { name: draft.storyName, content: draft.storyInput, updatedAt: now };
+  return withChapterWorkspace({ ...project, storyDraft }, { storyDraft });
 };
 
 export const storyDraftIdentity = (draft: StoryEditorDraft): string => (

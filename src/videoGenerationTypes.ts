@@ -56,6 +56,7 @@ export type VideoGenerationBackend = 'api' | 'comfyui';
 /** UI source; cloud workflows reuse the authenticated API task transport. */
 export type VideoGenerationSource = VideoGenerationBackend | 'runninghub';
 export interface VideoPromptSource {
+  chapterId?: string;
   storyboardId?: string;
   sequencePlanId?: string;
   segmentId?: string;

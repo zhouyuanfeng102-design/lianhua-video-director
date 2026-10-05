@@ -6,6 +6,7 @@ import type {
 } from './runningHubVideoTypes';
 import { normalizeRunningHubVideoFieldControls, normalizeRunningHubVideoNodeCatalog, resolveRunningHubVideoFieldControl } from './runningHubVideoNodes';
 import { assertVideoReferenceSlots, videoReferenceSlotIndex } from './videoReferenceSlots';
+import { resolveRunningHubVideoImageProtocol } from './runningHubImageProtocol';
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const own = (value: object, key: string): boolean => Object.prototype.hasOwnProperty.call(value, key);
@@ -147,7 +148,8 @@ const normalizeMapping = (raw: unknown): RunningHubVideoMapping => {
   if (isRecord(value.parameters)) for (const [key, item] of Object.entries(value.parameters)) {
     const binding = normalizeBinding(item); if (binding) Object.defineProperty(parameters, key, { value: binding, enumerable: true, configurable: true, writable: true });
   }
-  return { prompt, images, ...(Object.keys(parameters).length ? { parameters } : {}) };
+  const imageCount = value.imageCount === null ? null : normalizeBinding(value.imageCount);
+  return { prompt, images, ...(imageCount !== undefined ? { imageCount } : {}), ...(Object.keys(parameters).length ? { parameters } : {}) };
 };
 
 export const createRunningHubVideoWorkflow = (name = '新建云端工作流'): RunningHubVideoWorkflow => {
@@ -285,13 +287,15 @@ export const validateRunningHubVideoWorkflow = (workflow: RunningHubVideoWorkflo
   });
   if (!workflow.mapping.prompt.length) issues.push('请明确绑定至少一个提示词节点；导入不会擅自猜测节点用途。');
   const assigned = new Set<string>();
-  const check = (binding: RunningHubVideoInputBinding, kind: 'prompt' | 'image' | 'parameter', label: string) => {
+  const check = (binding: RunningHubVideoInputBinding, kind: 'prompt' | 'image' | 'image-count' | 'parameter', label: string) => {
     try {
       const index = nodeIndex(workflow.requestTemplate, binding); const value = raw.nodeInfoList[index].fieldValue;
       const key = JSON.stringify([binding.nodeId, binding.inputName]);
       if (assigned.has(key)) issues.push(`${label} 与其他用途绑定了同一个节点字段，请明确唯一用途。`); assigned.add(key);
       if ((kind === 'prompt' || kind === 'image') && typeof value !== 'string') issues.push(`${label} 必须映射文本字段，不能覆盖数值、数组或节点连线。`);
       if (kind === 'parameter' && !['string', 'number', 'boolean'].includes(typeof value)) issues.push(`${label} 不是可覆盖的简单常量。`);
+      if (kind === 'image-count' && !((typeof value === 'number' && Number.isSafeInteger(value) && value >= 0)
+        || (typeof value === 'string' && /^\d+$/u.test(value.trim()) && Number.isSafeInteger(Number(value))))) issues.push(`${label} 必须绑定非负整数或整数字符串字段。`);
     } catch (cause) { issues.push(`${label}：${cause instanceof Error ? cause.message : '无效映射。'}`); }
   };
   workflow.mapping.prompt.forEach((binding, index) => check(binding, 'prompt', `提示词 ${index + 1}`));
@@ -300,6 +304,8 @@ export const validateRunningHubVideoWorkflow = (workflow: RunningHubVideoWorkflo
     if (!name.trim() || ['prompt', 'images', 'references', 'first_image', 'last_image', 'model', 'parameters'].includes(name) || /^image_\d+$/u.test(name)) issues.push(`参数名称 ${name || '（空）'} 与系统字段冲突。`);
     check(binding, 'parameter', `参数 ${name}`);
   }
+  const imageCount = resolveRunningHubVideoImageProtocol(workflow).imageCount;
+  if (imageCount) check(imageCount, 'image-count', '实际图片数量');
   if (raw.usePersonalQueue !== undefined && typeof raw.usePersonalQueue !== 'boolean') issues.push('usePersonalQueue 必须是布尔值 true / false，不能是字符串。');
   if (raw.instanceType !== undefined && (typeof raw.instanceType !== 'string' || !['default', 'plus', 'ultra'].includes(raw.instanceType))) issues.push('instanceType 应为 default、plus 或 ultra。');
   if (raw.retainSeconds !== undefined && (!Number.isInteger(raw.retainSeconds) || Number(raw.retainSeconds) < 10 || Number(raw.retainSeconds) > 180)) issues.push('retainSeconds 必须是 10–180 的整数；不使用时请删除该字段。');
@@ -481,20 +487,14 @@ export const compileRunningHubVideoApi = (config: RunningHubVideoConfig, workflo
   if (!/^https?:$/u.test(base.protocol) || base.username || base.password || base.search || base.hash) throw new Error('RunningHub 地址必须是无内嵌凭据的 HTTP(S) 基础地址。');
   const baseUrl = base.toString().replace(/\/+$/u, '');
   let requestTemplate = workflow.requestTemplate;
-  const imageDefaults = workflow.mapping.images.map((binding) => ({
-    fieldName: binding.inputName,
-    value: readRunningHubVideoRequest(requestTemplate).nodeInfoList[nodeIndex(requestTemplate, binding)].fieldValue,
-  }));
-  // Preserve a workflow's explicit no-image sentinel, never its old file name.
-  // Only mapped image inputs can supply this convention, not audio or controls.
-  const emptyImageValue = (index: number): '' | 'None' => {
-    const input = imageDefaults[index];
-    if (input.value === '' || input.value === 'None') return input.value;
-    return imageDefaults.some((other) => other.fieldName === input.fieldName && other.value === 'None') ? 'None' : '';
-  };
+  const imageProtocol = resolveRunningHubVideoImageProtocol(workflow);
   const runningHubMappedFields: NonNullable<VideoTaskApiConfig['runningHubMappedFields']> = [
     ...workflow.mapping.prompt.map((binding) => ({ nodeId: binding.nodeId, fieldName: binding.inputName, kind: 'prompt' as const })),
-    ...workflow.mapping.images.map((binding, imageIndex) => ({ nodeId: binding.nodeId, fieldName: binding.inputName, kind: 'image' as const, imageIndex, emptyValue: emptyImageValue(imageIndex) })),
+    ...workflow.mapping.images.map((binding, imageIndex) => ({ nodeId: binding.nodeId, fieldName: binding.inputName, kind: 'image' as const, imageIndex, emptyValue: imageProtocol.emptyImageValues[imageIndex] })),
+    ...(imageProtocol.imageCount ? [{ nodeId: imageProtocol.imageCount.nodeId, fieldName: imageProtocol.imageCount.inputName, kind: 'image-count' as const,
+      imageCountSource: imageProtocol.imageCountSource,
+      ...(imageProtocol.imageCountMode ? { imageCountMode: imageProtocol.imageCountMode } : {}),
+      originalValue: clone(readRunningHubVideoRequest(requestTemplate).nodeInfoList[nodeIndex(requestTemplate, imageProtocol.imageCount)].fieldValue) }] : []),
     ...Object.entries(workflow.mapping.parameters || {}).map(([parameter, binding]) => ({
       nodeId: binding.nodeId, fieldName: binding.inputName, kind: 'parameter' as const, parameter,
       originalValue: clone(readRunningHubVideoRequest(requestTemplate).nodeInfoList[nodeIndex(requestTemplate, binding)].fieldValue),
@@ -527,7 +527,7 @@ export const compileRunningHubVideoApi = (config: RunningHubVideoConfig, workflo
   };
 };
 
-/** Execute only mappings the user explicitly confirmed. Other strings/values are opaque. */
+/** Execute only mappings frozen during compilation. Other strings/values are opaque. */
 export const bindRunningHubVideoRequest = (
   template: string,
   mappedFields: NonNullable<VideoTaskApiConfig['runningHubMappedFields']>,
@@ -552,6 +552,7 @@ export const bindRunningHubVideoRequest = (
   const assigned = new Set<string>(); let prompts = 0;
   const consumedImages = new Set<number>();
   const imageIndices = new Set<number>();
+  let imageCounts = 0;
   for (const field of mappedFields) {
     const binding = { nodeId: field.nodeId, inputName: field.fieldName };
     const index = nodeIndex(template, binding);
@@ -570,11 +571,22 @@ export const bindRunningHubVideoRequest = (
       if (uploaded) {
         node.fieldValue = uploaded.image; consumedImages.add(uploaded.index);
       } else {
-        // Keep the node in the request: omitting it can restore a cloud default
-        // image. Legacy snapshots lack emptyValue and explicitly send ''. A
-        // truly mandatory cloud input may still return its own node error.
-        node.fieldValue = field.emptyValue === 'None' ? 'None' : '';
+        // Keep the node in the request. Verified RunningHub AI apps restore
+        // their declared placeholder (example.png) when the web UI cancels a
+        // slot; literal None/'' can reach BatchImagesNode as a None tensor.
+        // Only known safe sentinels from compiled metadata are accepted; old
+        // or hand-edited snapshots fall back to the legacy empty string.
+        node.fieldValue = field.emptyValue === 'None' || field.emptyValue === 'example.png' ? field.emptyValue : '';
       }
+    } else if (field.kind === 'image-count') {
+      if (++imageCounts > 1) throw new Error('RunningHub 实际图片数量只能绑定一个字段，请核对工作流映射。');
+      if (field.imageCountMode === 'prefix' && [...uploadBySlot.keys()].some((slot) => slot >= images.length)) {
+        throw new Error(`为保证该 RunningHub 应用按图片数量读取到全部参考图，请从图片槽 1 起连续选择 ${images.length} 个槽位，中间不要留空；不会自动移动图片或改变提示词中的图片编号。`);
+      }
+      const original = field.originalValue;
+      if (!((typeof original === 'number' && Number.isSafeInteger(original) && original >= 0)
+        || (typeof original === 'string' && /^\d+$/u.test(original.trim()) && Number.isSafeInteger(Number(original))))) throw new Error('RunningHub 实际图片数量映射缺少有效的整数原值，请重新选择工作流。');
+      node.fieldValue = coerceRunningHubVideoNodeValue(original, images.length, '实际图片数量');
     } else if (field.kind === 'parameter') {
       if (!field.parameter) throw new Error('RunningHub 参数映射缺少参数名称。');
       const value = own(draft.parameters, field.parameter) && draft.parameters[field.parameter] !== undefined ? draft.parameters[field.parameter] : field.originalValue;

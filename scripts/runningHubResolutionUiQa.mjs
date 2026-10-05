@@ -182,7 +182,7 @@ async function openManager() {
   await page.getByRole('tab', { name: 'RunningHub 云端', exact: true }).click();
   await page.getByRole('button', { name: '管理云端工作流', exact: true }).click();
   await page.getByRole('dialog', { name: 'RunningHub 云端视频工作流管理', exact: true }).waitFor();
-  await page.getByRole('tab', { name: '时长与分辨率', exact: true }).click();
+  await page.getByRole('tab', { name: '时长、比例与分辨率', exact: true }).click();
 }
 
 async function selectResolution(prefix, label) {
@@ -195,8 +195,8 @@ async function selectResolution(prefix, label) {
 
 async function editManagerWorkflow(name) {
   await page.getByRole('button', { name: `编辑云端工作流 ${name}`, exact: true }).click();
-  await page.getByRole('tab', { name: '时长与分辨率', exact: true }).click();
-  await page.getByRole('tab', { name: '时长与像素 / 分辨率', exact: true }).click();
+  await page.getByRole('tab', { name: '时长、比例与分辨率', exact: true }).click();
+  await page.getByRole('tab', { name: '时长、比例与像素 / 分辨率', exact: true }).click();
 }
 
 async function assertMpOnlyFields(prefix) {
@@ -302,7 +302,7 @@ try {
   stages.push('single-aspect-ratio-override-hides-and-restores-pixel-labels');
   assert.equal(await page.getByLabel('本次视频分辨率', { exact: true }).count(), 0, 'strict MP preset has no arbitrary custom input');
   assert.equal(await page.getByLabel('本次视频分辨率选项', { exact: true }).locator('option[value="value:0.98"]').count(), 0);
-  await checkLayout(page.getByLabel('本次时长与分辨率', { exact: true }), 'single-mp-1120x720');
+    await checkLayout(page.getByLabel('本次时长、比例与分辨率', { exact: true }), 'single-mp-1120x720');
   await page.getByRole('button', { name: '生成视频', exact: true }).click();
   await page.waitForFunction(() => window.__runningHubResolutionQa.posts.length >= 1);
   const firstRequest = await page.evaluate(() => window.__runningHubResolutionQa.posts[0]);
@@ -339,10 +339,10 @@ try {
   await page.getByLabel('批量 RunningHub 云端工作流', { exact: true }).selectOption('qa-standard-workflow');
   assert.equal(await page.getByLabel('批量视频分辨率', { exact: true }).inputValue(), '', 'batch MP must not leak into 720P workflow');
   await page.getByLabel('批量 RunningHub 云端工作流', { exact: true }).selectOption('qa-dimensions-workflow');
-  await page.getByLabel('批量时长与分辨率', { exact: true }).getByText('高级：指定宽高', { exact: true }).click();
+  await page.getByLabel('批量时长、比例与分辨率', { exact: true }).getByText('高级：指定宽高', { exact: true }).click();
   await page.getByLabel('批量视频宽度（像素）', { exact: true }).fill('800');
   await page.getByLabel('批量视频高度（像素）', { exact: true }).fill('448');
-  await checkLayout(page.getByLabel('批量时长与分辨率', { exact: true }), 'batch-real-dimensions-1120x720');
+  await checkLayout(page.getByLabel('批量时长、比例与分辨率', { exact: true }), 'batch-real-dimensions-1120x720');
   await page.getByLabel('批量 RunningHub 云端工作流', { exact: true }).selectOption('qa-legacy-mp-workflow');
   await assertMpOnlyFields('批量');
   assert.match(await page.getByLabel('批量视频分辨率选项', { exact: true }).locator('option:checked').innerText(), /1\.0\s*MP/u);
@@ -351,7 +351,7 @@ try {
   const mpRowSummaries = await page.locator('.vd-batch-row-main .vop-request-summary').allTextContents();
   assert.equal(mpRowSummaries.length, 2);
   assert.ok(mpRowSummaries.every((summary) => /请求像素\s*1(?:\.0)?\s*MP/u.test(summary)), 'batch row summaries retain MP unit instead of generic resolution wording');
-  await checkLayout(page.getByLabel('批量时长与分辨率', { exact: true }), 'batch-mp-1120x720');
+  await checkLayout(page.getByLabel('批量时长、比例与分辨率', { exact: true }), 'batch-mp-1120x720');
   await page.getByRole('button', { name: '全选中文', exact: true }).click();
   await page.getByRole('button', { name: '检查并生成 2 段视频', exact: true }).click();
   await page.getByRole('checkbox', { name: '确认批量生成费用', exact: true }).check();
@@ -366,14 +366,14 @@ try {
   await page.locator('.sidebar').getByRole('button', { name: '视频导演台', exact: true }).click();
   await page.getByRole('tab', { name: '单段生成', exact: true }).click();
   await page.getByLabel('RunningHub 云端工作流', { exact: true }).selectOption('qa-dimensions-workflow');
-  await page.getByLabel('本次时长与分辨率', { exact: true }).getByText('高级：指定宽高', { exact: true }).click();
+  await page.getByLabel('本次时长、比例与分辨率', { exact: true }).getByText('高级：指定宽高', { exact: true }).click();
   await page.getByLabel('本次视频宽度（像素）', { exact: true }).fill('800');
   await page.getByLabel('本次视频高度（像素）', { exact: true }).fill('448');
-  await checkLayout(page.getByLabel('本次时长与分辨率', { exact: true }), 'single-real-dimensions-1120x720');
+  await checkLayout(page.getByLabel('本次时长、比例与分辨率', { exact: true }), 'single-real-dimensions-1120x720');
   await page.getByLabel('RunningHub 云端工作流', { exact: true }).selectOption('qa-legacy-mp-workflow');
   await assertMpOnlyFields('本次');
   await page.getByLabel('RunningHub 云端工作流', { exact: true }).selectOption('qa-dimensions-workflow');
-  const widthDetails = page.getByLabel('本次时长与分辨率', { exact: true }).locator('details').filter({ hasText: '高级：指定宽高' });
+  const widthDetails = page.getByLabel('本次时长、比例与分辨率', { exact: true }).locator('details').filter({ hasText: '高级：指定宽高' });
   if (await widthDetails.getAttribute('open') === null) await widthDetails.locator('summary').click();
   assert.equal(await page.getByLabel('本次视频宽度（像素）', { exact: true }).inputValue(), '800');
   assert.equal(await page.getByLabel('本次视频高度（像素）', { exact: true }).inputValue(), '448');

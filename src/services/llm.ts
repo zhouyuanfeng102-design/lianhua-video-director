@@ -24,6 +24,7 @@ import {
   type StoryBeat,
 } from '../storySegmentation';
 import { sourceContentHash } from '../sourceIntegrity';
+import { resolveChapterAnalysisEntities, splitChapterAnalysisSource, type ChapterEntityCatalog } from '../chapterEntities';
 import {
   assertMasterSegmentDurationContract,
   assertSequenceSegmentDurationContract,
@@ -97,6 +98,7 @@ import {
 import {
   FEMALE_CHARACTER_IMAGE_WORDING_RULE,
   FEMALE_CHARACTER_NEUTRAL_AGE_STAGE_RULE,
+  STORY_AGE_FACT_PRESERVATION_RULE,
   normalizeFemaleCharacterVocabularyRecord,
 } from '../characterVocabulary';
 import {
@@ -138,6 +140,8 @@ export interface StoryAnalysisResponse {
   locations?: Array<string | StoryAnalysisLocation>;
   props?: Array<string | StoryAnalysisProp>;
   scenes: Array<{
+    sourceStart?: number;
+    sourceEnd?: number;
     title?: string;
     content?: string;
     summary?: string;
@@ -379,7 +383,7 @@ const CHARACTER_VARIANT_SCHEMA_FIELDS = '"baseName":"仅确有独立形态变化
  * Species and lifespan do not determine whether a character has human anatomy.
  */
 const NONHUMAN_AGE_LIFECYCLE_RULE = [
-  '年龄描述由你结合全文与真实身体形态判断，不靠年龄词判物种。人类或剧情明确的人形修仙者可以写“外观约二十岁，实际数百岁”，不要因长寿或修为把人类改为非人类。',
+  '年龄描述由你结合全文与真实身体形态判断，不靠年龄词判物种。原文明示年龄必须原样保留；只有对应年龄项缺失时，才根据剧情和真实生命周期作保守近似，不因长寿或修为擅自改写人类年龄。',
   '明确非人角色按剧情写合适的年岁、生命周期或生长阶段；不要把年龄强行转换成人类脸或人体。未知形态保留上下文中已有的年龄事实，不一律改成幼体/成体。',
 ].join('\n');
 
@@ -503,6 +507,7 @@ export const normalizeStoryAnalysisCharacter = (
     normalizeCharacterVariantRecord(variantInput as StoryAnalysisCharacter),
   );
   Object.assign(normalized, variantNormalized);
+  Object.assign(normalized, normalizeAnalysisEntityIdentity(value));
   const nsfwProfile = normalizeCharacterNsfwProfile(
     (value as Record<string, unknown>).nsfwProfile,
   );
@@ -524,6 +529,10 @@ export const mergeStoryAnalysisCharacter = (
     const value = normalizedIncoming[key];
     if (typeof value === 'string' && (value.trim() || key === 'signatureProps')) (merged as Record<string, unknown>)[key] = value.trim();
   });
+  Object.assign(merged, normalizeAnalysisEntityIdentity(normalizedExisting), normalizeAnalysisEntityIdentity(normalizedIncoming));
+  if (normalizedExisting?.aliases?.length || normalizedIncoming.aliases?.length) merged.aliases = [...new Set([
+    ...(normalizedExisting?.aliases || []), ...(normalizedIncoming.aliases || []),
+  ])];
   const existingProfile = normalizeCharacterNsfwProfile(normalizedExisting?.nsfwProfile);
   const incomingProfile = normalizeCharacterNsfwProfile(normalizedIncoming.nsfwProfile);
   if (existingProfile || incomingProfile) {
@@ -536,10 +545,21 @@ export const mergeStoryAnalysisCharacter = (
   return merged;
 };
 
+const normalizeAnalysisEntityIdentity = (value: unknown): { existingEntityId?: string; baseCharacterId?: string; aliases?: string[] } => {
+  if (!value || typeof value !== 'object') return {};
+  const raw = value as Record<string, unknown>;
+  return {
+    ...(typeof raw.existingEntityId === 'string' && raw.existingEntityId.trim() ? { existingEntityId: raw.existingEntityId.trim() } : {}),
+    ...(typeof raw.baseCharacterId === 'string' && raw.baseCharacterId.trim() ? { baseCharacterId: raw.baseCharacterId.trim() } : {}),
+    ...(Array.isArray(raw.aliases) ? { aliases: [...new Set(raw.aliases.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean))] } : {}),
+  };
+};
+
 const normalizeAnalysisEntity = <T extends object>(value: unknown, keys: Array<keyof T>): T | string | undefined => {
   if (typeof value === 'string') return value.trim() || undefined;
   if (!value || typeof value !== 'object') return undefined;
   const normalized = Object.fromEntries(keys.map((key) => [key, typeof (value as any)[key] === 'string' ? (value as any)[key].trim() : ''])) as T;
+  Object.assign(normalized, normalizeAnalysisEntityIdentity(value));
   return Object.values(normalized).some(Boolean) ? normalized : undefined;
 };
 
@@ -1377,6 +1397,7 @@ export const requestStoryPreparationWithReview = async (
     optimizing
       ? '本模式目标优先于规则预设中与视频化整理冲突的要求。旧预设中的“必须加长”“必须扩写”“不是改写”“连续自然段”“禁止标题或字段”等硬格式要求不适用；场景标题和字段只是推荐组织方式。保留不冲突的人物一致性与事实约束。没有本地预抽取的人物或对白标准答案：由你自己阅读完整原文、识别并处理人物、发言和场景关系，不要迎合本地姓名规则。内容或结构疑点将提供给用户人工确认，不需要为了通过检查生硬改写。'
       : '本模式硬契约优先于前面的规则预设及创作资料中与模式冲突的要求。优化整理时，旧预设中的“必须加长”“必须扩写”“不是改写”等扩写专用要求不适用；其他不冲突的文风、人物一致性和叙事要求继续保留。',
+    STORY_AGE_FACT_PRESERVATION_RULE,
     '</story_preparation_mode_contract>',
   ].join('\n');
   const presetSystemPrompt = [
@@ -4206,7 +4227,7 @@ const parseStoryAnalysisResult = (result: string): StoryAnalysisResponse => {
   if (!Array.isArray(parsed?.scenes) || !parsed.scenes.length) throw new Error('文本模型没有返回可用场景');
   const normalizeText = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
   const normalizeList = <T extends object>(value: unknown, keys: Array<keyof T>): T[] => Array.isArray(value)
-    ? value.map((item) => typeof item === 'string' ? ({ name: item.trim() } as unknown as T) : item && typeof item === 'object' ? Object.fromEntries(keys.map((key) => [key, normalizeText((item as any)[key])])) as unknown as T : null).filter((item): item is T => Boolean(item && Object.values(item).some(Boolean)))
+    ? value.map((item) => typeof item === 'string' ? ({ name: item.trim() } as unknown as T) : normalizeAnalysisEntity<T>(item, keys)).filter((item): item is T => Boolean(item && typeof item === 'object' && Object.values(item).some(Boolean)))
     : [];
   const rawCharacters = Array.isArray(parsed.characters) ? parsed.characters : [];
   const characterEntries = rawCharacters
@@ -4248,6 +4269,7 @@ const parseStoryAnalysisResult = (result: string): StoryAnalysisResponse => {
       ...(known.formLabel ? { formLabel: known.formLabel } : {}),
       ...(known.variantOf ? { variantOf: known.variantOf } : {}),
       ...(known.transformationType ? { transformationType: known.transformationType } : {}),
+      ...normalizeAnalysisEntityIdentity(known),
       ...(known.gender && !normalized.gender ? { gender: known.gender } : {}),
     };
   };
@@ -4268,10 +4290,17 @@ const parseStoryAnalysisResult = (result: string): StoryAnalysisResponse => {
   return { scenes, characters, locations, props };
 };
 
-export const requestStoryAnalysis = async (
+export interface StoryAnalysisOptions {
+  entityCatalog?: ChapterEntityCatalog;
+  chapterId?: string;
+  onProgress?: (completedChunks: number, totalChunks: number) => void;
+}
+
+const requestStoryAnalysisChunk = async (
   config: TextApiConfig,
   story: string,
   signal?: AbortSignal,
+  options: StoryAnalysisOptions & { sourceStart?: number; sourceEnd?: number; chunkCount?: number } = {},
 ): Promise<StoryAnalysisResponse> => {
   if (signal?.aborted) throw createAbortError();
   if (!story.trim()) throw new Error('请先输入需要解析并补全的完整剧情');
@@ -4284,7 +4313,10 @@ export const requestStoryAnalysis = async (
     : '';
   const systemPrompt = [
     '你是中文小说的视频前期分析助手。先通读提供的完整剧情，由你自己全局识别人物、地点、道具和场景关系，再一次性返回完整严格 JSON；不要 Markdown、解释或代码围栏。',
-    '输入是未经本地切块或预抽取的全文，不提供本地人物、别名、代词、节拍或场景候选清单。必须依据全文前后文自己判断，不能只分析开头、局部片段或把后文真名另建成新人。',
+    options.chunkCount && options.chunkCount > 1
+      ? '本次输入是超长章节按原文字符区间分出的连续部分，所有部分将依次分析并合并，原文没有截断或改写。必须覆盖本部分全部事件。已有资料目录包含项目实体及前面部分已确认的实体，先核对同一身份，不能凭称呼相似猜测合并。'
+      : '输入为当前章节的完整原文，必须分析全文前后文，不能只分析开头或把后文真名另建成新人。',
+    options.entityCatalog ? '已有资料目录为同一项目共用的身份与视觉设计。能明确对应已有实体时，返回该记录的 existingEntityId，name 使用其标准名称，aliases 记录本章明确使用的别名；不要另建一份。普通换装、伤病和情绪只写场景 content/summary。重大身体或年龄阶段变化可建立新形态并返回 baseCharacterId 指向原人物，禁止用原人物 existingEntityId 覆盖旧形态；无法确认同一身份时省略 existingEntityId，绝不编造 ID。同名但不是同一实体时使用原文明示的区分称谓；无法区分则保留事实等待用户确认。' : '',
     '在读完全文后，按地点、时间、人物关系或明显事件变化确定全局可拍摄场景边界，保持真实事件顺序并覆盖全文，不能因篇幅长遗漏后段。保留每个场景的关键原文，不要编造剧情。',
     nsfwDetailRule,
     `实体名称必须是跨场景可复用的稳定名称：第一人称叙事若原文没有给主角姓名，统一命名为“${DEFAULT_FIRST_PERSON_SUBJECT}”，不得把“我”保存为人物名。`,
@@ -4297,7 +4329,8 @@ export const requestStoryAnalysis = async (
     CHARACTER_MORPHOLOGY_RULE,
     CHARACTER_VARIANT_RULE,
     FEMALE_CHARACTER_NEUTRAL_AGE_STAGE_RULE,
-    '同时根据完整剧情统一整理项目圣经资料，人物、地点、道具不能只返回名称，必须给出后续生图可用的详细外观与材质信息。普通资料字段必须填写（signatureProps 没有长期装备时返回空字符串）；baseName/formLabel/variantOf/transformationType 四个形态字段仅限确有独立形态变化的人物，普通人物省略，不为了填满JSON示例而补造形态。普通资料中原文未明确的信息要根据题材、时代、阵营、身份和剧情作用合理补全，禁止使用“未知、待补充、根据剧情、无资料”等占位词。apparentAge 是外观年龄/视觉年龄，必须按用户要求、剧情称谓、身份、修为阶段、社会角色和外貌描写推算；actualAge 是实际年龄/生理或设定年龄，也必须按剧情和世界观推算；height 是身高/高度/体型尺度，也必须按人物物种、性别设定、外观年龄感、身份职业、剧情称谓和画面比例推算。无法确定精确数字时，年龄用“约二十岁”“二十岁出头”“外观二十多岁”“实际年龄数百岁”等近似表述，身高/高度用“约158cm”“一米七左右”“小型妖精约一米”“巨兽约三米高”等近似表述，不得留空。后续生图必须按 apparentAge 控制年龄感，不按 actualAge 把长寿或修仙角色画老，并按 height 稳定身体比例。',
+    '同时根据完整剧情统一整理项目圣经资料，人物、地点、道具不能只返回名称，必须给出后续生图可用的详细外观与材质信息。普通资料字段必须填写（signatureProps 没有长期装备时返回空字符串）；baseName/formLabel/variantOf/transformationType 四个形态字段仅限确有独立形态变化的人物，普通人物省略，不为了填满JSON示例而补造形态。普通资料中原文未明确的信息要根据题材、时代、阵营、身份和剧情作用合理补全，禁止使用“未知、待补充、根据剧情、无资料”等占位词。apparentAge 是外观年龄/视觉年龄，actualAge 是实际年龄/设定年龄；两者优先沿用原文明确事实，只有相应项缺失时才按剧情上下文推算。height 是身高/高度/体型尺度，按原文明确尺度或上下文合理补全。后续生图按 apparentAge 控制年龄感，不按 actualAge 把长寿或修仙角色画老，并按 height 稳定身体比例。',
+    STORY_AGE_FACT_PRESERVATION_RULE,
     NONHUMAN_AGE_LIFECYCLE_RULE,
     storyHasNsfw
       ? MOSE_JIANGHU_PRIVATE_PROFILE_RULES
@@ -4309,7 +4342,11 @@ export const requestStoryAnalysis = async (
   const result = await requestTextModel(
     config,
     systemPrompt,
-    `<story_analysis_data>\n${serializeUntrustedPromptData({ sourceStory: story })}\n</story_analysis_data>`,
+    `<story_analysis_data>\n${serializeUntrustedPromptData({ sourceStory: story,
+      ...(options.entityCatalog ? { existingEntityCatalog: options.entityCatalog } : {}),
+      ...(options.chapterId ? { chapterId: options.chapterId } : {}),
+      ...(options.chunkCount && options.chunkCount > 1 ? { sourceRange: { start: options.sourceStart, end: options.sourceEnd } } : {}),
+    })}\n</story_analysis_data>`,
     signal,
   );
   if (signal?.aborted) throw createAbortError();
@@ -4372,6 +4409,75 @@ export const requestStoryAnalysis = async (
     locations: mergeEntities((parsedAnalysis.locations || []).filter((item): item is StoryAnalysisLocation => Boolean(item && typeof item === 'object'))),
     props: mergeEntities((parsedAnalysis.props || []).filter((item): item is StoryAnalysisProp => Boolean(item && typeof item === 'object')))
   };
+};
+
+/** Long chapters are partitioned losslessly; each part receives the same
+ * project identity directory plus identities discovered in earlier parts. */
+export const requestStoryAnalysis = async (
+  config: TextApiConfig, story: string, signal?: AbortSignal, options: StoryAnalysisOptions = {},
+): Promise<StoryAnalysisResponse> => {
+  if (signal?.aborted) throw createAbortError();
+  const chunks = splitChapterAnalysisSource(story);
+  if (chunks.length <= 1) return requestStoryAnalysisChunk(config, story, signal, options);
+  const catalog: ChapterEntityCatalog = {
+    characters: (options.entityCatalog?.characters || []).map((entry) => ({ ...entry, aliases: [...entry.aliases] })),
+    locations: (options.entityCatalog?.locations || []).map((entry) => ({ ...entry, aliases: [...entry.aliases] })),
+    props: (options.entityCatalog?.props || []).map((entry) => ({ ...entry, aliases: [...entry.aliases] })),
+  };
+  const temporaryIds = new Set<string>();
+  const result: StoryAnalysisResponse = { scenes: [], characters: [], locations: [], props: [] };
+  options.onProgress?.(0, chunks.length);
+  for (let index = 0; index < chunks.length; index += 1) {
+    if (signal?.aborted) throw createAbortError();
+    const chunk = chunks[index];
+    const response = await requestStoryAnalysisChunk(config, chunk.content, signal, {
+      ...options, entityCatalog: catalog, sourceStart: chunk.sourceStart, sourceEnd: chunk.sourceEnd, chunkCount: chunks.length,
+    });
+    const { analysis } = resolveChapterAnalysisEntities(response, catalog);
+    for (const key of ['characters', 'locations', 'props'] as const) {
+      for (const raw of analysis[key] || []) {
+        const item = typeof raw === 'string' ? { name: raw } : raw;
+        if (!item.name?.trim()) continue;
+        const stableId = item.existingEntityId && !temporaryIds.has(item.existingEntityId) ? item.existingEntityId : undefined;
+        const normalized = { ...item, existingEntityId: stableId,
+          ...('baseCharacterId' in item && item.baseCharacterId && temporaryIds.has(item.baseCharacterId) ? { baseCharacterId: undefined } : {}),
+        };
+        const previous = result[key]!.find((entry) => typeof entry === 'object' && (stableId ? entry.existingEntityId === stableId : entry.name === item.name));
+        if (previous && typeof previous === 'object') {
+          const merged = previous as Record<string, unknown>;
+          for (const [field, value] of Object.entries(normalized)) {
+            if (!merged[field] && value !== undefined && value !== '') merged[field] = value;
+          }
+          previous.aliases = [...new Set([...(previous.aliases || []), ...(item.aliases || [])])];
+        } else (result[key] as Array<typeof normalized>).push(normalized);
+        const catalogEntry = catalog[key].find((entry) => entry.id === item.existingEntityId || entry.name === item.name);
+        if (catalogEntry) catalogEntry.aliases = [...new Set([...catalogEntry.aliases, ...(item.aliases || [])])];
+        else {
+          const id = `chapter-analysis-${key}-${index}-${catalog[key].length}`;
+          temporaryIds.add(id);
+          catalog[key].push({ id, name: item.name, aliases: item.aliases || [],
+            ...('baseName' in item && item.baseName ? { baseName: item.baseName } : {}),
+            ...('formLabel' in item && item.formLabel ? { formLabel: item.formLabel } : {}),
+          });
+        }
+      }
+    }
+    let cursor = 0;
+    for (const scene of analysis.scenes) {
+      const localStart = scene.content ? chunk.content.indexOf(scene.content, cursor) : -1;
+      if (localStart >= 0) cursor = localStart + scene.content!.length;
+      const clearTemporary = <T extends { existingEntityId?: string } | string>(value: T): T => typeof value === 'object' && value.existingEntityId && temporaryIds.has(value.existingEntityId)
+        ? { ...value, existingEntityId: undefined } : value;
+      result.scenes.push({ ...scene,
+        ...(localStart >= 0 ? { sourceStart: chunk.sourceStart + localStart, sourceEnd: chunk.sourceStart + cursor } : {}),
+        characters: scene.characters?.map(clearTemporary),
+        location: scene.location ? clearTemporary(scene.location) : undefined,
+        props: scene.props?.map(clearTemporary),
+      });
+    }
+    options.onProgress?.(index + 1, chunks.length);
+  }
+  return result;
 };
 
 export interface StoryBibleEnrichmentSeed {
@@ -4467,7 +4573,8 @@ export const requestStoryBibleEnrichment = async (
             spec.key === 'characters' ? CHARACTER_MORPHOLOGY_RULE : '',
             spec.key === 'characters' ? CHARACTER_VARIANT_ENRICHMENT_RULE : '',
             spec.key === 'characters' ? FEMALE_CHARACTER_NEUTRAL_AGE_STAGE_RULE : '',
-            spec.key === 'characters' ? '人物 apparentAge 是外观年龄/视觉年龄，actualAge 是实际年龄/设定年龄，height 是身高/高度/体型尺度；三者都必须根据剧情上下文、用户要求、称谓、身份、修为阶段、社会角色、物种和外貌描写推算并填写，不得留空。无法确定精确数字时使用“约二十岁”“二十岁出头”“外观二十多岁”“实际年龄数百岁”“约158cm”“一米七左右”“小型妖精约一米”“巨兽约三米高”等近似表述。后续生图按 apparentAge 控制年龄感，不按 actualAge 把长寿或修仙角色画老，并按 height 稳定身体比例。' : '',
+            spec.key === 'characters' ? '人物 apparentAge 是外观年龄/视觉年龄，actualAge 是实际年龄/设定年龄，height 是身高/高度/体型尺度；原文明确的年龄和身高必须原样沿用，只有相应项缺失时才推算并填写，不得用推算覆盖明确事实。后续生图按 apparentAge 控制年龄感，不按 actualAge 把长寿或修仙角色画老，并按 height 稳定身体比例。' : '',
+            spec.key === 'characters' ? STORY_AGE_FACT_PRESERVATION_RULE : '',
             spec.key === 'characters' ? NONHUMAN_AGE_LIFECYCLE_RULE : '',
             spec.key === 'characters' ? '人物 gender 必须依据剧情中的姓名、称谓、代词、身份关系和生物设定：人类或人形用男/女，动物、灵兽、怪物等非人用雄性/雌性；特殊或群体性别忠实输出自由文本，不得强制枚举或只凭服装猜测。' : '',
             spec.key === 'characters' && privateTargetsInRequest.length
@@ -4950,7 +5057,7 @@ export const requestImageAssetAutofill = async (
         ? '本次附带的是用户选定参考图。可用其可见外观补齐指定字段，不能由画面推定无法看见的履历、真实年龄或身份关系。'
         : '',
       kind === 'character' && useStory
-        ? '补齐 age 时填写外观年龄/视觉年龄，补齐 actualAge 时填写实际年龄/设定年龄。二者必须根据用户明确要求、当前表单、剧情上下文、身份、称谓、种族、修为阶段、社会角色和外貌描写推算；没有精确数字时使用“约二十岁”“二十岁出头”“外观二十多岁”“实际年龄数百岁”等近似表述，不得留空。不要照搬其他人物或否定句中的年龄；若只有他人年龄或否定年龄，仍按当前人物上下文估算近似年龄。后续生图只按 age 控制年龄感，不按 actualAge 把长寿或修仙角色画老。'
+        ? '补齐 age 时填写外观年龄/视觉年龄，补齐 actualAge 时填写实际年龄/设定年龄。当前表单、剧情上下文或用户要求已经明确的年龄、范围及“约、外观、实际”等限定必须原样沿用；只有对应字段缺失时才根据当前人物上下文作保守近似，不得用身份、称谓、种族、修为阶段或作品常识覆盖明确年龄。不要把其他人物或否定句中的年龄当作当前人物的明确事实。appearance、anchor 等描述若提及年龄必须与字段一致。后续生图只按 age 控制年龄感，不按 actualAge 把长寿或修仙角色画老。'
         : '',
       kind === 'character' && useStory ? NONHUMAN_AGE_LIFECYCLE_RULE : '',
       kind === 'character' && !useStory

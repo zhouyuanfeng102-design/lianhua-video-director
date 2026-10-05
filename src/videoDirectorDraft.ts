@@ -4,6 +4,8 @@ import { addVideoReference, moveVideoReference, removeVideoReference, videoRefer
 import { hasCurrentOfficialH3EnglishPrompt, hasCurrentOfficialH3Prompt, isOfficialH3TargetId } from './officialPrompt';
 import { officialH3ContextForStoryboard } from './officialH3Context';
 import { videoH3BindingForPrompt } from './videoH3ReferenceBinding';
+import { chapterBoards, chapterIdForPlan, chapterIdForStoryboard } from './chapters';
+import type { AutomaticVideoTailConfiguration } from './videoTailReference';
 import {
   canUseNsfwPrivateProfileAssetForStoryboardShot,
   isNsfwPrivateProfileAsset,
@@ -11,6 +13,7 @@ import {
 
 export interface VideoDirectorLaunchRequest {
   id: string;
+  chapterId?: string;
   storyboardId?: string;
   language?: 'zh' | 'en';
   assetIds?: string[];
@@ -22,6 +25,72 @@ export interface VideoDirectorLaunchRequest {
   batchTaskIds?: string[];
 }
 
+/** Only the editable video form is stored here. Runtime, connections and task
+ * snapshots stay in the project controller and never follow the chapter UI. */
+export interface VideoDirectorChapterDraft {
+  draft: VideoGenerationDraft;
+  parameterText: string;
+  parameterDrafts: Array<[string, string]>;
+  generationMode: 'single' | 'batch';
+  batch?: VideoDirectorBatchDraft;
+}
+
+export interface VideoDirectorBatchDraft {
+  planId: string;
+  backend: VideoGenerationDraft['backend'];
+  workflowId: string;
+  apiProfileId: string;
+  runningHubWorkflowId?: string;
+  parameterText: string;
+  parameterDrafts: Array<[string, string]>;
+  selectedKeys: string[];
+  languages: Record<string, 'zh' | 'en'>;
+  referenceOverrides: Record<string, VideoImageReference[]>;
+  referenceRoleOverrides: Record<string, ReferenceRole[]>;
+  automaticTails: Record<string, AutomaticVideoTailConfiguration>;
+  tailCharacterModes: Record<string, {
+    kind: 'automatic' | 'static'; connectionScope: string; sequenceFingerprint: string;
+    tailAssetId?: string; tailRole?: ReferenceRole; tailFingerprint?: string; sourceFingerprint?: string;
+    editedReferences?: true;
+  }>;
+  previewSegmentId: string;
+  previewPane: 'prompt' | 'references';
+  settingsCollapsed: boolean;
+  query: string;
+}
+
+export const videoDirectorChapterKey = (projectId: string, chapterId?: string): string => JSON.stringify([projectId, chapterId || '']);
+
+export const readVideoDirectorChapterDraft = (value: unknown): VideoDirectorChapterDraft | undefined => {
+  if (!value || typeof value !== 'object') return undefined;
+  const entry = value as Partial<VideoDirectorChapterDraft>;
+  const draft = entry.draft;
+  if (!draft || typeof draft.name !== 'string' || typeof draft.prompt !== 'string'
+    || !['api', 'comfyui'].includes(draft.backend) || !Array.isArray(draft.references)
+    || !draft.parameters || typeof draft.parameters !== 'object') return undefined;
+  const parameterDrafts = Array.isArray(entry.parameterDrafts)
+    ? entry.parameterDrafts.filter((item): item is [string, string] => Array.isArray(item) && item.length === 2 && item.every((part) => typeof part === 'string')) : [];
+  const batch = entry.batch;
+  const validBatch = batch && typeof batch.planId === 'string' && ['api', 'comfyui'].includes(batch.backend)
+    && typeof batch.parameterText === 'string' && Array.isArray(batch.selectedKeys)
+    && Array.isArray(batch.parameterDrafts) && batch.languages && batch.referenceOverrides
+    && batch.referenceRoleOverrides && batch.automaticTails && batch.tailCharacterModes;
+  return { draft: structuredClone(draft), parameterText: typeof entry.parameterText === 'string' ? entry.parameterText : JSON.stringify(draft.parameters, null, 2),
+    parameterDrafts, generationMode: entry.generationMode === 'batch' ? 'batch' : 'single',
+    batch: validBatch ? structuredClone(batch) : undefined };
+};
+
+/** Navigation only: never rewrite historical task snapshots to add a chapter. */
+export const chapterIdForVideoLaunch = (project: Project, request: Omit<VideoDirectorLaunchRequest, 'id'>): string | undefined => {
+  if (request.storyboardId) return chapterIdForStoryboard(project, request.storyboardId);
+  const taskId = request.taskId || request.batchTaskIds?.[0];
+  const task = taskId && project.generationTasks.find((entry) => entry.id === taskId && (entry.kind === 'video' || !entry.kind));
+  const source = task && (task.kind === 'video' || !task.kind) ? task.videoJob?.snapshot.draft.source : undefined;
+  if (source?.storyboardId) return chapterIdForStoryboard(project, source.storyboardId);
+  if (source?.sequencePlanId) return chapterIdForPlan(project, source.sequencePlanId);
+  return source?.chapterId || request.chapterId;
+};
+
 export interface VideoPromptChoice {
   id: string;
   storyboardId: string;
@@ -32,6 +101,7 @@ export interface VideoPromptChoice {
   updatedAt: number;
   segmentIndex?: number;
   version: string;
+  chapterId?: string;
 }
 
 const isVideoDirectorVisualAsset = (asset: ReferenceAsset): boolean => (
@@ -50,8 +120,10 @@ export const videoImageRole = (asset: ReferenceAsset): ReferenceRole => {
   return 'general';
 };
 
-export const videoPromptChoices = (project: Project): VideoPromptChoice[] => (
-  [...project.storyboards].sort((left, right) => right.updatedAt - left.updatedAt).flatMap((board) => {
+export const videoPromptChoices = (project: Project, chapterId?: string): VideoPromptChoice[] => (
+  [...(chapterId ? chapterBoards(project, chapterId) : project.storyboards)]
+  .filter((board) => !board.sourceStale && !project.sequencePlans.find((plan) => plan.id === board.sequencePlanId)?.sourceStale)
+  .sort((left, right) => right.updatedAt - left.updatedAt).flatMap((board) => {
     const label = board.sourceStoryTitle || project.scenes.find((scene) => scene.id === board.sceneId)?.title || '未命名剧情';
     const revision = board.revisions?.find((item) => item.id === board.activeRevisionId);
     const h3 = isOfficialH3TargetId(board.targetModelId);
@@ -80,6 +152,7 @@ export const videoPromptChoices = (project: Project): VideoPromptChoice[] => (
       updatedAt: board.updatedAt,
       segmentIndex: board.segmentIndex,
       version,
+      chapterId: chapterIdForStoryboard(project, board),
     }));
   })
 );
@@ -175,6 +248,7 @@ export const applyVideoPromptChoice = (
   const next: VideoGenerationDraft = {
     ...draft, name: label, prompt: choice.prompt, h3ReferenceBinding: undefined,
     source: {
+      chapterId: chapterIdForStoryboard(project, board),
       storyboardId: board.id, sequencePlanId: board.sequencePlanId, segmentId: board.segmentId,
       segmentIndex: board.segmentIndex, language: choice.language,
       promptVersion: board.activeRevisionId || board.updatedAt, label,

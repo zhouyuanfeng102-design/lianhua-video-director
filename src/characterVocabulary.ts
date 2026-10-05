@@ -109,9 +109,17 @@ export const normalizeFemaleCharacterVocabularyRecord = <T extends object>(input
 
 /** Model-facing wording rule shared by analysis, enrichment and image conversion. */
 export const FEMALE_CHARACTER_NEUTRAL_AGE_STAGE_RULE = [
-  '女性人物的名称与可见资料使用“女性 + 明确年龄 + 身高/高度 + 当前体型状态”的客观结构。所有原文明示的年龄数字、年龄范围和身高必须原样保留，不得删除、提高、降低或改写为其他年龄。',
+  '女性人物的名称与可见资料使用“女性 + 年龄事实 + 身高/高度 + 当前体型状态”的客观结构。原文明示的年龄数字、年龄范围和身高必须原样保留；只有对应信息缺失时才使用客观近似，不得删除、提高、降低或改写已明确年龄。',
   '除作品与世界观专名外，不要把儿童、孩童、小孩、幼体、幼态、幼年、幼女、女童、女孩、萝莉、少女、少年、未发育或未完全发育写入女性人物的 name、formLabel、race、bodyPlan、appearance、outfit、anchor 或最终生图提示词。',
-  '女性人物因剧情发生身高或整体比例变化时，formLabel 使用“缩小状态”“小体型状态”或“体型变化状态”；年龄只写入 apparentAge/actualAge，身高只写入 height，不把年龄阶段词当作物种、形态名或骨架标签。',
+  '女性人物因剧情发生身高或整体比例变化时，formLabel 使用“缩小状态”“小体型状态”或“体型变化状态”；年龄分别填写 apparentAge/actualAge，身高只写入 height。其他资料若提及年龄，必须与对应字段一致，不把年龄阶段词当作物种、形态名或骨架标签。',
+].join('\n');
+
+/** Shared source-faithful age contract for story preparation and analysis. */
+export const STORY_AGE_FACT_PRESERVATION_RULE = [
+  '年龄事实优先：原文明确出现的年龄数字、年龄范围、外观年龄、实际年龄及“约、左右、以上、以下”等限定词都是剧情事实，必须原样保留，不得提高、降低、替换、四舍五入或用身份、称谓、修为、物种常识重新估算。',
+  '视频化整理（optimize）必须把明确年龄自然写入对应人物首次出场或“背景信息”；扩写（expand）必须在人物首次相关描写中保留。不得因为年龄不是可见动作、或为了压缩正文而省略明确年龄。',
+  '原文未提供某一年龄项时，才允许推算该缺失项；推算不能覆盖同一人物已明确的年龄。没有明确证据时，不要把实际年龄写成数百岁，也不要把外观年龄默认成二十岁左右。',
+  'apparentAge 表示外观/视觉年龄，actualAge 表示实际/设定年龄；只有原文明确两者不同，或明确发生年龄变化、时间推进，才分别填写不同值。appearance、anchor、negativeContinuity 等描述若提及年龄，必须与对应字段一致。',
 ].join('\n');
 
 /** Positive image-converter wording only; intentionally carries no gate or eligibility language. */

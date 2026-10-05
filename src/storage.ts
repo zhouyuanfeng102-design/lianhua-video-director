@@ -63,6 +63,8 @@ import { normalizeH3IdentityBindings } from './h3IdentityBindings';
 import { normalizeVideoCreativeDirection } from './videoCreativeDirection';
 import { normalizeDirectorLookDraft } from './directorLookDraft';
 import { normalizeStoryDraft } from './storyDraft';
+import { migrateProjectChapters } from './chapters';
+import { STORY_AGE_FACT_PRESERVATION_RULE } from './characterVocabulary';
 import { migrateLegacyStoryboardImageNames } from './storyboardImageNameMigration';
 import { STORYBOARD_IMAGE_PLAN_MAX_COUNT } from './storyboardImagePlan';
 import {
@@ -755,6 +757,7 @@ export const defaultStoryExpansionPresets: StoryExpansionPreset[] = [{
   ...LEGACY_STORY_EXPANSION_GENERAL_V1_3_0,
   systemPrompt: [
     LEGACY_STORY_EXPANSION_GENERAL_V1_3_0.systemPrompt,
+    STORY_AGE_FACT_PRESERVATION_RULE,
     MOSE_JIANGHU_NSFW_DETAIL_RULES,
   ].join('\n\n'),
   version: '1.4.0',
@@ -1011,6 +1014,10 @@ const LEGACY_STORY_EXPANSION_V110_FINGERPRINT = 'src-v1-ec1a1eed543f4a91';
 const LEGACY_STORY_EXPANSION_V110_SEMANTIC_CHARACTERS = 2908;
 const LEGACY_STORY_EXPANSION_V120_FINGERPRINT = 'src-v1-6f0a6aa91096b5b1';
 const LEGACY_STORY_EXPANSION_V120_SEMANTIC_CHARACTERS = 1190;
+const LEGACY_STORY_EXPANSION_V140_SYSTEM_PROMPT = [
+  LEGACY_STORY_EXPANSION_GENERAL_V1_3_0.systemPrompt,
+  MOSE_JIANGHU_NSFW_DETAIL_RULES,
+].join('\n\n');
 
 const isUntouchedLegacyStoryExpansionPreset = (candidate: unknown, includeV100: boolean): boolean => {
   if (!isRecord(candidate)) return false;
@@ -1035,13 +1042,21 @@ const isUntouchedLegacyStoryExpansionPreset = (candidate: unknown, includeV100: 
       (field) => candidate[field] === LEGACY_STORY_EXPANSION_GENERAL_V1_3_0[field],
     )
   ) return true;
+  if (
+    candidate.id === DEFAULT_STORY_EXPANSION_PRESET_ID
+    && candidate.name === LEGACY_STORY_EXPANSION_GENERAL_V1_3_0.name
+    && candidate.systemPrompt === LEGACY_STORY_EXPANSION_V140_SYSTEM_PROMPT
+    && candidate.outputRules === LEGACY_STORY_EXPANSION_GENERAL_V1_3_0.outputRules
+    && candidate.enabled === LEGACY_STORY_EXPANSION_GENERAL_V1_3_0.enabled
+    && candidate.version === '1.4.0'
+  ) return true;
   return includeV100 && LEGACY_STORY_EXPANSION_SEMANTIC_FIELDS.every(
     (field) => candidate[field] === LEGACY_STORY_EXPANSION_GENERAL_V1_0_0[field],
   );
 };
 
 /**
- * Untouched v1.1.0/v1.2.0/v1.3.0 defaults gain the current video-story template
+ * Untouched v1.1.0/v1.2.0/v1.3.0/v1.4.0 defaults gain the current video-story template
  * even in schema-21 saves. Keep the existing pre-schema-13 v1.0.0 upgrade path;
  * a later user-restored v1.0.0 remains authoritative. No collection reset or
  * schema bump is needed, and all user edits/custom metadata remain untouched.
@@ -1868,11 +1883,17 @@ const normalizeGenerationTasks = (incoming: unknown, projectId: string): Generat
       ...(typeof task.imagePromptRuleSetId === 'string' && task.imagePromptRuleSetId.trim()
         ? { imagePromptRuleSetId: task.imagePromptRuleSetId.trim() }
         : {}),
+      ...(typeof task.imagePromptRuleSetName === 'string' && task.imagePromptRuleSetName.trim()
+        ? { imagePromptRuleSetName: task.imagePromptRuleSetName.trim() }
+        : {}),
       ...(typeof task.imagePromptRuleSetVersion === 'string' && task.imagePromptRuleSetVersion.trim()
         ? { imagePromptRuleSetVersion: task.imagePromptRuleSetVersion.trim() }
         : {}),
       ...(typeof task.imagePromptPresetId === 'string' && task.imagePromptPresetId.trim()
         ? { imagePromptPresetId: task.imagePromptPresetId.trim() }
+        : {}),
+      ...(typeof task.imagePromptPresetName === 'string' && task.imagePromptPresetName.trim()
+        ? { imagePromptPresetName: task.imagePromptPresetName.trim() }
         : {}),
       ...(typeof task.imagePromptPresetVersion === 'string' && task.imagePromptPresetVersion.trim()
         ? { imagePromptPresetVersion: task.imagePromptPresetVersion.trim() }
@@ -2157,6 +2178,7 @@ const migrateLegacyRevisionPrompts = (
       ...(officialPromptChanged || officialPromptEnChanged
         ? { targetOutput: undefined }
         : {}),
+      ...(canonicalRevisionChanged ? { seedance25Output: undefined } : {}),
     };
   });
   return { value: changed ? value : incoming, changed };
@@ -2219,6 +2241,7 @@ const migrateLegacyStoryboardPrompts = (
       : {}),
   };
   if (currentPromptChanged || targetOutputHasLeak) delete value.targetOutput;
+  if (currentPromptChanged && Object.prototype.hasOwnProperty.call(value, 'seedance25Output')) delete value.seedance25Output;
   return { original: incoming, value, changed: true };
 };
 
@@ -2566,6 +2589,10 @@ const normalizePersistedProject = (
   migrateAutomaticExtraRequirement: boolean,
 ): Project => {
   const project = mergeDefined(fallback, incoming) as Project;
+  // Chapter selection/workspaces must never inherit the demo or another
+  // project's editor state during a partial import.
+  project.activeChapterId = typeof incoming.activeChapterId === 'string' ? incoming.activeChapterId : undefined;
+  project.chapterWorkspaces = isRecord(incoming.chapterWorkspaces) ? incoming.chapterWorkspaces : undefined;
   // This is a library/workspace label, never a request to stop generation.
   // Old or malformed records default to false instead of inheriting a marker
   // from the active project used as an import normalization fallback.
@@ -2675,10 +2702,36 @@ const normalizePersistedProject = (
     return normalized;
   });
   const sceneIds = baseScenes.map((scene) => scene.id);
+  const normalizeSeedance25Output = (value: unknown): any | undefined => {
+    if (!isRecord(value) || value.targetId !== 'seedance-2.5') return undefined;
+    const promptZh = typeof value.promptZh === 'string' ? value.promptZh : '';
+    const promptEn = typeof value.promptEn === 'string' ? value.promptEn : '';
+    const sourceFingerprint = typeof value.sourceFingerprint === 'string' ? value.sourceFingerprint : '';
+    if (!promptZh || !sourceFingerprint) return undefined;
+    return {
+      targetId: 'seedance-2.5',
+      promptZh,
+      ...(promptEn ? { promptEn } : {}),
+      durationSec: typeof value.durationSec === 'number' && Number.isFinite(value.durationSec) && value.durationSec > 0
+        ? value.durationSec : 30,
+      sourceFingerprint,
+      referenceManifest: Array.isArray(value.referenceManifest) ? value.referenceManifest : [],
+      warnings: Array.isArray(value.warnings) ? value.warnings.filter((item): item is string => typeof item === 'string') : [],
+      generatedAt: typeof value.generatedAt === 'number' && Number.isFinite(value.generatedAt) ? value.generatedAt : 0,
+      ...(typeof value.englishSourceFingerprint === 'string' ? { englishSourceFingerprint: value.englishSourceFingerprint } : {}),
+      ...(typeof value.englishError === 'string' && value.englishError ? { englishError: value.englishError } : {}),
+    };
+  };
+
   const storyboards = projectArray(
     incoming.storyboards,
     collectionFallbacks.storyboards,
   ).map((board: any) => {
+    // Pull this field out before spreading the saved board. Otherwise an
+    // invalid persisted value survives whenever normalization returns
+    // undefined, because the original `...board` field is copied first.
+    const { seedance25Output: rawSeedance25Output, ...boardFields } = board;
+    const seedance25Output = normalizeSeedance25Output(rawSeedance25Output);
     const hasSourceIds = Array.isArray(board.sourceSceneIds);
     const incomingSourceIds = hasSourceIds
       ? board.sourceSceneIds.filter((id: unknown): id is string => typeof id === 'string')
@@ -2720,7 +2773,7 @@ const normalizePersistedProject = (
         })
       : [];
     return {
-      ...board,
+      ...boardFields,
       sceneId,
       storyboardImageCount: normalizeStoryboardImageCount(board.storyboardImageCount),
       ...(board.imageToImage !== undefined
@@ -2750,21 +2803,29 @@ const normalizePersistedProject = (
         ? { creativeDirection: normalizeVideoCreativeDirection(board.creativeDirection) }
         : {}),
       ...(typeof board.targetModelId === 'string' ? { targetModelId: board.targetModelId } : {}),
+      ...(seedance25Output ? { seedance25Output } : {}),
       ...(Array.isArray(board.revisions) ? {
-        revisions: board.revisions.map((revision: any) => ({
-          ...revision,
-          officialPromptZh: typeof revision?.officialPromptZh === 'string' ? revision.officialPromptZh : '',
-          officialPromptEn: typeof revision?.officialPromptEn === 'string' ? revision.officialPromptEn : '',
-          officialPromptSource: typeof revision?.officialPromptSource === 'string' ? revision.officialPromptSource : '',
-          officialPromptEnSource: typeof revision?.officialPromptEnSource === 'string' ? revision.officialPromptEnSource : '',
-          sequencePromptHandoff: normalizeSequencePromptHandoffStamp(revision?.sequencePromptHandoff),
-          h3IdentityBindings: normalizeH3IdentityBindings(revision?.h3IdentityBindings),
-          h3IdentityBindingsEn: normalizeH3IdentityBindings(revision?.h3IdentityBindingsEn),
-          ...(Object.prototype.hasOwnProperty.call(revision ?? {}, 'creativeDirection')
-            ? { creativeDirection: normalizeVideoCreativeDirection(revision.creativeDirection) }
-            : {}),
-          ...(typeof revision?.targetModelId === 'string' ? { targetModelId: revision.targetModelId } : {}),
-        })),
+        revisions: board.revisions.map((revision: any) => {
+          // Apply the same discard rule to revision snapshots. A malformed
+          // value must not leak back through the revision spread.
+          const { seedance25Output: rawRevisionSeedance25Output, ...revisionFields } = isRecord(revision) ? revision : {};
+          const normalizedRevisionSeedance25Output = normalizeSeedance25Output(rawRevisionSeedance25Output);
+          return {
+            ...revisionFields,
+            officialPromptZh: typeof revision?.officialPromptZh === 'string' ? revision.officialPromptZh : '',
+            officialPromptEn: typeof revision?.officialPromptEn === 'string' ? revision.officialPromptEn : '',
+            officialPromptSource: typeof revision?.officialPromptSource === 'string' ? revision.officialPromptSource : '',
+            officialPromptEnSource: typeof revision?.officialPromptEnSource === 'string' ? revision.officialPromptEnSource : '',
+            sequencePromptHandoff: normalizeSequencePromptHandoffStamp(revision?.sequencePromptHandoff),
+            h3IdentityBindings: normalizeH3IdentityBindings(revision?.h3IdentityBindings),
+            h3IdentityBindingsEn: normalizeH3IdentityBindings(revision?.h3IdentityBindingsEn),
+            ...(Object.prototype.hasOwnProperty.call(revision ?? {}, 'creativeDirection')
+              ? { creativeDirection: normalizeVideoCreativeDirection(revision.creativeDirection) }
+              : {}),
+            ...(typeof revision?.targetModelId === 'string' ? { targetModelId: revision.targetModelId } : {}),
+            ...(normalizedRevisionSeedance25Output ? { seedance25Output: normalizedRevisionSeedance25Output } : {}),
+          };
+        }),
       } : {}),
       shots,
     };
@@ -2807,7 +2868,7 @@ const normalizePersistedProject = (
       ),
     }, migrateAutomaticExtraRequirement),
   ));
-  return migrateLegacyStoryboardImageNames(normalizedProject);
+  return migrateProjectChapters(migrateLegacyStoryboardImageNames(normalizedProject));
 };
 
 /** Keep archived projects readable without resurrecting default demo records. */

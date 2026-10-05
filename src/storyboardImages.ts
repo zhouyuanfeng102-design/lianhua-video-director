@@ -99,8 +99,10 @@ export const applyStoryboardImageOutputSize = <T extends StoryboardImageRequest>
 /** Immutable converter identity attached before a storyboard image enters the queue. */
 export interface StoryboardImagePromptTrace {
   imagePromptRuleSetId: NonNullable<ImageGenerationTask['imagePromptRuleSetId']>;
+  imagePromptRuleSetName?: ImageGenerationTask['imagePromptRuleSetName'];
   imagePromptRuleSetVersion: NonNullable<ImageGenerationTask['imagePromptRuleSetVersion']>;
   imagePromptPresetId: NonNullable<ImageGenerationTask['imagePromptPresetId']>;
+  imagePromptPresetName?: ImageGenerationTask['imagePromptPresetName'];
   imagePromptPresetVersion: NonNullable<ImageGenerationTask['imagePromptPresetVersion']>;
   imagePromptFormat: NonNullable<ImageGenerationTask['imagePromptFormat']>;
 }

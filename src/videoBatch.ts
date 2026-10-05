@@ -256,10 +256,14 @@ const semanticConnection = (connection: unknown): unknown => {
   // Keep pre-0.7.7 completed/in-flight fingerprints stable so a software
   // upgrade alone cannot turn the same selection into another paid request.
   const semanticApi = record(api) && api.provider === 'runninghub' && Array.isArray(api.runningHubMappedFields)
-    ? { ...api, runningHubMappedFields: api.runningHubMappedFields.map((field) => {
-      if (!record(field) || field.kind !== 'image') return field;
+    ? { ...api, runningHubMappedFields: api.runningHubMappedFields.flatMap((field) => {
+      // Automatic application compatibility must not make completed/in-flight
+      // selections look new after an upgrade. Actual selected images already
+      // participate in the fingerprint; explicit count bindings still differ.
+      if (record(field) && field.kind === 'image-count' && field.imageCountSource === 'verified-app') return [];
+      if (!record(field) || field.kind !== 'image') return [field];
       const { emptyValue: _emptyValue, ...identity } = field;
-      return identity;
+      return [identity];
     }) } : api;
   return canonicalValue({
     backend,

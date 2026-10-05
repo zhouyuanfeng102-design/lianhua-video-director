@@ -17,6 +17,8 @@ export interface RunningHubVideoFieldControl {
 export interface RunningHubVideoMapping {
   prompt: RunningHubVideoInputBinding[];
   images: Array<RunningHubVideoInputBinding & { role?: ReferenceRole }>;
+  /** Actual selected image count, including a continuation frame. Null disables verified-app adaptation. */
+  imageCount?: RunningHubVideoInputBinding | null;
   /** Only explicitly entered task overrides are applied; omitted values keep cloud defaults. */
   parameters?: Record<string, RunningHubVideoInputBinding>;
 }

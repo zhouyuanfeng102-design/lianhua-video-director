@@ -11,7 +11,8 @@ import {
 import { listRunningHubVideoNodes, mergeRunningHubVideoNodeCatalog, parseRunningHubVideoNodes } from '../runningHubVideoNodes';
 import { discoverRunningHubVideoNodes } from '../services/runningHubVideoDiscovery';
 import { selectRunningHubVideoFieldChoices } from '../runningHubVideoFieldChoices';
-import { syncRunningHubImageSlots } from '../runningHubImageSlots';
+import { bindRunningHubImageCount, isRunningHubImageCountField, runningHubImageCountConflict, syncRunningHubImageSlots } from '../runningHubImageSlots';
+import { resolveRunningHubVideoImageProtocol } from '../runningHubImageProtocol';
 import { bindRunningHubVideoOutput, isRunningHubVideoMegapixelsBinding, runningHubVideoOutputCandidates, runningHubVideoOutputConflict, runningHubVideoOutputControl, runningHubVideoOutputDraft, runningHubVideoOutputFields, setRunningHubVideoFieldControl, type RunningHubVideoOutputKey } from '../runningHubVideoOutput';
 import '../videoWorkflowManager.css';
 import '../runningHubVideoSettings.css';
@@ -54,7 +55,7 @@ const materializeControl = (edit: OutputControlEdit): RunningHubVideoFieldContro
   if (control.min !== undefined && control.max !== undefined && control.min > control.max) throw new Error('选项最小值不能大于最大值。');
   return control;
 };
-const tabs: Array<[EditorTab, string]> = [['basic', '基本信息'], ['mapping', '提示词与图片'], ['output', '时长与分辨率'], ['parameters', '节点参数'], ['runtime', '云端运行'], ['json', '请求 JSON']];
+const tabs: Array<[EditorTab, string]> = [['basic', '基本信息'], ['mapping', '提示词与图片'], ['output', '时长、比例与分辨率'], ['parameters', '节点参数'], ['runtime', '云端运行'], ['json', '请求 JSON']];
 const jsonKey = (value: unknown) => JSON.stringify(value);
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : '操作未完成，请检查云端工作流设置。';
 const valueText = (value: unknown) => typeof value === 'string' ? value : value === undefined ? '' : JSON.stringify(value);
@@ -136,11 +137,15 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
   }, [draft]);
   // Invalid drafts stay inspectable in JSON; malformed rows must not crash the editor.
   const nodeRows = useMemo(() => listRunningHubVideoNodes(draft?.requestTemplate || '', draft?.nodeCatalog), [draft?.requestTemplate, draft?.nodeCatalog]);
+  const imageProtocol = draft ? resolveRunningHubVideoImageProtocol(draft) : undefined;
+  const imageCount = imageProtocol?.imageCount;
+  const imageCountKey = imageCount ? bindingKey(imageCount) : '';
+  const imageCountCandidates = nodeRows.filter(isRunningHubImageCountField);
   const mappingRows = draft?.mapping[mappingTab] || [];
   const mappingChoices = selectRunningHubVideoFieldChoices(nodeRows, mappingTab, { showAll: mappingRange === 'all', search: mappingSearch, keepBindings: mappingRows, catalog: draft?.nodeCatalog });
   const mappingCommon = selectRunningHubVideoFieldChoices(nodeRows, mappingTab, { keepBindings: mappingRows, catalog: draft?.nodeCatalog });
   const requestedBindings = (parsed.request?.nodeInfoList || []).flatMap((node) => node && typeof node.nodeId === 'string' && typeof node.fieldName === 'string' ? [{ nodeId: node.nodeId, inputName: node.fieldName }] : []);
-  const parameterKeep = [...requestedBindings, ...Object.values(draft?.mapping.parameters || {}), ...nodeRows.filter((node) => Object.prototype.hasOwnProperty.call(nodeEdits, bindingKey({ nodeId: node.nodeId, inputName: node.fieldName }))).map((node) => ({ nodeId: node.nodeId, inputName: node.fieldName }))];
+  const parameterKeep = [...requestedBindings, ...Object.values(draft?.mapping.parameters || {}), ...(imageCount ? [imageCount] : []), ...nodeRows.filter((node) => Object.prototype.hasOwnProperty.call(nodeEdits, bindingKey({ nodeId: node.nodeId, inputName: node.fieldName }))).map((node) => ({ nodeId: node.nodeId, inputName: node.fieldName }))];
   const parameterRows = selectRunningHubVideoFieldChoices(nodeRows, 'parameters', { showAll: parameterRange === 'all', keepBindings: parameterKeep, catalog: draft?.nodeCatalog });
   const filteredNodes = parameterRows.filter((node) => !nodeSearch.trim() || `${node.nodeId}.${node.fieldName} ${node.description || ''}`.toLowerCase().includes(nodeSearch.trim().toLowerCase()));
   const currentParameterPage = Math.min(parameterPage, Math.max(0, Math.ceil(filteredNodes.length / pageSize) - 1));
@@ -224,8 +229,11 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
     if (!draft) return;
     try {
       const mapping = { ...draft.mapping, ...patch };
+      if (imageCount && [...mapping.prompt, ...mapping.images, ...Object.values(mapping.parameters || {})].some((binding) => bindingKey(binding) === imageCountKey)) {
+        throw new Error(`${imageCount.nodeId}.${imageCount.inputName} 已用于每段实际图片数量，请先在参考图片槽中解除数量绑定。`);
+      }
       let requestTemplate = draft.requestTemplate;
-      for (const binding of [...mapping.prompt, ...mapping.images, ...Object.values(mapping.parameters || {})]) {
+      for (const binding of [...mapping.prompt, ...mapping.images, ...Object.values(mapping.parameters || {}), ...(mapping.imageCount ? [mapping.imageCount] : [])]) {
         const node = nodeRows.find((row) => row.nodeId === binding.nodeId && row.fieldName === binding.inputName);
         if (node) requestTemplate = ensureRunningHubVideoRequestNode(requestTemplate, node);
       }
@@ -253,6 +261,7 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
     for (const node of nodeRows) {
       const binding = { nodeId: String(node.nodeId), inputName: String(node.fieldName) };
       const key = bindingKey(binding);
+      if (key === imageCountKey) continue;
       if (Object.prototype.hasOwnProperty.call(nodeEdits, key)) requestTemplate = updateRunningHubVideoNodeValue(ensureRunningHubVideoRequestNode(requestTemplate, node), binding, nodeEdits[key]);
     }
     if (retainSecondsEdit !== null) requestTemplate = updateRunningHubVideoRequestField(requestTemplate, 'retainSeconds', retainSecondsEdit === '' ? undefined : Number(retainSecondsEdit));
@@ -387,8 +396,8 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
         if (!manualNode.value.trim() || !Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value))) throw new Error('请输入有效数字；长 ID 或大整数请改用文本类型，避免精度丢失。');
       } else if (manualNode.type === 'boolean') value = manualNode.value === 'true';
       const binding = { nodeId: manualNode.nodeId.trim(), inputName: manualNode.fieldName.trim() };
-      if (manualNode.type === 'image' && draft && [...draft.mapping.prompt, ...Object.values(draft.mapping.parameters || {})].some((entry) => bindingKey(entry) === bindingKey(binding))) {
-        throw new Error('此字段已用于提示词或参数，不能同时作为图片槽；请先核对原用途。');
+      if (manualNode.type === 'image' && draft && [...draft.mapping.prompt, ...Object.values(draft.mapping.parameters || {}), ...(imageCount ? [imageCount] : [])].some((entry) => bindingKey(entry) === bindingKey(binding))) {
+        throw new Error('此字段已用于提示词、参数或每段实际图片数量，不能同时作为图片槽；请先核对原用途。');
       }
       if (acceptNodeSource(JSON.stringify([{ nodeId: binding.nodeId, fieldName: binding.inputName, fieldValue: value }]))) {
         if (manualNode.type === 'image') setDraft((current) => {
@@ -451,6 +460,7 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
   }
   function updateParameterBinding(binding: RunningHubVideoInputBinding, name: string) {
     if (!draft) return;
+    if (bindingKey(binding) === imageCountKey) { setError('此字段按每段实际图片数量自动填写，不能同时绑定可覆盖参数。'); return; }
     const enteredKey = name.trim();
     const key = (enteredKey === 'width' || enteredKey === 'height') && isRunningHubVideoMegapixelsBinding(draft, binding) ? 'resolution' : enteredKey;
     if (['__proto__', 'prototype', 'constructor'].includes(key)) { setError('请使用普通参数名，例如 duration 或 seed。'); return; }
@@ -459,6 +469,17 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
     if (key && parameters[key]) { setError('这个参数名已绑定其他字段，请使用不同名称。'); return; }
     if (key) parameters[key] = binding;
     patchMapping({ parameters });
+  }
+  function updateImageCountBinding(value: string) {
+    if (!draft) return;
+    try {
+      const binding = value === 'auto' ? undefined : value === 'none' ? null : (() => {
+        const [nodeId, inputName] = JSON.parse(value) as [string, string];
+        return { nodeId, inputName };
+      })();
+      setDraft(prepareWorkflowDraft(bindRunningHubImageCount(materializeDraft(), binding)));
+      setNodeEdits({}); setOutputControlEdits({}); setRetainSecondsEdit(null); clearNotice();
+    } catch (cause) { setError(errorText(cause)); }
   }
   function updateOutputBinding(key: RunningHubVideoOutputKey, binding: RunningHubVideoInputBinding) {
     try {
@@ -510,7 +531,7 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
       {edit.kind === 'select' && !strictOptions && customOutputDefaults[id] && <label className="field"><span>自定义默认值</span><input aria-label={`${label}自定义默认值`} value={value} onChange={(event) => setDefault(event.target.value)} /></label>}
       <p className="vwm-help">{control.unit === 'MP' ? 'MP 表示百万像素总量，按节点数值提交。' : definition.hint}</p>
       {control.unit === 'MP' && control.optionLabels && <p className="vwm-help">括号为当前工作流 16:9 分辨率节点尺寸；二采可能改变最终视频尺寸。</p>}
-      {key === 'resolution' && binding && supported && <details className="rhv-control-settings"><summary>输入选项设置</summary><div className="rhv-control-fields">
+      {(key === 'resolution' || key === 'aspect_ratio') && binding && supported && <details className="rhv-control-settings"><summary>输入选项设置</summary><div className="rhv-control-fields">
         {control.unit === 'MP' && <button type="button" className="btn small" onClick={() => replaceOutputControl(binding, megapixelPreset)}>使用 0.2–1.0 MP 选项</button>}
         <label className="field"><span>输入方式</span><select aria-label={`${label}输入方式`} value={edit.kind} disabled={fixedPreset} onChange={(event) => setControlEdit({ kind: event.target.value as RunningHubVideoFieldControl['kind'] })}><option value="text">文本</option><option value="number">数值</option><option value="select">{control.unit === 'MP' ? '固定选项' : '可选项与自定义'}</option></select></label>
         {edit.kind === 'select' && <label className="field"><span>{fixedPreset ? '固定档位' : '可选值（逗号分隔）'}</span><textarea aria-label={`${label}可选值`} rows={2} readOnly={fixedPreset} value={edit.options} onChange={(event) => setControlEdit({ options: event.target.value })} /></label>}
@@ -524,7 +545,7 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
     const emptyLabel = nodeRows.length && !mappingChoices.length ? '当前范围无匹配字段，请调整搜索或切换高级' : '请选择实际节点字段';
     return <label className="field"><span>RunningHub 节点与字段</span><select aria-label={`${label}节点字段`} value={bindingKey(binding)} onChange={(event) => {
       const [nodeId, inputName] = JSON.parse(event.target.value) as [string, string]; onChangeBinding({ nodeId, inputName });
-    }}><option value={found ? '["",""]' : bindingKey(binding)}>{found ? emptyLabel : binding.nodeId || binding.inputName ? `${binding.nodeId}.${binding.inputName} · 节点目录中不存在` : emptyLabel}</option>{mappingChoices.map((node) => <option key={bindingKey({ nodeId: node.nodeId, inputName: node.fieldName })} value={bindingKey({ nodeId: node.nodeId, inputName: node.fieldName })} disabled={typeof node.fieldValue !== 'string'}>{node.nodeId}.{node.fieldName}{typeof node.description === 'string' && node.description ? ` · ${node.description}` : ''}{mappingRows.some((entry) => entry.nodeId === node.nodeId && entry.inputName === node.fieldName) ? ' · 已绑定' : ''}{typeof node.fieldValue !== 'string' ? ' · 非文本字段' : ''}</option>)}</select></label>;
+    }}><option value={found ? '["",""]' : bindingKey(binding)}>{found ? emptyLabel : binding.nodeId || binding.inputName ? `${binding.nodeId}.${binding.inputName} · 节点目录中不存在` : emptyLabel}</option>{mappingChoices.map((node) => <option key={bindingKey({ nodeId: node.nodeId, inputName: node.fieldName })} value={bindingKey({ nodeId: node.nodeId, inputName: node.fieldName })} disabled={typeof node.fieldValue !== 'string' || bindingKey({ nodeId: node.nodeId, inputName: node.fieldName }) === imageCountKey}>{node.nodeId}.{node.fieldName}{typeof node.description === 'string' && node.description ? ` · ${node.description}` : ''}{mappingRows.some((entry) => entry.nodeId === node.nodeId && entry.inputName === node.fieldName) ? ' · 已绑定' : ''}{typeof node.fieldValue !== 'string' ? ' · 非文本字段' : ''}{bindingKey({ nodeId: node.nodeId, inputName: node.fieldName }) === imageCountKey ? ' · 已用于每段实际图片数量' : ''}</option>)}</select></label>;
   }
 
   const runtimeRequest: Record<string, unknown> = parsed.request || {};
@@ -544,17 +565,31 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
           {(tab === 'mapping' || tab === 'output' || tab === 'parameters') && nodeTools()}
           <div className="vwm-tab-panel" role="tabpanel" aria-label={tabs.find(([value]) => value === tab)?.[1]}>
             {tab === 'output' && <>
-              <div className="vwm-section-tabs rhv-output-tabs" role="tablist" aria-label="时长分辨率配置类别"><button type="button" role="tab" aria-selected={outputPane === 'standard'} className={outputPane === 'standard' ? 'active' : ''} onClick={() => { setOutputPane('standard'); setOutputSearch(''); }}>时长与像素 / 分辨率</button><button type="button" role="tab" aria-selected={outputPane === 'pixels'} className={outputPane === 'pixels' ? 'active' : ''} onClick={() => { setOutputPane('pixels'); setOutputSearch(''); }}>高级：指定宽高</button></div>
+              <div className="vwm-section-tabs rhv-output-tabs" role="tablist" aria-label="时长比例分辨率配置类别"><button type="button" role="tab" aria-selected={outputPane === 'standard'} className={outputPane === 'standard' ? 'active' : ''} onClick={() => { setOutputPane('standard'); setOutputSearch(''); }}>时长、比例与像素 / 分辨率</button><button type="button" role="tab" aria-selected={outputPane === 'pixels'} className={outputPane === 'pixels' ? 'active' : ''} onClick={() => { setOutputPane('pixels'); setOutputSearch(''); }}>高级：指定宽高</button></div>
               <div className="rhv-field-filters"><label className="field"><span>显示范围</span><select aria-label="时长分辨率字段范围" value={outputRange} onChange={(event) => setOutputRange(event.target.value === 'all' ? 'all' : 'common')}><option value="common">常用候选及已绑定</option><option value="all">全部字段（高级）</option></select></label><label className="field"><span>搜索节点（已绑定项保留）</span><input aria-label="搜索时长分辨率字段" value={outputSearch} onChange={(event) => setOutputSearch(event.target.value)} placeholder="节点 ID / 字段名 / 标题" /></label></div>
-              <div className="rhv-output-fields">{outputPane === 'standard' ? <>{outputField('duration')}{outputField('resolution')}</> : <>{outputField('width')}{outputField('height')}</>}</div>
+              <div className="rhv-output-fields">{outputPane === 'standard' ? <>{outputField('duration')}{outputField('aspect_ratio')}{outputField('resolution')}</> : <>{outputField('width')}{outputField('height')}</>}</div>
               {outputDraftIssue && <p className="vd-error">{outputDraftIssue}</p>}
-              <p className="vwm-help">{outputPane === 'standard' ? 'MP 使用单个像素选项；需要分别指定宽高的工作流请打开“高级：指定宽高”。' : '仅用于工作流独立的宽度、高度字段，单位像素。'}生成时留空使用原值；解除绑定保留请求字段。</p>
+              <p className="vwm-help">{outputPane === 'standard' ? '比例按云端字段提供的完整选项值提交；MP 使用单个像素选项，需要分别指定宽高的工作流请打开“高级：指定宽高”。' : '仅用于工作流独立的宽度、高度字段，单位像素。'}生成时留空使用原值；解除绑定保留请求字段。</p>
             </>}
             {tab === 'basic' && <><label className="field"><span>工作流名称（可直接重命名后保存）</span><input aria-label="RunningHub 工作流名称" value={draft.name} onChange={(event) => patchDraft({ name: event.target.value })} /></label><div className="rhv-two-fields"><label className="field"><span>云端调用类型</span><select aria-label="RunningHub 云端调用类型" value={draft.runKind} onChange={(event) => patchDraft({ runKind: event.target.value as RunningHubVideoWorkflow['runKind'] })}><option value="ai-app">AI 应用 · run/ai-app</option><option value="workflow">ComfyUI 工作流 · run/workflow</option></select></label><label className="field"><span>{draft.runKind === 'ai-app' ? 'AI 应用 ID' : '云端工作流 ID'}</span><input aria-label="RunningHub 云端 ID" value={draft.remoteId} inputMode="numeric" placeholder="从 RunningHub 调用地址中复制 ID" onChange={(event) => patchDraft({ remoteId: event.target.value })} /></label></div><label className="field"><span>最终视频输出节点 ID（可选）</span><input aria-label="RunningHub 视频输出节点 ID" value={draft.outputNodeId || ''} placeholder="留空：自动收集视频结果；多输出时可指定最终成片节点" onChange={(event) => patchDraft({ outputNodeId: event.target.value || undefined })} /></label><div className="vwm-info"><strong>只注入你明确绑定的输入</strong><p>当前视频提示词 → 提示词映射；选择的参考图 → 按顺序上传并填入图片槽。工作流其余常量、音频、LoRA 与自定义字段保持原值。</p><p>云端 ID 按文字保存，不会将 19 位 ID 转成浮点数。工作流须在 RunningHub 云端已存在，本软件不创建或上传本地 ComfyUI 画布。</p></div>{parsed.issues.length > 0 && <div className="rhv-issues"><strong>待配置项</strong><p>{parsed.issues.slice(0, 3).join('；')}</p></div>}</>}
             {tab === 'mapping' && <>
               <div className="vwm-section-tabs" role="tablist" aria-label="云端输入映射类别"><button type="button" role="tab" aria-selected={mappingTab === 'prompt'} className={mappingTab === 'prompt' ? 'active' : ''} onClick={() => { setMappingTab('prompt'); setMappingPage(0); setMappingRange('common'); setMappingSearch(''); }}>提示词输入 {draft.mapping.prompt.length}</button><button type="button" role="tab" aria-selected={mappingTab === 'images'} className={mappingTab === 'images' ? 'active' : ''} onClick={() => { setMappingTab('images'); setMappingPage(0); setMappingRange('common'); setMappingSearch(''); }}>参考图片槽 {draft.mapping.images.length}</button></div>
               {mappingTab === 'images' ? <>
-                <div className="vwm-info compact">这里只显示云端工作流可接收的图片槽位和节点字段。每段视频的槽位用途请在“生成视频 → 选择参考图”中单独设置；每段可不同，不必填满。</div>
+                <div className="vwm-info compact">每段视频的图片数量和用途可在“生成视频 → 选择参考图”中单独设置。{imageProtocol?.verifiedProfile && imageCount ? '当前工作流按实际图片数量运行，未使用的图片槽会按云端支持的方式留空。' : '能否留空及如何跳过未使用图片，以云端工作流支持的规则为准。'}</div>
+                <div className="vwm-mapping-item">
+                  <label className="field"><span>图片数量字段（每个工作流配置一次）</span><select aria-label="RunningHub 图片数量字段" value={draft.mapping.imageCount === null ? 'none' : draft.mapping.imageCount ? bindingKey(draft.mapping.imageCount) : 'auto'} onChange={(event) => updateImageCountBinding(event.target.value)}>
+                    <option value="auto">自动识别（仅已核实的云端应用）</option>
+                    <option value="none">不绑定（保留数量字段原值）</option>
+                    {draft.mapping.imageCount && !imageCountCandidates.some((node) => bindingKey({ nodeId: node.nodeId, inputName: node.fieldName }) === bindingKey(draft.mapping.imageCount!)) && <option value={bindingKey(draft.mapping.imageCount)} disabled>{draft.mapping.imageCount.nodeId}.{draft.mapping.imageCount.inputName} · 缺失或不是整数字段</option>}
+                    {imageCountCandidates.map((node) => {
+                      const binding = { nodeId: node.nodeId, inputName: node.fieldName };
+                      const conflict = runningHubImageCountConflict(draft, binding);
+                      return <option key={bindingKey(binding)} value={bindingKey(binding)} disabled={Boolean(conflict)}>{node.nodeId}.{node.fieldName}{typeof node.description === 'string' && node.description ? ` · ${node.description}` : ''}{conflict ? ` · 已用于${conflict}` : ''}</option>;
+                    })}
+                  </select></label>
+                  {imageCount ? <p className="vwm-help">每段按实际选图数量自动填写（含衔接尾帧）。已绑定：<code>{imageCount.nodeId}.{imageCount.inputName}</code>{imageProtocol?.imageCountSource === 'verified-app' ? ' · 已核实的应用字段' : ''}。无需逐段手填数量。</p>
+                    : <p className="vwm-help">{draft.mapping.imageCount === null ? '当前不自动填写图片数量，数量字段保留原值。' : '尚未识别到已核实的图片数量字段；如云端提供“使用几张图”等输入，请在此选择对应字段。'} 仅接受非负整数或整数字符串；选择字段不会让云端自动获得可选图片能力。</p>}
+                </div>
                 <div className="rhv-image-slot-grid" aria-label="全部云端图片槽">{draft.mapping.images.map((binding, index) => {
                   const node = nodeRows.find((entry) => entry.nodeId === binding.nodeId && entry.fieldName === binding.inputName);
                   return <div className="rhv-image-slot-card" key={`${bindingKey(binding)}-${index}`}>
@@ -564,7 +599,7 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
                   </div>;
                 })}</div>
                 {!draft.mapping.images.length && <div className="vwm-empty">尚未找到图片输入槽。文生视频可不选图；图生视频请先“读取云端节点”或导入节点 JSON，识别后会全部显示。自定义字段可在“手动添加字段”中明确标为图片输入。</div>}
-                <p className="vwm-help">共 {draft.mapping.images.length} 个图片槽。此处只维护槽位数量、顺序和节点字段；用途不再在 API 设置中固定。点击“保存工作流”后生效；云端工作流如有必填图片，服务返回时会显示原因。</p>
+                <p className="vwm-help">共 {draft.mapping.images.length} 个图片槽。此处维护槽位顺序、节点字段及图片数量绑定；每段选图独立保存。点击“保存工作流”后生效；必填图片和可选空槽须符合云端工作流规则。</p>
               </> : <>
                 <div className="vwm-info compact">{mappingRange === 'all' ? '高级列表包含工作流内部配置，请核对字段用途；不自动绑定提示词，提示词映射需要文本字段。' : '按字段名与标题显示提示词候选，排除常见图片和技术参数。仅辅助查找，选择后才绑定，不自动判断用途。'}</div>
                 {fieldFilters(true)}
@@ -580,11 +615,12 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
               const binding = { nodeId: String(node.nodeId), inputName: String(node.fieldName) }; const key = bindingKey(binding);
               const promptIndex = draft.mapping.prompt.findIndex((entry) => bindingKey(entry) === key); const imageIndex = draft.mapping.images.findIndex((entry) => bindingKey(entry) === key);
               const parameterName = Object.entries(draft.mapping.parameters || {}).find(([, entry]) => bindingKey(entry) === key)?.[0] || '';
-              const dynamic = promptIndex >= 0 || imageIndex >= 0;
+              const countDynamic = key === imageCountKey;
+              const dynamic = countDynamic || promptIndex >= 0 || imageIndex >= 0;
               const inRequest = parsed.request?.nodeInfoList.some((entry) => entry?.nodeId === node.nodeId && entry.fieldName === node.fieldName);
               const unsafeInteger = typeof node.fieldValue === 'number' && Number.isInteger(node.fieldValue) && !Number.isSafeInteger(node.fieldValue);
               const scalar = ['string', 'number', 'boolean'].includes(typeof node.fieldValue) && !unsafeInteger;
-              return <div className="vwm-parameter-item" key={key}><div className="vwm-row"><strong>{node.nodeId}.{node.fieldName}</strong><span className="vwm-value-type">{promptIndex >= 0 ? '调用时填视频提示词' : imageIndex >= 0 ? `调用时填第 ${imageIndex + 1} 张图片` : parameterName ? `明确覆盖参数：${parameterName}` : inRequest ? '保留请求原值' : '云端默认 · 尚未覆盖'}</span></div><div className="rhv-two-fields"><label className="field"><span>字段默认值 · {typeof node.fieldValue}</span>{typeof node.fieldValue === 'boolean' ? <select aria-label={`云端字段 ${node.nodeId}.${node.fieldName} 默认值`} disabled={dynamic} value={nodeEdits[key] ?? String(node.fieldValue)} onChange={(event) => { setNodeEdits({ ...nodeEdits, [key]: event.target.value }); clearNotice(); }}><option value="true">true</option><option value="false">false</option></select> : <input aria-label={`云端字段 ${node.nodeId}.${node.fieldName} 默认值`} disabled={dynamic || !scalar} value={dynamic ? promptIndex >= 0 ? '使用当前视频提示词' : `上传第 ${imageIndex + 1} 张参考图` : nodeEdits[key] ?? valueText(node.fieldValue)} title={!scalar ? '复杂值请在请求 JSON 中编辑' : undefined} onChange={(event) => { setNodeEdits({ ...nodeEdits, [key]: event.target.value }); clearNotice(); }} />}</label><label className="field"><span>可覆盖参数名（留空为常量）</span><input aria-label={`云端字段 ${node.nodeId}.${node.fieldName} 参数名`} disabled={dynamic} value={parameterName} placeholder="例如 duration / seed / width" onChange={(event) => updateParameterBinding(binding, event.target.value)} /></label></div>{typeof node.description === 'string' && node.description && <p className="vwm-help">{node.description}</p>}{!inRequest && !dynamic && !Object.prototype.hasOwnProperty.call(nodeEdits, key) && <button type="button" className="vwm-text-button" onClick={() => useCatalogDefault(node)}>将此默认值加入请求</button>}{Object.prototype.hasOwnProperty.call(nodeEdits, key) && <button type="button" className="vwm-text-button" onClick={() => { const next = { ...nodeEdits }; delete next[key]; setNodeEdits(next); }}>撤销这个默认值编辑</button>}</div>;
+              return <div className="vwm-parameter-item" key={key}><div className="vwm-row"><strong>{node.nodeId}.{node.fieldName}</strong><span className="vwm-value-type">{countDynamic ? '调用时填实际图片数量' : promptIndex >= 0 ? '调用时填视频提示词' : imageIndex >= 0 ? `调用时填第 ${imageIndex + 1} 张图片` : parameterName ? `明确覆盖参数：${parameterName}` : inRequest ? '保留请求原值' : '云端默认 · 尚未覆盖'}</span></div><div className="rhv-two-fields"><label className="field"><span>字段默认值 · {typeof node.fieldValue}</span>{typeof node.fieldValue === 'boolean' ? <select aria-label={`云端字段 ${node.nodeId}.${node.fieldName} 默认值`} disabled={dynamic} value={nodeEdits[key] ?? String(node.fieldValue)} onChange={(event) => { setNodeEdits({ ...nodeEdits, [key]: event.target.value }); clearNotice(); }}><option value="true">true</option><option value="false">false</option></select> : <input aria-label={`云端字段 ${node.nodeId}.${node.fieldName} 默认值`} disabled={dynamic || !scalar} value={dynamic ? countDynamic ? '每段实际图片数量（含衔接尾帧）' : promptIndex >= 0 ? '使用当前视频提示词' : `上传第 ${imageIndex + 1} 张参考图` : nodeEdits[key] ?? valueText(node.fieldValue)} title={!scalar ? '复杂值请在请求 JSON 中编辑' : undefined} onChange={(event) => { setNodeEdits({ ...nodeEdits, [key]: event.target.value }); clearNotice(); }} />}</label><label className="field"><span>可覆盖参数名（留空为常量）</span><input aria-label={`云端字段 ${node.nodeId}.${node.fieldName} 参数名`} disabled={dynamic} value={parameterName} placeholder="例如 duration / seed / width" onChange={(event) => updateParameterBinding(binding, event.target.value)} /></label></div>{typeof node.description === 'string' && node.description && <p className="vwm-help">{node.description}</p>}{!inRequest && !dynamic && !Object.prototype.hasOwnProperty.call(nodeEdits, key) && <button type="button" className="vwm-text-button" onClick={() => useCatalogDefault(node)}>将此默认值加入请求</button>}{Object.prototype.hasOwnProperty.call(nodeEdits, key) && <button type="button" className="vwm-text-button" onClick={() => { const next = { ...nodeEdits }; delete next[key]; setNodeEdits(next); }}>撤销这个默认值编辑</button>}</div>;
             })}{!filteredNodes.length && <p className="vwm-empty">{nodeRows.length ? '当前范围未找到匹配字段，请调整搜索词或切换“全部字段（高级）”。' : '当前没有节点资料。点击上方“读取云端节点”，或导入工作流 API 格式 JSON。'}</p>}</div><Pager label="云端节点参数" total={filteredNodes.length} page={currentParameterPage} size={pageSize} onChange={setParameterPage} /><p className="vwm-help">目录字段默认不发送；编辑默认值或绑定参数时才加入请求。未编辑的云端字段不覆盖。</p></>}
             {tab === 'runtime' && <>
               <div className="vwm-info compact rhv-runtime-help"><strong>教程的 6 项是接口外层参数，不是 6 个节点</strong><p>nodeInfoList 由“提示词与图片 / 节点参数”配置；实例、队列、保留时长和回调在下方设置。addMetadata（元数据开关）保留原值，可在“请求 JSON”编辑。</p></div>

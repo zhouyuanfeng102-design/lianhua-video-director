@@ -213,9 +213,8 @@ const MODEL_PROFILE_DEFINITIONS = {
       inputModalities: { ...imageVideoAudio, 'clay-render': 'supported' },
       maxReferences: { image: 30, video: 10, audio: 10 },
       duration: {
-        maxSec: 30,
-        status: 'limited',
-        note: '官方发布资料描述单次最高 30 秒，并支持多轮延展。'
+        status: 'supported',
+        note: '公开资料当前常以 30 秒为参考；软件保留自定义时长，实际能力以当前官方入口为准。'
       },
       nativeAudio: 'supported',
       firstLastFrame: 'limited',

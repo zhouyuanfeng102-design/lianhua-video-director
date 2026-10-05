@@ -5,10 +5,34 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import ts from 'typescript';
 import * as diagnostics from '../src/errorDiagnostics';
 import * as userFacing from '../src/userFacingError';
+import { videoProviderErrorDiagnostics } from '../src/videoTaskErrorDiagnostics';
 
 let groups = 0;
 const test = (name: string, action: () => void) => { action(); groups += 1; console.log(`PASS ${name}`); };
 const testAsync = async (name: string, action: () => Promise<void>) => { await action(); groups += 1; console.log(`PASS ${name}`); };
+
+test('RunningHub 合图异常显示 node_name 节点名称，不泄漏输入或猜测缺图槽位', () => {
+  const failedReason = Object.freeze({
+    node_id: '858', node_name: 'BatchImagesNode', exception_type: 'AttributeError',
+    exception_message: "'NoneType' object has no attribute 'shape'",
+    current_inputs: { image: 'private-image-input' }, traceback: ['private-traceback-path'],
+  });
+  for (const reason of [failedReason, JSON.stringify(failedReason)]) {
+    const result = videoProviderErrorDiagnostics({ code: 805, msg: '工作流运行失败', data: { failedReason: reason } });
+    assert.equal(result?.code, '805');
+    assert.match(result!.message, /节点：858；节点类型：BatchImagesNode；异常类型：AttributeError/u);
+    assert.match(result!.message, /'NoneType' object has no attribute 'shape'/u);
+    assert.doesNotMatch(result!.message, /private-image-input|private-traceback-path|429|第六槽|第 6 槽/u);
+  }
+  assert.match(videoProviderErrorDiagnostics({ failedReason: { ...failedReason, node_type: 'ExplicitNodeType' } })!.message,
+    /节点类型：ExplicitNodeType/u, 'an explicit node type remains authoritative');
+  assert.match(videoProviderErrorDiagnostics({ failedReason: { ...failedReason, node_type: '' } })!.message,
+    /节点类型：BatchImagesNode/u, 'an empty alias must not hide the returned node name');
+  let invoked = false;
+  const getter = Object.defineProperty({ node_id: '858' }, 'node_name', { get: () => { invoked = true; throw new Error('not a data field'); } });
+  assert.doesNotThrow(() => videoProviderErrorDiagnostics({ failedReason: getter }));
+  assert.equal(invoked, false);
+});
 
 test('TLS 原文、状态码、阶段和路由保留，不读取任意请求对象', () => {
   const error = Object.assign(new Error('Client network socket disconnected before secure TLS connection was established'), {

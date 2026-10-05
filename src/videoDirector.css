@@ -1,6 +1,25 @@
 .video-director-view, .video-generation-settings { min-width: 0; }
 .video-director-view .section-heading { flex-wrap: wrap; }
 .video-director-view h1 { margin: 0; font-size: calc(20px * var(--ui-font-scale, 1)); }
+/* Compact only the video workspace header; shared chapter/task controls keep
+   their normal sizing on other pages. */
+main:has(> .workspace.view-video) { --vd-header-font: clamp(10px, calc(.7vw * var(--ui-font-scale, 1)), 13px); }
+main:has(> .workspace.view-video) > .chapter-toolbar { padding: 0 8px; gap: 3px 8px; margin-bottom: 2px; font-size: var(--vd-header-font); line-height: 1.2; }
+main:has(> .workspace.view-video) > .chapter-toolbar > label { gap: 5px; }
+main:has(> .workspace.view-video) > .chapter-toolbar :is(select, .btn) { height: 22px; min-height: 22px; padding: 2px 6px; font-size: var(--vd-header-font); line-height: 1.2; }
+main:has(> .workspace.view-video) > .chapter-toolbar svg { width: 13px; height: 13px; flex-shrink: 0; }
+.workspace.view-video { padding-top: 2px; }
+.workspace.view-video .video-director-view > .section-heading { gap: 3px 8px; margin-bottom: 2px; align-items: center; }
+.workspace.view-video .video-director-view > .section-heading h1 { font-size: clamp(13px, calc(.95vw * var(--ui-font-scale, 1)), 17px); line-height: 1.2; }
+.workspace.view-video .video-director-view > .section-heading p { margin-top: 1px; font-size: 9px; line-height: 1.2; }
+.workspace.view-video .video-director-view > .section-heading .btn,
+.workspace.view-video .video-director-view > .vd-generation-mode .btn { min-height: 22px; padding: 2px 6px; font-size: var(--vd-header-font); line-height: 1.2; }
+.workspace.view-video .video-director-view > .vd-generation-mode { margin-bottom: 2px; }
+.workspace.view-video .video-director-view > .vd-chapter-context { margin: 1px 0 2px; font-size: clamp(9px, calc(.5vw * var(--ui-font-scale, 1)), 10px); line-height: 1.1; }
+.workspace.view-video .video-director-view > .video-execution-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; padding: 2px 8px; margin-bottom: 4px; font-size: var(--vd-header-font); }
+.workspace.view-video .video-execution-fields { gap: 3px 10px; }
+.workspace.view-video .video-execution-fields :is(select, input) { height: 22px; min-height: 22px; padding: 2px 5px; line-height: 1.2; }
+.workspace.view-video .video-execution-controls p { flex: 1 1 250px; margin: 0; font-size: clamp(9px, calc(.5vw * var(--ui-font-scale, 1)), 10px); line-height: 1.2; }
 .vd-layout { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(285px, 1fr); align-items: start; gap: 14px; }
 .vd-stack { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .vd-stack > .card, .vd-task-card { min-width: 0; }

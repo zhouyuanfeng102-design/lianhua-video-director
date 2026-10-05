@@ -2,6 +2,7 @@ import type { Character, ImageVariant, Project, Storyboard } from './types';
 import { isLandscapeImageRequest } from './imageLocationScope';
 import { characterVariantDisplayName } from './characterVariants';
 import { normalizeFemaleCharacterVocabularyRecord } from './characterVocabulary';
+import { activeChapter, chapterIdsForEntity, chapterScenes, chapterWorkspace } from './chapters';
 
 const MAX_CONTEXT_CHARS = 12000;
 const MAX_DOCUMENT_CHARS = 2600;
@@ -118,7 +119,7 @@ const hasSourceMarker = (value: string): boolean => {
 export const buildImagePromptIdentityContext = (
   project: Project,
   characterNames: readonly string[] = [],
-  sourceStoryboard?: Pick<Storyboard, 'sourceStoryTitle' | 'sourceStoryContent' | 'sourceSceneSnapshots'>,
+  sourceStoryboard?: Pick<Storyboard, 'sourceStoryTitle' | 'sourceStoryContent' | 'sourceSceneSnapshots' | 'chapterId'>,
   options?: { assetKind?: string; imageVariant?: ImageVariant },
 ): string => {
   // The environment source already carries this location's spatial facts.
@@ -128,12 +129,19 @@ export const buildImagePromptIdentityContext = (
   const names = [...new Set(characterNames.map(trim).filter(Boolean))];
   const selectedCharacters = project.characters.filter((character) => !character.dossier?.archivedIntoCharacterId && selectedCharacterNames(character)
     .some((name) => names.includes(name)));
+  if (selectedCharacters.length && selectedCharacters.every((character) => character.dossier?.useStory === false)) return '';
   const evidenceNames = [...new Set([
     ...names,
     ...selectedCharacters
       .flatMap((character) => [trim(character.baseName), trim(character.variantOf)]).filter(Boolean),
   ])];
-  const documents = project.sourceDocuments.map((document) => ({
+  const currentChapter = activeChapter(project);
+  const relatedChapterIds = selectedCharacters.filter((character) => character.dossier?.useStory !== false)
+    .flatMap((character) => chapterIdsForEntity(project, 'character', character.id));
+  const chapterIds = new Set(sourceStoryboard?.chapterId ? [sourceStoryboard.chapterId]
+    : currentChapter && (!relatedChapterIds.length || relatedChapterIds.includes(currentChapter.id)) ? [currentChapter.id]
+      : relatedChapterIds.slice(0, 1));
+  const documents = project.sourceDocuments.filter((document) => chapterIds.has(document.id)).map((document) => ({
     label: '已保存剧情文档', title: trim(document.name), content: trim(document.content),
   })).filter((document) => document.title || document.content);
   const boardSource = trim(sourceStoryboard?.sourceStoryContent)
@@ -141,16 +149,16 @@ export const buildImagePromptIdentityContext = (
   if (boardSource) {
     // A storyboard request belongs to its saved source, not the editor's
     // possibly unrelated next draft. Other documents are supporting evidence.
-    const duplicateIndex = documents.findIndex((document) => document.content === boardSource);
-    if (duplicateIndex >= 0) documents.splice(duplicateIndex, 1);
+    documents.length = 0;
     documents.unshift({ label: '当前分镜已保存原文', title: trim(sourceStoryboard?.sourceStoryTitle), content: boardSource });
   }
-  const draft = sourceStoryboard ? undefined : project.storyDraft;
+  const draft = sourceStoryboard || !currentChapter || !chapterIds.has(currentChapter.id) ? undefined
+    : chapterWorkspace(project, currentChapter.id).storyDraft ?? project.storyDraft;
   if (trim(draft?.content) && !documents.some((document) => document.content === trim(draft?.content))) {
     documents.unshift({ label: '当前未提交剧情草稿', title: trim(draft?.name), content: trim(draft?.content) });
   }
   if (!documents.some((document) => document.content)) {
-    documents.push(...project.scenes.map((scene) => ({
+    documents.push(...[...chapterIds].flatMap((chapterId) => chapterScenes(project, chapterId)).map((scene) => ({
       label: '已解析场景原文', title: trim(scene.title), content: trim(scene.content || scene.summary),
     })).filter((document) => document.content));
   }

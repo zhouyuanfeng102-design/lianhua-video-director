@@ -1,4 +1,10 @@
-﻿import { CharacterDossierApplyDialog } from "./components/CharacterDossierApplyDialog";
+import { askChapterEntityResolutions, applyChapterEntityResolutions } from "./components/ChapterEntityConflictDialog";
+import { chapterContentForEntity } from "./chapters";
+import { imageTaskRuleMetadata } from "./imageTaskRuleMetadata";
+﻿import { activeChapter, chapterScenes, chapterBoards, chapterPlans, chapterScopeProject, chapterWorkspace, withChapterWorkspace, withChapterSelection, migrateProjectChapters, appendChapters, addChapter, archiveChapter, reorderChapters, chapterIdForTask, chapterIdForAsset } from "./chapters";
+import { ChapterManager } from "./components/ChapterManager";
+import { buildChapterEntityCatalog, resolveChapterAnalysisEntities } from "./chapterEntities";
+import { CharacterDossierApplyDialog } from "./components/CharacterDossierApplyDialog";
 import { applyCharacterDossierApplication, type CharacterDossierApplicationOptions } from "./characterDossierApplication";
 import { normalizeCharacterDossier, dossierUsesStory, characterDossierFormForRequest, markDossierManualFields, canAutofillDossierField, mergeDossierAutofill, preserveConfirmedCharacterFields } from "./characterDossierPolicy";
 import {
@@ -102,6 +108,7 @@ import type {
   StoryExpansionPreset,
   Storyboard,
   StoryboardRevision,
+  Seedance25Output,
   StylePreset,
   ViewKey,
   VideoShot,
@@ -110,6 +117,7 @@ import type {
   VideoGenerationTask,
   Workflow,
 } from "./types";
+import { chapterIdForVideoLaunch } from "./videoDirectorDraft";
 import { VideoDirectorView, VideoTaskCard, type VideoDirectorLaunchRequest } from "./components/VideoDirectorView";
 import { StoryPreparationReviewDialog } from "./components/StoryPreparationReviewDialog";
 import { ImageOutputSizeControls } from "./components/ImageOutputSizeControls";
@@ -163,9 +171,12 @@ import {
   type DirectorDecision,
 } from "./promptEngine";
 import { compileTargetPrompt } from "./promptAdapters";
+import { compileOfficialSeedancePrompt, getOfficialSeedanceSourceFingerprint, translateSeedancePromptToEnglish } from "./seedancePrompt";
 import {
   OFFICIAL_H3_TARGET_ID,
   applyOfficialH3Prompt,
+  buildOfficialH3References,
+  buildOfficialH3SubjectDefinitions,
   buildOfficialH3SourceFingerprint,
   hasCurrentOfficialH3Prompt,
   hasCurrentOfficialH3EnglishPrompt,
@@ -403,7 +414,6 @@ import {
   canImportPresetPayload,
   canUseFinalPromptConverter,
   canUseStoryAnalysisApi,
-  cloneRecordsForEnrichment,
   collectAuthoritativeStoryEntityNames,
   commitStateTransition,
   composeDerivedLocalPrompt,
@@ -1749,7 +1759,10 @@ const withProjectLibrary = (next: AppState, previous?: AppState): AppState => {
 
 export default function App() {
   const [state, setStateInternal] = useState<AppState>(() => loadState());
-  const initialSequencePlan = state.project.sequencePlans?.[0];
+  const editorProject = useMemo(() => chapterScopeProject(state.project), [state.project]);
+  const currentChapter = activeChapter(state.project);
+  const currentChapterId = currentChapter?.id || "";
+  const initialSequencePlan = editorProject.sequencePlans?.[0];
   const initialDirectorSettingsSnapshot = useMemo(() => parseDirectorSettingsFingerprint(
     initialSequencePlan?.semanticPlanningSnapshot?.directorSettingsFingerprint
       || initialSequencePlan?.masterPromptDirectorSettingsFingerprint
@@ -1782,6 +1795,10 @@ export default function App() {
   const undoStack = useRef<AppState[]>([]);
   const redoStack = useRef<AppState[]>([]);
   const workspaceEpochRef = useRef(0);
+  const backgroundChapterRef = useRef<{ projectId: string; chapterId: string }>();
+  const chapterWorkerInBackground = () => Boolean(backgroundChapterRef.current
+    && backgroundChapterRef.current.projectId === stateRef.current.project.id
+    && backgroundChapterRef.current.chapterId !== activeChapter(stateRef.current.project)?.id);
   const sequenceBatchEpochRef = useRef(0);
   const sequenceBatchIdentityRef = useRef<SequenceOperationIdentity | null>(null);
   const storyboardImageBatchLifecycleRef = useRef<StoryboardImageBatchLifecycle | null>(null);
@@ -1870,11 +1887,11 @@ export default function App() {
   // Derive both selections from the same initial state. Calling loadState()
   // twice would create two different demo IDs on a fresh install.
   const [activeSceneId, setActiveSceneId] = useState<string>(
-    () => state.project.scenes[0]?.id || "",
+    () => editorProject.scenes[0]?.id || "",
   );
   const [activeStoryboardId, setActiveStoryboardId] = useState<string>(
     () => initialSequencePlan?.segments[0]?.storyboardId
-      || (initialSequencePlan ? "" : state.project.storyboards[0]?.id || ""),
+      || (initialSequencePlan ? "" : editorProject.storyboards[0]?.id || ""),
   );
   const [notice, setNotice] = useState<Notice | null>(null);
   const [runtimeErrorLog, setRuntimeErrorLog] = useState<RuntimeErrorLogEntry[]>(
@@ -1970,7 +1987,7 @@ export default function App() {
   );
   const [selectedDirectorSceneIds, setSelectedDirectorSceneIds] = useState<
     string[]
-  >(() => (state.project.scenes[0]?.id ? [state.project.scenes[0].id] : []));
+  >(() => (editorProject.scenes[0]?.id ? [editorProject.scenes[0].id] : []));
   const [directorInputMode, setDirectorInputMode] = useState<InputMode>(() => (
     normalizeGridDirectorInputMode(
       initialDirectorWorkflow,
@@ -2174,13 +2191,13 @@ export default function App() {
   const [recoveryStatus, setRecoveryStatus] = useState<RecoveryStatus | null>(null);
 
   const storyAnalysisIdentity = buildStoryAnalysisRequestIdentity(
-    state.project,
+    editorProject,
     storyInput,
   );
   const storyAnalysisIdentityRef = useRef(storyAnalysisIdentity);
-  storyAnalysisIdentityRef.current = storyAnalysisIdentity;
+  if (!chapterWorkerInBackground()) storyAnalysisIdentityRef.current = storyAnalysisIdentity;
   const storyExpansionIdentityRef = useRef(storyAnalysisIdentity);
-  storyExpansionIdentityRef.current = storyAnalysisIdentity;
+  if (!chapterWorkerInBackground()) storyExpansionIdentityRef.current = storyAnalysisIdentity;
   const canRestoreStoryPreparation = Boolean(storyPreparationUndo
     && storyPreparationUndo.projectId === state.project.id
     && storyPreparationUndo.after === storyInput && !busy && !storyExpansionBusy);
@@ -2194,7 +2211,7 @@ export default function App() {
     ? { warningCount: pendingStoryReview.result.warnings.length, stale: storyReviewStale }
     : null;
   const openStoryPreparationReview = () => setStoryReviewOpen(true);
-  const sequencePlanningActivePlan = state.project.sequencePlans?.find(
+  const sequencePlanningActivePlan = editorProject.sequencePlans?.find(
     (plan) => plan.id === activePlanId,
   );
   const sequencePlanningMasterBoard = sequencePlanningActivePlan?.masterStoryboardId
@@ -2433,9 +2450,10 @@ export default function App() {
     sequencePlanningUsesSemanticDuration || semanticSequencePlanningActiveRef.current,
   );
   const sequencePlanningIdentityRef = useRef(sequencePlanningIdentity);
-  sequencePlanningIdentityRef.current = sequencePlanningIdentity;
+  if (!chapterWorkerInBackground()) sequencePlanningIdentityRef.current = sequencePlanningIdentity;
 
   useEffect(() => {
+    if (chapterWorkerInBackground()) return;
     const activeRequest = storyAnalysisAbortRef.current;
     if (
       activeRequest
@@ -2450,6 +2468,7 @@ export default function App() {
   }, [storyAnalysisIdentity]);
 
   useEffect(() => {
+    if (chapterWorkerInBackground()) return;
     const activeRequest = storyExpansionAbortRef.current;
     if (
       activeRequest
@@ -2472,6 +2491,7 @@ export default function App() {
   }, [state.project.id]);
 
   useEffect(() => {
+    if (chapterWorkerInBackground()) return;
     const activeRequest = sequencePlanningAbortRef.current;
     if (
       activeRequest
@@ -2503,41 +2523,11 @@ export default function App() {
     sequencePromptRefreshRef.current = null;
   }, []);
 
-  const syncWorkspaceUiState = useCallback((loadedState: AppState) => {
-    workspaceEpochRef.current += 1;
-    storyImportOperationRef.current += 1;
-    pendingStoryReviewRef.current = null;
-    setPendingStoryReview(null);
-    setStoryReviewOpen(false);
-    storyboardBusyOwnerRef.current += 1;
-    sequencePromptRefreshRef.current?.controller.abort();
-    sequencePromptRefreshRef.current = null;
-    storyboardImageBatchLifecycleRef.current?.invalidateBindings();
-    storyAnalysisOperationRef.current += 1;
-    storyAnalysisAbortRef.current?.abort();
-    storyAnalysisAbortRef.current = null;
-    storyAnalysisRequestIdentityRef.current = "";
-    storyExpansionOperationRef.current += 1;
-    storyExpansionAbortRef.current?.abort();
-    storyExpansionAbortRef.current = null;
-    storyExpansionRequestIdentityRef.current = "";
-    sequencePlanningOperationRef.current += 1;
-    sequencePlanningAbortRef.current?.abort();
-    sequencePlanningAbortRef.current = null;
-    sequencePlanningRequestIdentityRef.current = "";
-    semanticSequencePlanningActiveRef.current = false;
-    sequenceBatchEpochRef.current += 1;
-    sequenceBatchIdentityRef.current = null;
-    setSequenceBatchRunning(false);
-    setSequenceBatchProgress({ completed: 0, total: 0 });
-    // Workspace switches restore a different story fingerprint; an error
-    // from the outgoing project must never bleed into the loaded project.
-    setSequenceMasterGenerationIssue("");
-    setBusy(false);
-    setStoryExpansionBusy(false);
-    setPlanningBusy(false);
+  const restoreChapterUiState = useCallback((inputState: AppState) => {
+    const loadedState = { ...inputState, project: chapterScopeProject(inputState.project) };
     const controls = deriveWorkspaceUiState(loadedState);
-    const loadedPlan = loadedState.project.sequencePlans?.[0];
+    const savedControls = chapterWorkspace(loadedState.project).directorControls;
+    const loadedPlan = loadedState.project.sequencePlans.find((plan) => plan.id === savedControls?.activePlanId) || loadedState.project.sequencePlans?.[0];
     const loadedPlanReviewFingerprint = loadedPlan
       ? sequencePlanReviewFingerprint(loadedPlan)
       : "";
@@ -2649,16 +2639,99 @@ export default function App() {
     setVisualStyle(nextVisualStyle);
     setExtraRequirement(loadedDirectorSnapshot.extraRequirement ?? controls.extraRequirement);
     setSelectedAssetIds(loadedDirectorSnapshot.selectedAssetIds || controls.selectedAssetIds);
-    setAssetKind("character");
-    setAssetForm({ ...createEmptyAssetForm(), style: nextVisualStyle || "电影写实" });
-    setAssetFormStyleSource("director");
+
     setSelectedRuleId(controls.selectedRuleId);
     setSelectedConverterId(controls.selectedConverterId);
     setSelectedStoryExpansionPresetId(controls.selectedStoryExpansionPresetId);
     setSelectedStyleId(controls.selectedStyleId);
+    if (savedControls) {
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'activeSceneId')) setActiveSceneId(savedControls.activeSceneId as typeof activeSceneId);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'activeStoryboardId')) setActiveStoryboardId(savedControls.activeStoryboardId as typeof activeStoryboardId);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'selectedDirectorSceneIds')) setSelectedDirectorSceneIds(savedControls.selectedDirectorSceneIds as typeof selectedDirectorSceneIds);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'directorWorkflow')) setDirectorWorkflow(savedControls.directorWorkflow as typeof directorWorkflow);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'directorInputMode')) setDirectorInputMode(savedControls.directorInputMode as typeof directorInputMode);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'durationPreset')) setDurationPreset(savedControls.durationPreset as typeof durationPreset);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'customDuration')) setCustomDuration(savedControls.customDuration as typeof customDuration);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'planningSegmentDurationPreset')) setPlanningSegmentDurationPreset(savedControls.planningSegmentDurationPreset as typeof planningSegmentDurationPreset);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'planningCustomSegmentDuration')) setPlanningCustomSegmentDuration(savedControls.planningCustomSegmentDuration as typeof planningCustomSegmentDuration);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'productionMode')) setProductionMode(savedControls.productionMode as typeof productionMode);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'sequenceStage')) setSequenceStage(savedControls.sequenceStage as typeof sequenceStage);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'sequenceSettingsOpen')) setSequenceSettingsOpen(savedControls.sequenceSettingsOpen as typeof sequenceSettingsOpen);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'durationMode')) setDurationMode(savedControls.durationMode as typeof durationMode);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'totalDuration')) setTotalDuration(savedControls.totalDuration as typeof totalDuration);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'totalDurationTouched')) setTotalDurationTouched(savedControls.totalDurationTouched as typeof totalDurationTouched);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'segmentationMode')) setSegmentationMode(savedControls.segmentationMode as typeof segmentationMode);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'activePlanId')) setActivePlanId(savedControls.activePlanId as typeof activePlanId);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'activeSegmentId')) setActiveSegmentId(savedControls.activeSegmentId as typeof activeSegmentId);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'confirmedSequencePlanFingerprint')) setConfirmedSequencePlanFingerprint(savedControls.confirmedSequencePlanFingerprint as typeof confirmedSequencePlanFingerprint);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'acceptedSequencePlanMismatchFingerprint')) setAcceptedSequencePlanMismatchFingerprint(savedControls.acceptedSequencePlanMismatchFingerprint as typeof acceptedSequencePlanMismatchFingerprint);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'acknowledgedCompressedPlanFingerprint')) setAcknowledgedCompressedPlanFingerprint(savedControls.acknowledgedCompressedPlanFingerprint as typeof acknowledgedCompressedPlanFingerprint);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'durationEstimate')) setDurationEstimate(savedControls.durationEstimate as typeof durationEstimate);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'estimateConfirmed')) setEstimateConfirmed(savedControls.estimateConfirmed as typeof estimateConfirmed);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'shotMode')) setShotMode(savedControls.shotMode as typeof shotMode);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'shotCount')) setShotCount(savedControls.shotCount as typeof shotCount);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'pace')) setPace(savedControls.pace as typeof pace);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'aspectRatio')) setAspectRatio(savedControls.aspectRatio as typeof aspectRatio);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'resolution')) setResolution(savedControls.resolution as typeof resolution);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'audioMode')) setAudioMode(savedControls.audioMode as typeof audioMode);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'styleId')) setStyleId(savedControls.styleId as typeof styleId);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'ruleSetId')) setRuleSetId(savedControls.ruleSetId as typeof ruleSetId);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'converterId')) setConverterId(savedControls.converterId as typeof converterId);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'directorStyleId')) setDirectorStyleId(savedControls.directorStyleId as typeof directorStyleId);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'directorCategory')) setDirectorCategory(savedControls.directorCategory as typeof directorCategory);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'directorStyleName')) setDirectorStyleName(savedControls.directorStyleName as typeof directorStyleName);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'directorStyleSummary')) setDirectorStyleSummary(savedControls.directorStyleSummary as typeof directorStyleSummary);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'cameraTerms')) setCameraTerms(savedControls.cameraTerms as typeof cameraTerms);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'lightingTerms')) setLightingTerms(savedControls.lightingTerms as typeof lightingTerms);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'visualStyle')) setVisualStyle(savedControls.visualStyle as typeof visualStyle);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'extraRequirement')) setExtraRequirement(savedControls.extraRequirement as typeof extraRequirement);
+      if (Object.prototype.hasOwnProperty.call(savedControls, 'selectedAssetIds')) setSelectedAssetIds(savedControls.selectedAssetIds as typeof selectedAssetIds);
+    }
+    setSequenceMasterGenerationIssue("");
   }, []);
 
-  useEffect(() => {
+
+
+  const syncWorkspaceUiState = useCallback((loadedState: AppState) => {
+    backgroundChapterRef.current = undefined;
+    workspaceEpochRef.current += 1;
+    storyImportOperationRef.current += 1;
+    pendingStoryReviewRef.current = null;
+    setPendingStoryReview(null);
+    setStoryReviewOpen(false);
+    storyboardBusyOwnerRef.current += 1;
+    sequencePromptRefreshRef.current?.controller.abort();
+    sequencePromptRefreshRef.current = null;
+    storyboardImageBatchLifecycleRef.current?.invalidateBindings();
+    storyAnalysisOperationRef.current += 1;
+    storyAnalysisAbortRef.current?.abort();
+    storyAnalysisAbortRef.current = null;
+    storyAnalysisRequestIdentityRef.current = "";
+    storyExpansionOperationRef.current += 1;
+    storyExpansionAbortRef.current?.abort();
+    storyExpansionAbortRef.current = null;
+    storyExpansionRequestIdentityRef.current = "";
+    sequencePlanningOperationRef.current += 1;
+    sequencePlanningAbortRef.current?.abort();
+    sequencePlanningAbortRef.current = null;
+    sequencePlanningRequestIdentityRef.current = "";
+    semanticSequencePlanningActiveRef.current = false;
+    sequenceBatchEpochRef.current += 1;
+    sequenceBatchIdentityRef.current = null;
+    setSequenceBatchRunning(false);
+    setSequenceBatchProgress({ completed: 0, total: 0 });
+    // Workspace switches restore a different story fingerprint; an error
+    // from the outgoing project must never bleed into the loaded project.
+    setSequenceMasterGenerationIssue("");
+    setBusy(false);
+    setStoryExpansionBusy(false);
+    setPlanningBusy(false);
+    restoreChapterUiState(loadedState);
+    const look = resolveWorkspaceDirectorLook(loadedState, {});
+    setAssetKind("character");
+    setAssetForm({ ...createEmptyAssetForm(), style: look.visualStyle || "电影写实" });
+    setAssetFormStyleSource("director");
+  }, [restoreChapterUiState]);  useEffect(() => {
     if (!hasDesktopStateStorage()) return;
     let active = true;
     void loadDesktopState()
@@ -2850,17 +2923,17 @@ export default function App() {
 
   const activeScene = useMemo(
     () =>
-      state.project.scenes.find((scene) => scene.id === activeSceneId) ||
-      state.project.scenes[0],
-    [state.project.scenes, activeSceneId],
+      editorProject.scenes.find((scene) => scene.id === activeSceneId) ||
+      editorProject.scenes[0],
+    [editorProject.scenes, activeSceneId],
   );
   const activeStoryboard = useMemo(() => {
-    const selected = state.project.storyboards.find(
+    const selected = editorProject.storyboards.find(
       (board) => board.id === activeStoryboardId,
     );
     if (selected || productionMode === "sequence") return selected;
-    return state.project.storyboards[0];
-  }, [state.project.storyboards, activeStoryboardId, productionMode]);
+    return editorProject.storyboards[0];
+  }, [editorProject.storyboards, activeStoryboardId, productionMode]);
   const activeStoryboardGlobalReferenceAssetIds =
     activeStoryboard?.globalReferenceAssetIds || [];
   const activeStoryboardGlobalReferenceKey =
@@ -2894,9 +2967,9 @@ export default function App() {
   }, [activeStoryboard?.id, activeStoryboardGlobalReferenceKey, directorWorkflow]);
   const activeSequencePlan = useMemo(
     () =>
-      state.project.sequencePlans?.find((plan) => plan.id === activePlanId)
-      || state.project.sequencePlans?.[0],
-    [state.project.sequencePlans, activePlanId],
+      editorProject.sequencePlans?.find((plan) => plan.id === activePlanId)
+      || editorProject.sequencePlans?.[0],
+    [editorProject.sequencePlans, activePlanId],
   );
   const activeSequenceSegment = useMemo(
     () =>
@@ -2914,7 +2987,7 @@ export default function App() {
     [activeSequencePlan, state.project.storyboards],
   );
   const activePlanIdRef = useRef(activeSequencePlan?.id || "");
-  activePlanIdRef.current = activeSequencePlan?.id || "";
+  if (!chapterWorkerInBackground()) activePlanIdRef.current = activeSequencePlan?.id || "";
   const sequenceContextKey = useMemo(() => JSON.stringify([
     state.project.id,
     activeSequencePlan?.id || "",
@@ -2930,8 +3003,11 @@ export default function App() {
   ]), [state.project.id, activeSequencePlan?.id, activeSequencePlan?.sourceStoryContent, productionMode,
     storyName, storyInput, durationMode, totalDuration, planningSegmentDurationPreset, planningCustomSegmentDuration, segmentationMode]);
   const sequenceContextKeyRef = useRef(sequenceContextKey);
+  const chapterSwitchPendingRef = useRef(false);
   useEffect(() => {
+    if (chapterSwitchPendingRef.current) { chapterSwitchPendingRef.current = false; sequenceContextKeyRef.current = sequenceContextKey; return; }
     if (sequenceContextKeyRef.current !== sequenceContextKey) {
+      if (chapterWorkerInBackground()) { sequenceContextKeyRef.current = sequenceContextKey; return; }
       sequenceBatchEpochRef.current += 1;
       sequenceBatchIdentityRef.current = null;
       setSequenceBatchRunning(false);
@@ -2978,23 +3054,23 @@ export default function App() {
   );
   const selectedDirectorScenes = useMemo(() => {
     const selected = selectedDirectorSceneIds
-      .map((id) => state.project.scenes.find((scene) => scene.id === id))
+      .map((id) => editorProject.scenes.find((scene) => scene.id === id))
       .filter((scene): scene is Scene => Boolean(scene));
     return selected.length ? selected : activeScene ? [activeScene] : [];
-  }, [selectedDirectorSceneIds, state.project.scenes, activeScene]);
+  }, [selectedDirectorSceneIds, editorProject.scenes, activeScene]);
   const directorSourceScenes = useMemo(
     () =>
       directorWorkflow === "grid"
         ? selectedDirectorScenes
-        : state.project.scenes,
-    [directorWorkflow, selectedDirectorScenes, state.project.scenes],
+        : editorProject.scenes,
+    [directorWorkflow, selectedDirectorScenes, editorProject.scenes],
   );
   const directorScene = useMemo(
     () =>
       directorWorkflow === "grid"
         ? combineDirectorScenes(selectedDirectorScenes)
         : buildWholeStoryScene(
-            state.project.scenes,
+            editorProject.scenes,
             storyInput,
             storyName,
             state.project.characters,
@@ -3002,14 +3078,14 @@ export default function App() {
     [
       directorWorkflow,
       selectedDirectorScenes,
-      state.project.scenes,
+      editorProject.scenes,
       storyInput,
       storyName,
     ],
   );
   const liveSequenceStory = storyInput.trim()
     ? storyInput
-    : state.project.sourceDocuments[0]?.content
+    : activeChapter(state.project)?.content
       || directorScene?.content
       || "";
   const liveSequenceStoryTitle = storyName.trim() || "未命名剧情";
@@ -3193,7 +3269,7 @@ export default function App() {
     directorWorkflow === "grid" ? "grid" : smartDirectorDecision.workflow;
   const storyboardGenerationIdentity = JSON.stringify([
     storyboardRequestSourceIdentity({
-      project: state.project, story: storyInput, title: storyName,
+      project: editorProject, story: storyInput, title: storyName,
       scenes: directorSourceScenes, scene: directorScene,
       // New prompt requests are text-only. Hidden legacy image selections
       // must not cancel them; effective historical master refs are guarded
@@ -3226,14 +3302,14 @@ export default function App() {
     activeConverter,
   ]);
   const storyboardGenerationIdentityRef = useRef(storyboardGenerationIdentity);
-  storyboardGenerationIdentityRef.current = storyboardGenerationIdentity;
+  if (!chapterWorkerInBackground()) storyboardGenerationIdentityRef.current = storyboardGenerationIdentity;
   const segmentStoryboardConfigurationIdentity = JSON.stringify([
     activeSequencePlan?.semanticPlanningSnapshot,
     storyboardRequestSourceIdentity({
-      project: state.project,
-      story: state.project.sourceDocuments[0]?.content || "",
-      title: state.project.sourceDocuments[0]?.name || "",
-      scenes: state.project.scenes, selectedAssetIds: [], extraRequirement,
+      project: editorProject,
+      story: activeChapter(state.project)?.content || "",
+      title: activeChapter(state.project)?.name || "",
+      scenes: editorProject.scenes, selectedAssetIds: [], extraRequirement,
     }),
     directorWorkflow,
     shotMode,
@@ -3261,11 +3337,12 @@ export default function App() {
   const segmentStoryboardConfigurationIdentityRef = useRef(
     segmentStoryboardConfigurationIdentity,
   );
-  segmentStoryboardConfigurationIdentityRef.current =
+  if (!chapterWorkerInBackground()) segmentStoryboardConfigurationIdentityRef.current =
     segmentStoryboardConfigurationIdentity;
   const sequencePromptApiIdentity = sourceContentHash(JSON.stringify(state.settings.textApi));
   useEffect(() => {
     const operation = sequencePromptRefreshRef.current;
+    if (chapterWorkerInBackground()) return;
     if (operation && (
       operation.projectId !== state.project.id
       || operation.configurationIdentity !== segmentStoryboardConfigurationIdentity
@@ -3810,6 +3887,7 @@ export default function App() {
     const preflightProjectId = stateRef.current.project.id;
     const preflightEpoch = workspaceEpochRef.current;
     const snapshot = stateRef.current;
+    const requestChapterId = activeChapter(snapshot.project)?.id;
     const segmentDurationSec = sequencePlanningSegmentDurationSec;
     const requestedTotalDurationSec = semanticPlanningRequestedTotalDurationSec;
     if (requestedTotalDurationSec !== undefined) {
@@ -3836,7 +3914,7 @@ export default function App() {
       && workspaceEpochRef.current === preflightEpoch
       && stateRef.current.project.id === preflightProjectId
       && sequencePlanningIdentityRef.current === identity
-      && storyDraftIdentity(storyDraftRef.current) === draftIdentity
+      && storyDraftIdentity(readProjectStoryDraft(chapterScopeProject(stateRef.current.project, requestChapterId))) === draftIdentity
       && storyboardRequestApiIdentity(stateRef.current.settings.textApi) === apiIdentity
       && sourceContentHash(JSON.stringify(stateRef.current.project.characters)) === charactersIdentity;
     setPlanningBusy("segmenting");
@@ -3855,7 +3933,7 @@ export default function App() {
           camera: savedStyle.camera, lighting: savedStyle.lighting, sound: savedStyle.sound },
         cameraTerms, lightingTerms, extraRequirement,
       });
-      const result = await requestSemanticSequencePlan(snapshot.settings.textApi, {
+      const result = { ...await requestSemanticSequencePlan(snapshot.settings.textApi, {
         title: storyName.trim() || "未命名剧情",
         story: sourceStory,
         segmentDurationSec,
@@ -3884,18 +3962,24 @@ export default function App() {
         onRepair: ({ attempt, maxAttempts, detail }) => {
           if (isCurrent()) notify(`AI 正在修复分段数据（${attempt}/${maxAttempts}）：${getSafeErrorDiagnostics(detail).message}`);
         },
-      });
+      }), chapterId: requestChapterId };
       if (!isCurrent()) return;
       let committed = false;
       setState((current) => {
         if (!isCurrent()) return current;
         committed = true;
-        return { ...current, project: { ...current.project,
+        const selected = activeChapter(current.project)?.id === requestChapterId;
+        const workspace = chapterWorkspace(current.project, requestChapterId);
+        return { ...current, project: withChapterWorkspace({ ...current.project,
           sequencePlans: upsertSequencePlan(current.project.sequencePlans, result),
-          directorSettingsConfirmedFingerprint: liveDirectorSettingsFingerprint,
-          directorSettingsConfirmedAt: Date.now(),
+          ...(selected ? { directorSettingsConfirmedFingerprint: liveDirectorSettingsFingerprint, directorSettingsConfirmedAt: Date.now() } : {}),
           updatedAt: Date.now(),
-        } };
+        }, { directorSettingsConfirmedFingerprint: liveDirectorSettingsFingerprint, directorSettingsConfirmedAt: Date.now(),
+          directorControls: { ...workspace.directorControls, activePlanId: result.id, activeSegmentId: result.segments[0]?.id || "", activeStoryboardId: "",
+            productionMode: "sequence", sequenceStage: "plan", durationMode: result.durationMode, segmentationMode: result.segmentationMode,
+            totalDuration: result.requestedTotalDurationSec ?? result.totalDurationSec, totalDurationTouched: true,
+            durationEstimate: null, estimateConfirmed: false, confirmedSequencePlanFingerprint: "", acknowledgedCompressedPlanFingerprint: "", acceptedSequencePlanMismatchFingerprint: "" },
+        }, requestChapterId) };
       });
       if (!committed) return;
       // Release before changing request-owned UI identities, as in legacy planning.
@@ -3903,6 +3987,7 @@ export default function App() {
       sequencePlanningRequestIdentityRef.current = "";
       semanticSequencePlanningActiveRef.current = false;
       setPlanningBusy(false);
+      if (activeChapter(stateRef.current.project)?.id === requestChapterId) {
       activePlanIdRef.current = result.id;
       setActivePlanId(result.id);
       setActiveSegmentId(result.segments[0]?.id || "");
@@ -3919,13 +4004,13 @@ export default function App() {
       setProductionMode("sequence");
       setSequenceStage("plan");
       setSequenceMasterGenerationIssue("");
+      }
       notify(`AI 已直接编排 ${result.segments.length} 段，每段 ${result.segmentDurationSec} 秒，共 ${result.totalDurationSec} 秒。未生成全片总提示词；旧计划和成片保留。`);
     } catch (error) {
       if (!isCurrent()) return;
       reportRuntimeError("sequence-semantic-planning", error);
       const message = error instanceof Error ? error.message : "AI 剧情分段失败，请重试。";
-      setSequenceMasterGenerationIssue(message);
-      setSequenceStage("plan");
+      if (activeChapter(stateRef.current.project)?.id === requestChapterId) { setSequenceMasterGenerationIssue(message); setSequenceStage("plan"); }
       notify(message, "error");
     } finally {
       if (sequencePlanningAbortRef.current === controller && sequencePlanningOperationRef.current === operation) {
@@ -3945,7 +4030,7 @@ export default function App() {
     }
     const sourceCandidate = storyInput.trim()
       ? storyInput
-      : state.project.sourceDocuments[0]?.content
+      : activeChapter(state.project)?.content
         || directorScene?.content
         || "";
     if (!sourceCandidate.trim()) {
@@ -4138,6 +4223,7 @@ export default function App() {
       const planId = preservePreviousPlan ? createId("sequence") : requestReplacePlanId || createId("sequence");
       const planTimestamp = Date.now();
       const plan: VideoSequencePlan = {
+        chapterId: currentChapterId,
         id: planId,
         title: storyName.trim() || "未命名剧情",
         sourceStoryTitle: storyName.trim() || "未命名剧情",
@@ -4945,7 +5031,7 @@ export default function App() {
     const sourceScenes = board.sourceSceneSnapshots?.length
       ? board.sourceSceneSnapshots
       : liveSourceScenes;
-    const sourceStory = stateSnapshot.project.sourceDocuments[0];
+    const sourceStory = stateSnapshot.project.sourceDocuments.find((source) => source.id === board.chapterId) || activeChapter(stateSnapshot.project);
     const sequenceSegment = board.sequencePlanId && board.segmentId
       ? stateSnapshot.project.sequencePlans
           .find((plan) => plan.id === board.sequencePlanId)
@@ -4966,7 +5052,7 @@ export default function App() {
       scene ||
       stateSnapshot.project.scenes.find((item) => item.id === board.sceneId) ||
       stateSnapshot.project.scenes.find((item) => item.id === activeSceneId) ||
-      stateSnapshot.project.scenes[0];
+      chapterScenes(stateSnapshot.project, board.chapterId)[0];
     const liveStyle =
       stateSnapshot.stylePresets.find((item) => item.id === board.stylePresetId) ||
       defaultStylePresets.find((item) => item.id === board.stylePresetId) ||
@@ -5131,6 +5217,7 @@ export default function App() {
         ...rebuiltBoard,
         targetModelId: rebuildTargetModelId || undefined,
         targetOutput: undefined,
+        seedance25Output: undefined,
         officialPromptZh: "",
         officialPromptEn: "",
         officialPromptSource: "",
@@ -5151,6 +5238,7 @@ export default function App() {
         ...rebuiltBoard,
         targetModelId: undefined,
         targetOutput: undefined,
+        seedance25Output: undefined,
         officialPromptZh: "",
         officialPromptEn: "",
         officialPromptSource: "",
@@ -5374,15 +5462,65 @@ export default function App() {
     });
   }, [projectLibrary]);
 
+  const chapterDirectorControls = { activeSceneId, activeStoryboardId, selectedDirectorSceneIds, directorWorkflow, directorInputMode, durationPreset, customDuration, planningSegmentDurationPreset, planningCustomSegmentDuration, productionMode, sequenceStage, sequenceSettingsOpen, durationMode, totalDuration, totalDurationTouched, segmentationMode, activePlanId, activeSegmentId, confirmedSequencePlanFingerprint, acceptedSequencePlanMismatchFingerprint, acknowledgedCompressedPlanFingerprint, durationEstimate, estimateConfirmed, shotMode, shotCount, pace, aspectRatio, resolution, audioMode, styleId, ruleSetId, converterId, directorStyleId, directorCategory, directorStyleName, directorStyleSummary, cameraTerms, lightingTerms, visualStyle, extraRequirement, selectedAssetIds };
+  const chapterDirectorControlsRef = useRef(chapterDirectorControls);
+  chapterDirectorControlsRef.current = chapterDirectorControls;
+  const controlsReadyRef = useRef(false);
+  useEffect(() => {
+    if (!controlsReadyRef.current) {
+      controlsReadyRef.current = true;
+      if (!hasDesktopStateStorage()) restoreChapterUiState(stateRef.current);
+      return;
+    }
+    if (!desktopStateReady) return;
+    const projectId = state.project.id;
+    const chapterId = currentChapterId;
+    const controls = chapterDirectorControlsRef.current;
+    setBackgroundState((current) => {
+      if (current.project.id !== projectId || activeChapter(current.project)?.id !== chapterId
+        || JSON.stringify(chapterWorkspace(current.project, chapterId).directorControls) === JSON.stringify(controls)) return current;
+      return { ...current, project: withChapterWorkspace(current.project, { directorControls: controls }, chapterId) };
+    });
+  }, [state.project.id, currentChapterId, desktopStateReady, JSON.stringify(chapterDirectorControls)]);
+  useEffect(() => {
+    if (!busy && !planningBusy && !sequenceBatchRunning && !storyExpansionBusy
+      && !hasActiveStoryboardBuild() && !sequencePromptRefreshRef.current) backgroundChapterRef.current = undefined;
+  }, [busy, planningBusy, sequenceBatchRunning, storyExpansionBusy]);
+
   /** Keep an unfinished story textarea with its project before switching away. */
   const stateWithCurrentDraft = (
     sourceState: AppState,
     draft = storyDraftRef.current,
   ): AppState => {
     if (storyDraftOwnerRef.current !== sourceState.project.id) return sourceState;
-    const project = withProjectStoryDraft(sourceState.project, draft);
+    const project = withChapterWorkspace(withProjectStoryDraft(sourceState.project, draft), { directorControls: chapterDirectorControlsRef.current });
     if (project === sourceState.project) return sourceState;
     return withProjectLibrary({ ...sourceState, project }, sourceState);
+  };
+
+  const changeChapterProject = (change: (project: AppState['project']) => AppState['project']) => {
+    const source = stateWithCurrentDraft(stateRef.current);
+    if (!backgroundChapterRef.current && (busy || planningBusy || sequenceBatchRunning || hasActiveStoryboardBuild() || sequencePromptRefreshRef.current)) {
+      backgroundChapterRef.current = { projectId: source.project.id, chapterId: activeChapter(source.project)!.id };
+    }
+    const project = change(source.project);
+    if (project === source.project) return;
+    const switched = activeChapter(project)?.id !== activeChapter(source.project)?.id;
+    const next = { ...source, project };
+    setState(next);
+    if (switched) {
+      chapterSwitchPendingRef.current = true;
+      // Story rewriting has a user review dialog; close that review on chapter navigation.
+      storyExpansionOperationRef.current += 1;
+      storyExpansionAbortRef.current?.abort(); storyExpansionAbortRef.current = null;
+      storyExpansionRequestIdentityRef.current = ""; setStoryExpansionBusy(false);
+      pendingStoryReviewRef.current = null; setPendingStoryReview(null); setStoryReviewOpen(false);
+      setStoryPreparationUndo(null);
+      restoreChapterUiState(next);
+    }
+  };
+  const selectChapter = (chapterId: string) => {
+    if (chapterId && chapterId !== activeChapter(stateRef.current.project)?.id) changeChapterProject((project) => withChapterSelection(project, chapterId));
   };
 
   const resetSourceDerivedUi = () => {
@@ -5407,10 +5545,10 @@ export default function App() {
     const t = Date.now();
     let sourceChanged = false;
     setState((current) => {
-      const source = current.project.sourceDocuments[0];
+      const source = activeChapter(current.project);
       if (source && source.name === nextName && source.content === content) {
         return current.project.storyDraft === undefined ? current : {
-          ...current, project: { ...current.project, storyDraft: undefined },
+          ...current, project: withChapterWorkspace({ ...current.project, storyDraft: undefined }, { storyDraft: undefined }),
         };
       }
       const nextSource = source
@@ -5434,7 +5572,7 @@ export default function App() {
   const sourceDraftSnapshot = (content: string): string => {
     const current = stateRef.current;
     const t = Date.now();
-    const source = current.project.sourceDocuments[0];
+    const source = activeChapter(current.project);
     const nextSource = source
       ? {
           ...source,
@@ -5456,7 +5594,7 @@ export default function App() {
       project: {
         ...current.project,
         sourceDocuments: source
-          ? [nextSource, ...current.project.sourceDocuments.slice(1)]
+          ? current.project.sourceDocuments.map((chapter) => chapter.id === source.id ? nextSource : chapter)
           : [nextSource, ...current.project.sourceDocuments],
       },
     }, current)).serialized;
@@ -5680,7 +5818,7 @@ export default function App() {
   const handleNewProject = () => {
     const sourceState = stateWithCurrentDraft(stateRef.current);
     const t = Date.now();
-    const project: AppState["project"] = {
+    const project: AppState["project"] = migrateProjectChapters({
       id: createId("project"),
       name: newProjectName.trim() || "未命名视频项目",
       description:
@@ -5696,7 +5834,7 @@ export default function App() {
       generationTasks: [],
       createdAt: t,
       updatedAt: t,
-    };
+    });
     const nextState = withProjectLibrary({
       ...sourceState,
       project,
@@ -5796,7 +5934,7 @@ export default function App() {
     };
     const requestProjectId = expansionState.project.id;
     const requestIdentity = buildStoryAnalysisRequestIdentity(
-      expansionState.project,
+      chapterScopeProject(expansionState.project),
       sourceStory,
     );
     const requestEpoch = workspaceEpochRef.current;
@@ -5914,509 +6052,211 @@ export default function App() {
 
   const handleAnalyzeStory = async () => {
     if (busy || storyExpansionAbortRef.current || storyAnalysisAbortRef.current) return;
-    if (!storyInput.trim()) {
-      notify("请先粘贴一段剧情或导入文本。", "error");
-      return;
-    }
+    if (!storyInput.trim()) { notify("请先粘贴本章正文或导入小说。", "error"); return; }
     const analysisState = stateRef.current;
-    const useApi = canUseStoryAnalysisApi(analysisState.settings.textApi);
-    if (!useApi) {
-      notify("解析并补全需要文本 AI，请先启用并配置 API。不会使用本地抽词生成人物或场景。", "error");
-      setView("settings");
-      return;
+    if (!canUseStoryAnalysisApi(analysisState.settings.textApi)) {
+      notify("解析并补全需要文本 AI，请先启用并配置 API。", "error"); setView("settings"); return;
     }
-    const sourceStory = storyInput;
-    const sourceStoryName = storyName;
     const originalProject = analysisState.project;
-    const sourceTimestamp = Date.now();
-    const previousSource = originalProject.sourceDocuments[0];
-    const nextSource = {
-      ...previousSource,
-      id: previousSource?.id || createId("source"),
-      name: sourceStoryName.trim() || "剧情原文", content: sourceStory,
-      createdAt: previousSource?.createdAt || sourceTimestamp, updatedAt: sourceTimestamp,
-    };
-    // Stage invalidation only. Failure must not erase the last usable project.
-    const sourceReplacement = replaceProjectSourceDocument(originalProject, nextSource);
-    const analysisProject = sourceReplacement.project;
-    const relevantProjectState = (project: Project) => JSON.stringify([
-      project.sourceDocuments, project.characters, project.locations, project.props,
-      project.scenes, project.storyboards, project.sequencePlans,
-    ]);
-    const originalProjectSignature = relevantProjectState(originalProject);
-    const requestApiFingerprint = sourceContentHash(JSON.stringify(analysisState.settings.textApi));
-    const requestProjectId = analysisProject.id;
-    const requestIdentity = buildStoryAnalysisRequestIdentity(
-      analysisProject,
-      sourceStory,
-    );
-    storyAnalysisIdentityRef.current = requestIdentity;
+    const ownerChapter = activeChapter(originalProject);
+    if (!ownerChapter) { notify("请先新建章节。", "error"); return; }
+    const chapterId = ownerChapter.id;
+    const sourceStory = storyInput;
+    const sourceStoryName = storyName.trim() || ownerChapter.name;
+    const nextSource = { ...ownerChapter, name: sourceStoryName, content: sourceStory, updatedAt: Date.now() };
+    const scopedProject = chapterScopeProject(originalProject, chapterId);
+    const requestProjectId = originalProject.id;
     const requestEpoch = workspaceEpochRef.current;
+    const requestApiFingerprint = sourceContentHash(JSON.stringify(analysisState.settings.textApi));
+    const requestIdentity = buildStoryAnalysisRequestIdentity(scopedProject, sourceStory);
     const requestController = new AbortController();
+    const requestOperation = ++storyAnalysisOperationRef.current;
+    storyAnalysisIdentityRef.current = requestIdentity;
     storyAnalysisAbortRef.current = requestController;
     storyAnalysisRequestIdentityRef.current = requestIdentity;
-    const requestOperation = storyAnalysisOperationRef.current + 1;
-    storyAnalysisOperationRef.current = requestOperation;
-    const isAnalysisCurrent = () => !requestController.signal.aborted
-      && requestOperation === storyAnalysisOperationRef.current
-      && requestEpoch === workspaceEpochRef.current
-      && stateRef.current.project.id === requestProjectId
-      && isCurrentOperationIdentity(requestIdentity, storyAnalysisIdentityRef.current)
-      && storyDraftRef.current.storyInput === sourceStory
-      && storyDraftRef.current.storyName === sourceStoryName
-      && sourceContentHash(JSON.stringify(stateRef.current.settings.textApi)) === requestApiFingerprint;
+    const ownerDraft = (project: Project) => {
+      if (activeChapter(project)?.id === chapterId) return { name: storyDraftRef.current.storyName.trim() || ownerChapter.name, content: storyDraftRef.current.storyInput };
+      const draft = chapterWorkspace(project, chapterId).storyDraft;
+      const source = project.sourceDocuments.find((item) => item.id === chapterId);
+      return { name: draft?.name.trim() || source?.name || "", content: draft?.content ?? source?.content ?? "" };
+    };
+    // Chapter selection and another chapter's work are not invalidation events.
+    // Own-source edits and shared dossier edits remain protected from late writes.
+    const protectedSignature = (project: Project) => JSON.stringify([
+      chapterScenes(project, chapterId), chapterBoards(project, chapterId), chapterPlans(project, chapterId),
+      ...[project.characters, project.locations, project.props].map((items) => items.map(({ assetIds: _assets, sourceChapterIds: _chapters, ...item }) => item)),
+    ]);
+    const initialSignature = protectedSignature(originalProject);
+    const isAnalysisCurrent = () => {
+      const project = stateRef.current.project;
+      const draft = ownerDraft(project);
+      return !requestController.signal.aborted && storyAnalysisOperationRef.current === requestOperation
+        && requestEpoch === workspaceEpochRef.current && project.id === requestProjectId
+        && project.sourceDocuments.some((item) => item.id === chapterId && !item.archived)
+        && draft.name === sourceStoryName && draft.content === sourceStory
+        && sourceContentHash(JSON.stringify(stateRef.current.settings.textApi)) === requestApiFingerprint;
+    };
     setBusy(true);
     try {
-      let apiEntityCharacters: Array<Record<string, unknown>> = [];
-      // Keep only global character records for the targeted legacy refresh.
-      // Scene entries are references and may omit dossier fields; allowing
-      // them to win here could clear a valid full-story character result.
-      let authoritativeCharacterRefreshRecords: Array<Record<string, unknown>> = [];
-      let apiEntityLocations: Array<Record<string, string>> = [];
-      let apiEntityProps: Array<Record<string, string>> = [];
-      let incompleteEnrichmentKinds: string[] = [];
-      let storyEnrichmentError: unknown = null;
-      const analysisResponse = await requestStoryAnalysis(
-        analysisState.settings.textApi, sourceStory, requestController.signal,
-      );
+      const catalog = buildChapterEntityCatalog(originalProject);
+      let rawAnalysis = await requestStoryAnalysis(analysisState.settings.textApi, sourceStory, requestController.signal, {
+        entityCatalog: catalog, chapterId,
+        onProgress: (completed, total) => { if (isAnalysisCurrent()) notify(`正在解析“${sourceStoryName}”：${completed}/${total} 部分，原文将完整处理。`); },
+      });
       if (!isAnalysisCurrent()) return;
+      let resolved = resolveChapterAnalysisEntities(rawAnalysis, originalProject);
+      if (resolved.conflicts.length) {
+        const choices = await askChapterEntityResolutions(resolved.conflicts, catalog, requestController.signal);
+        if (!choices || !isAnalysisCurrent()) return;
+        rawAnalysis = applyChapterEntityResolutions(rawAnalysis, choices, catalog);
+        resolved = resolveChapterAnalysisEntities(rawAnalysis, originalProject);
+        if (resolved.conflicts.length) throw new Error("部分资料关联仍不明确，本章原有结果未改动。");
+      }
+      const analysisResponse = resolved.analysis;
       const noLocalCandidates = { characters: [], locations: [], props: [] };
-      const resolvedEntityNames = collectAuthoritativeStoryEntityNames(analysisResponse, noLocalCandidates);
-      const blocks = analysisResponse.scenes.map((scene, index) => {
-        const names = collectAuthoritativeStoryEntityNames({ scenes: [scene] }, noLocalCandidates);
+      const names = collectAuthoritativeStoryEntityNames(analysisResponse, noLocalCandidates);
+      const blocks = analysisResponse.scenes.map((scene, index) => ({
+        title: scene.title || `场景 ${index + 1}`, content: scene.content || "", summary: scene.summary || "",
+        entities: collectAuthoritativeStoryEntityNames({ scenes: [scene] }, noLocalCandidates),
+        sourceStart: scene.sourceStart, sourceEnd: scene.sourceEnd,
+      })).filter((scene) => scene.content.trim());
+      if (!blocks.length) throw new Error("AI 未返回可读取的场景内容，本章原有结果未改动。");
+      const characterItems = (analysisResponse.characters || []).filter((item) => typeof item === "object") as Array<Record<string, unknown>>;
+      const locationItems = (analysisResponse.locations || []).filter((item) => typeof item === "object") as Array<Record<string, unknown>>;
+      const propItems = (analysisResponse.props || []).filter((item) => typeof item === "object") as Array<Record<string, unknown>>;
+      const identity = (items: Array<Record<string, unknown>>, name: string) => {
+        const item = items.find((entry) => entry.name === name) || {};
         return {
-          title: scene.title || `场景 ${index + 1}`, content: scene.content || "", summary: scene.summary || "",
-          apiCharacters: names.characters, apiLocations: names.locations, apiProps: names.props,
+          ...(typeof item.existingEntityId === "string" && item.existingEntityId ? { existingEntityId: item.existingEntityId } : {}),
+          ...(typeof item.baseCharacterId === "string" && item.baseCharacterId ? { baseCharacterId: item.baseCharacterId } : {}),
+          aliases: Array.isArray(item.aliases) ? item.aliases.filter((value): value is string => typeof value === "string") : [],
+          sourceChapterIds: [chapterId],
         };
-      }).filter((scene) => scene.content.trim());
-      if (!blocks.length) throw new Error("AI 未返回可读取的场景内容，原项目未改动；不会使用本地场景替代。");
-      apiEntityCharacters = (analysisResponse.characters || []).filter(
-        (item): item is Record<string, unknown> => Boolean(item) && typeof item === "object",
-      );
-      authoritativeCharacterRefreshRecords = [...apiEntityCharacters];
-      apiEntityLocations = (analysisResponse.locations || []).filter(
-        (item): item is Record<string, string> => typeof item === "object",
-      );
-      apiEntityProps = (analysisResponse.props || []).filter(
-        (item): item is Record<string, string> => typeof item === "object",
-      );
-      analysisResponse.scenes.forEach((scene) => {
-        (scene.characters || []).forEach((item) => {
-          if (item && typeof item === "object") apiEntityCharacters.push(item as Record<string, unknown>);
-        });
-        if (scene.location && typeof scene.location === "object") apiEntityLocations.push(scene.location as Record<string, string>);
-        (scene.props || []).forEach((item) => {
-          if (item && typeof item === "object") apiEntityProps.push(item as Record<string, string>);
-        });
-      });
-      notify(`AI 已完成全文人物与场景识别，正在完善 ${resolvedEntityNames.characters.length} 个人物、${resolvedEntityNames.locations.length} 个地点和 ${resolvedEntityNames.props.length} 个道具的资料。`);
-      try {
-        const enriched = await requestStoryBibleEnrichment(
-          analysisState.settings.textApi, sourceStory,
-          {
-            characters: resolvedEntityNames.characters,
-            locations: resolvedEntityNames.locations,
-            props: resolvedEntityNames.props,
-            nsfwCharacterNames: detectNsfwCharacterNames(sourceStory, resolvedEntityNames.characters, analysisResponse.scenes),
-          },
-          requestController.signal, { fullSourceContext: true },
-        );
-        if (!isAnalysisCurrent()) return;
-            apiEntityCharacters.push(
-              ...(enriched.characters as Array<Record<string, unknown>>),
-            );
-            authoritativeCharacterRefreshRecords.push(
-              // Preserve the response's field presence. Only an explicitly
-              // returned empty signatureProps means "no stable equipment";
-              // an omitted field in a partial response is not a deletion.
-              ...(enriched.characters as Array<Record<string, unknown>>),
-            );
-            apiEntityLocations.push(
-              ...(enriched.locations as Array<Record<string, string>>),
-            );
-            apiEntityProps.push(
-              ...(enriched.props as Array<Record<string, string>>),
-            );
-            incompleteEnrichmentKinds = enriched.incompleteKinds;
-      } catch (error) {
-        if (isAbortError(error) || !isAnalysisCurrent()) return;
-        storyEnrichmentError = error;
-        incompleteEnrichmentKinds = ["人物", "地点", "道具"];
-      }
-      const t = Date.now();
-      const existingByTitle = new Map(
-        analysisProject.scenes.map((scene) => [scene.title, scene]),
-      );
-      const existingCharacters = cloneRecordsForEnrichment(
-        analysisProject.characters,
-      );
-      const existingLocations = cloneRecordsForEnrichment(
-        analysisProject.locations,
-      );
-      const existingProps = cloneRecordsForEnrichment(analysisProject.props);
-      const characterDetails = mergeCharacterEnrichmentDetails(apiEntityCharacters);
-      const locationDetails = mergeEntityEnrichmentDetails(apiEntityLocations);
-      const propDetails = mergeEntityEnrichmentDetails(apiEntityProps);
-      const authoritativeCharacters: Character[] = resolvedEntityNames.characters.map((name) => {
-        const detail = characterDetails.get(name)
-          || (name === DEFAULT_FIRST_PERSON_SUBJECT ? characterDetails.get("我") : undefined)
-          || {};
-        return {
-          id: createId("character"),
-          name,
-          baseName: detail.baseName || undefined,
-          formLabel: detail.formLabel || undefined,
-          variantOf: detail.variantOf || undefined,
-          transformationType: detail.transformationType || undefined,
-          gender: detail.gender || "",
-          morphology: detail.morphology || "",
-          bodyPlan: detail.bodyPlan || "",
-          apparentAge: detail.apparentAge || "",
-          actualAge: detail.actualAge || "",
-          height: detail.height || "",
-          race: detail.race || "",
-          appearance: detail.appearance || "",
-          outfit: detail.outfit || "",
-          signatureProps: detail.signatureProps || "",
-          personality: detail.personality || "",
-          motionHabits: detail.motionHabits || "",
-          anchor: detail.anchor || "",
-          negativeContinuity: detail.negativeContinuity || "",
-          assetIds: [],
-          nsfwProfile: detail.nsfwProfile ? { ...detail.nsfwProfile } : undefined,
-        };
-      });
-      const authoritativeLocations: Location[] = resolvedEntityNames.locations.map((name) => {
-        const detail = locationDetails.get(name) || {};
-        return {
-          id: createId("location"),
-          name,
-          description: detail.description || "",
-          timeWeather: detail.timeWeather || "",
-          lighting: detail.lighting || "",
-          palette: detail.palette || "",
-          fixedProps: detail.fixedProps || "",
-          anchor: detail.anchor || "",
-          assetIds: [],
-        };
-      });
-      const authoritativeProps: Prop[] = resolvedEntityNames.props.map((name) => {
-        const detail = propDetails.get(name) || {};
-        return {
-          id: createId("prop"),
-          name,
-          category: detail.category || "剧情道具",
-          material: detail.material || "",
-          appearance: detail.appearance || "",
-          effect: detail.effect || "",
-          stateRules: detail.stateRules || "",
-          assetIds: [],
-        };
-      });
-      const sourceMentionedNames = <T extends { name: string }>(records: readonly T[]) => (
-        records
-          .map((record) => record.name.trim())
-          .filter((name) => Boolean(name) && sourceStory.includes(name))
-      );
-      const previousCharacterIds = originalProject.scenes.flatMap((scene) => scene.characterIds);
-      const previousLocationIds = originalProject.scenes.flatMap((scene) => (
-        scene.locationIds?.length
-          ? scene.locationIds
-          : scene.locationId
-            ? [scene.locationId]
-            : []
-      ));
-      const previousPropIds = originalProject.scenes.flatMap((scene) => scene.propIds);
-      const reconciledCharacters = reconcileAuthoritativeStoryEntities(
-        existingCharacters,
-        authoritativeCharacters,
-        {
-          aiSucceeded: resolvedEntityNames.aiSucceeded,
-          kind: "character",
-          sourceText: sourceStory,
-          localCandidateNames: sourceMentionedNames(existingCharacters),
-          previousSceneEntityIds: previousCharacterIds,
-        },
-      ).records;
-      // A successful, user-triggered full reparse is the explicit repair path
-      // for legacy character dossiers.  Refresh only the AI-authoritative
-      // stable-prop/continuity slice; reconciliation has already retained the
-      // existing id, assetIds and every other manually maintained field.
-      const nextCharacters = storyEnrichmentError
-        ? reconciledCharacters
-        : refreshReanalyzedCharacterFields(
-            reconciledCharacters as Character[],
-            authoritativeCharacterRefreshRecords,
-          );
-      const nextLocations = reconcileAuthoritativeStoryEntities(
-        existingLocations,
-        authoritativeLocations,
-        {
-          aiSucceeded: resolvedEntityNames.aiSucceeded,
-          kind: "location",
-          localCandidateNames: sourceMentionedNames(existingLocations),
-          previousSceneEntityIds: previousLocationIds,
-        },
-      ).records;
-      const nextProps = reconcileAuthoritativeStoryEntities(
-        existingProps,
-        authoritativeProps,
-        {
-          aiSucceeded: resolvedEntityNames.aiSucceeded,
-          kind: "prop",
-          localCandidateNames: sourceMentionedNames(existingProps),
-          previousSceneEntityIds: previousPropIds,
-        },
-      ).records;
-      const analyzedSourceHash = sourceContentHash(sourceStory);
-      let sceneSourceCursor = 0;
-      const sourceRangeForScene = (content: string): { sourceStart?: number; sourceEnd?: number } => {
-        let sourceStart = sourceStory.indexOf(content, sceneSourceCursor);
-        if (sourceStart < 0) sourceStart = sourceStory.indexOf(content);
-        if (sourceStart < 0) return {};
-        const sourceEnd = sourceStart + content.length;
-        sceneSourceCursor = Math.max(sceneSourceCursor, sourceEnd);
-        return { sourceStart, sourceEnd };
       };
-      const nextScenes: Scene[] = blocks.map((block, index) => {
-        const existing = existingByTitle.get(block.title);
-        const sourceRange = sourceRangeForScene(block.content);
-        const names = block.apiCharacters.filter(Boolean);
-        const characterIds = names.map((name) => {
-          const existing = nextCharacters.find(
-            (character) => character.name === name,
-          );
-          if (existing) return existing.id;
-          const detail = characterDetails.get(name)
-            || (name === DEFAULT_FIRST_PERSON_SUBJECT ? characterDetails.get("我") : undefined)
-            || {};
-          const character: Character = {
-            id: createId("character"),
-            name,
-            baseName: detail.baseName || undefined,
-            formLabel: detail.formLabel || undefined,
-            variantOf: detail.variantOf || undefined,
-            transformationType: detail.transformationType || undefined,
-            gender: detail.gender || "",
-            morphology: detail.morphology || "",
-            bodyPlan: detail.bodyPlan || "",
-            apparentAge: detail.apparentAge || "",
-            actualAge: detail.actualAge || "",
-            height: detail.height || "",
-            race: detail.race || "",
-            appearance: detail.appearance || "",
-            outfit: detail.outfit || "",
-            signatureProps: detail.signatureProps || "",
-            personality: detail.personality || "",
-            motionHabits: detail.motionHabits || "",
-            anchor: detail.anchor || "",
-            negativeContinuity: detail.negativeContinuity || "",
-            assetIds: [],
-            nsfwProfile: detail.nsfwProfile ? { ...detail.nsfwProfile } : undefined,
-          };
-          nextCharacters.push(character);
-          return character.id;
-        });
-        const locationName = (block.apiLocations[0] || "").trim();
-        let location = locationName
-          ? nextLocations.find((candidate) => candidate.name === locationName)
-          : undefined;
-        if (locationName) {
-          if (!location) {
-            const detail = locationDetails.get(locationName) || {};
-            location = {
-              id: createId("location"),
-              name: locationName,
-              description: detail.description || "",
-              timeWeather: detail.timeWeather || "",
-              lighting: detail.lighting || "",
-              palette: detail.palette || "",
-              fixedProps: detail.fixedProps || "",
-              anchor: detail.anchor || "",
-              assetIds: [],
-            };
-            nextLocations.push(location);
-          }
+      let incompleteEnrichmentKinds: string[] = [];
+      let enrichmentError: unknown = null;
+      // Analysis already returns detailed dossiers. Only newly introduced,
+      // incomplete entities need another pass; shared records are never redesigned.
+      const missingNew = (items: Array<Record<string, unknown>>, fields: string[]) => items.filter((item) => !item.existingEntityId
+        && fields.some((field) => typeof item[field] !== "string" || !String(item[field]).trim())).map((item) => String(item.name || "")).filter(Boolean);
+      const seed = {
+        characters: missingNew(characterItems, ["gender", "appearance", "race", "anchor"]),
+        locations: missingNew(locationItems, ["description", "lighting", "anchor"]),
+        props: missingNew(propItems, ["material", "appearance"]),
+        nsfwCharacterNames: [],
+      };
+      if (seed.characters.length || seed.locations.length || seed.props.length) {
+        if (sourceStory.length > 16000) {
+          incompleteEnrichmentKinds = [seed.characters.length ? "人物" : "", seed.locations.length ? "地点" : "", seed.props.length ? "道具" : ""].filter(Boolean);
+        } else try {
+          const enriched = await requestStoryBibleEnrichment(analysisState.settings.textApi, sourceStory, seed, requestController.signal, { fullSourceContext: true });
+          if (!isAnalysisCurrent()) return;
+          characterItems.push(...enriched.characters as Array<Record<string, unknown>>);
+          locationItems.push(...enriched.locations as Array<Record<string, unknown>>);
+          propItems.push(...enriched.props as Array<Record<string, unknown>>);
+          incompleteEnrichmentKinds = enriched.incompleteKinds;
+        } catch (error) {
+          if (isAbortError(error) || !isAnalysisCurrent()) return;
+          enrichmentError = error; incompleteEnrichmentKinds = ["新增资料"];
         }
-        const propNames = block.apiProps.filter(Boolean);
-        const propIds: string[] = [];
-        propNames.forEach((name) => {
-          let prop: Prop | undefined = nextProps.find(
-            (candidate) => candidate.name === name,
-          );
-          if (!prop) {
-            const detail = propDetails.get(name) || {};
-            prop = {
-              id: createId("prop"),
-              name,
-              category: detail.category || "剧情道具",
-              material: detail.material || "",
-              appearance: detail.appearance || "",
-              effect: detail.effect || "",
-              stateRules: detail.stateRules || "",
-              assetIds: [],
-            };
-            nextProps.push(prop);
-          }
-          if (!propIds.includes(prop.id)) propIds.push(prop.id);
-        });
+      }
+      const charactersByName = mergeCharacterEnrichmentDetails(characterItems);
+      const locationsByName = mergeEntityEnrichmentDetails(locationItems);
+      const propsByName = mergeEntityEnrichmentDetails(propItems);
+      const characterRecords: Character[] = names.characters.map((name) => {
+        const detail = charactersByName.get(name) || {};
         return {
-          id: existing?.id || createId("scene"),
-          title: block.title || `场景 ${index + 1}`,
-          content: block.content,
-          summary: block.summary,
-          sourceContentHash: analyzedSourceHash,
-          ...sourceRange,
-          characterIds,
-          locationId: location?.id,
-          locationIds: location ? [location.id] : [],
-          propIds,
-          storyboardIds: existing?.storyboardIds || [],
-          createdAt: existing?.createdAt || t,
-          updatedAt: t,
+          id: createId("character"), name, ...identity(characterItems, name),
+          baseName: detail.baseName || undefined, formLabel: detail.formLabel || undefined,
+          variantOf: detail.variantOf || undefined, transformationType: detail.transformationType || undefined,
+          gender: detail.gender || "", apparentAge: detail.apparentAge || "", actualAge: detail.actualAge || "", height: detail.height || "",
+          morphology: detail.morphology || "", bodyPlan: detail.bodyPlan || "", race: detail.race || "", appearance: detail.appearance || "",
+          outfit: detail.outfit || "", signatureProps: detail.signatureProps || "", personality: detail.personality || "", motionHabits: detail.motionHabits || "",
+          anchor: detail.anchor || "", negativeContinuity: detail.negativeContinuity || "", assetIds: [],
+          ...(detail.nsfwProfile ? { nsfwProfile: detail.nsfwProfile } : {}),
         };
       });
-      const sceneIdMigration = new Map<string, string>();
-      analysisProject.scenes.forEach((scene, index) => {
-        const replacement =
-          nextScenes.find((item) => item.title === scene.title) ||
-          nextScenes[index] ||
-          nextScenes[0];
-        if (replacement) sceneIdMigration.set(scene.id, replacement.id);
+      const locationRecords: Location[] = names.locations.map((name) => {
+        const detail = locationsByName.get(name) || {};
+        return { id: createId("location"), name, ...identity(locationItems, name), description: detail.description || "", timeWeather: detail.timeWeather || "",
+          lighting: detail.lighting || "", palette: detail.palette || "", fixedProps: detail.fixedProps || "", anchor: detail.anchor || "", assetIds: [] };
       });
-      const migratedStoryboards = analysisProject.storyboards.map((board) => {
-        const mappedSources = (
-          board.sourceSceneIds?.length ? board.sourceSceneIds : [board.sceneId]
-        )
-          .map((id) =>
-            nextScenes.some((scene) => scene.id === id)
-              ? id
-              : sceneIdMigration.get(id),
-          )
-          .filter((id): id is string => Boolean(id));
-        const sourceSceneIds = mappedSources.length
-          ? [...new Set(mappedSources)]
-          : nextScenes.slice(0, 1).map((scene) => scene.id);
-        return {
-          ...board,
-          sceneId: sourceSceneIds[0] || board.sceneId,
-          sourceSceneIds,
-          sourceContentHash: analyzedSourceHash,
-        };
+      const propRecords: Prop[] = names.props.map((name) => {
+        const detail = propsByName.get(name) || {};
+        return { id: createId("prop"), name, ...identity(propItems, name), category: detail.category || "剧情道具", material: detail.material || "",
+          appearance: detail.appearance || "", effect: detail.effect || "", stateRules: detail.stateRules || "", assetIds: [] };
       });
-      const boardsByScene = new Map<string, string[]>();
-      migratedStoryboards.forEach((board) =>
-        board.sourceSceneIds?.forEach((sceneId) =>
-          boardsByScene.set(sceneId, [
-            ...(boardsByScene.get(sceneId) || []),
-            board.id,
-          ]),
-        ),
-      );
-      const linkedScenes = nextScenes.map((scene) => ({
-        ...scene,
-        storyboardIds: [
-          ...new Set([
-            ...scene.storyboardIds,
-            ...(boardsByScene.get(scene.id) || []),
-          ]),
-        ],
-      }));
       if (!isAnalysisCurrent()) return;
-      if (relevantProjectState(stateRef.current.project) !== originalProjectSignature) {
-        notify("分析期间项目资料已变化，AI 结果未覆盖当前项目，请基于当前资料重新分析。", "error");
-        return;
+      if (protectedSignature(stateRef.current.project) !== initialSignature) {
+        notify("分析期间本章或共用资料已修改，本次结果未覆盖，请基于最新资料重新解析。", "error"); return;
       }
-      setState((current) => applyProjectUpdateForRequest(
-        current,
-        requestProjectId,
-        (project) => ({
-          ...replaceProjectSourceDocument(project, nextSource).project,
-          sourceDocuments: [
-            {
-              ...nextSource,
-              content: sourceStory,
-              contentHash: analyzedSourceHash,
-              createdAt: project.sourceDocuments[0]?.createdAt || t,
-              updatedAt: t,
-            },
-            ...project.sourceDocuments.slice(1),
-          ],
-          characters: nextCharacters,
-          locations: nextLocations,
-          props: nextProps,
-          scenes: linkedScenes,
-          storyboards: migratedStoryboards,
-        }),
-        t,
-      ));
-      storyImportOperationRef.current += 1;
-      storyDraftRef.current = { storyInput: sourceStory, storyName: nextSource.name };
-      storyDraftOwnerRef.current = requestProjectId;
-      setStoryInputInternal(sourceStory);
-      setStoryNameInternal(nextSource.name);
-      if (sourceReplacement.sourceChanged) resetSourceDerivedUi();
-      const first = linkedScenes[0];
-      if (first) {
-        setActiveSceneId(first.id);
-        setSelectedDirectorSceneIds([first.id]);
-      }
-      const completionNotice = buildStoryAnalysisCompletionNotice({
-        requestedAi: useApi,
-        sceneCount: nextScenes.length,
-        characterCount: nextCharacters.length,
-        locationCount: nextLocations.length,
-        incompleteKinds: incompleteEnrichmentKinds,
-        analysisError: null,
-        enrichmentError: storyEnrichmentError,
+      const mergeRecords = (project: Project) => {
+        const characterResult = reconcileAuthoritativeStoryEntities(project.characters, characterRecords, { kind: "character", aiSucceeded: true, chapterId });
+        const locationResult = reconcileAuthoritativeStoryEntities(project.locations, locationRecords, { kind: "location", aiSucceeded: true, chapterId });
+        const propResult = reconcileAuthoritativeStoryEntities(project.props, propRecords, { kind: "prop", aiSucceeded: true, chapterId });
+        if ([characterResult, locationResult, propResult].some((result) => result.conflicts?.length)) throw new Error("资料关联已变化，本次结果未覆盖。");
+        return { characters: characterResult.records, locations: locationResult.records, props: propResult.records };
+      };
+      const shared = mergeRecords(stateRef.current.project);
+      const timestamp = Date.now();
+      const analyzedSourceHash = sourceContentHash(sourceStory);
+      let sourceCursor = 0;
+      const usedSceneIds = new Set<string>();
+      const nextScenes: Scene[] = blocks.map((block) => {
+        const previous = scopedProject.scenes.find((scene) => !usedSceneIds.has(scene.id) && scene.title === block.title && scene.content === block.content);
+        if (previous) usedSceneIds.add(previous.id);
+        let sourceStart = block.sourceStart;
+        let sourceEnd = block.sourceEnd;
+        if (sourceStart === undefined) {
+          const found = sourceStory.indexOf(block.content, sourceCursor);
+          if (found >= 0) { sourceStart = found; sourceEnd = found + block.content.length; sourceCursor = sourceEnd; }
+        }
+        const characterIds = block.entities.characters.map((name) => shared.characters.find((item) => item.name === name)?.id).filter((id): id is string => Boolean(id));
+        const locationIds = block.entities.locations.map((name) => shared.locations.find((item) => item.name === name)?.id).filter((id): id is string => Boolean(id));
+        const propIds = block.entities.props.map((name) => shared.props.find((item) => item.name === name)?.id).filter((id): id is string => Boolean(id));
+        return { id: previous?.id || createId("scene"), chapterId, title: block.title, content: block.content, summary: block.summary,
+          sourceContentHash: analyzedSourceHash, sourceStart, sourceEnd, characterIds, locationId: locationIds[0], locationIds, propIds,
+          storyboardIds: previous?.storyboardIds || [], createdAt: previous?.createdAt || timestamp, updatedAt: timestamp };
       });
-      notify(completionNotice.text, completionNotice.tone);
+      const oldSceneIds = new Set(scopedProject.scenes.map((scene) => scene.id));
+      // Keep historical scene records when old boards/plans still refer to them.
+      // They remain explicitly stale, instead of guessing a replacement by index.
+      const retainedIds = new Set([
+        ...scopedProject.storyboards.flatMap((board) => [board.sceneId, ...(board.sourceSceneIds || [])]),
+        ...scopedProject.sequencePlans.flatMap((plan) => plan.segments.flatMap((segment) => segment.sourceSceneIds || [])),
+      ]);
+      const retainedScenes = scopedProject.scenes.filter((scene) => !usedSceneIds.has(scene.id) && retainedIds.has(scene.id)).map((scene) => ({ ...scene, chapterId, sourceStale: true }));
+      setState((current) => applyProjectUpdateForRequest(current, requestProjectId, (project) => {
+        if (protectedSignature(project) !== initialSignature) return project;
+        const replaced = replaceProjectSourceDocument(project, { ...nextSource, contentHash: analyzedSourceHash, updatedAt: timestamp }).project;
+        return { ...replaced, ...mergeRecords(project),
+          scenes: [...project.scenes.filter((scene) => !oldSceneIds.has(scene.id)), ...nextScenes, ...retainedScenes],
+        };
+      }, timestamp));
+      if (activeChapter(stateRef.current.project)?.id === chapterId) {
+        storyImportOperationRef.current += 1;
+        storyDraftRef.current = { storyInput: sourceStory, storyName: sourceStoryName };
+        storyDraftOwnerRef.current = requestProjectId;
+        setStoryInputInternal(sourceStory); setStoryNameInternal(sourceStoryName);
+        const first = nextScenes[0];
+        if (first) { setActiveSceneId(first.id); setSelectedDirectorSceneIds([first.id]); }
+      }
+      const completion = buildStoryAnalysisCompletionNotice({ requestedAi: true, sceneCount: nextScenes.length,
+        characterCount: names.characters.length, locationCount: names.locations.length,
+        incompleteKinds: incompleteEnrichmentKinds, analysisError: null, enrichmentError });
+      notify(`“${sourceStoryName}”${completion.text} 共用资料已复用，其他章节保持不变。`, completion.tone);
     } catch (error) {
       if (isAbortError(error) || !isAnalysisCurrent()) return;
       reportRuntimeError("story-analysis", error);
-      notify(`AI 全文解析失败，原项目未改动：${error instanceof Error ? error.message : String(error)}`, "error");
+      notify(`本章解析失败，原有内容未改动：${error instanceof Error ? error.message : String(error)}`, "error");
     } finally {
       if (storyAnalysisOperationRef.current === requestOperation) {
-        storyAnalysisAbortRef.current = null;
-        storyAnalysisRequestIdentityRef.current = "";
+        storyAnalysisAbortRef.current = null; storyAnalysisRequestIdentityRef.current = "";
         if (requestEpoch === workspaceEpochRef.current) setBusy(false);
       }
     }
   };
 
-  const handleImportStoryFile = async (
-    event: ChangeEvent<HTMLInputElement>,
-  ) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    // Release the picker immediately; an older completion must not clear a
-    // newer selection or retain a stale event target after project navigation.
-    event.target.value = "";
-    const requestOperation = ++storyImportOperationRef.current;
-    const requestProjectId = stateRef.current.project.id;
-    const requestEpoch = workspaceEpochRef.current;
-    const requestDraft = storyDraftIdentity(storyDraftRef.current);
-    const requestSource = JSON.stringify(stateRef.current.project.sourceDocuments);
-    const isImportCurrent = () => requestOperation === storyImportOperationRef.current
-      && requestProjectId === stateRef.current.project.id
-      && requestProjectId === storyDraftOwnerRef.current
-      && requestEpoch === workspaceEpochRef.current
-      && requestDraft === storyDraftIdentity(storyDraftRef.current)
-      && requestSource === JSON.stringify(stateRef.current.project.sourceDocuments);
-    try {
-      const importedText = await readFileAsText(file);
-      if (!isImportCurrent()) return;
-      const resolvedText = await resolveSourceIntegrityForAction(importedText, "导入剧情", isImportCurrent);
-      if (!isImportCurrent() || resolvedText === undefined) return;
-      invalidateSequenceEstimate();
-      const importedName = file.name.replace(/\.[^.]+$/, "") || "剧情原文";
-      const sourceChanged = persistPrimarySourceDocument(resolvedText, importedName);
-      notify(`已导入 ${file.name}${sourceChanged ? "；旧场景、总提示词和分段计划已失效" : ""}，点击“解析并补全”继续。`);
-    } catch (error) {
-      if (!isImportCurrent()) return;
-      notify(error instanceof Error ? error.message : "导入文本失败", "error");
-    }
-  };
 
   const buildStoryboard = async (
     override?: StoryboardGenerationOverride,
@@ -6489,6 +6329,7 @@ export default function App() {
       return undefined;
     }
     const requestProjectId = state.project.id;
+    const requestChapterId = activeChapter(state.project)?.id;
     // Capture the replacement target before any AI work. Even before the
     // first Chinese checkpoint, a user edit or deletion must win over a
     // late response from this request.
@@ -6539,9 +6380,9 @@ export default function App() {
     // Check stateRef as well as render refs: a draft/asset update can land in
     // the same event loop turn as a model response, before React rerenders.
     const currentRequestSourceIdentity = () => storyboardRequestSourceIdentity({
-      project: stateRef.current.project,
-      story: storyDraftRef.current.storyInput,
-      title: storyDraftRef.current.storyName,
+      project: chapterScopeProject(stateRef.current.project, requestChapterId),
+      story: readProjectStoryDraft(chapterScopeProject(stateRef.current.project, requestChapterId)).storyInput,
+      title: readProjectStoryDraft(chapterScopeProject(stateRef.current.project, requestChapterId)).storyName,
       scenes: sourceSceneIds.map((id) => stateRef.current.project.scenes.find((scene) => scene.id === id))
         .filter((scene): scene is Scene => Boolean(scene)),
       selectedAssetIds: requestReferenceIds, extraRequirement,
@@ -6669,7 +6510,7 @@ export default function App() {
           : masterBoardForSegment?.sourceContentHash
             || sourcePlanForGeneration?.sourceContentHash
             || sourceContentHash(
-              stateRef.current.project.sourceDocuments[0]?.content
+              activeChapter(stateRef.current.project)?.content
                 || sceneForGeneration.content,
             ),
       });
@@ -7039,6 +6880,8 @@ export default function App() {
       );
       const t = Date.now();
       const board: Storyboard = {
+        chapterId: requestChapterId,
+        sourceStale: false,
         id: existingSegmentBoardId || createId("storyboard"),
         sceneId: sourceSceneIds[0] || sceneForGeneration.id,
         sourceSceneIds,
@@ -7112,9 +6955,7 @@ export default function App() {
           modelRuleSetId: boardRuleSetId,
           converterPresetId: matchedConverter.id,
           stylePresetId: boardStyle.id,
-          sourceDocumentIds: semanticContext ? [] : state.project.sourceDocuments.map(
-            (item) => item.id,
-          ),
+          sourceDocumentIds: requestChapterId ? [requestChapterId] : [],
           referenceAssetIds: usedAssetIds,
           generatedAt: t,
           mode: canonicalMasterSlice
@@ -7325,7 +7166,7 @@ export default function App() {
               throw error;
             }
             chineseCheckpoint = structuredClone(qualified);
-            setActiveStoryboardId(qualified.id);
+            if (activeChapter(stateRef.current.project)?.id === requestChapterId) setActiveStoryboardId(qualified.id);
             await saveStateAsync(stateRef.current);
             if (isGenerationRequestCurrent()) notify("中文提示词已保存，正在生成英文；英文失败可单独重试。");
           },
@@ -7375,11 +7216,17 @@ export default function App() {
         return undefined;
       }
 
-      if (!segmentForGeneration && matchedConverter.id !== converterId)
-        setConverterId(matchedConverter.id);
-      setActiveStoryboardId(complete.id);
-      if (segmentForGeneration || override?.keepDirector) setView("director");
-      if (!segmentForGeneration && !override?.keepDirector) setView("storyboard");
+      if (activeChapter(stateRef.current.project)?.id === requestChapterId) {
+        if (!segmentForGeneration && matchedConverter.id !== converterId) setConverterId(matchedConverter.id);
+        setActiveStoryboardId(complete.id);
+        if (segmentForGeneration || override?.keepDirector) setView("director");
+        if (!segmentForGeneration && !override?.keepDirector) setView("storyboard");
+      } else {
+        setBackgroundState((current) => ({ ...current, project: withChapterWorkspace(current.project, {
+          directorControls: { ...chapterWorkspace(current.project, requestChapterId).directorControls, activeStoryboardId: complete.id,
+            ...(segmentForGeneration ? { activeSegmentId: segmentForGeneration.id } : {}) },
+        }, requestChapterId) }));
+      }
       if (complete.officialPromptEnError) {
         reportRuntimeError("storyboard-translate", complete.officialPromptEnError);
         notify(`中文已完成并保存；英文待重试：${complete.officialPromptEnError}。可点击“仅重试英文”继续。`, "error");
@@ -7879,6 +7726,7 @@ export default function App() {
             converterPresetId: refreshedOfficialBoard.converterPresetId,
             targetModelId: refreshedOfficialBoard.targetModelId,
             targetOutput: refreshedOfficialBoard.targetOutput,
+            seedance25Output: undefined,
             officialPromptZh: refreshedChinesePrompt,
             officialPromptSource: refreshedOfficialBoard.officialPromptSource,
             h3IdentityBindings: refreshedOfficialBoard.h3IdentityBindings,
@@ -8388,8 +8236,9 @@ export default function App() {
           continue;
         }
         const liveCount = livePlan.segments.length;
-        setActiveSegmentId(liveSegment.id);
-        setDirectorDurationForSegment(liveSegment);
+        if (activeChapter(stateRef.current.project)?.id === plan.chapterId) {
+          setActiveSegmentId(liveSegment.id); setDirectorDurationForSegment(liveSegment);
+        }
         lastProcessedSegmentId = liveSegment.id;
         if (needsHandoffRepair || livePromptAction.action === "refresh-official" || livePromptAction.action === "translate-english") {
           setSequenceBatchProgress({
@@ -8427,7 +8276,7 @@ export default function App() {
           }
           continue;
         }
-        setActiveStoryboardId(liveSegment.storyboardId || "");
+        if (activeChapter(stateRef.current.project)?.id === plan.chapterId) setActiveStoryboardId(liveSegment.storyboardId || "");
         if (!updateSequenceSegmentRuntimeStatus(
           requestedIdentity,
           segmentId,
@@ -8503,7 +8352,7 @@ export default function App() {
         const lastProcessedSegment = stateRef.current.project.sequencePlans
           .find((candidate) => candidate.id === plan.id)
           ?.segments.find((candidate) => candidate.id === lastProcessedSegmentId);
-        if (lastProcessedSegment) {
+        if (lastProcessedSegment && activeChapter(stateRef.current.project)?.id === plan.chapterId) {
           setActiveStoryboardId(lastProcessedSegment.storyboardId || "");
         }
         setSequenceBatchProgress({
@@ -8742,6 +8591,8 @@ export default function App() {
     await videoWorkbenchController.cancel();
   };
   const openVideoDirector = (input: Omit<VideoDirectorLaunchRequest, "id"> = {}) => {
+    const chapterId = chapterIdForVideoLaunch(stateRef.current.project, input);
+    if (chapterId) selectChapter(chapterId);
     setVideoLaunchRequest({ ...input, id: createId("video_launch") });
     setView("video");
   };
@@ -8751,6 +8602,7 @@ export default function App() {
       notify("原提示词已不存在；成片来源详情仍保留当时的提示词快照。", "error");
       return;
     }
+    if (destination.chapterId) selectChapter(destination.chapterId);
     setProductionMode(destination.mode);
     if (destination.mode === "sequence") {
       if (destination.planId !== activePlanIdRef.current) {
@@ -8835,7 +8687,6 @@ export default function App() {
     handleRestoreStoryPreparation,
     handleAnalyzeStory,
     storyExpansionBusy,
-    handleImportStoryFile,
     directorWorkflow,
     setDirectorWorkflow: chooseWorkflow,
     selectedDirectorSceneIds,
@@ -9041,16 +8892,24 @@ export default function App() {
     }
   };
 
+  const chapterContext = { ...appContext, state: { ...state, project: editorProject } };
   const renderView = () => {
     switch (view) {
       case "story":
-        return <StoryView {...appContext} />;
+        return <StoryView {...chapterContext} />;
       case "director":
-        return <DirectorView {...appContext} />;
+        return <DirectorView {...chapterContext} />;
       case "video":
         return <VideoDirectorView key={state.project.id} project={state.project} settings={state.settings}
           onChangeExecution={(patch) => setState((current) => ({ ...current, settings: { ...current.settings, ...patch } }))}
           controller={videoController} launchRequest={videoLaunchRequest}
+          onChapterDraftChange={(projectId, chapterId, draft) => setBackgroundState((current) => {
+            const owner = current.project.id === projectId ? current.project : current.projects.find((project) => project.id === projectId);
+            if (!owner || JSON.stringify(chapterWorkspace(owner, chapterId).videoDirector) === JSON.stringify(draft)) return current;
+            const updated = withChapterWorkspace(owner, { videoDirector: draft }, chapterId);
+            return { ...current, project: current.project.id === projectId ? updated : current.project,
+              projects: current.projects.map((project) => project.id === projectId ? updated : project) };
+          })}
           tailFrameTools={{ available: Boolean(videoWorkbenchController.status?.available), busy: videoWorkbenchController.busy || Boolean(tailFrameAiProgress), progress: tailFrameAiProgress || videoWorkbenchController.progress, extract: extractPreviousVideoTail, selectFrame: selectPreviousVideoFrame, cancel: cancelPreviousVideoTail }}
           onOpenSettings={() => { setOpenVideoSettings(true); setView("settings"); }}
           onOpenPrompt={openPromptSource}
@@ -9058,7 +8917,7 @@ export default function App() {
           onOpenVideoAssets={() => { setVideoAssetStoryboardFilter(""); setAssetLibrarySection("video"); setView("assets"); }}
           onOpenJobs={() => setView("jobs")} />;
       case "storyboard":
-        return <StoryboardView {...appContext} />;
+        return <StoryboardView {...chapterContext} />;
       case "image":
         return <ImageWorkbenchView {...appContext} />;
       case "video-workbench":
@@ -9290,6 +9149,24 @@ export default function App() {
             </Button>
           </div>
         </header>
+        {['story', 'director', 'video', 'storyboard'].includes(view) && <ChapterManager project={state.project}
+          onSelect={selectChapter}
+          onCreate={() => changeChapterProject((project) => addChapter(project))}
+          onImport={(pieces) => { changeChapterProject((project) => appendChapters(project, pieces)); notify(`已导入 ${pieces.length} 个章节，请选择章节解析。`); }}
+          onArchive={(id, archived) => changeChapterProject((project) => archiveChapter(project, id, archived))}
+          onRename={(id, name) => {
+            changeChapterProject((project) => ({ ...project,
+              sourceDocuments: project.sourceDocuments.map((chapter) => chapter.id === id ? { ...chapter, name, updatedAt: Date.now() } : chapter),
+              chapterWorkspaces: { ...project.chapterWorkspaces, [id]: { ...chapterWorkspace(project, id),
+                ...(chapterWorkspace(project, id).storyDraft ? { storyDraft: { ...chapterWorkspace(project, id).storyDraft!, name } } : {}) } },
+              ...(activeChapter(project)?.id === id && project.storyDraft ? { storyDraft: { ...project.storyDraft, name } } : {}),
+            }));
+            if (activeChapter(stateRef.current.project)?.id === id) {
+              storyDraftRef.current = { ...storyDraftRef.current, storyName: name };
+              setStoryNameInternal(name);
+            }
+          }}
+          onReorder={(ids) => changeChapterProject((project) => reorderChapters(project, ids))} />}
         <div className={`workspace view-${view}`}>{renderView()}</div>
       </main>
       {updateLogOpen && (
@@ -9921,7 +9798,6 @@ interface AppContext {
   handleRestoreStoryPreparation: () => void;
   handleAnalyzeStory: () => Promise<void>;
   storyExpansionBusy: boolean;
-  handleImportStoryFile: (event: ChangeEvent<HTMLInputElement>) => Promise<void>;
   directorWorkflow: Workflow;
   setDirectorWorkflow: (workflow: Workflow) => void;
   selectedDirectorSceneIds: string[];
@@ -10231,7 +10107,6 @@ function StoryView(ctx: AppContext) {
     handleRestoreStoryPreparation,
     handleAnalyzeStory,
     storyExpansionBusy,
-    handleImportStoryFile,
     busy,
     updateProject,
     notify,
@@ -10390,16 +10265,7 @@ function StoryView(ctx: AppContext) {
                 <strong>原文输入</strong>
               </div>
               <div className="row">
-                <label className="btn small ghost">
-                  <Upload size={14} />
-                  导入 TXT/MD
-                  <input
-                    className="file-input"
-                    type="file"
-                    accept=".txt,.md,.markdown"
-                    onChange={handleImportStoryFile}
-                  />
-                </label>
+
                 <Button
                   small
                   icon={<Save size={14} />}
@@ -10417,7 +10283,7 @@ function StoryView(ctx: AppContext) {
                 <Button small variant="ghost" onClick={openStoryPreparationReview}>查看优化结果</Button>
               </div>
             )}
-            <Field label="文档名称">
+            <Field label="章节名称">
               <input
                 value={storyName}
                 onChange={(event) => setStoryName(event.target.value)}
@@ -12193,6 +12059,146 @@ function DirectorView(ctx: AppContext) {
     && hasCurrentOfficialH3EnglishPrompt(directorResultStoryboard, officialPromptContext)
       ? directorResultStoryboard.officialPromptEn || ""
       : "";
+  const [directorPromptFormat, setDirectorPromptFormat] = useState<"h3" | "seedance">("h3");
+  const [seedancePromptBusy, setSeedancePromptBusy] = useState(false);
+  const [seedancePromptError, setSeedancePromptError] = useState("");
+  const seedancePromptInput = useMemo(() => {
+    if (!directorResultStoryboard || !officialPromptContext) return undefined;
+    const references = buildOfficialH3References(
+      directorResultStoryboard,
+      officialPromptContext.assets,
+      officialPromptContext.characters,
+    );
+    const subjectDefinitions = buildOfficialH3SubjectDefinitions(
+      directorResultStoryboard,
+      officialPromptContext,
+      references,
+    );
+    return {
+      canonicalPrompt: directorResultStoryboard.promptPlan?.canonicalPrompt || directorResultStoryboard.finalPrompt,
+      durationSec: directorResultStoryboard.promptPlan?.durationSec || directorResultStoryboard.durationSec,
+      aspectRatio: directorResultStoryboard.promptPlan?.aspectRatio || directorResultStoryboard.aspectRatio,
+      resolution: directorResultStoryboard.promptPlan?.resolution || directorResultStoryboard.resolution,
+      audioMode: directorResultStoryboard.promptPlan?.audioMode || directorResultStoryboard.audioMode,
+      references,
+      subjectDefinitions,
+      detailMode: "director",
+      targetId: "seedance-2.5",
+      constraints: directorResultStoryboard.promptPlan?.constraints || [
+        directorResultStoryboard.globalLock,
+        directorResultStoryboard.extraRequirement ? `制作要求：${directorResultStoryboard.extraRequirement}` : "",
+      ].filter(Boolean),
+    };
+  }, [directorResultStoryboard, officialPromptContext]);
+  const seedancePromptFingerprint = seedancePromptInput
+    ? getOfficialSeedanceSourceFingerprint(seedancePromptInput)
+    : "";
+  const seedanceOutput = directorResultStoryboard?.seedance25Output;
+  const seedanceOutputFresh = Boolean(
+    seedanceOutput
+    && seedancePromptFingerprint
+    && seedanceOutput.sourceFingerprint === seedancePromptFingerprint,
+  );
+  const translateSeedancePrompt = async (sourcePrompt: string): Promise<string> => {
+    const textApi = state.settings.textApi;
+    return translateSeedancePromptToEnglish({
+      sourcePrompt,
+      request: (system, user) => requestTextModel(textApi, system, user, undefined, { disableThinking: true }),
+    });
+  };
+  const saveSeedanceOutput = (
+    storyboardId: string,
+    output: Seedance25Output,
+    expectedSource?: { canonicalPrompt: string; durationSec: number },
+  ): void => {
+    setState((current) => {
+      const liveBoard = current.project.storyboards.find((board) => board.id === storyboardId);
+      if (!liveBoard) return current;
+      if (expectedSource) {
+        const liveCanonicalPrompt = liveBoard.promptPlan?.canonicalPrompt || liveBoard.finalPrompt;
+        const liveDurationSec = liveBoard.promptPlan?.durationSec || liveBoard.durationSec;
+        if (liveCanonicalPrompt !== expectedSource.canonicalPrompt || liveDurationSec !== expectedSource.durationSec) return current;
+      }
+      return {
+        ...current,
+        project: {
+          ...current.project,
+          storyboards: current.project.storyboards.map((board) => board.id === storyboardId
+            ? { ...board, seedance25Output: output, updatedAt: Date.now() }
+            : board),
+          updatedAt: Date.now(),
+        },
+      };
+    });
+  };
+  const generateSeedanceOfficialPrompt = async (): Promise<void> => {
+    if (!directorResultStoryboard || !seedancePromptInput || !validOfficialPrompt || seedancePromptBusy) return;
+    setSeedancePromptBusy(true);
+    setSeedancePromptError("");
+    try {
+      const compiled = compileOfficialSeedancePrompt(seedancePromptInput);
+      let promptEn = "";
+      let englishError = "";
+      try {
+        promptEn = await translateSeedancePrompt(compiled.promptZh);
+      } catch (error) {
+        englishError = error instanceof Error ? error.message : "英文版 Seedance 提示词生成失败。";
+      }
+      const output: Seedance25Output = {
+        targetId: "seedance-2.5",
+        promptZh: compiled.promptZh,
+        ...(promptEn ? { promptEn } : {}),
+        durationSec: compiled.durationSec,
+        sourceFingerprint: compiled.sourceFingerprint,
+        referenceManifest: compiled.referenceManifest.assets.map((asset) => ({ ...asset })),
+        warnings: compiled.warnings,
+        generatedAt: Date.now(),
+        englishSourceFingerprint: promptEn ? compiled.sourceFingerprint : undefined,
+        englishError,
+      };
+      saveSeedanceOutput(directorResultStoryboard.id, output, {
+        canonicalPrompt: seedancePromptInput.canonicalPrompt,
+        durationSec: seedancePromptInput.durationSec,
+      });
+      setSeedancePromptError(englishError);
+      notify(englishError ? "Seedance 中文稿已生成，英文版待重试。" : "Seedance 2.5 中英文官方提示词已生成。", englishError ? "error" : undefined);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Seedance 2.5 官方提示词生成失败。";
+      setSeedancePromptError(message);
+      notify(message, "error");
+    } finally {
+      setSeedancePromptBusy(false);
+    }
+  };
+  const retrySeedanceEnglish = async (): Promise<void> => {
+    if (!directorResultStoryboard || !seedanceOutputFresh || !seedanceOutput?.promptZh || seedancePromptBusy) return;
+    setSeedancePromptBusy(true);
+    setSeedancePromptError("");
+    try {
+      const promptEn = await translateSeedancePrompt(seedanceOutput.promptZh);
+      saveSeedanceOutput(directorResultStoryboard.id, {
+        ...seedanceOutput,
+        promptEn,
+        englishSourceFingerprint: seedanceOutput.sourceFingerprint,
+        englishError: "",
+        generatedAt: Date.now(),
+      }, seedancePromptInput ? {
+        canonicalPrompt: seedancePromptInput.canonicalPrompt,
+        durationSec: seedancePromptInput.durationSec,
+      } : undefined);
+      notify("Seedance 英文提示词已生成。" );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Seedance 英文提示词生成失败。";
+      setSeedancePromptError(message);
+      notify(message, "error");
+    } finally {
+      setSeedancePromptBusy(false);
+    }
+  };
+  useEffect(() => {
+    setDirectorPromptFormat("h3");
+    setSeedancePromptError("");
+  }, [directorResultStoryboard?.id]);
   useEffect(() => {
     if (!validEnglishPrompt) setPromptLanguage("zh");
   }, [directorResultStoryboard?.id, validEnglishPrompt]);
@@ -12501,15 +12507,19 @@ function DirectorView(ctx: AppContext) {
     }
     const imagePromptTrace = {
       imagePromptRuleSetId: imagePromptSelection.ruleSet.id,
+      imagePromptRuleSetName: imagePromptSelection.ruleSet.name,
       imagePromptRuleSetVersion: imagePromptSelection.ruleSet.version,
       imagePromptPresetId: imagePromptSelection.preset.id,
+      imagePromptPresetName: imagePromptSelection.preset.name,
       imagePromptPresetVersion: imagePromptSelection.preset.version,
       imagePromptFormat: imagePromptSelection.ruleSet.format,
     } satisfies Pick<
       StoryboardImageGenerationRequest,
       | "imagePromptRuleSetId"
+      | "imagePromptRuleSetName"
       | "imagePromptRuleSetVersion"
       | "imagePromptPresetId"
+      | "imagePromptPresetName"
       | "imagePromptPresetVersion"
       | "imagePromptFormat"
     >;
@@ -14046,7 +14056,7 @@ function DirectorView(ctx: AppContext) {
                 <div className="card-title" style={{ marginBottom: 0 }}>
                   <div><h2>{directorPane === "result" ? "生成结果" : "参考图"}</h2></div>
                 </div>
-                {directorPane === "result" && directorResultStoryboard && validOfficialPrompt && (
+                {directorPane === "result" && directorPromptFormat === "h3" && directorResultStoryboard && validOfficialPrompt && (
                   <div className="director-result-bridge">
                     <span title="仅此操作会调用 AI 修复当前段对白和排时，保留段长与原台词，自动保存旧版本；不生成视频。">
                       <Button small variant="ghost" icon={<RefreshCw size={13} />}
@@ -14121,7 +14131,7 @@ function DirectorView(ctx: AppContext) {
                     )}
                     <div className="card-title director-result-head" style={{ marginTop: 2 }}>
                       <div>
-                        <h2>MiniMax H3 官方格式</h2>
+                        <h2>{directorPromptFormat === "seedance" ? "Seedance 2.5 官方格式" : "MiniMax H3 官方格式"}</h2>
                         <p>
                         {directorResultStoryboard.durationSec} 秒 ·{" "}
                           {directorResultStoryboard.shots.length} 镜 ·{" "}
@@ -14133,7 +14143,11 @@ function DirectorView(ctx: AppContext) {
                         </p>
                       </div>
                       <div className="row result-language-tools">
-                        <div
+                        <div className="segmented" role="group" aria-label="官方提示词格式">
+                          <button type="button" aria-pressed={directorPromptFormat === "h3"} className={`segment ${directorPromptFormat === "h3" ? "active" : ""}`} onClick={() => { setDirectorPromptFormat("h3"); if (!validEnglishPrompt) setPromptLanguage("zh"); }}>MiniMax H3</button>
+                          <button type="button" aria-pressed={directorPromptFormat === "seedance"} className={`segment ${directorPromptFormat === "seedance" ? "active violet" : ""}`} onClick={() => { setDirectorPromptFormat("seedance"); if (!seedanceOutput?.promptEn) setPromptLanguage("zh"); }}>Seedance 2.5</button>
+                        </div>
+                        {directorPromptFormat === "h3" && <div
                           className="result-language-switch"
                           role="group"
                           aria-label="提示词语言"
@@ -14156,15 +14170,42 @@ function DirectorView(ctx: AppContext) {
                           >
                             English
                           </button>
-                        </div>
+                        </div>}
+                        {directorPromptFormat === "seedance" && <div
+                          className="result-language-switch"
+                          role="group"
+                          aria-label="Seedance 提示词语言"
+                        >
+                          <button
+                            type="button"
+                            aria-pressed={promptLanguage === "zh"}
+                            className={`result-language-card zh ${promptLanguage === "zh" ? "active" : ""}`}
+                            onClick={() => setPromptLanguage("zh")}
+                          >
+                            中文
+                          </button>
+                          <button
+                            type="button"
+                            aria-pressed={promptLanguage === "en"}
+                            className={`result-language-card en ${promptLanguage === "en" ? "active" : ""}`}
+                            disabled={!seedanceOutputFresh || !seedanceOutput?.promptEn}
+                            title={seedanceOutput?.promptEn ? "查看英文 Seedance 描述；对白保持剧情指定语言" : "生成 Seedance 官方稿后才可查看英文版。"}
+                            onClick={() => setPromptLanguage("en")}
+                          >
+                            English
+                          </button>
+                        </div>}
                         <Button
                           small
                           icon={<Copy size={14} />}
+                          disabled={directorPromptFormat === "seedance" && (!seedanceOutputFresh || !seedanceOutput?.promptZh)}
                           onClick={() =>
                             handleCopyPrompt(
-                              promptLanguage === "en" && validEnglishPrompt
-                                ? validEnglishPrompt
-                                : validOfficialPrompt,
+                              directorPromptFormat === "seedance"
+                                ? promptLanguage === "en" && seedanceOutputFresh && seedanceOutput?.promptEn
+                                  ? seedanceOutput.promptEn
+                                  : seedanceOutput?.promptZh || ""
+                                : promptLanguage === "en" && validEnglishPrompt ? validEnglishPrompt : validOfficialPrompt,
                             )
                           }
                         >
@@ -14172,12 +14213,34 @@ function DirectorView(ctx: AppContext) {
                         </Button>
                       </div>
                     </div>
-                    <div className="faint small-text director-result-language-note" title="English只改变画面等描述语言；对白保留剧情原语言，只有剧情明确要求时才使用英文对白。">English翻译画面描述，对白保留剧情指定语言。</div>
+                    {directorPromptFormat === "h3" ? <div className="faint small-text director-result-language-note" title="English只改变画面等描述语言；对白保留剧情原语言，只有剧情明确要求时才使用英文对白。">English翻译画面描述，对白保留剧情指定语言。</div> : (
+                      <div className="faint small-text director-result-language-note" title="Seedance 中文和英文稿独立保存；英文只翻译画面、动作和声音描述，对白保留剧情原语言；时长沿用导演台设置，无有效值时按30秒。">Seedance 中英文稿独立保存；英文只翻译描述，对白保留剧情原语言；时长沿用导演台设置，无有效值时按30秒。</div>
+                    )}
+                    {directorPromptFormat === "seedance" && seedanceOutputFresh && seedanceOutput?.englishError && (
+                      <div className="sequence-result-status" role="status">
+                        <span>中文稿已保存，英文版待重试：{formatUserFacingError(seedanceOutput.englishError)}</span>
+                        <Button small variant="ghost" disabled={seedancePromptBusy} onClick={() => void retrySeedanceEnglish()}>{seedancePromptBusy ? "重试中…" : "仅重试英文"}</Button>
+                      </div>
+                    )}
+                    {directorPromptFormat === "seedance" && seedanceOutputFresh && seedanceOutput?.warnings.length ? (
+                      <div className="sequence-result-status" role="status">
+                        <span>Seedance 生成提醒：{seedanceOutput.warnings.join("；")}</span>
+                      </div>
+                    ) : null}
                     <div className="prompt-copy director-result-copy h3-prompt-copy" role="region" aria-label="视频提示词正文" tabIndex={0}>
-                      <H3PromptDisplay
+                      {directorPromptFormat === "h3" ? <H3PromptDisplay
                         language={promptLanguage === "en" && validEnglishPrompt ? "en" : "zh"}
                         prompt={promptLanguage === "en" && validEnglishPrompt ? validEnglishPrompt : validOfficialPrompt}
-                      />
+                      /> : seedanceOutputFresh && seedanceOutput ? (
+                        <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{promptLanguage === "en" && seedanceOutput.promptEn ? seedanceOutput.promptEn : seedanceOutput.promptZh}</pre>
+                      ) : (
+                        <div className="prompt-validation" style={{ margin: 0 }}>
+                          <strong>{seedanceOutput ? "Seedance 官方稿已过期" : "Seedance 2.5 官方稿尚未生成"}</strong>
+                          <div style={{ marginTop: 6 }}>{seedanceOutput ? "剧情、分镜、参考素材或时长已变化，请重新生成中英文稿。" : "点击后生成中文和英文两版；不会重复生成默认的 MiniMax H3。"}</div>
+                          {seedancePromptError && <div className="sequence-segment-error-text" style={{ marginTop: 6 }}>{formatUserFacingError(seedancePromptError)}</div>}
+                          <Button small variant="primary" disabled={seedancePromptBusy} onClick={() => void generateSeedanceOfficialPrompt()}>{seedancePromptBusy ? "生成中…" : "生成 Seedance 2.5 官方稿"}</Button>
+                        </div>
+                      )}
                     </div>
                     <div className="row director-result-actions">
                       <Button
@@ -14626,6 +14689,7 @@ function StoryboardView(ctx: AppContext) {
       creativeDirection: normalizeVideoCreativeDirection(revision.creativeDirection),
       targetModelId: revision.targetModelId,
       targetOutput: revision.targetOutput,
+      seedance25Output: revision.seedance25Output,
       shots: (revision.shots || []).map((shot) => ({ ...shot })),
       metadata: revision.metadata,
     }));
@@ -15144,6 +15208,7 @@ function StoryboardView(ctx: AppContext) {
         canonicalPrompt: board.finalPrompt,
         promptPlan: board.promptPlan,
         targetOutput: board.targetOutput,
+        seedance25Output: board.seedance25Output,
         firstFrameAssetId: board.firstFrameAssetId,
         lastFrameAssetId: board.lastFrameAssetId,
         audioLedger: board.audioLedger || [],
@@ -16814,10 +16879,12 @@ function ImageWorkbenchView(ctx: AppContext) {
     const requestedDossierInputs = dossierAutofillInputsRef.current;
     const useStoryForDossier = assetKind !== "character" || dossierUsesStory(requestedDossier);
     const requestForm = assetKind === "character" ? characterDossierFormForRequest(assetForm, requestedDossier) : assetForm;
-    const sourceStory = (useStoryForDossier ? state.project.sourceDocuments : [])
-      .map((document) => document.content)
-      .filter(Boolean)
-      .join("\n\n");
+    const contextEntities = assetKind === "character" ? state.project.characters : assetKind === "location" ? state.project.locations : assetKind === "prop" ? state.project.props : [];
+    const matchingContextEntities = contextEntities.filter((item) => item.name.trim() === (assetForm.name || "").trim());
+    const contextEntityId = selectedEntityId || (matchingContextEntities.length === 1 ? matchingContextEntities[0].id : "");
+    const sourceStory = !useStoryForDossier ? "" : assetKind === "character" || assetKind === "location" || assetKind === "prop"
+      ? chapterContentForEntity(state.project, assetKind, contextEntityId)
+      : activeChapter(state.project)?.content || "";
     const ordinaryRequestedFields = missingImageAssetFormFields(assetKind, requestForm).filter((field) => assetKind !== "character"
       || canAutofillDossierField(requestForm, requestedDossier, field, { explicitFillEmpty: true }));
     const privateAutofillRequestedByMode = imageGenerationMode === "private"
@@ -16841,24 +16908,17 @@ function ImageWorkbenchView(ctx: AppContext) {
     const hasFormClue = fieldsForKind.some(([key]) => (
       key !== "style" && !missingFieldSet.has(key) && Boolean(requestForm[key]?.trim())
     ));
-    // Character equipment ownership depends on later returns/transfers as
-    // well as the opening acquisition. Keep the complete source in this
-    // existing completion request; other asset kinds retain their old budget.
+    // Shared dossiers use the relevant chapter, never all novel documents.
+    // Within that chapter preserve the full character context for ownership.
     const fullCharacterContext = assetKind === "character";
-    const autofillDocuments = fullCharacterContext
-      ? state.project.sourceDocuments : state.project.sourceDocuments.slice(0, 2);
-    const autofillScenes = fullCharacterContext
-      ? sourceStory.trim() ? [] : state.project.scenes
-      : state.project.scenes.slice(0, 16);
+    const autofillScenes = sourceStory.trim() ? [] : chapterScenes(state.project).filter((scene) => !contextEntityId
+      || (assetKind === "character" ? scene.characterIds.includes(contextEntityId) : assetKind === "location"
+        ? scene.locationId === contextEntityId || scene.locationIds?.includes(contextEntityId) : scene.propIds.includes(contextEntityId)));
     const projectContextParts = [
       state.project.description.trim()
         ? `项目说明：${state.project.description.trim()}`
         : "",
-      ...autofillDocuments.map((document) => (
-        document.content.trim()
-          ? `剧情文档《${document.name}》：\n${fullCharacterContext ? document.content.trim() : document.content.trim().slice(0, 6500)}`
-          : ""
-      )),
+      sourceStory.trim() ? `当前资料关联章节原文：\n${fullCharacterContext ? sourceStory : sourceStory.slice(0, 12000)}` : "",
       ...autofillScenes.map((scene) => {
         const sceneText = (fullCharacterContext ? scene.content || scene.summary : scene.summary || scene.content).trim();
         return sceneText ? `场景《${scene.title}》：${fullCharacterContext ? sceneText : sceneText.slice(0, 420)}` : "";
@@ -17637,8 +17697,10 @@ function ImageWorkbenchView(ctx: AppContext) {
     }
     const imagePromptTrace = {
       imagePromptRuleSetId: imagePromptSelection.ruleSet.id,
+      imagePromptRuleSetName: imagePromptSelection.ruleSet.name,
       imagePromptRuleSetVersion: imagePromptSelection.ruleSet.version,
       imagePromptPresetId: imagePromptSelection.preset.id,
+      imagePromptPresetName: imagePromptSelection.preset.name,
       imagePromptPresetVersion: imagePromptSelection.preset.version,
       imagePromptFormat: imagePromptSelection.ruleSet.format,
     };
@@ -18147,8 +18209,10 @@ function ImageWorkbenchView(ctx: AppContext) {
       ).map((request) => ({
         ...applyStoryboardImageOutputSize(request, requestedStoryboardOutputSize),
         imagePromptRuleSetId: imagePromptSelection.ruleSet.id,
+        imagePromptRuleSetName: imagePromptSelection.ruleSet.name,
         imagePromptRuleSetVersion: imagePromptSelection.ruleSet.version,
         imagePromptPresetId: imagePromptSelection.preset.id,
+        imagePromptPresetName: imagePromptSelection.preset.name,
         imagePromptPresetVersion: imagePromptSelection.preset.version,
         imagePromptFormat: imagePromptSelection.ruleSet.format,
       }));
@@ -18214,8 +18278,10 @@ function ImageWorkbenchView(ctx: AppContext) {
         referenceAssetIds: [...request.referenceAssetIds],
         primaryReferenceAssetIds: [...request.primaryReferenceAssetIds],
         imagePromptRuleSetId: request.imagePromptRuleSetId,
+        imagePromptRuleSetName: request.imagePromptRuleSetName,
         imagePromptRuleSetVersion: request.imagePromptRuleSetVersion,
         imagePromptPresetId: request.imagePromptPresetId,
+        imagePromptPresetName: request.imagePromptPresetName,
         imagePromptPresetVersion: request.imagePromptPresetVersion,
         imagePromptFormat: request.imagePromptFormat,
       }, createdAt + index, "queued"));
@@ -18343,8 +18409,10 @@ function ImageWorkbenchView(ctx: AppContext) {
             imageVariant: request.imageVariant,
             negativePrompt: requestNegativePrompt,
             imagePromptRuleSetId: request.imagePromptRuleSetId,
+            imagePromptRuleSetName: request.imagePromptRuleSetName,
             imagePromptRuleSetVersion: request.imagePromptRuleSetVersion,
             imagePromptPresetId: request.imagePromptPresetId,
+            imagePromptPresetName: request.imagePromptPresetName,
             imagePromptPresetVersion: request.imagePromptPresetVersion,
             imagePromptFormat: request.imagePromptFormat,
             mediaType: "image",
@@ -19260,6 +19328,13 @@ function AssetsView(ctx: AppContext) {
     notify,
   } = ctx;
   const [assetPage, setAssetPage] = useState(1);
+  const [chapterFilter, setChapterFilter] = useState("all");
+  useEffect(() => { setChapterFilter("all"); }, [state.project.id]);
+  const assetChapterLabel = (asset: ReferenceAsset) => {
+    const chapterId = chapterIdForAsset(state.project, asset);
+    const chapter = state.project.sourceDocuments.find((item) => item.id === chapterId);
+    return chapter ? `章节：${chapter.name}${chapter.archived ? "（已归档）" : ""}` : "项目共享 / 历史素材";
+  };
   const { assetLibrarySection, setAssetLibrarySection, openVideoDirector } = ctx;
   const [videoImageSelection, setVideoImageSelection] = useState<string[]>([]);
   const [uploadKind, setUploadKind] = useState<
@@ -19324,6 +19399,7 @@ function AssetsView(ctx: AppContext) {
     ? new Set(relatedVideoAssets(state.project, ctx.videoAssetStoryboardFilter).map((asset) => asset.id)) : undefined;
   const filtered: ReferenceAsset[] = state.project.assets.filter(
     (asset: ReferenceAsset) =>
+      (chapterFilter === "all" || (chapterIdForAsset(state.project, asset) || "shared") === chapterFilter) &&
       (assetLibrarySection === "image"
         ? ["image", "clay-render"].includes(assetLibraryMediaType(asset))
         : assetLibraryMediaType(asset) === assetLibrarySection) &&
@@ -19345,7 +19421,7 @@ function AssetsView(ctx: AppContext) {
   );
   const playingVideoAsset = assetLibrarySection === "video" && videoPreviewSelection
     ? visibleAssetPage.find((asset) => matchesVideoSelection(videoPreviewSelection, state.project.id, asset)) : undefined;
-  useEffect(() => { setVideoPreviewSelection(null); }, [assetLibrarySection, state.project.id, safeAssetPage, assetSearch, mediaFilter]);
+  useEffect(() => { setVideoPreviewSelection(null); }, [assetLibrarySection, state.project.id, safeAssetPage, assetSearch, mediaFilter, chapterFilter]);
   useEffect(() => {
     if (assetLibrarySection !== "video") return;
     const projectId = state.project.id;
@@ -19681,6 +19757,7 @@ function AssetsView(ctx: AppContext) {
       lastFrameAssetId: boundary === "last" ? asset.id : board.lastFrameAssetId,
       targetModelId: undefined,
       targetOutput: undefined,
+      seedance25Output: undefined,
       officialPromptZh: "",
       officialPromptEn: "",
       officialPromptSource: "",
@@ -19715,6 +19792,7 @@ function AssetsView(ctx: AppContext) {
       audioLedger: [...(board.audioLedger || []), cue],
       targetModelId: undefined,
       targetOutput: undefined,
+      seedance25Output: undefined,
       officialPromptZh: "",
       officialPromptEn: "",
       officialPromptSource: "",
@@ -19939,6 +20017,17 @@ function AssetsView(ctx: AppContext) {
               {assetLibrarySection === "video" && <option value="video">视频</option>}
               {assetLibrarySection === "audio" && <option value="audio">音频</option>}
             </select>
+            <select
+              value={chapterFilter}
+              onChange={(event) => { setChapterFilter(event.target.value); setAssetPage(1); }}
+              aria-label="资产章节筛选"
+            >
+              <option value="all">全项目 · 全部章节</option>
+              {state.project.sourceDocuments.map((chapter) => <option key={chapter.id} value={chapter.id}>
+                {chapter.name}{chapter.archived ? "（已归档）" : ""}
+              </option>)}
+              <option value="shared">项目共享 / 历史素材</option>
+            </select>
           </div>
           <div className="row assets-toolbar-actions">
             {assetLibrarySection === "image" && <Button small icon={<Film size={14} />} disabled={!videoReadySelection.length}
@@ -20012,6 +20101,7 @@ function AssetsView(ctx: AppContext) {
                       aria-label={`选中用于生成视频：${asset.name}`}
                       onChange={(event) => setVideoImageSelection((ids) => event.target.checked ? [...ids, asset.id] : ids.filter((id) => id !== asset.id))} />选中用于生成视频</label>)}
                 <strong title={asset.name}>{asset.name}</strong>
+                <small className="asset-chapter-label">{assetChapterLabel(asset)}</small>
                 <small>
                   {asset.mediaType || "image"} · {asset.referenceRole || asset.role} · {asset.tags.join("、")}
                 </small>
@@ -20120,8 +20210,8 @@ function AssetsView(ctx: AppContext) {
       ) : (
         <Card>
           <Empty
-            title="资产库为空"
-            description="去图像工作台生成角色、场景、物品或九宫格参考资产。"
+            title={chapterFilter === "all" ? "资产库为空" : "当前章节范围暂无素材"}
+            description={chapterFilter === "all" ? "去图像工作台生成角色、场景、物品或九宫格参考资产。" : "选择“全项目 · 全部章节”可查看其他章节和项目共享的素材。"}
           />
         </Card>
       )}
@@ -22125,7 +22215,9 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
         );
         trace = {
           imagePromptRuleSetId: selection.ruleSet.id, imagePromptRuleSetVersion: selection.ruleSet.version,
+          imagePromptRuleSetName: selection.ruleSet.name,
           imagePromptPresetId: selection.preset.id, imagePromptPresetVersion: selection.preset.version,
+          imagePromptPresetName: selection.preset.name,
           imagePromptFormat: selection.ruleSet.format,
         };
       }
@@ -22256,7 +22348,9 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
         sourceEntityKind: task.assetKind === "character" || task.assetKind === "location" || task.assetKind === "prop" ? task.assetKind : undefined,
         visualAnchor: sourceAsset?.visualAnchor, gridStates: sourceAsset?.gridStates?.map((entry) => ({ ...entry })),
         imagePromptRuleSetId: task.imagePromptRuleSetId, imagePromptRuleSetVersion: task.imagePromptRuleSetVersion,
+        imagePromptRuleSetName: task.imagePromptRuleSetName,
         imagePromptPresetId: task.imagePromptPresetId, imagePromptPresetVersion: task.imagePromptPresetVersion,
+        imagePromptPresetName: task.imagePromptPresetName,
         imagePromptFormat: task.imagePromptFormat, imageBackend: task.backend, width: actualImageSize?.width, height: actualImageSize?.height,
         imageRequestSize: { width: task.width, height: task.height, sizeOverride: task.sizeOverride },
         tags: [...new Set([...(sourceAsset?.tags || []), task.assetKind === "storyboard" ? "剧情分镜" : task.assetKind, "重新生图"])],
@@ -22323,6 +22417,16 @@ function GenerationTasksView(ctx: AppContext) {
     notify,
   } = ctx;
   const tasks = (state.project.generationTasks || []).filter(isVisibleGenerationTask);
+  const [chapterFilter, setChapterFilter] = useState("all");
+  useEffect(() => { setChapterFilter("all"); }, [state.project.id]);
+  const chapterFilteredTasks = tasks.filter((task) => (
+    chapterFilter === "all" || (chapterIdForTask(state.project, task) || "shared") === chapterFilter
+  ));
+  const taskChapterLabel = (task: (typeof tasks)[number]) => {
+    const chapterId = chapterIdForTask(state.project, task);
+    const chapter = state.project.sourceDocuments.find((item) => item.id === chapterId);
+    return chapter ? `章节：${chapter.name}${chapter.archived ? "（已归档）" : ""}` : "项目共享 / 历史任务";
+  };
   const taskErrorKnownSecrets = [
     state.settings.textApi.apiKey, state.settings.visionApi.apiKey,
     state.settings.imageApi.apiKey, state.settings.videoTaskApi.apiKey,
@@ -22334,9 +22438,9 @@ function GenerationTasksView(ctx: AppContext) {
     ...state.settings.apiCredentialBook.map((item) => item.apiKey),
   ];
   type TaskCategory = "image" | "video" | "autofill";
-  const imageTasks = tasks.filter(isImageGenerationTask);
-  const videoTasks = tasks.filter(isVideoGenerationTask);
-  const autofillTasks = tasks.filter(isAutofillGenerationTask);
+  const imageTasks = chapterFilteredTasks.filter(isImageGenerationTask);
+  const videoTasks = chapterFilteredTasks.filter(isVideoGenerationTask);
+  const autofillTasks = chapterFilteredTasks.filter(isAutofillGenerationTask);
   const [activeTaskCategory, setActiveTaskCategory] = useState<TaskCategory>(() => {
     const newestTask = tasks[0];
     if (newestTask && isImageGenerationTask(newestTask)) return "image";
@@ -22590,6 +22694,7 @@ function GenerationTasksView(ctx: AppContext) {
       || task.status === "succeeded" && live?.stage !== "downloading"
       || live?.trackingStopped);
     return <Fragment key={task.id}>
+      <div className="field-hint task-chapter-label">{taskChapterLabel(task)}</div>
       <VideoTaskCard
         task={task}
         assets={state.project.assets}
@@ -22705,6 +22810,8 @@ function GenerationTasksView(ctx: AppContext) {
   };
   const renderVideoTaskGroup = (group: (typeof videoTaskGroups)[number]) => {
     if (!group.batchId) return renderVideoTask(group.tasks[0]);
+    const hiddenTaskCount = tasks.filter((task) => isVideoGenerationTask(task) && task.batchId === group.batchId).length - group.tasks.length;
+    const partialBatchReason = hiddenTaskCount > 0 ? `章节筛选隐藏了本批次 ${hiddenTaskCount} 项；选择“全项目 · 全部章节”后可操作整个批次。` : "";
     const counts: Record<VideoTaskBatchStatus, number> = {
       pending: 0,
       submitting: 0,
@@ -22723,7 +22830,7 @@ function GenerationTasksView(ctx: AppContext) {
       projectId: state.project.id, batchId: group.batchId,
       getRuntime: (taskId) => runtimeById[taskId],
     });
-    const deleteDisabledReason = videoBatchDeletionBusyReason(group.batchId) || deletion.reason;
+    const deleteDisabledReason = partialBatchReason || videoBatchDeletionBusyReason(group.batchId) || deletion.reason;
     const stoppable = group.tasks.filter(videoTaskCanStopBeforeSubmit).length;
     const chainBatch = group.tasks.some((task) => task.videoJob?.snapshot.batchCompletionOrder);
     const retryableFailures = group.tasks.filter((task) => {
@@ -22762,6 +22869,7 @@ function GenerationTasksView(ctx: AppContext) {
           <div className="field-hint">
             共 {group.tasks.length} 项 · 中文 {zhCount} · 英文 {enCount} · {new Date(Math.max(...group.tasks.map((task) => task.createdAt))).toLocaleString()}
           </div>
+          <div className="field-hint task-chapter-label">{[...new Set(group.tasks.map(taskChapterLabel))].join(" · ")}</div>
           <div className="video-task-batch-counts" aria-label="批次任务状态汇总">
             <span>待提交 {Math.max(0, counts.pending - resultSelectionCount - cloudRecoveryCount)}</span>
             {resultSelectionCount > 0 && <span>待选择成片 {resultSelectionCount}</span>}
@@ -22784,8 +22892,8 @@ function GenerationTasksView(ctx: AppContext) {
             small
             variant="primary"
             icon={<Play size={13} />}
-            disabled={!ctx.videoController.resumeBatch || counts.succeeded === group.tasks.length || Boolean(resumingVideoBatchId || continuingVideoBatchId || stoppingVideoBatchId)}
-            title="继续未完成项；已成功成片不重做，可能重新收费的生成先确认"
+            disabled={Boolean(partialBatchReason) || !ctx.videoController.resumeBatch || counts.succeeded === group.tasks.length || Boolean(resumingVideoBatchId || continuingVideoBatchId || stoppingVideoBatchId)}
+            title={partialBatchReason || "继续未完成项；已成功成片不重做，可能重新收费的生成先确认"}
             onClick={() => void resumeVideoBatch(group.batchId!)}
           >
             {resumingVideoBatchId === group.batchId ? "正在检查…" : continuingVideoBatchId === group.batchId ? "正在继续…" : "继续批次"}
@@ -22806,8 +22914,8 @@ function GenerationTasksView(ctx: AppContext) {
           <Button
             small
             variant="ghost"
-            disabled={!stoppable || Boolean(stoppingVideoBatchId || resumingVideoBatchId || continuingVideoBatchId)}
-            title={stoppable ? `停止此批次中 ${stoppable} 个尚未提交的任务，不影响已提交任务` : "此批次没有可停止的未提交任务"}
+            disabled={Boolean(partialBatchReason) || !stoppable || Boolean(stoppingVideoBatchId || resumingVideoBatchId || continuingVideoBatchId)}
+            title={partialBatchReason || (stoppable ? `停止此批次中 ${stoppable} 个尚未提交的任务，不影响已提交任务` : "此批次没有可停止的未提交任务")}
             onClick={() => void stopVideoBatch(group.batchId!)}
           >
             {stoppingVideoBatchId === group.batchId ? "正在停止…" : `停止未提交项${stoppable ? `（${stoppable}）` : ""}`}
@@ -22837,7 +22945,7 @@ function GenerationTasksView(ctx: AppContext) {
         {videoBatchContinuation.requiresAiTail && <p>缺少衔接帧的项目会从准确的已成功上一段进行 AI 选帧，可能产生视觉接口费用；不会擅自换用其它视频。</p>}
         <ul>{videoBatchContinuation.items.map((item) => <li key={item.taskId}>{item.segmentIndex ? `第 ${item.segmentIndex} 段 · ` : ""}{item.name} — {item.willRegenerate ? "重新生成（可能再次收费）" : "继续尚未提交的生成"}</li>)}</ul>
         <div className="row wrap">
-          <Button small variant="primary" disabled={Boolean(continuingVideoBatchId)} onClick={() => void confirmVideoBatchContinuation()}>
+          <Button small variant="primary" disabled={Boolean(continuingVideoBatchId || partialBatchReason)} title={partialBatchReason || undefined} onClick={() => void confirmVideoBatchContinuation()}>
             {continuingVideoBatchId ? "正在准备续跑…" : `确认继续 ${videoBatchContinuation.items.length} 项（可能收费）`}
           </Button>
           <Button small variant="ghost" onClick={cancelVideoBatchContinuation}>{continuingVideoBatchId ? "取消续跑准备" : "暂不继续"}</Button>
@@ -22862,6 +22970,7 @@ function GenerationTasksView(ctx: AppContext) {
       ? state.project.assets.find((asset) => asset.id === task.resultAssetId)
       : undefined;
     const previewUrl = resultAsset ? assetPreviewUrl(resultAsset) : task.resultUrl || "";
+    const promptConfig = imageTaskRuleMetadata(task, state.imagePromptRules, resultAsset);
     const variantLabel = getImageVariantGenerationSpec(task.imageVariant)?.label || task.imageVariant;
     const canRegenerate = canRegenerateImageTask(task, tasks)
       && !storyboardImageBatchLifecycle.isActive(`regenerate:${state.project.id}:${imageRegenerationRootId(task)}`);
@@ -22885,8 +22994,13 @@ function GenerationTasksView(ctx: AppContext) {
                 </Badge>
                 <strong>{task.name}</strong>
               </div>
+              <div className="field-hint task-chapter-label">{taskChapterLabel(task)}</div>
               <div className="field-hint">
                 {imageAssetKindLabel(task.assetKind)} · {variantLabel} · 请求 {task.width}×{task.height}{resultAsset?.imageRequestSize && resultAsset.width && resultAsset.height ? ` · 实际 ${resultAsset.width}×${resultAsset.height}` : ''} · {task.model || task.backend} · {new Date(task.updatedAt).toLocaleString()}
+              </div>
+              <div className="field-hint image-task-prompt-config" aria-label="本次生图规则与预设">
+                <span title={promptConfig.rule.title}><strong>生图规则：</strong>{promptConfig.rule.text}</span>
+                <span title={promptConfig.preset.title}><strong>分类预设：</strong>{promptConfig.preset.text}</span>
               </div>
               {task.imageGenerationMode === "image-to-image" && <div className="field-hint">
                 原始参考图 {task.referenceAssetSnapshots?.length || 0} 张：{task.referenceAssetSnapshots?.map((asset) => asset.name).join("、") || "快照缺失"}
@@ -22982,6 +23096,7 @@ function GenerationTasksView(ctx: AppContext) {
               </Badge>
               <strong>{task.name}</strong>
             </div>
+            <div className="field-hint task-chapter-label">{taskChapterLabel(task)}</div>
             <div className="field-hint">
               {imageAssetKindLabel(task.assetKind)} · 请求 {task.requestedFields.length} 项
               {task.status === "succeeded" ? ` · 已返回 ${completedFieldCount} 项` : ""}
@@ -23028,6 +23143,19 @@ function GenerationTasksView(ctx: AppContext) {
     <div className="grid jobs-view">
       <SectionHeading eyebrow="GENERATION JOBS" title="生成任务" description="图片、视频和资料任务分开查看，状态与操作互不混杂。" />
       <Card className="soft generation-task-browser">
+        <div className="row-between" style={{ marginBottom: 10 }}>
+          <label className="row">
+            <span>章节范围</span>
+            <select value={chapterFilter} onChange={(event) => setChapterFilter(event.target.value)} aria-label="任务章节筛选">
+              <option value="all">全项目 · 全部章节</option>
+              {state.project.sourceDocuments.map((chapter) => <option key={chapter.id} value={chapter.id}>
+                {chapter.name}{chapter.archived ? "（已归档）" : ""}
+              </option>)}
+              <option value="shared">项目共享 / 历史任务</option>
+            </select>
+          </label>
+          <span className="field-hint">{chapterFilter === "all" ? "显示全项目任务" : `当前范围 ${chapterFilteredTasks.length} 项`} · 后台任务持续运行</span>
+        </div>
         <div className="generation-task-tabs" role="tablist" aria-label="任务分类">
           {(["image", "video", "autofill"] as const).map((category) => {
             const meta = taskCategoryMeta[category];
@@ -23082,8 +23210,8 @@ function GenerationTasksView(ctx: AppContext) {
         {!activeTaskMeta.count && (
           <Card>
             <Empty
-              title={activeTaskMeta.emptyTitle}
-              description={activeTaskMeta.emptyDescription}
+              title={chapterFilter === "all" ? activeTaskMeta.emptyTitle : "当前章节范围暂无此类任务"}
+              description={chapterFilter === "all" ? activeTaskMeta.emptyDescription : "选择“全项目 · 全部章节”可查看其他章节和项目共享的任务。"}
               action={<Button onClick={openActiveTaskSource}>{activeTaskMeta.actionLabel}</Button>}
             />
           </Card>

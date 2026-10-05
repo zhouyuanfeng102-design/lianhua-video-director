@@ -3,7 +3,7 @@ setlocal
 chcp 65001 >nul
 set "ROOT_DIR=%~dp0"
 set "APP_DIR=%ROOT_DIR%交付\"
-set "APP_EXE=%ROOT_DIR%交付\莲华视频导演台-1.3.0-便携版.exe"
+set "APP_EXE=%ROOT_DIR%交付\莲华视频导演台-1.3.7-便携版.exe"
 if not exist "%APP_EXE%" (
   echo Lianhua portable exe not found.
   pause

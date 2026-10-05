@@ -7,6 +7,7 @@ import * as nodeLibrary from '../src/runningHubVideoNodes';
 import * as fieldChoices from '../src/runningHubVideoFieldChoices';
 import * as outputLibrary from '../src/runningHubVideoOutput';
 import * as imageSlots from '../src/runningHubImageSlots';
+import * as imageProtocol from '../src/runningHubImageProtocol';
 import type { RunningHubVideoConfig, RunningHubVideoWorkflow } from '../src/runningHubVideoTypes';
 
 // Execute the actual TSX callbacks with isolated hooks. No browser, cloud endpoint,
@@ -61,6 +62,7 @@ function harness(kind: 'manager' | 'settings', initial = fixture(), options: Har
     if (name === '../runningHubVideoFieldChoices') return fieldChoices;
     if (name === '../runningHubVideoOutput') return outputLibrary;
     if (name === '../runningHubImageSlots') return imageSlots;
+    if (name === '../runningHubImageProtocol') return imageProtocol;
     if (name === '../services/runningHubVideoDiscovery') return { discoverRunningHubVideoNodes: (identity: DiscoveryIdentity, signal: AbortSignal) => {
       discoveryCalls.push({ identity: structuredClone(identity), signal });
       return options.discover ? options.discover(identity, signal) : Promise.reject(new Error('测试禁止未经显式模拟的节点读取'));
@@ -606,6 +608,7 @@ await testAsync('节点文件异步读取在关闭导入或切换工作流后不
 
 const outputFields = {
   duration: { nodeId: '40', inputName: 'duration', label: 'RunningHub 视频时长', value: 6 },
+  aspect_ratio: { nodeId: '43', inputName: 'aspect_ratio', label: 'RunningHub 画面比例', value: '9:16 (Portrait Widescreen)' },
   resolution: { nodeId: '41', inputName: 'resolution', label: 'RunningHub 分辨率', value: '720P' },
   width: { nodeId: '42', inputName: 'width', label: 'RunningHub 像素宽度', value: '1280' },
   height: { nodeId: '42', inputName: 'height', label: 'RunningHub 像素高度', value: 720 },
@@ -637,7 +640,7 @@ const outputWorkflow = (name = '时长分辨率工作流'): RunningHubVideoWorkf
   };
 };
 const outputSection = (h: ReturnType<typeof harness>, key: OutputKey) => {
-  h.click('时长与分辨率'); h.click(key === 'width' || key === 'height' ? '高级：指定宽高' : '时长与像素 / 分辨率');
+  h.click('时长、比例与分辨率'); h.click(key === 'width' || key === 'height' ? '高级：指定宽高' : '时长、比例与像素 / 分辨率');
 };
 const bindOutput = (h: ReturnType<typeof harness>, key: OutputKey) => {
   outputSection(h, key); const field = outputFields[key];
@@ -657,12 +660,13 @@ const readyOutputWorkflow = (name?: string): RunningHubVideoWorkflow => {
   return workflow;
 };
 
-test('时长分辨率只查看筛选不绑定，四字段分为两屏且留空不创建覆盖项', () => {
+test('时长比例分辨率只查看筛选不绑定，标准字段与宽高分为两屏且留空不创建覆盖项', () => {
   const original = outputWorkflow(); const h = harness('manager', fixture([original]));
   outputSection(h, 'duration');
   assert.deepEqual(optionValues(h, '时长分辨率字段范围'), ['common', 'all']);
   assert.equal(h.required('select', '时长分辨率字段范围').props.value, 'common');
   assert.equal(h.required('select', 'RunningHub 视频时长节点字段').props.value, fieldKey('', ''));
+  assert.equal(h.required('select', 'RunningHub 画面比例节点字段').props.value, fieldKey('', ''));
   assert.equal(h.required('select', 'RunningHub 分辨率节点字段').props.value, fieldKey('', ''));
   assert.equal(h.find('select', 'RunningHub 像素宽度节点字段'), undefined, 'only two parameter cards occupy the active screen');
   assert.ok(fieldOptionValues(h, 'RunningHub 视频时长节点字段').includes(fieldKey('40', 'duration')));
@@ -678,17 +682,18 @@ test('时长分辨率只查看筛选不绑定，四字段分为两屏且留空�
   h.dispose();
 });
 
-test('四项参数明确绑定和默认值编辑可保存复制导出重载，保留数值类型与分辨率大小写', () => {
+test('输出参数明确绑定和默认值编辑可保存复制导出重载，保留比例完整值、数值类型与分辨率大小写', () => {
   const original = outputWorkflow(); const before = library.readRunningHubVideoRequest(original.requestTemplate);
   const h = harness('manager', fixture([original]));
   bindOutput(h, 'duration');
   assert.deepEqual(library.readRunningHubVideoRequest(draftRequest(h)).nodeInfoList.map((node) => fieldKey(node.nodeId, node.fieldName)), [...before.nodeInfoList.map((node) => fieldKey(node.nodeId, node.fieldName)), fieldKey('40', 'duration')]);
-  bindOutput(h, 'resolution'); bindOutput(h, 'width'); bindOutput(h, 'height');
-  const edits: Record<OutputKey, string> = { duration: '10.5', resolution: '1080P', width: '1920', height: '1080' };
+  bindOutput(h, 'aspect_ratio'); bindOutput(h, 'resolution'); bindOutput(h, 'width'); bindOutput(h, 'height');
+  const edits: Record<OutputKey, string> = { duration: '10.5', aspect_ratio: '16:9 (Widescreen)', resolution: '1080P', width: '1920', height: '1080' };
   for (const key of outputKeys) { outputSection(h, key); h.change('input', `${outputFields[key].label}默认值`, edits[key]); }
   h.click('保存工作流'); const saved = structuredClone(h.state.workflows[0]);
   assert.deepEqual(saved.mapping.parameters, Object.fromEntries(outputKeys.map((key) => [key, { nodeId: outputFields[key].nodeId, inputName: outputFields[key].inputName }])));
   assert.equal(outputValue(saved.requestTemplate, 'duration'), 10.5);
+  assert.equal(outputValue(saved.requestTemplate, 'aspect_ratio'), '16:9 (Widescreen)');
   assert.equal(outputValue(saved.requestTemplate, 'resolution'), '1080P');
   assert.equal(outputValue(saved.requestTemplate, 'width'), '1920');
   assert.equal(outputValue(saved.requestTemplate, 'height'), 1080);
@@ -713,9 +718,9 @@ test('四项参数明确绑定和默认值编辑可保存复制导出重载，�
   assert.equal(reloaded.discoveryCalls.length, 0); reloaded.dispose(); h.dispose();
 });
 
-test('四项任务覆盖仅改显式字段，修改工作流默认值不污染已编译任务快照', () => {
+test('输出任务覆盖仅改显式字段，修改工作流默认值不污染已编译任务快照', () => {
   const original = readyOutputWorkflow(); const config = fixture([original]); config.activeWorkflowId = original.id;
-  const params = { duration: 8.5, resolution: '4K', width: 3840, height: '2160' };
+  const params = { duration: 8.5, aspect_ratio: '16:9 (Widescreen)', resolution: '4K', width: 3840, height: '2160' };
   const api = library.compileRunningHubVideoApi(config, original.id, params); const frozen = structuredClone(api);
   const expected = library.readRunningHubVideoRequest(original.requestTemplate);
   for (const key of outputKeys) {
@@ -738,7 +743,7 @@ test('清空时长分辨率映射只解除用途，不删除原请求默认值�
   h.click('保存工作流'); const saved = h.state.workflows[0];
   assert.equal(saved.mapping.parameters?.duration, undefined); assert.deepEqual(saved.mapping.parameters?.resolution, original.mapping.parameters?.resolution);
   assert.equal(saved.requestTemplate, original.requestTemplate); assert.deepEqual(saved.mapping.prompt, original.mapping.prompt); assert.deepEqual(saved.mapping.images, original.mapping.images);
-  for (const key of ['resolution', 'width', 'height'] as const) { outputSection(h, key); h.change('select', `${outputFields[key].label}节点字段`, fieldKey('', '')); }
+  for (const key of ['aspect_ratio', 'resolution', 'width', 'height'] as const) { outputSection(h, key); h.change('select', `${outputFields[key].label}节点字段`, fieldKey('', '')); }
   h.click('保存工作流'); assert.equal(Object.keys(h.state.workflows[0].mapping.parameters || {}).length, 0);
   assert.equal(h.state.workflows[0].requestTemplate, original.requestTemplate); h.dispose();
 });

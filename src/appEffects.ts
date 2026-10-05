@@ -22,6 +22,8 @@ import type {
   Workflow,
 } from './types';
 import { sourceContentHash } from './sourceIntegrity';
+import { replaceChapterSourceDocument } from './chapters';
+import { reconcileChapterEntities, type ChapterEntityConflict } from './chapterEntities';
 import { isDossierFieldConfirmed, preserveConfirmedCharacterFields, CHARACTER_DOSSIER_FIELDS } from './characterDossierPolicy';
 import { readProjectStoryDraft } from './storyDraft';
 import { normalizeDirectorLookDraft, type DirectorLookDraft } from './directorLookDraft';
@@ -909,44 +911,11 @@ export interface ProjectSourceReplacementResult {
   invalidatedPlanIds: string[];
 }
 
-/** Replace the primary source and invalidate every artifact derived from an
- * older exact source hash. Name-only edits retain all generated work. */
+/** Update one chapter while preserving all shared and historical artifacts. */
 export const replaceProjectSourceDocument = (
   project: Project,
   sourceDocument: SourceDocument,
-): ProjectSourceReplacementResult => {
-  const currentSource = project.sourceDocuments[0];
-  const nextHash = sourceContentHash(sourceDocument.content);
-  const currentHash = currentSource
-    ? sourceContentHash(currentSource.content)
-    : undefined;
-  const sourceChanged = currentHash === undefined
-    ? Boolean(project.scenes.length || project.storyboards.length || project.sequencePlans.length)
-    : currentHash !== nextHash;
-  const nextSource: SourceDocument = { ...sourceDocument, contentHash: nextHash };
-  const invalidatedStoryboardIds = sourceChanged
-    ? project.storyboards.map((board) => board.id)
-    : [];
-  const invalidatedPlanIds = sourceChanged
-    ? project.sequencePlans.map((plan) => plan.id)
-    : [];
-
-  return {
-    project: {
-      ...project,
-      storyDraft: undefined,
-      sourceDocuments: currentSource
-        ? [nextSource, ...project.sourceDocuments.slice(1)]
-        : [nextSource, ...project.sourceDocuments],
-      scenes: sourceChanged ? [] : project.scenes,
-      storyboards: sourceChanged ? [] : project.storyboards,
-      sequencePlans: sourceChanged ? [] : project.sequencePlans,
-    },
-    sourceChanged,
-    invalidatedStoryboardIds,
-    invalidatedPlanIds,
-  };
-};
+): ProjectSourceReplacementResult => replaceChapterSourceDocument(project, sourceDocument);
 
 export interface SequenceSegmentGenerationSource {
   sourceStoryContent: string;
@@ -2078,6 +2047,8 @@ export type StoryEntityProvenance = 'manual' | 'ai' | 'local';
 export interface StoryEntityReconciliationOptions {
   aiSucceeded: boolean;
   kind: StoryEntityKind;
+  /** Chapter parses share a project bible and never prune absent entities. */
+  chapterId?: string;
   localCandidateNames?: readonly string[];
   previousSceneEntityIds?: readonly string[];
   provenanceById?: Readonly<Record<string, StoryEntityProvenance>>;
@@ -2088,6 +2059,7 @@ export interface StoryEntityReconciliationOptions {
 export interface StoryEntityReconciliationResult<T> {
   records: T[];
   removedIds: string[];
+  conflicts?: ChapterEntityConflict[];
 }
 
 const cloneStoryEntityRecord = <T extends { assetIds?: readonly string[] }>(record: T): T => {
@@ -2543,6 +2515,9 @@ export const reconcileAuthoritativeStoryEntities = <T extends {
   authoritative: readonly T[],
   options: StoryEntityReconciliationOptions,
 ): StoryEntityReconciliationResult<T> => {
+  if (options.chapterId) return reconcileChapterEntities(existing, authoritative, {
+    kind: options.kind, chapterId: options.chapterId, provenanceById: options.provenanceById,
+  });
   const recordName = (record: T): string => canonicalStoryEntityName(
     options.kind === 'character' ? canonicalCharacterVariantName(record) : record.name,
     options.kind,

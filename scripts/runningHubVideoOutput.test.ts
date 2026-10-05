@@ -46,10 +46,11 @@ const mapped = (): RunningHubVideoWorkflow => {
 };
 const config = (workflow: RunningHubVideoWorkflow): RunningHubVideoConfig => ({ enabled: false, baseUrl: 'https://www.runninghub.ai', apiKey: 'isolated-test-key', workflows: [workflow], activeWorkflowId: workflow.id });
 
-check('four output definitions distinguish seconds, resolution tokens and independent pixel dimensions', () => {
-  assert.deepEqual(runningHubVideoOutputFields.map((entry) => entry.key), ['duration', 'resolution', 'width', 'height']);
-  assert.equal(new Set(runningHubVideoOutputFields.map((entry) => entry.label)).size, 4);
+check('five output definitions include a selectable aspect ratio beside seconds, resolution and pixel dimensions', () => {
+  assert.deepEqual(runningHubVideoOutputFields.map((entry) => entry.key), ['duration', 'aspect_ratio', 'resolution', 'width', 'height']);
+  assert.equal(new Set(runningHubVideoOutputFields.map((entry) => entry.label)).size, 5);
   assert.match(runningHubVideoOutputFields.find((entry) => entry.key === 'duration')!.hint, /秒.*不是帧数.*保留/u);
+  assert.match(runningHubVideoOutputFields.find((entry) => entry.key === 'aspect_ratio')!.hint, /完整选项值/u);
   assert.match(runningHubVideoOutputFields.find((entry) => entry.key === 'resolution')!.hint, /720P.*1080P/u);
   assert.match(runningHubVideoOutputFields.find((entry) => entry.key === 'width')!.hint, /不自动计算宽高比/u);
 });
@@ -57,6 +58,7 @@ check('four output definitions distinguish seconds, resolution tokens and indepe
 check('common field aliases normalize case and separators without guessing unknown identifiers', () => {
   const cases: Record<RunningHubVideoOutputKey, string[]> = {
     duration: ['duration', 'Duration_Sec', 'durationSeconds', 'video-duration', 'seconds', '时长', '视频时长', '秒数'],
+    aspect_ratio: ['aspect_ratio', 'aspectRatio', 'ratio', '画面比例', '宽高比', '纵横比'],
     resolution: ['resolution', 'VideoResolution', 'output_resolution', '分辨率', '清晰度', 'megapixels', 'mega_pixels', 'megaPixel', '百万像素'],
     width: ['width', 'imageWidth', 'video_width', 'output-width', 'targetWidth', 'frame_width', '像素宽度', '画面宽度'],
     height: ['height', 'imageHeight', 'video_height', 'output-height', 'targetHeight', 'frame_height', '像素高度', '画面高度'],
@@ -82,7 +84,7 @@ check('seconds suggestions exclude frame counts, frame rates, milliseconds, rete
 });
 
 check('generic inputs use node titles as display hints, never infer meaning from their values', () => {
-  for (const [key, description] of [['duration', '视频时长（秒）'], ['resolution', 'Output Resolution'], ['width', '像素宽度'], ['height', 'Video Height']] as const) {
+  for (const [key, description] of [['duration', '视频时长（秒）'], ['aspect_ratio', '画面比例'], ['resolution', 'Output Resolution'], ['width', '像素宽度'], ['height', 'Video Height']] as const) {
     for (const name of ['value', 'int', 'integer', 'float', 'number', 'string', 'input', '数值', '值']) {
       assert.equal(runningHubVideoOutputCandidates([field(name, '', description)], key).length, 1, `${key}: ${name}`);
     }

@@ -590,6 +590,7 @@ export const applyOfficialH3Prompt = (
     ...board,
     targetModelId: OFFICIAL_H3_TARGET_ID,
     targetOutput: output,
+    ...(chineseChanged ? { seedance25Output: undefined } : {}),
     officialPromptZh: output.prompt,
     officialPromptSource: sourceFingerprint,
     officialPromptEn: chineseChanged ? '' : board.officialPromptEn,

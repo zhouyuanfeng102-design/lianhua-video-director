@@ -1,16 +1,18 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { ArrowDown, ArrowUp, CheckCircle2, ChevronLeft, ChevronRight, Film, FolderOpen, GripVertical, Image as ImageIcon, Layers, Link2, Music2, Pause, Play, Plus, RefreshCw, Scissors, Trash2, Upload, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, CheckCircle2, ChevronLeft, ChevronRight, Film, FolderOpen, GripVertical, Image as ImageIcon, Layers, Link2, Music2, Pause, Play, Plus, Redo2, RefreshCw, Scissors, Trash2, Undo2, Upload, X } from 'lucide-react';
 import { assetPreviewUrl } from '../media';
+import { chapterIdForAsset } from '../chapters';
 import type { Project, ReferenceAsset } from '../types';
 import type { VideoDirectorLaunchRequest } from '../videoDirectorDraft';
 import type { VideoWorkbenchController } from '../useVideoWorkbenchController';
 import type { WorkbenchFrameMode } from '../videoWorkbenchTypes';
 import { useWorkbenchNamePages } from '../useWorkbenchNamePages';
 import {
-  appendWorkbenchVideoSelection, normalizeWorkbenchVideoSelection, orderedWorkbenchSelection, selectableWorkbenchVideo,
+  appendWorkbenchVideoSelection, deleteWorkbenchClipRange, normalizeWorkbenchVideoSelection, orderedWorkbenchSelection, selectableWorkbenchVideo,
   selectWorkbenchVideoResults, workbenchAudioAsset as isAudio, workbenchVideoAsset as isVideo, workbenchId,
   type WorkbenchVideoSelection,
 } from '../videoWorkbench';
+import type { VideoWorkbenchInsertPosition } from '../videoWorkbench';
 import '../videoWorkbench.css';
 
 export interface VideoWorkbenchViewProps {
@@ -149,6 +151,11 @@ export function VideoWorkbenchView({ project, controller, onOpenVideoDirector, o
   const [frameCount, setFrameCount] = useState(6);
   const [useClipRange, setUseClipRange] = useState(true);
   const [currentTime, setCurrentTime] = useState(0);
+  /** Source-time range currently highlighted on the selected clip.  Keeping this
+   * in the view makes the destructive action explicit before it mutates the
+   * persisted draft. */
+  const [editRange, setEditRange] = useState<{ start: number; end: number }>({ start: 0, end: 0 });
+  const [timelineZoom, setTimelineZoom] = useState(1);
   const [targetStoryboardId, setTargetStoryboardId] = useState('');
   const [useAsFirstFrame, setUseAsFirstFrame] = useState(true);
   const [resultSourceFilter, setResultSourceFilter] = useState<'current' | 'all'>('current');
@@ -188,7 +195,8 @@ export function VideoWorkbenchView({ project, controller, onOpenVideoDirector, o
   const sourceStoryboardId = source?.sourceStoryboardId || source?.videoSourceTask?.storyboardId;
   const sourceSegment = selectedPlan?.segments.find((segment) => segment.storyboardId === sourceStoryboardId);
   const nextSegment = sourceSegment && selectedPlan?.segments.find((segment) => segment.index === sourceSegment.index + 1);
-  const filteredVideos = videos.filter((asset) => `${asset.name} ${asset.tags.join(' ')}`.toLowerCase().includes(search.toLowerCase()));
+  const chapterLabelForAsset = (asset: ReferenceAsset): string => project.sourceDocuments.find((chapter) => chapter.id === chapterIdForAsset(project, asset))?.name || '项目共用';
+  const filteredVideos = videos.filter((asset) => `${asset.name} ${chapterLabelForAsset(asset)} ${asset.tags.join(' ')}`.toLowerCase().includes(search.toLowerCase()));
   const validVideoSelection = normalizeWorkbenchVideoSelection(videoSelection, project.id, videos);
   const selectedVideoIds = new Set(validVideoSelection.assetIds);
   const selectableFilteredVideos = filteredVideos.filter(selectableWorkbenchVideo);
@@ -204,6 +212,9 @@ export function VideoWorkbenchView({ project, controller, onOpenVideoDirector, o
   const selectedClipIndex = draft.clips.findIndex((clip) => clip.id === selectedClipId);
   const selectedClipAsset = videos.find((asset) => asset.id === selectedClip?.sourceAssetId);
   const selectedClipDuration = selectedClip && (controller.probes[selectedClip.sourceAssetId]?.durationSec || selectedClipAsset?.durationSec);
+  const editRangeStart = selectedClip ? Math.max(selectedClip.inSec, Math.min(editRange.start, selectedClip.outSec)) : 0;
+  const editRangeEnd = selectedClip ? Math.max(editRangeStart, Math.min(editRange.end, selectedClip.outSec)) : 0;
+  const editRangeDuration = Math.max(0, editRangeEnd - editRangeStart);
   const clipError = selectedClip && (!selectedClipAsset || selectedClipAsset.missing ? '素材缺失：请移除此片段或在资产库重新关联文件。' : selectedClip.inSec < 0 || selectedClip.outSec <= selectedClip.inSec || Boolean(selectedClipDuration && selectedClip.outSec > selectedClipDuration + .01) ? `裁剪区间无效：需满足 0 ≤ 入点 < 出点${selectedClipDuration ? ` ≤ ${selectedClipDuration.toFixed(2)} 秒` : ''}。` : '');
   const detailPages = useMemo(() => messagePages(messageDialog?.text || ''), [messageDialog]);
   const footerMessage = hasError || (!available ? status?.message || '正在检查本地视频处理引擎…' : localNotice || progress?.message || '剪辑方案自动保存；原视频保留，抽帧和成片保存到当前项目。');
@@ -224,6 +235,13 @@ export function VideoWorkbenchView({ project, controller, onOpenVideoDirector, o
   useEffect(() => {
     if (selectedClipId && !draft.clips.some((clip) => clip.id === selectedClipId)) setSelectedClipId('');
   }, [draft.clips, selectedClipId]);
+  useEffect(() => {
+    if (!selectedClip) { setEditRange({ start: 0, end: 0 }); return; }
+    setEditRange({ start: selectedClip.inSec, end: selectedClip.outSec });
+  // Reset when undo/redo or another edit changes the selected clip's boundaries.
+  // Editing the timeline's local endpoints below does not touch these values.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedClipId, selectedClip?.inSec, selectedClip?.outSec]);
   useEffect(() => {
     setCurrentTime(0);
     if (source && !source.missing && source.relativePath && available) {
@@ -332,6 +350,67 @@ export function VideoWorkbenchView({ project, controller, onOpenVideoDirector, o
     });
     setLocalNotice('已按当前画面分割为两个片段，原视频未修改。');
   };
+  /** Remove the highlighted source-time range and close the resulting gap. */
+  const deleteSelectedRange = () => {
+    const clip = selectedClip;
+    if (!clip) return;
+    const fps = controller.probes[clip.sourceAssetId]?.fps || 25;
+    const frameDuration = 1 / fps;
+    const start = Math.max(clip.inSec, Math.min(editRangeStart, clip.outSec));
+    const end = Math.max(start, Math.min(editRangeEnd, clip.outSec));
+    if (end - start < frameDuration) {
+      setLocalError('请先在时间条中选择至少一帧的删除范围。');
+      return;
+    }
+    let focusId = '';
+    let focusSourceId = clip.sourceAssetId;
+    controller.updateDraft((current) => {
+      const index = current.clips.findIndex((item) => item.id === clip.id);
+      if (index < 0) return current;
+      const next = deleteWorkbenchClipRange(current, clip.id, { startSec: start, endSec: end });
+      const focusClip = next.clips[Math.min(index, next.clips.length - 1)] || next.clips[index - 1];
+      focusId = focusClip?.id || '';
+      focusSourceId = focusClip?.sourceAssetId || focusSourceId;
+      return next;
+    });
+    setSelectedClipId(focusId);
+    if (focusSourceId) setSourceId(focusSourceId);
+    setTimelinePreview(false); videoRef.current?.pause();
+    setLocalNotice(`已删除 ${formatTime(end - start)}，后续片段已自动合拢。原视频未修改。`);
+  };
+  const insertSourceAtCurrent = async () => {
+    const asset = source;
+    if (!asset || !selectableWorkbenchVideo(asset)) { setLocalError('请先从左侧选择可用的视频素材。'); return; }
+    const selectedIdAtStart = selectedClipId;
+    const timeAtStart = currentTime;
+    await runAction(async () => {
+      const target = selectedIdAtStart ? draft.clips.find((item) => item.id === selectedIdAtStart) : undefined;
+      let position: VideoWorkbenchInsertPosition = draft.clips.length;
+      if (target) {
+        const frameDuration = 1 / (controller.probes[target.sourceAssetId]?.fps || 25);
+        position = target.sourceAssetId === asset.id && timeAtStart > target.inSec + frameDuration && timeAtStart < target.outSec - frameDuration
+          ? { clipId: target.id, offsetSec: timeAtStart }
+          : { clipId: target.id, side: target.sourceAssetId === asset.id && timeAtStart <= target.inSec + frameDuration ? 'before' : 'after' };
+      }
+      const insertedId = await controller.insertAssetAt(asset.id, position);
+      setSelectedClipId(insertedId);
+      setSourceId(asset.id);
+      setLocalNotice('已在当前播放位置插入视频；原视频未修改。');
+    });
+  };
+  const replaceSelectedRange = async () => {
+    const asset = source;
+    const clip = selectedClip;
+    if (!asset || !selectableWorkbenchVideo(asset)) { setLocalError('请先从左侧选择可用的视频素材。'); return; }
+    if (!clip) { setLocalError('请先选中时间线片段，再替换其中的范围。'); return; }
+    const selectedIdAtStart = clip.id;
+    await runAction(async () => {
+      const replacementId = await controller.replaceClipRange(selectedIdAtStart, { startSec: editRangeStart, endSec: editRangeEnd }, asset.id);
+      setSelectedClipId(replacementId);
+      setSourceId(asset.id);
+      setLocalNotice('已用当前素材替换选区；原视频未修改。');
+    });
+  };
   const importFiles = (event: ChangeEvent<HTMLInputElement>) => {
     const files = [...(event.target.files || [])]; event.target.value = '';
     if (files.length) void runAction(() => controller.importFiles(files));
@@ -400,8 +479,8 @@ export function VideoWorkbenchView({ project, controller, onOpenVideoDirector, o
     <div className="vwb-layout">
       <aside className="vwb-library-column">
         <section className="vwb-panel vwb-sources" aria-label="视频素材">
-          <div className="vwb-panel-heading"><h2><Film size={15} />视频素材</h2><span className="vwb-count">{videos.length} 个</span></div>
-          <input className="vwb-search" type="search" aria-label="搜索视频素材" placeholder="搜索视频名称 / 标签" value={search} onChange={(event) => { setSearch(event.target.value); sourcePages.setPage(0); }} />
+          <div className="vwb-panel-heading"><h2><Film size={15} />视频素材 · 全部章节</h2><span className="vwb-count">{videos.length} 个</span></div>
+          <input className="vwb-search" type="search" aria-label="搜索视频素材" placeholder="搜索视频名称 / 章节 / 标签" value={search} onChange={(event) => { setSearch(event.target.value); sourcePages.setPage(0); }} />
           <div className="vwb-source-selection" aria-label="视频素材多选操作">
             <label className="vwb-check" title="选择当前筛选条件下的全部有效视频，包含其他分页"><input type="checkbox" aria-label="全选筛选结果（跨全部分页）" checked={allFilteredVideosSelected} aria-checked={someFilteredVideosSelected && !allFilteredVideosSelected ? 'mixed' : allFilteredVideosSelected} ref={(element) => { if (element) element.indeterminate = someFilteredVideosSelected && !allFilteredVideosSelected; }} disabled={busy || !selectableFilteredVideos.length} onChange={(event) => {
               const checked = event.target.checked;
@@ -415,7 +494,7 @@ export function VideoWorkbenchView({ project, controller, onOpenVideoDirector, o
             {sourcePages.items.map((asset) => <article key={asset.id} className={'vwb-source' + (sourcePages.wideNames.has(asset.id) ? ' vwb-source--full-width-name' : '') + (sourceId === asset.id ? ' selected' : '') + (selectedVideoIds.has(asset.id) ? ' checked' : '') + (asset.missing ? ' missing' : '')}>
               <input className="vwb-source-check" type="checkbox" aria-label={'选择素材 ' + asset.name} checked={selectedVideoIds.has(asset.id)} disabled={busy || !selectableWorkbenchVideo(asset)} onChange={(event) => { const checked = event.target.checked; setVideoSelection((selection) => selectWorkbenchVideoResults(selection, project.id, videos, [asset.id], checked)); setLocalNotice('已选素材按清单从上到下（新到旧）追加；预览、单独添加和多选勾选互不影响。'); }} />
               <button type="button" className="vwb-source-select vwb-source-cover" aria-label={'预览视频 ' + asset.name} onClick={() => chooseSource(asset)}><StaticThumbnail asset={asset} assets={project.assets} /></button>
-              <button type="button" className="vwb-source-select vwb-source-copy" onClick={() => chooseSource(asset)} aria-pressed={sourceId === asset.id} title={asset.name}><strong style={sourcePages.nameSizes[asset.id] ? { fontSize: sourcePages.nameSizes[asset.id] } : undefined}>{asset.name}</strong><small>{asset.missing ? '原文件缺失' : formatTime(controller.probes[asset.id]?.durationSec || asset.durationSec) + ' · ' + (asset.width || '?') + '×' + (asset.height || '?')}</small></button>
+              <button type="button" className="vwb-source-select vwb-source-copy" onClick={() => chooseSource(asset)} aria-pressed={sourceId === asset.id} title={asset.name}><strong style={sourcePages.nameSizes[asset.id] ? { fontSize: sourcePages.nameSizes[asset.id] } : undefined}>{asset.name}</strong><small title={'来源章节：' + chapterLabelForAsset(asset)}>{chapterLabelForAsset(asset)} · {asset.missing ? '原文件缺失' : formatTime(controller.probes[asset.id]?.durationSec || asset.durationSec) + ' · ' + (asset.width || '?') + '×' + (asset.height || '?')}</small></button>
               {sourcePages.wideNames.has(asset.id) && <small className="vwb-source-extra-meta">{asset.missing ? '原文件缺失' : formatTime(controller.probes[asset.id]?.durationSec || asset.durationSec) + ' · ' + (asset.width || '?') + '×' + (asset.height || '?')}</small>}
               <button type="button" className="vwb-icon-button vwb-source-add" title="单独加入时间线，不改变多选勾选" aria-label={'加入时间线 ' + asset.name} disabled={busy || !selectableWorkbenchVideo(asset) || !available} onClick={() => { void addVideoSources([asset.id], false); }}><Plus size={15} /></button>
             </article>)}
@@ -445,12 +524,45 @@ export function VideoWorkbenchView({ project, controller, onOpenVideoDirector, o
       </aside>
 
       {activeTab === 'edit' && <section className="vwb-panel vwb-tab-pane vwb-edit-pane" id="vwb-pane-edit" role="tabpanel" aria-labelledby="vwb-tab-edit" tabIndex={0}>
-        <div className="vwb-panel-heading"><h2><Scissors size={15} />剪辑时间线</h2><div className="vwb-actions"><span className="vwb-count">{draft.clips.length} 段 · 约 {formatTime(Math.max(0, totalDuration))}</span><button type="button" className="btn small ghost" disabled={busy || !draft.clips.length} onClick={() => { if (window.confirm('清空当前时间线？只移除剪辑片段，所有原视频和抽帧图片保留。')) { setTimelinePreview(false); controller.updateDraft((current) => ({ ...current, clips: [] })); } }}>清空</button></div></div>
+        <div className="vwb-panel-heading"><h2><Scissors size={15} />剪辑时间线</h2><div className="vwb-actions"><span className="vwb-count">{draft.clips.length} 段 · 约 {formatTime(Math.max(0, totalDuration))}</span><button type="button" className="btn small ghost" title="撤销最近一次剪辑操作" aria-label="撤销剪辑" disabled={busy || !controller.canUndoDraft} onClick={() => { controller.undoDraft(); setTimelinePreview(false); setLocalNotice('已撤销最近一次剪辑操作。'); }}><Undo2 size={12} />撤销</button><button type="button" className="btn small ghost" title="重做最近一次剪辑操作" aria-label="重做剪辑" disabled={busy || !controller.canRedoDraft} onClick={() => { controller.redoDraft(); setTimelinePreview(false); setLocalNotice('已重做最近一次剪辑操作。'); }}><Redo2 size={12} />重做</button><button type="button" className="btn small ghost" disabled={busy || !draft.clips.length} onClick={() => { if (window.confirm('清空当前时间线？只移除剪辑片段，所有原视频和抽帧图片保留。')) { setTimelinePreview(false); controller.updateDraft((current) => ({ ...current, clips: [] })); } }}>清空</button></div></div>
         <div className="vwb-edit-setup">
           <label className="vwb-label">剪辑方案名称<input value={draft.name} disabled={busy} maxLength={120} onChange={(event) => controller.updateDraft((current) => ({ ...current, name: event.target.value }))} /></label>
           <div className="vwb-sequence-load"><label className="vwb-label">长剧情分段<select value={planId} onChange={(event) => setPlanId(event.target.value)} disabled={busy}><option value="">选择长剧情方案</option>{project.sequencePlans.map((plan) => <option key={plan.id} value={plan.id}>{plan.title} · {plan.segments.length} 段</option>)}</select></label><button type="button" className="btn small" disabled={busy || !available || !planId} title="按剧情顺序装载每段最新成片" onClick={() => { if (draft.clips.length && !window.confirm('按剧情顺序重新装载各段最新成片？这会替换当前剪辑片段，原视频不会修改。')) return; clipPages.setPage(0); void runAction(() => controller.loadSequence(planId)); }}><Layers size={12} />装载</button></div>
         </div>
         <div className="vwb-clips-browser">
+          <section className="vwb-timeline" aria-label="可视化剪辑时间线">
+            <div className="vwb-timeline-heading">
+              <div className="vwb-timeline-title"><strong>时间条</strong><span>{selectedClip ? `选中第 ${selectedClipIndex + 1} 段 · 选区 ${formatTime(editRangeDuration)}` : '点击片段后设置选区'}</span></div>
+              <label className="vwb-timeline-zoom">缩放 <input type="range" min="0.75" max="2.5" step="0.25" value={timelineZoom} onChange={(event) => setTimelineZoom(Number(event.target.value))} aria-label="时间条缩放" /></label>
+            </div>
+            <div className="vwb-timeline-scroll">
+              <div className="vwb-timeline-track" style={{ width: `${Math.max(100, timelineZoom * 100)}%` }}>
+                {draft.clips.map((clip, index) => {
+                  const duration = Math.max(0.001, clip.outSec - clip.inSec);
+                  const asset = videos.find((item) => item.id === clip.sourceAssetId);
+                  const active = clip.id === selectedClipId;
+                  const selectionLeft = active ? Math.max(0, Math.min(100, (editRangeStart - clip.inSec) / duration * 100)) : 0;
+                  const selectionWidth = active ? Math.max(0, Math.min(100 - selectionLeft, editRangeDuration / duration * 100)) : 0;
+                  return <button type="button" key={clip.id} className={'vwb-timeline-clip' + (active ? ' selected' : '')} style={{ flexGrow: Math.max(.4, duration) }} aria-pressed={active} title={`${index + 1}. ${asset?.name || '缺失视频'} · ${formatTime(duration)}`} onClick={() => {
+                    if (asset) chooseSource(asset, clip.id); else setSelectedClipId(clip.id);
+                  }}>
+                    <span className="vwb-timeline-clip-label"><b>{index + 1}</b><strong>{asset?.name || '缺失视频'}</strong><small>{formatTime(duration)}</small></span>
+                    {active && selectionWidth > 0 && <span className="vwb-timeline-selection" style={{ left: `${selectionLeft}%`, width: `${selectionWidth}%` }} aria-hidden="true" />}
+                  </button>;
+                })}
+                {!draft.clips.length && <span className="vwb-timeline-empty">先从左侧素材添加视频，时间条会按片段时长显示。</span>}
+              </div>
+            </div>
+            {selectedClip && <div className="vwb-range-editor" aria-label="选区删除与插入">
+              <label>选区起点 <input type="number" min={selectedClip.inSec} max={selectedClip.outSec} step="0.01" value={editRangeStart} disabled={busy} onChange={(event) => setEditRange((range) => ({ ...range, start: Number(event.target.value) }))} /></label>
+              <label>选区终点 <input type="number" min={selectedClip.inSec} max={selectedClip.outSec} step="0.01" value={editRangeEnd} disabled={busy} onChange={(event) => setEditRange((range) => ({ ...range, end: Number(event.target.value) }))} /></label>
+              <button type="button" className="btn small ghost" disabled={busy || timelinePreview || selectedClip.sourceAssetId !== sourceId} onClick={() => setEditRange((range) => ({ ...range, start: Math.round(currentTime * 1000) / 1000 }))}>当前位置设起点</button>
+              <button type="button" className="btn small ghost" disabled={busy || timelinePreview || selectedClip.sourceAssetId !== sourceId} onClick={() => setEditRange((range) => ({ ...range, end: Math.round(currentTime * 1000) / 1000 }))}>当前位置设终点</button>
+              <button type="button" className="btn small danger" disabled={busy || editRangeDuration <= 0} onClick={deleteSelectedRange}><Trash2 size={12} />删除选区并合拢</button>
+              <button type="button" className="btn small" disabled={busy || !source || source.missing || !available} onClick={() => void insertSourceAtCurrent()}><Plus size={12} />当前处插入</button>
+              <button type="button" className="btn small" disabled={busy || !source || source.missing || !available} onClick={() => void replaceSelectedRange()}><RefreshCw size={12} />替换选区</button>
+            </div>}
+          </section>
           <ol ref={clipPages.listRef} className="vwb-clip-list" aria-label="剪辑片段">
             {clipPages.items.map((clip, pageIndex) => {
               const index = clipPages.page * clipPages.capacity + pageIndex;

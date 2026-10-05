@@ -150,8 +150,10 @@ export const generateDirectStoryboardImages = async (
     let directPromptConversion: DirectStoryboardImagePromptConversion | undefined;
     let imagePromptTrace: Pick<ImageGenerationTask,
       | 'imagePromptRuleSetId'
+      | 'imagePromptRuleSetName'
       | 'imagePromptRuleSetVersion'
       | 'imagePromptPresetId'
+      | 'imagePromptPresetName'
       | 'imagePromptPresetVersion'
       | 'imagePromptFormat'
     > | undefined;
@@ -182,8 +184,10 @@ export const generateDirectStoryboardImages = async (
         conversionIdentityContext = buildImagePromptIdentityContext(initial.project, characterNames, board);
         imagePromptTrace = {
           imagePromptRuleSetId: imagePromptSelection.ruleSet.id,
+          imagePromptRuleSetName: imagePromptSelection.ruleSet.name,
           imagePromptRuleSetVersion: imagePromptSelection.ruleSet.version,
           imagePromptPresetId: imagePromptSelection.preset.id,
+          imagePromptPresetName: imagePromptSelection.preset.name,
           imagePromptPresetVersion: imagePromptSelection.preset.version,
           imagePromptFormat: imagePromptSelection.ruleSet.format,
         };
@@ -378,7 +382,9 @@ export const generateDirectStoryboardImages = async (
           imageFrameBatchId: task.imageFrameBatchId, imageFrameIndex: task.imageFrameIndex,
           imageFrameCount: task.imageFrameCount, imageFrameDescription: task.imageFrameDescription, imageFrameTimeSec: task.imageFrameTimeSec,
           prompt: task.prompt, imageBackend: task.backend, imagePromptRuleSetId: task.imagePromptRuleSetId,
+          imagePromptRuleSetName: task.imagePromptRuleSetName,
           imagePromptRuleSetVersion: task.imagePromptRuleSetVersion, imagePromptPresetId: task.imagePromptPresetId,
+          imagePromptPresetName: task.imagePromptPresetName,
           imagePromptPresetVersion: task.imagePromptPresetVersion, imagePromptFormat: task.imagePromptFormat || 'natural-language',
           width: actual?.width, height: actual?.height,
           imageRequestSize: { width: task.width, height: task.height, sizeOverride: task.sizeOverride },

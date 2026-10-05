@@ -155,6 +155,183 @@ export const videoWorkbenchDuration = (draft: VideoWorkbenchDraft): number => Ma
   sum + Math.max(0, clip.outSec - clip.inSec) - (index < draft.clips.length - 1 && clip.transitionAfter.type === 'crossfade' ? Math.max(0, clip.transitionAfter.durationSec) : 0)
 ), 0));
 
+/**
+ * Editing operations below only change the draft's clip array. They deliberately
+ * do not touch source assets or the render/audio settings, so callers can use
+ * them from functional state updates and keep the original videos intact.
+ */
+export interface VideoWorkbenchRange {
+  /** Source-media time in seconds, rather than the clip's position on the timeline. */
+  startSec: number;
+  endSec: number;
+}
+export type VideoWorkbenchEditRange = VideoWorkbenchRange;
+
+export type VideoWorkbenchInsertPosition = number | {
+  /** Insert at a clip-array boundary. 0 inserts before the first clip. */
+  index: number;
+} | {
+  /** Insert relative to a clip. offsetSec, when supplied, is source-media time. */
+  clipId: string;
+  side?: 'before' | 'after';
+  offsetSec?: number;
+};
+
+export interface VideoWorkbenchReplaceRangeOptions {
+  /** If supplied, the replacement is inserted at a timeline boundary instead of the removed range. */
+  position?: VideoWorkbenchInsertPosition;
+}
+
+const cutTransition = (): VideoWorkbenchClip['transitionAfter'] => ({ type: 'cut', durationSec: 0 });
+const clipLength = (clip: VideoWorkbenchClip): number => Math.max(0, clip.outSec - clip.inSec);
+const cloneClip = (clip: VideoWorkbenchClip): VideoWorkbenchClip => ({
+  ...clip,
+  transitionAfter: { ...clip.transitionAfter },
+});
+const draftWithClips = (draft: VideoWorkbenchDraft, clips: VideoWorkbenchClip[]): VideoWorkbenchDraft => ({
+  ...draft,
+  output: { ...draft.output },
+  audio: { ...draft.audio },
+  clips,
+});
+
+/** Keep crossfades valid after an edit and force newly-created seams to hard cuts. */
+const normalizeWorkbenchTransitions = (clips: readonly VideoWorkbenchClip[], forceCutAfter = new Set<number>()): VideoWorkbenchClip[] => clips.map((clip, index) => {
+  const next = clips[index + 1];
+  if (!next || forceCutAfter.has(index) || clip.transitionAfter.type !== 'crossfade') {
+    return { ...cloneClip(clip), transitionAfter: cutTransitionIfNeeded(clip, next, forceCutAfter.has(index)) };
+  }
+  const maximum = Math.min(clipLength(clip), clipLength(next)) / 2;
+  if (!Number.isFinite(maximum) || maximum <= 0) return { ...cloneClip(clip), transitionAfter: cutTransition() };
+  const durationSec = Math.min(Math.max(0, clip.transitionAfter.durationSec), maximum);
+  return { ...cloneClip(clip), transitionAfter: durationSec > 0 ? { type: 'crossfade', durationSec } : cutTransition() };
+});
+
+const cutTransitionIfNeeded = (clip: VideoWorkbenchClip, next: VideoWorkbenchClip | undefined, forceCut: boolean): VideoWorkbenchClip['transitionAfter'] => {
+  if (forceCut || !next) return cutTransition();
+  if (clip.transitionAfter.type !== 'crossfade') return { ...clip.transitionAfter };
+  const maximum = Math.min(clipLength(clip), clipLength(next)) / 2;
+  const durationSec = Math.min(Math.max(0, clip.transitionAfter.durationSec), maximum);
+  return durationSec > 0 ? { type: 'crossfade', durationSec } : cutTransition();
+};
+
+/** Normalize an externally edited draft without mutating it. */
+export const normalizeWorkbenchClipTransitions = (draft: VideoWorkbenchDraft): VideoWorkbenchDraft => draftWithClips(draft, normalizeWorkbenchTransitions(draft.clips));
+
+const assertFiniteRange = (range: VideoWorkbenchRange): void => {
+  if (!Number.isFinite(range.startSec) || !Number.isFinite(range.endSec) || range.startSec >= range.endSec) {
+    throw new Error('剪辑范围必须是有效的开始和结束时间，且结束时间大于开始时间。');
+  }
+};
+
+const assertClipRange = (clip: VideoWorkbenchClip, range: VideoWorkbenchRange): void => {
+  assertFiniteRange(range);
+  if (range.startSec < clip.inSec || range.endSec > clip.outSec) {
+    throw new Error(`剪辑范围必须位于片段 ${clip.inSec.toFixed(3)}–${clip.outSec.toFixed(3)} 秒内。`);
+  }
+};
+
+const uniqueClipId = (clips: readonly VideoWorkbenchClip[], requested: string): string => {
+  if (requested && !clips.some((clip) => clip.id === requested)) return requested;
+  let id = workbenchId('clip');
+  while (clips.some((clip) => clip.id === id)) id = workbenchId('clip');
+  return id;
+};
+
+interface DeleteRangeResult {
+  clips: VideoWorkbenchClip[];
+  /** Boundary at which the removed range began, useful to replacement. */
+  insertionIndex: number;
+}
+
+const deleteWorkbenchClipRangeInternal = (draft: VideoWorkbenchDraft, clipId: string, range: VideoWorkbenchRange): DeleteRangeResult => {
+  const index = draft.clips.findIndex((clip) => clip.id === clipId);
+  if (index < 0) throw new Error('要剪辑的片段不存在。');
+  const clip = draft.clips[index];
+  assertClipRange(clip, range);
+  const hasPrefix = range.startSec > clip.inSec;
+  const hasSuffix = range.endSec < clip.outSec;
+  const replacement: VideoWorkbenchClip[] = [];
+  if (hasPrefix) replacement.push({ ...cloneClip(clip), outSec: range.startSec, transitionAfter: hasSuffix ? cutTransition() : { ...clip.transitionAfter } });
+  if (hasSuffix) replacement.push({ ...cloneClip(clip), id: hasPrefix ? uniqueClipId(draft.clips, `${clip.id}-tail`) : clip.id, inSec: range.endSec, transitionAfter: { ...clip.transitionAfter } });
+  const clips = [...draft.clips.slice(0, index), ...replacement, ...draft.clips.slice(index + 1)].map(cloneClip);
+  // A removed interval always creates a new seam. If the clip disappears, the
+  // previous clip now joins the following clip at the same boundary.
+  const seamIndex = hasPrefix ? index : index - 1;
+  const forceCuts = new Set<number>();
+  if (seamIndex >= 0 && seamIndex < clips.length - 1) forceCuts.add(seamIndex);
+  return { clips: normalizeWorkbenchTransitions(clips, forceCuts), insertionIndex: index + (hasPrefix ? 1 : 0) };
+};
+
+/** Delete a source-time range inside one clip and close the gap. */
+export const deleteWorkbenchClipRange = (draft: VideoWorkbenchDraft, clipId: string, range: VideoWorkbenchRange): VideoWorkbenchDraft => {
+  const result = deleteWorkbenchClipRangeInternal(draft, clipId, range);
+  return draftWithClips(draft, result.clips);
+};
+
+/** Alias matching the wording used by the timeline UI. */
+export const removeWorkbenchClipRange = deleteWorkbenchClipRange;
+export const deleteWorkbenchRange = deleteWorkbenchClipRange;
+
+/** Trim a clip to a source-time range while preserving its identity. */
+export const trimWorkbenchClipRange = (draft: VideoWorkbenchDraft, clipId: string, range: VideoWorkbenchRange): VideoWorkbenchDraft => {
+  const index = draft.clips.findIndex((clip) => clip.id === clipId);
+  if (index < 0) throw new Error('要裁剪的片段不存在。');
+  const clip = draft.clips[index];
+  assertClipRange(clip, range);
+  const clips = draft.clips.map((item, itemIndex) => itemIndex === index ? { ...cloneClip(item), inSec: range.startSec, outSec: range.endSec } : cloneClip(item));
+  return draftWithClips(draft, normalizeWorkbenchTransitions(clips));
+};
+
+const resolveInsertBoundary = (draft: VideoWorkbenchDraft, position: VideoWorkbenchInsertPosition): { index: number; split?: { clipIndex: number; offsetSec: number } } => {
+  if (typeof position === 'number') return { index: position };
+  if ('index' in position) return { index: position.index };
+  const clipIndex = draft.clips.findIndex((clip) => clip.id === position.clipId);
+  if (clipIndex < 0) throw new Error('插入位置对应的片段不存在。');
+  if (position.offsetSec !== undefined) {
+    const clip = draft.clips[clipIndex];
+    if (!Number.isFinite(position.offsetSec) || position.offsetSec < clip.inSec || position.offsetSec > clip.outSec) throw new Error('插入时间必须位于目标片段的入点和出点之间。');
+    if (position.offsetSec > clip.inSec && position.offsetSec < clip.outSec) return { index: clipIndex + 1, split: { clipIndex, offsetSec: position.offsetSec } };
+    return { index: position.offsetSec <= clip.inSec ? clipIndex : clipIndex + 1 };
+  }
+  return { index: position.side === 'before' ? clipIndex : clipIndex + 1 };
+};
+
+/** Insert a clip before/after a clip, at an array boundary, or at source time inside a clip. */
+export const insertWorkbenchClip = (draft: VideoWorkbenchDraft, clip: VideoWorkbenchClip, position: VideoWorkbenchInsertPosition = draft.clips.length): VideoWorkbenchDraft => {
+  if (!Number.isFinite(clip.inSec) || !Number.isFinite(clip.outSec) || clip.inSec < 0 || clip.outSec <= clip.inSec) throw new Error('插入片段的入点和出点无效。');
+  const resolved = resolveInsertBoundary(draft, position);
+  if (!Number.isInteger(resolved.index) || resolved.index < 0 || resolved.index > draft.clips.length) throw new Error('插入位置无效。');
+  const inserted = { ...cloneClip(clip), id: uniqueClipId(draft.clips, clip.id), transitionAfter: cutTransition() };
+  let clips: VideoWorkbenchClip[];
+  let forceCuts = new Set<number>();
+  if (resolved.split) {
+    const { clipIndex, offsetSec } = resolved.split;
+    const target = draft.clips[clipIndex];
+    // Include the inserted clip when allocating the split tail id: a caller is
+    // allowed to supply an id such as "clip-tail", and duplicate React keys
+    // would otherwise be created by this one operation.
+    const tailId = uniqueClipId([...draft.clips, inserted], `${target.id}-tail`);
+    const tail = { ...cloneClip(target), id: tailId, inSec: offsetSec, transitionAfter: { ...target.transitionAfter } };
+    const head = { ...cloneClip(target), outSec: offsetSec, transitionAfter: cutTransition() };
+    clips = [...draft.clips.slice(0, clipIndex), head, inserted, tail, ...draft.clips.slice(clipIndex + 1)].map(cloneClip);
+    forceCuts = new Set([clipIndex, clipIndex + 1]);
+  } else {
+    clips = [...draft.clips.slice(0, resolved.index), inserted, ...draft.clips.slice(resolved.index)].map(cloneClip);
+    forceCuts = new Set([resolved.index - 1, resolved.index]);
+  }
+  return draftWithClips(draft, normalizeWorkbenchTransitions(clips, forceCuts));
+};
+export const insertWorkbenchClipAt = insertWorkbenchClip;
+
+/** Replace a source-time range by inserting a new clip at the resulting seam. */
+export const replaceWorkbenchClipRange = (draft: VideoWorkbenchDraft, clipId: string, range: VideoWorkbenchRange, replacement: VideoWorkbenchClip, options: VideoWorkbenchReplaceRangeOptions = {}): VideoWorkbenchDraft => {
+  const deleted = deleteWorkbenchClipRangeInternal(draft, clipId, range);
+  const position = options.position ?? deleted.insertionIndex;
+  return insertWorkbenchClip({ ...draft, clips: deleted.clips }, replacement, position);
+};
+export const replaceWorkbenchRange = replaceWorkbenchClipRange;
+
 export const buildWorkbenchRenderRequest = (project: Project, draft: VideoWorkbenchDraft, jobId: string): WorkbenchRenderRequest => {
   if (!draft.clips.length) throw new Error('请先添加要剪辑的视频。');
   if (draft.clips.length > 100) throw new Error('单个剪辑方案最多 100 个片段，请分段导出。');

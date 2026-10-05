@@ -3,6 +3,7 @@ import { bindComfyVideoWorkflow, comfyVideoExecutionStartedAt, mapComfyVideoProg
 import { ComfyMissingTaskTracker, ComfyQueuePresenceCache } from './comfyPolling';
 import { assertNoEmbeddedVideoCredentials, buildVideoApiBody, defaultMiniMaxVideoApi, defaultRunningHubVideoApi, isRunningHubUploadedFile, parseVideoApiResult, redactVideoSecrets, runningHubVideoResults, videoApiSubmitEndpoint } from './videoGenerationApi';
 import { compileRunningHubVideoApi, resolveConfiguredVideoApi } from './runningHubVideo';
+import { migrateRunningHubVideoApiImageProtocol, resolveRunningHubVideoImageProtocol } from './runningHubImageProtocol';
 import { nestedValue } from './videoTasks';
 import { defaultComfyVideoConfig } from './videoGenerationTypes';
 import { defaultRhTvApi, RHTV_ORIGIN } from './rhtvBridge';
@@ -1084,7 +1085,22 @@ export class VideoGenerationEngine {
     const candidates = [current.videoTaskApi, ...(current.videoApiProfiles || [])];
     if (connection.backend === 'api' && connection.api?.provider === 'runninghub' && current.runningHubVideo) {
       for (const workflow of current.runningHubVideo.workflows) {
-        try { candidates.push(compileRunningHubVideoApi(current.runningHubVideo, workflow.id, frozenRunningHubParameters(task.videoJob!.snapshot))); }
+        try {
+          const parameters = frozenRunningHubParameters(task.videoJob!.snapshot);
+          candidates.push(compileRunningHubVideoApi(current.runningHubVideo, workflow.id, parameters));
+          const protocol = resolveRunningHubVideoImageProtocol(workflow);
+          if (task.remoteTaskId?.trim() && workflow.mapping.imageCount === undefined
+            && protocol.verifiedProfile && protocol.imageCountSource === 'verified-app'
+            && !connection.api.runningHubMappedFields?.some((field) => field.kind === 'image-count')) {
+            // A submitted pre-upgrade task keeps its original request. Only the
+            // verified automatic count migration may supply a second, read-only
+            // credential candidate; endpoint/template/bindings still match below.
+            const legacyWorkflow = { ...workflow, mapping: { ...workflow.mapping, imageCount: null } };
+            candidates.push(compileRunningHubVideoApi({ ...current.runningHubVideo,
+              workflows: current.runningHubVideo.workflows.map((item) => item === workflow ? legacyWorkflow : item),
+            }, workflow.id, parameters));
+          }
+        }
         catch { /* Unfinished workflows cannot supply credentials. */ }
       }
     }
@@ -1269,7 +1285,7 @@ export class VideoGenerationEngine {
       if (asset.missing) throw new Error(`批量第 ${index + 1} 项的图片“${asset.name}”文件丢失，请重新关联素材。`);
       return structuredClone(asset);
     });
-    const config: VideoTaskApiConfig | undefined = reuse?.connection.api ? { ...reuse.connection.api, apiKey: await this.recoverCredential(reusedTask!) }
+    const config: VideoTaskApiConfig | undefined = reuse?.connection.api ? migrateRunningHubVideoApiImageProtocol({ ...reuse.connection.api, apiKey: await this.recoverCredential(reusedTask!) })
       : draft.backend === 'api' ? resolveConfiguredVideoApi(state.settings, draft) : undefined;
     const comfy: ComfyVideoConfig = reuse?.connection.comfyui
       ? { ...reuse.connection.comfyui, apiKey: await this.key(reusedTask!), workflows: reuse.connection.workflow ? [reuse.connection.workflow] : [] }
@@ -1741,7 +1757,7 @@ export class VideoGenerationEngine {
       if (!asset || asset.type === 'video' || asset.type === 'audio') throw new Error('所选图片已不存在或不是图片资产。');
       return structuredClone(asset);
     });
-    const config: VideoTaskApiConfig | undefined = reuse?.connection.api ? { ...reuse.connection.api, apiKey: await this.recoverCredential(reusedTask!) }
+    const config: VideoTaskApiConfig | undefined = reuse?.connection.api ? migrateRunningHubVideoApiImageProtocol({ ...reuse.connection.api, apiKey: await this.recoverCredential(reusedTask!) })
       : draft.backend === 'api' ? resolveConfiguredVideoApi(state.settings, draft) : undefined;
     const comfy = reuse?.connection.comfyui ? { ...reuse.connection.comfyui, apiKey: await this.key(reusedTask!), workflows: reuse.connection.workflow ? [reuse.connection.workflow] : [] } : state.settings.comfyuiVideo || defaultComfyVideoConfig;
     const workflow = reuse?.connection.workflow || comfy.workflows.find((item) => item.id === (draft.workflowId || comfy.activeWorkflowId));
@@ -1843,7 +1859,11 @@ export class VideoGenerationEngine {
       this.patch(admitted, { status: 'submitting' }, { stage: 'preparing', message: '已取得视频生成名额，正在准备已选择的提示词与图片' });
       task = this.liveTask(taskId) || task;
       const draft = task.videoJob!.snapshot.draft;
-      const config = task.videoJob!.snapshot.connection.api;
+      const savedConfig = task.videoJob!.snapshot.connection.api;
+      // A failed task may be explicitly reused after the image-placeholder
+      // fix. Migrate only this local submission copy; the immutable historical
+      // snapshot remains available for audit and credential identity.
+      const config = savedConfig ? migrateRunningHubVideoApiImageProtocol(savedConfig) : savedConfig;
       const comfy = task.videoJob!.snapshot.connection.comfyui;
       const workflow = task.videoJob!.snapshot.connection.workflow;
       // Queued descendants may also have lost their old scoped keys. Restore

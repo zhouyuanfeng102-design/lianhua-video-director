@@ -67,6 +67,12 @@ export type VideoSegmentStatus = 'planned' | 'generating' | 'ready' | 'stale' | 
 
 export interface SourceDocument {
   id: string;
+  /** A source document is one chapter inside this project. */
+  order?: number;
+  archived?: boolean;
+  volume?: string;
+  /** Preserved legacy work whose original chapter cannot be identified. */
+  historical?: boolean;
   name: string;
   content: string;
   /** Stable hash of the exact source text used to derive downstream artifacts. */
@@ -108,6 +114,9 @@ export interface CharacterNsfwProfile {
 
 export interface Character {
   id: string;
+  aliases?: string[];
+  sourceChapterIds?: string[];
+  baseCharacterId?: string;
   /** User-controlled ordinary dossier provenance; absent means legacy story-aware behavior. */
   dossier?: {
     useStory?: boolean;
@@ -151,6 +160,8 @@ export interface Character {
 
 export interface Location {
   id: string;
+  aliases?: string[];
+  sourceChapterIds?: string[];
   name: string;
   description: string;
   timeWeather: string;
@@ -165,6 +176,8 @@ export interface Location {
 
 export interface Prop {
   id: string;
+  aliases?: string[];
+  sourceChapterIds?: string[];
   name: string;
   category: string;
   material: string;
@@ -230,6 +243,8 @@ export interface StoryboardRevision {
   targetModelId?: string;
   /** Snapshot of the target request metadata paired with the official prompt. */
   targetOutput?: TargetOutput;
+  /** Seedance 2.5 official natural-language output, kept separate from H3. */
+  seedance25Output?: Seedance25Output;
   /** Saved shot-count authority; absent in legacy revisions. */
   shotMode?: ShotMode;
   shotCount?: number;
@@ -334,6 +349,19 @@ export interface StoryboardImageFrameMetadata {
   imageFrameTimeSec?: number;
 }
 
+export interface Seedance25Output {
+  targetId: 'seedance-2.5';
+  promptZh: string;
+  promptEn?: string;
+  durationSec: number;
+  sourceFingerprint: string;
+  referenceManifest: Array<Record<string, unknown>>;
+  warnings: string[];
+  generatedAt: number;
+  englishSourceFingerprint?: string;
+  englishError?: string;
+}
+
 export interface ReferenceAsset extends StoryboardImageFrameMetadata {
   id: string;
   /** Ordinary reference association copy; the original asset keeps its immutable provenance. */
@@ -380,8 +408,10 @@ export interface ReferenceAsset extends StoryboardImageFrameMetadata {
   negativePrompt?: string;
   /** Exact image-prompt converter selection used to create this asset. */
   imagePromptRuleSetId?: string;
+  imagePromptRuleSetName?: string;
   imagePromptRuleSetVersion?: string;
   imagePromptPresetId?: string;
+  imagePromptPresetName?: string;
   imagePromptPresetVersion?: string;
   imagePromptFormat?: ImagePromptFormat;
   /** Physical image-generation backend, independent of the selected prompt rule's backend/format. */
@@ -416,6 +446,9 @@ export interface ReferenceAsset extends StoryboardImageFrameMetadata {
 
 export interface StoryAnalysisCharacter {
   name?: string;
+  existingEntityId?: string;
+  aliases?: string[];
+  baseCharacterId?: string;
   /** Optional identity-variant metadata. A variant is a separate visual asset. */
   baseName?: string;
   formLabel?: string;
@@ -442,6 +475,8 @@ export interface StoryAnalysisCharacter {
 
 export interface StoryAnalysisLocation {
   name?: string;
+  existingEntityId?: string;
+  aliases?: string[];
   description?: string;
   timeWeather?: string;
   lighting?: string;
@@ -452,6 +487,8 @@ export interface StoryAnalysisLocation {
 
 export interface StoryAnalysisProp {
   name?: string;
+  existingEntityId?: string;
+  aliases?: string[];
   category?: string;
   material?: string;
   appearance?: string;
@@ -656,6 +693,8 @@ export interface VideoSegment {
 
 export interface VideoSequencePlan {
   id: string;
+  chapterId?: string;
+  sourceStale?: boolean;
   title: string;
   sourceStoryTitle: string;
   sourceStoryContent: string;
@@ -727,6 +766,8 @@ export interface StoryboardImageToImageSettings {
 
 export interface Storyboard {
   id: string;
+  chapterId?: string;
+  sourceStale?: boolean;
   /** Current editable dossier changed; historical delivery strings remain available. */
   characterDossierDirty?: { characterIds: string[]; updatedAt: number };
   sceneId: string;
@@ -794,6 +835,8 @@ export interface Storyboard {
   /** Target model used for the latest adapted output. */
   targetModelId?: string;
   targetOutput?: TargetOutput;
+  /** On-demand Seedance 2.5 bilingual delivery, never overwrites H3 output. */
+  seedance25Output?: Seedance25Output;
   firstFrameAssetId?: string;
   lastFrameAssetId?: string;
   audioLedger?: AudioCue[];
@@ -815,6 +858,8 @@ export interface Storyboard {
 
 export interface Scene {
   id: string;
+  chapterId?: string;
+  sourceStale?: boolean;
   title: string;
   content: string;
   summary: string;
@@ -838,6 +883,17 @@ export interface StoryDraft {
   updatedAt: number;
 }
 
+/** Chapter-owned editor state; shared dossiers, media and jobs stay on Project. */
+export interface ChapterWorkspace {
+  storyDraft?: StoryDraft;
+  directorControls?: Record<string, unknown>;
+  videoDirector?: unknown;
+  directorSettingsConfirmedFingerprint?: string;
+  directorSettingsConfirmedAt?: number;
+  directorLookRequirement?: string;
+  directorLookDraft?: DirectorLookDraft;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -845,6 +901,8 @@ export interface Project {
   /** Project-library workspace marker only; video workers continue normally. */
   backgroundSuspended?: boolean;
   sourceDocuments: SourceDocument[];
+  activeChapterId?: string;
+  chapterWorkspaces?: Record<string, ChapterWorkspace>;
   storyDraft?: StoryDraft;
   characters: Character[];
   locations: Location[];
@@ -962,8 +1020,10 @@ export interface ImageGenerationTask extends StoryboardImageFrameMetadata {
   imageApiSnapshot?: ImageApiExecutionSnapshot;
   /** Exact image-prompt converter selection used before backend submission. */
   imagePromptRuleSetId?: string;
+  imagePromptRuleSetName?: string;
   imagePromptRuleSetVersion?: string;
   imagePromptPresetId?: string;
+  imagePromptPresetName?: string;
   imagePromptPresetVersion?: string;
   imagePromptFormat?: ImagePromptFormat;
   sourceEntityId?: string;
@@ -1086,7 +1146,7 @@ export interface VideoTaskApiConfig {
   runningHubOutputNodeIds?: string[];
   /** Ordered image-slot capacity; individual submissions may use fewer slots. */
   runningHubImageRoles?: ReferenceRole[];
-  runningHubMappedFields?: Array<{ nodeId: string; fieldName: string; kind: 'prompt' | 'image' | 'parameter'; imageIndex?: number; emptyValue?: '' | 'None'; parameter?: string; originalValue?: unknown }>;
+  runningHubMappedFields?: Array<{ nodeId: string; fieldName: string; kind: 'prompt' | 'image' | 'image-count' | 'parameter'; imageIndex?: number; emptyValue?: '' | 'None' | 'example.png'; imageCountMode?: 'prefix'; imageCountSource?: 'explicit' | 'verified-app'; parameter?: string; originalValue?: unknown }>;
   /** Local controls for mapped parameters; never included in the cloud request body. */
   runningHubParameterControls?: Record<string, RunningHubVideoFieldControl>;
   /** JSON placeholders: {{prompt}}, {{model}}, {{images}}, {{first_image}}, {{last_image}}, {{parameters}}. */

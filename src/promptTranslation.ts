@@ -127,8 +127,12 @@ function createProtection(source: string) {
   const definitionNames = Array.from(source.matchAll(
     /^<(?:Subject|Picture|Video|Audio)\s+\d+>\s+is\s+(.+?)(?=\s+(?:referenced from\s+<|defined by\b)|\s*[:：])/gmu,
   ), (match) => match[1].trim()).filter((name) => name.length <= 100 && !/^the referenced .+ source$/iu.test(name));
+  // Seedance references use @Image/@Video/@Audio/@Clay Render tokens. The
+  // media type word is not a speaking subject; keeping it in the generic
+  // bare-name dictionary would reject an otherwise valid English heading such
+  // as "Video specification" as an invented speaker.
   const bareSpeakerNames = [...getPromptSpeakerNames(source), ...dialogueProtection.dialogues.map((line) => line.speaker)]
-    .filter((name) => name && !/^<Subject\s/u.test(name));
+    .filter((name) => name && !/^<Subject\s/u.test(name) && !/^(?:Image|Video|Audio|Clay|Render)$/iu.test(name));
   const entities = [...new Set([...(source.match(ENTITY_PATTERN) || []), ...definitionNames, ...bareSpeakerNames])]
     .sort((left, right) => right.length - left.length);
   const groups: [string, string, string[]][] = [

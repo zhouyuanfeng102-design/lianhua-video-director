@@ -3,8 +3,9 @@ import type { AppState, Project, ReferenceAsset } from './types';
 import { applyOwnedProjectUpdate } from './appEffects';
 import { saveStateAsync } from './storage';
 import { buildWorkbenchRenderRequest, createWorkbenchClip, emptyVideoWorkbenchDraft, frameWorkbenchAsset, renderedWorkbenchAsset,
-  sequenceWorkbenchAssets, workbenchId, workbenchSource, workbenchVideoAsset,
+  insertWorkbenchClip, replaceWorkbenchClipRange, sequenceWorkbenchAssets, workbenchId, workbenchSource, workbenchVideoAsset,
   type VideoWorkbenchClip, type VideoWorkbenchDraft, type VideoWorkbenchFrameOptions, type VideoWorkbenchJob } from './videoWorkbench';
+import type { VideoWorkbenchInsertPosition } from './videoWorkbench';
 import type { VideoWorkbenchStatus, WorkbenchProgress, WorkbenchVideoProbe } from './videoWorkbenchTypes';
 
 type Bridge = Pick<NonNullable<Window['lianhuaDesktop']>, 'videoWorkbenchStatus' | 'probeWorkbenchVideo' | 'extractWorkbenchFrames' | 'renderWorkbenchTimeline' | 'cancelWorkbenchJob' | 'onWorkbenchProgress' | 'importMedia'>;
@@ -27,6 +28,13 @@ export interface VideoWorkbenchController {
   probes: Record<string, WorkbenchVideoProbe>;
   refreshStatus: () => Promise<void>;
   updateDraft: (updater: (draft: VideoWorkbenchDraft) => VideoWorkbenchDraft) => void;
+  insertAssetAt: (assetId: string, position?: VideoWorkbenchInsertPosition) => Promise<string>;
+  replaceClip: (clipId: string, assetId: string) => Promise<string>;
+  replaceClipRange: (clipId: string, range: { startSec: number; endSec: number }, assetId: string) => Promise<string>;
+  undoDraft: () => void;
+  redoDraft: () => void;
+  canUndoDraft: boolean;
+  canRedoDraft: boolean;
   probeAsset: (assetId: string) => Promise<WorkbenchVideoProbe>;
   importFiles: (files: File[]) => Promise<void>;
   addAssets: (assetIds: string[]) => Promise<void>;
@@ -52,6 +60,7 @@ export class VideoWorkbenchEngine {
   private disposed = false;
   private unsubscribe?: () => void;
   private active?: { job: VideoWorkbenchJob; requestId: string; cancelled: boolean };
+  private draftHistory = new Map<string, { undo: VideoWorkbenchDraft[]; redo: VideoWorkbenchDraft[] }>();
   constructor(private options: EngineOptions) {
     this.unsubscribe = options.desktop?.onWorkbenchProgress?.((progress) => {
       if (this.disposed || !this.active || this.active.cancelled || progress.jobId !== this.active.requestId || progress.projectId !== this.active.job.projectId) return;
@@ -84,9 +93,50 @@ export class VideoWorkbenchEngine {
     this.changed();
   }
   draft(projectId: string) { return this.owner(projectId)?.videoWorkbench?.draft || emptyVideoWorkbenchDraft(projectId); }
+  private history(projectId: string) {
+    const existing = this.draftHistory.get(projectId);
+    if (existing) return existing;
+    const created = { undo: [], redo: [] };
+    this.draftHistory.set(projectId, created);
+    return created;
+  }
+  canUndo(projectId: string) { return this.history(projectId).undo.length > 0; }
+  canRedo(projectId: string) { return this.history(projectId).redo.length > 0; }
+  private sameDraft(left: VideoWorkbenchDraft, right: VideoWorkbenchDraft) {
+    const comparable = (draft: VideoWorkbenchDraft) => { const { updatedAt: _updatedAt, ...rest } = draft; return rest; };
+    return JSON.stringify(comparable(left)) === JSON.stringify(comparable(right));
+  }
+  private recordDraftChange(projectId: string, before: VideoWorkbenchDraft, after: VideoWorkbenchDraft) {
+    if (this.sameDraft(before, after)) return;
+    const history = this.history(projectId);
+    history.undo.push(structuredClone(before));
+    if (history.undo.length > 60) history.undo.shift();
+    history.redo = [];
+  }
   updateDraft(projectId: string, updater: (draft: VideoWorkbenchDraft) => VideoWorkbenchDraft) {
-    this.patch(projectId, (project) => ({ ...project, videoWorkbench: { jobs: project.videoWorkbench?.jobs || [],
-      draft: { ...updater(project.videoWorkbench?.draft || emptyVideoWorkbenchDraft(projectId)), updatedAt: Date.now() } } }));
+    let before: VideoWorkbenchDraft | undefined;
+    let after: VideoWorkbenchDraft | undefined;
+    this.patch(projectId, (project) => {
+      const current = project.videoWorkbench?.draft || emptyVideoWorkbenchDraft(projectId);
+      before = structuredClone(current);
+      after = { ...updater(structuredClone(current)), updatedAt: Date.now() };
+      return { ...project, videoWorkbench: { jobs: project.videoWorkbench?.jobs || [], draft: after } };
+    });
+    if (before && after) this.recordDraftChange(projectId, before, after);
+  }
+  undoDraft(projectId: string) {
+    const history = this.history(projectId); const previous = history.undo.pop();
+    if (!previous) return false;
+    const current = this.draft(projectId); history.redo.push(structuredClone(current));
+    this.patch(projectId, (project) => ({ ...project, videoWorkbench: { jobs: project.videoWorkbench?.jobs || [], draft: { ...structuredClone(previous), updatedAt: Date.now() } } }));
+    this.changed(); return true;
+  }
+  redoDraft(projectId: string) {
+    const history = this.history(projectId); const next = history.redo.pop();
+    if (!next) return false;
+    const current = this.draft(projectId); history.undo.push(structuredClone(current));
+    this.patch(projectId, (project) => ({ ...project, videoWorkbench: { jobs: project.videoWorkbench?.jobs || [], draft: { ...structuredClone(next), updatedAt: Date.now() } } }));
+    this.changed(); return true;
   }
   probesFor(projectId: string): Record<string, WorkbenchVideoProbe> {
     return Object.fromEntries((this.owner(projectId)?.assets || []).flatMap((asset) => {
@@ -175,6 +225,82 @@ export class VideoWorkbenchEngine {
           draft: { ...draft, clips: [...draft.clips, ...clips], updatedAt: Date.now() } } };
       });
       if (appendIssue) throw new Error(appendIssue);
+    });
+  }
+  async insertAssetAt(projectId: string, assetId: string, position: VideoWorkbenchInsertPosition = this.draft(projectId).clips.length) {
+    return this.setup(async (check) => {
+      const owner = this.owner(projectId);
+      if (!owner) throw new Error('插入所属项目已不存在。');
+      const capturedDraftId = this.draft(projectId).id;
+      const selected = owner.assets.find((candidate) => candidate.id === assetId);
+      if (!selected || !workbenchVideoAsset(selected)) throw new Error('请选择有效的视频素材。');
+      workbenchSource(selected);
+      const capturedAsset = structuredClone(selected);
+      const probe = await this.probeAsset(projectId, assetId);
+      check();
+      let issue: string | undefined;
+      let insertedId = '';
+      let beforeDraft: VideoWorkbenchDraft | undefined;
+      let afterDraft: VideoWorkbenchDraft | undefined;
+      this.patch(projectId, (project) => {
+        const currentDraft = project.videoWorkbench?.draft || emptyVideoWorkbenchDraft(projectId);
+        beforeDraft = structuredClone(currentDraft);
+        const currentAsset = project.assets.find((candidate) => candidate.id === assetId);
+        if (currentDraft.id !== capturedDraftId) { issue = '剪辑方案已切换，未插入过期选片。'; return project; }
+        if (!currentAsset || currentAsset.relativePath !== capturedAsset.relativePath || currentAsset.checksum !== capturedAsset.checksum) {
+          issue = `视频“${capturedAsset.name}”的文件已更换，请重新选择；未插入旧文件。`; return project;
+        }
+        const inserted = createWorkbenchClip(capturedAsset, probe);
+        insertedId = inserted.id;
+        const nextDraft = insertWorkbenchClip(currentDraft, inserted, position);
+        afterDraft = { ...nextDraft, updatedAt: Date.now() };
+        return { ...project, videoWorkbench: { jobs: project.videoWorkbench?.jobs || [], draft: afterDraft } };
+      });
+      if (issue) throw new Error(issue);
+      if (beforeDraft && afterDraft) this.recordDraftChange(projectId, beforeDraft, afterDraft);
+      return insertedId;
+    });
+  }
+  async replaceClip(projectId: string, clipId: string, assetId: string) {
+    const current = this.draft(projectId).clips.find((clip) => clip.id === clipId);
+    if (!current) throw new Error('目标片段已被移除，请重新选择。');
+    return this.replaceClipRange(projectId, clipId, { startSec: current.inSec, endSec: current.outSec }, assetId);
+  }
+  async replaceClipRange(projectId: string, clipId: string, range: { startSec: number; endSec: number }, assetId: string) {
+    return this.setup(async (check) => {
+      const owner = this.owner(projectId);
+      if (!owner) throw new Error('替换所属项目已不存在。');
+      const capturedDraftId = this.draft(projectId).id;
+      const selected = owner.assets.find((candidate) => candidate.id === assetId);
+      if (!selected || !workbenchVideoAsset(selected)) throw new Error('请选择有效的视频素材。');
+      workbenchSource(selected);
+      const capturedAsset = structuredClone(selected);
+      const probe = await this.probeAsset(projectId, assetId);
+      check();
+      let issue: string | undefined;
+      let replacementId = '';
+      let beforeDraft: VideoWorkbenchDraft | undefined;
+      let afterDraft: VideoWorkbenchDraft | undefined;
+      this.patch(projectId, (project) => {
+        const currentDraft = project.videoWorkbench?.draft || emptyVideoWorkbenchDraft(projectId);
+        beforeDraft = structuredClone(currentDraft);
+        const targetIndex = currentDraft.clips.findIndex((clip) => clip.id === clipId);
+        const currentAsset = project.assets.find((candidate) => candidate.id === assetId);
+        if (currentDraft.id !== capturedDraftId) { issue = '剪辑方案已切换，未替换过期选片。'; return project; }
+        if (targetIndex < 0) { issue = '目标片段已被移除，请重新选择。'; return project; }
+        if (!currentAsset || currentAsset.relativePath !== capturedAsset.relativePath || currentAsset.checksum !== capturedAsset.checksum) {
+          issue = `视频“${capturedAsset.name}”的文件已更换，请重新选择；未替换旧文件。`; return project;
+        }
+        const target = currentDraft.clips[targetIndex];
+        const replacement = { ...createWorkbenchClip(capturedAsset, probe), volume: target.volume, transitionAfter: { type: 'cut' as const, durationSec: 0 } };
+        replacementId = replacement.id;
+        const nextDraft = replaceWorkbenchClipRange(currentDraft, clipId, range, replacement);
+        afterDraft = { ...nextDraft, updatedAt: Date.now() };
+        return { ...project, videoWorkbench: { jobs: project.videoWorkbench?.jobs || [], draft: afterDraft } };
+      });
+      if (issue) throw new Error(issue);
+      if (beforeDraft && afterDraft) this.recordDraftChange(projectId, beforeDraft, afterDraft);
+      return replacementId;
     });
   }
   async loadSequence(projectId: string, planId: string) {
@@ -312,6 +438,10 @@ export function useVideoWorkbenchController({ state, getCurrentState, setState, 
     status: engine.current?.status, busy: engine.current?.busy || false, error: engine.current?.error || '', progress: engine.current?.progress,
     probes: engine.current?.probesFor(projectId) || {}, refreshStatus: () => get().refreshStatus(),
     updateDraft: (update) => get().updateDraft(projectId, update), probeAsset: (id) => get().probeAsset(projectId, id), importFiles: (files) => get().importFiles(projectId, files),
+    insertAssetAt: (id, index) => get().insertAssetAt(projectId, id, index), replaceClip: (clipId, id) => get().replaceClip(projectId, clipId, id),
+    replaceClipRange: (clipId, range, id) => get().replaceClipRange(projectId, clipId, range, id),
+    undoDraft: () => { get().undoDraft(projectId); }, redoDraft: () => { get().redoDraft(projectId); },
+    canUndoDraft: Boolean(engine.current?.canUndo(projectId)), canRedoDraft: Boolean(engine.current?.canRedo(projectId)),
     addAssets: (ids) => get().addAssets(projectId, ids), loadSequence: (id) => get().loadSequence(projectId, id), extractFrames: (id, options) => get().extractFrames(projectId, id, options),
     extractBoundaries: (draft) => get().extractBoundaries(projectId, draft), renderTimeline: () => get().renderTimeline(projectId), cancel: () => get().cancel(), retryJob: (id) => get().retryJob(projectId, id) };
 }
