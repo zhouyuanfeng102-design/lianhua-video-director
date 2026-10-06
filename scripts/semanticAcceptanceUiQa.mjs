@@ -20,7 +20,7 @@ const assert = {
 export const QA_INVENTORY = [
   { claim: '人族修仙者的年龄与人形结构原样接收', controls: '剧情解析 → 解析并补全', states: '解析/人物补齐/地点补齐/成功', evidence: '精确3次同源请求；3人物15字段、1地点、1场原样落库；无年龄返修或语义日志' },
   { claim: '已有AI资料在图像工作台正确展示', controls: '图像工作台、人物选择', states: '依次选择3个人物', evidence: 'human-like、身体结构、外观约二十岁、实际约三百岁等字段与截图' },
-  { claim: '不再按措辞、格式或语言给AI结果语义判错', controls: 'AI剧情优化、对照预览、核对提示', states: 'Markdown标题/英文自然段，两种结果均为0提示', evidence: '完整原文单次请求、返回原样只读展示、“本地语义校验已关闭”提示' },
+  { claim: '不再按措辞、格式或语言给AI结果语义判错', controls: 'AI画面描述转化、对照预览、核对提示', states: 'Markdown标题/英文自然段，两种结果均为0提示', evidence: '完整原文单次请求、返回原样只读展示、“请对照全文检查人物、动作因果和原对白”提示' },
   { claim: '审阅结果采用与还原可逆，不擅自保存', controls: '采用到编辑区、还原处理前文本', states: '预览前/采用后/还原后', evidence: '原文编辑区精确比对；已保存项目内容不变' },
   { claim: '真正的接口和结构错误仍报告且保留已有结果', controls: '解析并补全、报错日志、关闭日志', states: 'HTTP503、无效JSON（两个离开正常路径的场景）', evidence: '分别仅1请求、清楚的中文技术错误；人物/场景/已保存原文不变' },
   { claim: '相关控件清楚可见且不被覆盖', controls: '解析、审阅标签、采用、还原、人物形态与年龄', states: '调用者指定的真实窗口尺寸，初始/成功/审阅/错误', evidence: '逐状态截图、区域边界与命中检查；需主代理独立目检截图' },
@@ -85,8 +85,8 @@ export async function createSemanticAcceptanceUiQa({ page, baseUrl, outputDirect
   page.setDefaultTimeout(8000);
   const input = () => page.locator('.story-source-textarea');
   const analyze = () => page.locator('.story-input-actions').getByRole('button', { name: /^解析并补全$/u });
-  const optimize = () => page.locator('.story-input-actions').getByRole('button', { name: /^AI\s*剧情优化$/u });
-  const review = () => page.getByRole('dialog', { name: 'AI 剧情优化 · 结果审阅', exact: true });
+  const optimize = () => page.locator('.story-input-actions').getByRole('button', { name: /^AI\s*画面描述转化$/u });
+  const review = () => page.getByRole('dialog', { name: 'AI 画面描述转化 · 结果审阅', exact: true });
   const storyView = () => page.locator('.sidebar').getByRole('button', { name: '剧情解析', exact: true }).click();
   const getProject = () => page.evaluate((key) => JSON.parse(localStorage.getItem(key)).project, storageKey);
   const snapshot = async () => pickProject(await getProject());
@@ -255,7 +255,7 @@ export async function createSemanticAcceptanceUiQa({ page, baseUrl, outputDirect
         assert.equal(await review().getByRole('textbox', { name: 'AI 返回结果', exact: true }).inputValue(), variant.text);
         assert.equal(await input().inputValue(), STORY, 'the visible original stays unchanged before adoption');
         assert.deepEqual(await snapshot(), afterAnalysis, 'preview does not save or reparse');
-        assert.match(await review().innerText(), /本地语义校验已关闭/u);
+        assert.match(await review().innerText(), /请对照全文检查人物、动作因果和原对白/u);
         assert.equal(await review().getByRole('tab', { name: '核对提示（0）', exact: true }).count(), 1);
         await inspectFit(`${variant.id}-comparison`, ['.sr-review-tabs', '.sr-review-text-pane textarea', '.sr-review-actions button']);
         await capture(`04-${variant.id}-comparison`);

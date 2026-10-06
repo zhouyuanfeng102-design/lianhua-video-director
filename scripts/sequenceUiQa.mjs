@@ -3928,7 +3928,7 @@ try {
   const storyActionRow = page.locator('.story-input-card > .row-between').last();
   const storyActionLabels = (await storyActionRow.locator('button').allTextContents())
     .map((label) => label.replace(/\s+/gu, ' ').trim());
-  const expectedStoryActionLabels = ['AI扩写', 'AI剧情优化', '清空', '解析并补全'];
+  const expectedStoryActionLabels = ['AI扩写', 'AI画面描述转化', '清空', '解析并补全'];
   if (JSON.stringify(storyActionLabels) !== JSON.stringify(expectedStoryActionLabels)) {
     throw new Error(`story input actions changed: ${JSON.stringify(storyActionLabels)}`);
   }
@@ -3948,14 +3948,14 @@ try {
     path: path.join(outputDirectory, storyActionsScreenshot),
     fullPage: false,
   });
-  await page.getByRole('button', { name: 'AI剧情优化', exact: true }).click();
+  await page.getByRole('button', { name: 'AI画面描述转化', exact: true }).click();
   await page.waitForFunction(() => (
     document.querySelector('.topbar h1')?.textContent?.trim() === 'API 设置'
   ));
   const missingApiNotice = page.locator('.sidebar-notice.error');
   await missingApiNotice.waitFor();
   const missingApiNoticeText = (await missingApiNotice.textContent())?.replace(/\s+/gu, ' ').trim() || '';
-  if (!/AI剧情优化.*文本(?: API|模型)/u.test(missingApiNoticeText)) {
+  if (!/AI画面描述转化.*文本(?: API|模型)/u.test(missingApiNoticeText)) {
     throw new Error(`AI expansion missing-API notice is not actionable: ${missingApiNoticeText}`);
   }
   const expansionApiScreenshot = 'story-expansion-api-required.png';

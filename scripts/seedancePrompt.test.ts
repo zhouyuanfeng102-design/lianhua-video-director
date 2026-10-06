@@ -62,6 +62,14 @@ assert.match(customResult.promptZh, /0–120 秒/u);
 assert.ok(customResult.warnings.some((warning) => warning.includes('不截断')));
 assert.notEqual(defaultResult.sourceFingerprint, customResult.sourceFingerprint);
 
+const causalTimeline = '【0s-15s】夏提雅挥动枪形武器迎击冲向她的兽人，前排兽人受击飞向半空。\n'
+  + '【15s-30s】里尤洛看着敌军接连倒飞，侍从惊呼：“飞出去了……”；夏提雅的后续迎击暂时画外。';
+const causalResult = compileOfficialSeedancePrompt({ ...base, durationSec: 30, canonicalPrompt: causalTimeline });
+assert.ok(causalResult.promptZh.includes(`连续时间轴（覆盖 0–30 秒）：\n${causalTimeline}\n`),
+  'Seedance retains the complete AI-confirmed actor, target, direction, result and off-screen action');
+assert.doesNotMatch(causalResult.promptZh, /无形力场|STORY_CAUSALITY/u,
+  'the local renderer neither invents combat mechanisms nor embeds AI interpretation rules in product output');
+
 const h3InputResult = compileOfficialSeedancePrompt({
   ...base,
   durationSec: 60,
@@ -109,6 +117,8 @@ const promptEn = await translateSeedancePromptToEnglish({
   request: async (system, user) => {
     translationCalls += 1;
     assert.ok(system.includes(SEEDANCE_ENGLISH_TRANSLATION_RULE));
+    assert.ok(system.includes('STORY_CAUSALITY_TRANSLATION_V1'));
+    assert.match(system, /不能把具名攻击目标泛化为前方\/战场/u);
     assert.match(system, /章节标题翻译为英文，不删除开头内容/u);
     assert.match(system, /对白.*原语言/u);
     assert.match(user, /视频规格：时长 30 秒/u, 'the full specification must reach translation before the first timeline row');

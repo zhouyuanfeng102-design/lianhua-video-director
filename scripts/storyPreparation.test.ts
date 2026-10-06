@@ -356,12 +356,12 @@ try {
   assert.equal(await requestStoryPreparation(config, '林澜推开门。', undefined, preset), scene('林澜推开门。'));
   const system = requests[0].messages.filter((item) => item.role === 'system').map((item) => item.content).join('\n');
   const user = requests[0].messages.find((item) => item.role === 'user')!.content;
-  assert.ok(system.lastIndexOf('当前模式：视频化整理（optimize）') > system.indexOf(preset.systemPrompt));
-  assert.ok(user.lastIndexOf('当前模式：视频化整理（optimize）') > user.indexOf(preset.outputRules));
+  assert.ok(system.lastIndexOf('当前模式：AI画面描述转化（optimize）') > system.indexOf(preset.systemPrompt));
+  assert.ok(user.lastIndexOf('当前模式：AI画面描述转化（optimize）') > user.indexOf(preset.outputRules));
   assert.match(system, /本模式目标优先于.*规则预设/u);
   assert.equal(JSON.stringify(preset), presetBefore);
   assert.match(system, /(?:通读|完整原文|全文)/u);
-  assert.match(system, /(?:推荐|建议).*(?:场景|组织|结构)/u);
+  assert.match(system, /(?:自然连贯|自然中文段落|不套固定栏目)/u);
   assert.match(system, /(?:完整原文|全文).*(?:理解|依据|判断)/u);
   assert.doesNotMatch(system, /existingDialogue(?:Lines)?|sourceExcerpt/u,
     'optimization rules must not tell the model to follow local dialogue extraction hints');

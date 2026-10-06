@@ -3,6 +3,7 @@ import {
   assertSemanticSequencePlanningInput, copySemanticSequencePlanningInput, isSemanticSequencePlan,
   materializeSemanticSequencePlan, normalizeSemanticSegmentSource, parseSemanticSequenceResponse,
   normalizeSemanticSequenceRequestedTotalDuration,
+  normalizeStoryVisualConversionSnapshot,
   SemanticSequenceTechnicalError, semanticSegmentSourceContext, semanticSequenceSourceFingerprint,
   semanticSegmentStoryContent,
   validateSemanticSequencePlan,
@@ -492,7 +493,7 @@ test('source fingerprint changes with semantics/direction but not asynchronous g
   ]) { const changed = clone(original); mutate(changed); assert.notEqual(semanticSequenceSourceFingerprint(changed), identity); }
 });
 
-test('single-segment context never imports the full original or another segment dialogue', () => {
+test('single-segment context separates read-only full story from assigned performance scope', () => {
   const authored = response();
   authored.segments[1].content = 'OTHER_SEGMENT_BODY';
   authored.segments[1].semanticSource.dialogues[0].text = 'OTHER_SEGMENT_DIALOGUE';
@@ -502,8 +503,12 @@ test('single-segment context never imports the full original or another segment 
   assert.equal(context.generationStoryContent, semanticSegmentStoryContent(plan.segments[0]));
   assert.deepEqual(context.segment.semanticSource, plan.segments[0].semanticSource);
   assert.equal(context.segmentCount, 2);
-  const serialized = JSON.stringify(context);
-  for (const foreign of ['第二段独有原文尾句', 'OTHER_SEGMENT_BODY', 'OTHER_SEGMENT_DIALOGUE']) assert.equal(serialized.includes(foreign), false);
+  assert.equal(context.storyUnderstandingContext?.sourceStoryContent, source);
+  assert.equal(context.storyUnderstandingContext?.usage, 'understanding-only');
+  assert.match(context.storyUnderstandingContext!.instruction, /不搬入前后段新剧情/u);
+  const performanceScope = JSON.stringify({ content: context.generationStoryContent, segment: context.segment });
+  for (const foreign of ['第二段独有原文尾句', 'OTHER_SEGMENT_BODY', 'OTHER_SEGMENT_DIALOGUE']) assert.equal(performanceScope.includes(foreign), false);
+  for (const foreign of ['OTHER_SEGMENT_BODY', 'OTHER_SEGMENT_DIALOGUE']) assert.equal(JSON.stringify(context).includes(foreign), false);
   context.segment.semanticSource.dialogues[0].text = 'isolated change';
   context.creativeDirection.cameraTerms.push('isolated change');
   assert.equal(plan.segments[0].semanticSource!.dialogues[0].text, '等我');
@@ -566,6 +571,65 @@ test('normalizer copies complete semantic data without inventing missing semanti
   assert.notStrictEqual(normalized.events[0], original.events[0]);
   assert.equal(normalizeSemanticSegmentSource({ sourceEvidence: [] }), undefined);
   assert.equal(normalizeSemanticSegmentSource({ ...original, dialogues: [{ id: 'x', text: 'no speaker field' }] }), undefined);
+});
+
+test('passive combat causality survives model parsing and independent copies without changing viewpoint prose', () => {
+  const authored = response(1);
+  const event = authored.segments[0].semanticSource.events[0];
+  event.description = '旁观者看见敌人受击飞出';
+  event.causality = { actor: '夏提雅', actorCharacterId: 'shalltear', target: '掘土兽人', action: '挥枪迎击', result: '敌人被击飞',
+    evidence: '红铠人用形状怪异的枪形武器将敌人打上半空。', certainty: 'context-supported' };
+  const original = JSON.stringify(authored);
+  const parsed = parseSemanticSequenceResponse(original, input());
+  const plan = materialize(parsed);
+  const normalized = normalizeSemanticSegmentSource(plan.segments[0].semanticSource)!;
+  assert.deepEqual(normalized.events[0].causality, event.causality);
+  assert.notStrictEqual(normalized.events[0].causality, plan.segments[0].semanticSource!.events[0].causality);
+  assert.equal(plan.segments[0].content, authored.segments[0].content, 'local code preserves AI prose instead of guessing an actor');
+  normalized.events[0].causality!.actor = 'isolated mutation';
+  assert.equal(JSON.stringify(authored), original);
+  assert.equal(plan.segments[0].semanticSource!.events[0].causality!.actor, '夏提雅');
+  const unknown = clone(authored);
+  unknown.segments[0].semanticSource.events[0].causality = {
+    actor: '来源未明', target: '敌军', action: '受击', result: '倒下', evidence: '敌人突然倒下，攻击来源不明。', certainty: 'unknown',
+  };
+  assert.deepEqual(parseSemanticSequenceResponse(JSON.stringify(unknown), input()).segments, unknown.segments,
+    'unknown causes remain unknown; no protagonist is inserted locally');
+  const malformed = JSON.parse(original);
+  malformed.segments[0].semanticSource.events[0].causality.certainty = '肯定是主角';
+  assert.throws(() => parseSemanticSequenceResponse(JSON.stringify(malformed), input()), /events\[0\]\.causality/u);
+});
+
+test('matching novel snapshots and aliases remain read-only and cannot override edited segment content', () => {
+  const request = input();
+  request.characterContinuity = [{ id: 'lin', name: '林舟', aliases: ['蓝衣人'] }];
+  request.originalSourceContext = { id: 'conversion-1', chapterId: 'chapter-1', sourceName: '原始小说',
+    sourceText: '蓝衣人推开门。桥那头，山巅隐约可见。', resultText: request.story, createdAt: 10 };
+  const copied = copySemanticSequencePlanningInput(request);
+  assert.deepEqual(copied.originalSourceContext, request.originalSourceContext);
+  copied.originalSourceContext!.sourceText = 'isolated original';
+  copied.characterContinuity![0].aliases!.push('isolated alias');
+  assert.equal(request.originalSourceContext.sourceText, '蓝衣人推开门。桥那头，山巅隐约可见。');
+  assert.deepEqual(request.characterContinuity[0].aliases, ['蓝衣人']);
+  const plan = materialize(response(), request);
+  plan.segments[0].content = '用户改成林舟沉默等候。';
+  plan.segments[0].contentOverridden = true;
+  const context = semanticSegmentSourceContext(plan, plan.segments[0]);
+  assert.equal(context.generationStoryContent, '用户改成林舟沉默等候。');
+  assert.equal(context.contentOverridden, true);
+  assert.deepEqual(context.storyUnderstandingContext!.originalSourceContext, request.originalSourceContext);
+  assert.deepEqual(context.storyUnderstandingContext!.characterIdentities, request.characterContinuity);
+  assert.match(context.storyUnderstandingContext!.instruction, /不从旧证据或全文恢复用户已删除、修改的事件和对白/u);
+  context.storyUnderstandingContext!.originalSourceContext!.sourceText = 'isolated downstream';
+  context.storyUnderstandingContext!.characterIdentities[0].aliases!.push('isolated downstream');
+  assert.deepEqual(plan.semanticPlanningSnapshot!.originalSourceContext, request.originalSourceContext);
+  assert.deepEqual(plan.semanticPlanningSnapshot!.characterContinuity[0].aliases, ['蓝衣人']);
+  assert.throws(() => copySemanticSequencePlanningInput({ ...request, story: '另一篇剧情' }), /原文快照与当前剧情不匹配/u);
+  assert.equal(normalizeStoryVisualConversionSnapshot({ ...request.originalSourceContext, createdAt: NaN }), undefined);
+  assert.equal(normalizeStoryVisualConversionSnapshot({ ...request.originalSourceContext, sourceText: '' }), undefined);
+  const mismatched = materialize();
+  mismatched.semanticPlanningSnapshot!.originalSourceContext = { ...request.originalSourceContext, resultText: '其他篇章' };
+  assert.equal(semanticSegmentSourceContext(mismatched, mismatched.segments[0]).storyUnderstandingContext!.originalSourceContext, undefined);
 });
 
 for (const entry of cases) { entry.run(); console.log(`PASS ${entry.name}`); }

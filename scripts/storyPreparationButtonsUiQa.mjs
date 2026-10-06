@@ -9,7 +9,7 @@ import { createQaProcessHarness, findAvailableTcpPort, waitForCondition } from '
 // text generation is locally mocked and never reaches a real service.
 const root = path.resolve(import.meta.dirname, '..');
 const outputBase = path.join(root, 'output', 'playwright');
-const outputDirectory = path.resolve(process.env.QA_OUTPUT || path.join(outputBase, 'story-buttons-0.5.86'));
+const outputDirectory = path.resolve(process.env.QA_OUTPUT || path.join(outputBase, 'story-visual-conversion-1.4.4'));
 const relativeOutput = path.relative(outputBase, outputDirectory);
 if (!relativeOutput || relativeOutput.startsWith('..') || path.isAbsolute(relativeOutput)) throw new Error('Story button QA output must stay below output/playwright');
 for (let current = outputDirectory; current !== root; current = path.dirname(current)) {
@@ -89,7 +89,7 @@ const run = async () => {
           'optimization sends the full source without a local dialogue checklist');
       }
       assert.match(system, /story_preparation_mode_contract/u);
-      assert.ok(system.includes(data.mode === 'expand' ? '扩写补全（expand）' : '视频化整理（optimize）'));
+      assert.ok(system.includes(data.mode === 'expand' ? '扩写补全（expand）' : '画面描述转化（optimize）'));
       requests.push({ mode: data.mode, hold: tag, sourceCharacters: source.length, targetLength: data.targetLength });
       if (failNext) {
         failNext = false;
@@ -120,7 +120,7 @@ const run = async () => {
   }, { key: storageKey, apiBase: `${baseUrl}qa-story-buttons/v1`, original: source, other: otherSource });
   await page.reload({ waitUntil: 'networkidle', timeout: 40_000 });
   const navStory = () => page.locator('.sidebar').getByRole('button', { name: '剧情解析', exact: true }).click();
-  const optimizeButton = () => page.locator('.story-input-actions').getByRole('button', { name: /^AI\s*剧情优化$/u });
+  const optimizeButton = () => page.locator('.story-input-actions').getByRole('button', { name: /^AI\s*画面描述转化$/u });
   const expandButton = () => page.locator('.story-input-actions').getByRole('button', { name: /^AI\s*扩写$/u });
   const expansionTarget = () => page.getByRole('spinbutton', { name: 'AI扩写目标字数', exact: true });
   const input = page.locator('.story-source-textarea');
@@ -147,24 +147,51 @@ const run = async () => {
   await expandHandle.evaluate((button) => button.click()); await optimizeHandle.evaluate((button) => { button.click(); button.click(); });
   assert.equal(requests.length, 1, 'busy direct buttons cannot double-submit or switch the running mode');
   await release('busy');
-  const optimizationReview = page.getByRole('dialog', { name: 'AI 剧情优化 · 结果审阅', exact: true });
+  const optimizationReview = page.getByRole('dialog', { name: 'AI 画面描述转化 · 结果审阅', exact: true });
   await optimizationReview.waitFor();
   await optimizationReview.getByRole('button', { name: '采用到编辑区', exact: true }).click();
   await page.waitForFunction((expected) => document.querySelector('.story-source-textarea')?.value === expected, optimized);
-  assert.deepEqual(await storedProject(), originalProject, 'optimization remains a reviewable draft, not an automatic save or parse');
+  await page.waitForFunction((key) => JSON.parse(localStorage.getItem(key)).project.storyVisualConversions?.length === 1, storageKey);
+  const adoptedProject = await storedProject();
+  assert.deepEqual(adoptedProject.sourceDocuments, originalProject.sourceDocuments, 'adoption does not replace the saved source');
+  assert.deepEqual(adoptedProject.scenes, originalProject.scenes, 'adoption does not parse scenes');
+  const conversion = adoptedProject.storyVisualConversions[0];
+  assert.equal(conversion.chapterId, adoptedProject.activeChapterId);
+  assert.equal(conversion.sourceText, originalDraft);
+  assert.equal(conversion.resultText, optimized);
+  await page.getByRole('button', { name: '查看转化来源', exact: true }).click();
+  const sourceReview = page.getByRole('dialog', { name: '画面描述 · 转化来源', exact: true });
+  assert.equal(await sourceReview.getByRole('textbox', { name: '处理前原文', exact: true }).inputValue(), originalDraft);
+  assert.equal(await sourceReview.getByRole('textbox', { name: 'AI 返回结果', exact: true }).inputValue(), optimized);
+  assert.equal(await sourceReview.getByRole('button', { name: '采用到编辑区', exact: true }).count(), 0);
+  await sourceReview.getByRole('button', { name: '关闭', exact: true }).click();
   assert.ok(await optimizeButton().isEnabled()); assert.ok(await expandButton().isEnabled());
+  for (const width of [1000, 1280]) {
+    await page.setViewportSize({ width, height: 800 });
+    await page.locator('.story-input-footer').scrollIntoViewIfNeeded();
+    const geometry = await page.locator('.story-input-actions').evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      const buttons = [...element.querySelectorAll('button')].map((button) => button.getBoundingClientRect());
+      return { overflow: element.scrollWidth > element.clientWidth + 1,
+        outside: buttons.some((rect) => rect.left < bounds.left - 1 || rect.right > bounds.right + 1),
+        overlap: buttons.some((a, i) => buttons.slice(i + 1).some((b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1
+          && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1)) };
+    });
+    assert.deepEqual(geometry, { overflow: false, outside: false, overlap: false }, 'longer conversion label must wrap without overlap at ' + width);
+  }
   await page.locator('.story-input-footer').scrollIntoViewIfNeeded();
   await page.screenshot({ path: path.join(outputDirectory, 'direct-story-buttons-result.png'), fullPage: false }); screenshots.push('direct-story-buttons-result.png');
   await page.getByRole('button', { name: '还原处理前文本', exact: true }).click();
   assert.equal(await input.inputValue(), originalDraft, 'restore includes the exact original boundary whitespace');
-  assert.deepEqual(await storedProject(), originalProject);
+  assert.deepEqual((await storedProject()).sourceDocuments, originalProject.sourceDocuments);
+  assert.equal(await page.getByRole('button', { name: '查看转化来源', exact: true }).count(), 0, 'restored original does not match the converted draft');
   stages.push('optimize direct button sends optimize; both buttons disable while pending, no duplicate request; preview and exact restore preserve saved source');
   await expansionTarget().fill('720');
   await expandButton().click(); await waitForRequestCount(2);
   await page.waitForFunction((expected) => document.querySelector('.story-source-textarea')?.value === expected, expanded);
   assert.equal(requests[1].mode, 'expand');
   assert.match(requests[1].targetLength, /约 720 个中文字符/u, 'custom expansion target is sent as an approximate AI hint');
-  assert.deepEqual(await storedProject(), originalProject, 'expansion does not adopt or parse its own result');
+  assert.deepEqual((await storedProject()).sourceDocuments, originalProject.sourceDocuments, 'expansion does not replace the saved source');
   assert.ok(await page.getByRole('button', { name: '还原处理前文本', exact: true }).isVisible());
   await page.getByRole('button', { name: '保存原文', exact: true }).click();
   await page.waitForFunction(({ key, expected }) => JSON.parse(localStorage.getItem(key)).project.sourceDocuments[0].content === expected, { key: storageKey, expected: expanded });
@@ -204,7 +231,7 @@ const run = async () => {
   assert.ok(await optimizeButton().isEnabled()); assert.ok(await expandButton().isEnabled());
   await page.locator('.runtime-error-log-trigger').click();
   const errorDialog = page.getByRole('dialog', { name: '报错日志', exact: true });
-  await errorDialog.getByText('AI 剧情优化/扩写', { exact: true }).waitFor();
+  await errorDialog.getByText('AI 画面描述转化/扩写', { exact: true }).waitFor();
   await errorDialog.getByText(/文本模型请求失败：服务返回了未识别的错误/u).waitFor();
   await errorDialog.getByRole('button', { name: '关闭', exact: true }).click();
   const expectedNetworkErrors = errors.filter((message) => /Failed to load resource.*502/iu.test(message));

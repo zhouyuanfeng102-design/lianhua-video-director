@@ -16,7 +16,7 @@ const assert = {
  * This module never launches a browser/server and never uses a paid endpoint.
  */
 export const QA_INVENTORY = [
-  { claim: '优化只发送一次完整原文，不发送本地预抽清单', controls: 'AI剧情优化、稍后查看、查看优化结果', state: '待请求/预览/隐藏/重开', evidence: '捕获请求与对照预览截图' },
+  { claim: '优化只发送一次完整原文，不发送本地预抽清单', controls: 'AI画面描述转化、稍后查看、查看转化结果', state: '待请求/预览/隐藏/重开', evidence: '捕获请求与对照预览截图' },
   { claim: '所有结果先预览，采用不自动保存；可保留原文和还原', controls: '对照预览、核对提示、复制、分页、不采用、采用、还原', state: '零提示/多提示/采用后/还原后', evidence: '原文及持久项目逐字段比对、预览与提示截图' },
   { claim: '旧结果不覆盖后续编辑或其它项目', controls: '稍后查看、编辑原文、切换项目、旧结果采用', state: '已返回后过期/请求中编辑/请求中换项目', evidence: '采用禁用、编辑区与持久数据不串写' },
   { claim: 'AI全局场景和名字落库；三类补全每次拿全文', controls: '解析并补全、实体资料、场景管理', state: '全局分析/人物补全/地点补全/道具补全/完成', evidence: '四类请求全文精确匹配、场景边界与实体由mock AI决定' },
@@ -70,9 +70,9 @@ export async function createStoryFullSourceUiQa({ page, baseUrl = 'http://127.0.
   const getProject = () => page.evaluate((key) => JSON.parse(localStorage.getItem(key)).project, STORAGE_KEY);
   const snapshot = async () => projectSnapshot(await getProject());
   const input = () => page.locator('.story-source-textarea');
-  const optimize = () => page.locator('.story-input-actions').getByRole('button', { name: /^AI\s*剧情优化$/u });
+  const optimize = () => page.locator('.story-input-actions').getByRole('button', { name: /^AI\s*画面描述转化$/u });
   const analyze = () => page.locator('.story-input-actions').getByRole('button', { name: /^解析并补全$/u });
-  const dialog = () => page.getByRole('dialog', { name: 'AI 剧情优化 · 结果审阅', exact: true });
+  const dialog = () => page.getByRole('dialog', { name: 'AI 画面描述转化 · 结果审阅', exact: true });
   const story = async () => page.locator('.sidebar').getByRole('button', { name: '剧情解析', exact: true }).click();
   const waitRequests = async (count) => {
     const start = Date.now();
@@ -173,7 +173,7 @@ export async function createStoryFullSourceUiQa({ page, baseUrl = 'http://127.0.
       await fit(['.sr-review-tabs', '.sr-review-actions button', '.sr-review-later', '.sr-review-text-pane textarea']);
       await capture('02-clean-preview');
       await page.keyboard.press('Escape');
-      await page.getByRole('button', { name: '查看优化结果', exact: true }).click(); await dialog().waitFor(); assert.equal(requests.length, 1);
+      await page.getByRole('button', { name: '查看转化结果', exact: true }).click(); await dialog().waitFor(); assert.equal(requests.length, 1);
       await dialog().getByRole('button', { name: '稍后查看', exact: true }).click(); await optimize().click(); await dialog().waitFor(); assert.equal(requests.length, 1, 'optimize reopens the existing review without another model call');
       await dialog().getByRole('button', { name: '不采用，保留原文', exact: true }).click();
       assert.equal(await input().inputValue(), SIMPLE_SOURCE); assert.deepEqual(await snapshot(), storedBefore);
@@ -203,13 +203,13 @@ export async function createStoryFullSourceUiQa({ page, baseUrl = 'http://127.0.
     async staleReview() {
       nextOptimization = GOOD_RESULT; await optimize().click(); await waitRequests(3); await dialog().waitFor();
       await dialog().getByRole('button', { name: '稍后查看', exact: true }).click(); const changed = `${SIMPLE_SOURCE}用户后来补写的内容。`;
-      await input().fill(changed); await page.getByRole('button', { name: '查看优化结果', exact: true }).click();
+      await input().fill(changed); await page.getByRole('button', { name: '查看转化结果', exact: true }).click();
       assert.equal(await dialog().getByRole('button', { name: '采用到编辑区', exact: true }).isDisabled(), true);
       await capture('06-stale-review-disabled'); await dialog().getByRole('button', { name: '不采用，保留原文', exact: true }).click();
       assert.equal(await input().inputValue(), changed); assert.equal(requests.length, 3);
       await input().fill(SIMPLE_SOURCE); holdNext = 'stale-text'; await optimize().click(); await waitRequests(4);
       assert.equal(await optimize().isDisabled(), true); await input().fill(changed); await release('stale-text');
-      await optimize().waitFor({ state: 'visible' }); await page.waitForFunction(() => ![...document.querySelectorAll('.story-input-actions button')].find((button) => /AI\s*剧情优化/u.test(button.textContent || ''))?.disabled);
+      await optimize().waitFor({ state: 'visible' }); await page.waitForFunction(() => ![...document.querySelectorAll('.story-input-actions button')].find((button) => /AI\s*画面描述转化/u.test(button.textContent || ''))?.disabled);
       assert.equal(await input().inputValue(), changed); assert.equal(await dialog().count(), 0); assert.deepEqual(await snapshot(), storedBefore);
       await input().fill(SIMPLE_SOURCE); holdNext = 'stale-project'; await optimize().click(); await waitRequests(5);
       await page.locator('.top-actions .top-action-library').click();

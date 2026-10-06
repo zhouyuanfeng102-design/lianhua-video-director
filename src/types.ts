@@ -626,18 +626,41 @@ export interface PromptTrace {
 
 /** Ordinary story/appearance facts only; no assets or private visual dossiers. */
 export type SemanticSequenceCharacter = Pick<Character, 'name'> & Partial<Pick<Character,
-  'id' | 'baseName' | 'formLabel' | 'variantOf' | 'transformationType'
+  'id' | 'aliases' | 'baseName' | 'formLabel' | 'variantOf' | 'transformationType'
   | 'gender' | 'apparentAge' | 'actualAge' | 'height' | 'race' | 'morphology' | 'bodyPlan'
   | 'appearance' | 'outfit' | 'signatureProps' | 'personality' | 'motionHabits' | 'anchor'
   | 'negativeContinuity'
 >>;
+
+/** Model-authored story causality, not a local actor guess or a visibility list. */
+export interface SemanticEventCausality {
+  actor: string;
+  target: string;
+  action: string;
+  result: string;
+  /** Source wording supporting this relation, including contextual evidence. */
+  evidence: string;
+  certainty: 'explicit' | 'context-supported' | 'unknown';
+  actorCharacterId?: string;
+  targetCharacterId?: string;
+}
+
+/** An adopted visual description retains its actual pre-conversion source. */
+export interface StoryVisualConversionSnapshot {
+  id: string;
+  chapterId: string;
+  sourceName: string;
+  sourceText: string;
+  resultText: string;
+  createdAt: number;
+}
 
 export interface SemanticSegmentSource {
   /** AI-selected original evidence, separate from the AI-authored segment body.
    * Offsets, when supplied, use JavaScript UTF-16 indices into the saved source. */
   sourceEvidence: Array<{ text: string; sourceStart?: number; sourceEnd?: number }>;
   /** IDs may recur across segments for different phases of one long event. */
-  events: Array<{ id: string; description: string; phase?: string }>;
+  events: Array<{ id: string; description: string; phase?: string; causality?: SemanticEventCausality }>;
   /** IDs may recur for an explicitly continuous utterance, never a local replay. */
   dialogues: Array<{ id: string; speaker: string; text: string; language?: string; continuation?: string }>;
 }
@@ -652,6 +675,8 @@ export interface SemanticSequencePlanningSnapshot {
   creativeDirection: VideoCreativeDirection;
   pacing?: StoryPacingContext;
   characterContinuity: SemanticSequenceCharacter[];
+  /** Only a conversion snapshot matching the planned story can supply this. */
+  originalSourceContext?: StoryVisualConversionSnapshot;
   /** Optional per-segment photography preference; does not fix N or full-film shots. */
   shotMode?: ShotMode;
   shotCount?: number;
@@ -901,6 +926,8 @@ export interface Project {
   /** Project-library workspace marker only; video workers continue normally. */
   backgroundSuspended?: boolean;
   sourceDocuments: SourceDocument[];
+  /** Adopted picture-description conversions; legacy projects omit this list. */
+  storyVisualConversions?: StoryVisualConversionSnapshot[];
   activeChapterId?: string;
   chapterWorkspaces?: Record<string, ChapterWorkspace>;
   storyDraft?: StoryDraft;

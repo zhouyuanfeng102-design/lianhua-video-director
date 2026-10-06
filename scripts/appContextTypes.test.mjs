@@ -92,7 +92,7 @@ test("StoryView has two explicit preparation actions, reversible results and one
   const actionSource = actions.getText(sourceFile);
   const buttons = descendants(actions, (node) => ts.isJsxElement(node) && node.openingElement.tagName.getText(sourceFile) === 'Button');
   assert.equal(buttons.length, 5, 'expand, optimize, optional restore, clear and analysis remain available');
-  for (const [label, mode] of [['AI扩写', 'expand'], ['AI剧情优化', 'optimize']]) {
+  for (const [label, mode] of [['AI扩写', 'expand'], ['AI画面描述转化', 'optimize']]) {
     const matches = buttons.filter((button) => attributes(button).get('title')?.text === label);
     assert.equal(matches.length, 1, `${label} has one direct button`);
     const buttonAttributes = attributes(matches[0]);
@@ -111,8 +111,8 @@ test("StoryView has two explicit preparation actions, reversible results and one
   assert.match(actionSource, /解析并补全/u);
   assert.doesNotMatch(actionSource, /AI 增强补全|AI 补全中/u);
   assert.ok(
-    actionSource.indexOf('AI扩写') < actionSource.indexOf('AI剧情优化')
-      && actionSource.indexOf('AI剧情优化') < actionSource.indexOf('还原处理前文本')
+    actionSource.indexOf('AI扩写') < actionSource.indexOf('AI画面描述转化')
+      && actionSource.indexOf('AI画面描述转化') < actionSource.indexOf('还原处理前文本')
       && actionSource.indexOf('还原处理前文本') < actionSource.indexOf('清空')
       && actionSource.indexOf('清空') < actionSource.indexOf('解析并补全'),
     "story actions remain expand, optimize, optional restore, clear, then analysis",
@@ -137,8 +137,8 @@ test("AI preparation uses the clicked mode and enabled rules while preserving re
     /requestStoryPreparationWithReview\([\s\S]*?settings\.textApi,[\s\S]*?sourceStory,[\s\S]*?requestController\.signal,[\s\S]*?expansionPreset,[\s\S]*?requestMode/u,
   );
   const preparationCall = callsNamed(handler.body, 'requestStoryPreparationWithReview')[0];
-  assert.equal(preparationCall.arguments.length, 6,
-    'the preparation request must carry the optional expansion target without dropping the full source');
+  assert.equal(preparationCall.arguments.length, 7,
+    'the preparation request carries expansion target plus saved character context without dropping full source');
   assert.equal(preparationCall.arguments[1].getText(sourceFile), 'sourceStory',
     'AI expansion must receive the complete source draft, not a local summary or excerpt');
   assert.equal(preparationCall.arguments[4].getText(sourceFile), 'requestMode',
@@ -158,7 +158,7 @@ test("AI preparation uses the clicked mode and enabled rules while preserving re
   assert.match(actionSource, /isCurrentOperationIdentity\(requestIdentity, storyExpansionIdentityRef\.current\)/u);
   assert.match(actionSource, /hasCurrentPreparationSettings\(\)/u);
   assert.match(actionSource, /reportRuntimeError\(["']story-preparation["'], error\)/u, 'non-stale AI preparation failures must stay in the runtime error log');
-  assert.match(actionSource, /setStoryPreparationUndo\(\{ projectId: requestProjectId, before: sourceStory, after: expandedStory \}\)/u);
+  assert.match(actionSource, /setStoryPreparationUndo\(\{ projectId: requestProjectId, chapterId: requestChapterId, before: sourceStory, after: expandedStory \}\)/u);
   assert.doesNotMatch(actionSource, /persistPrimarySourceDocument\(|handleAnalyzeStory\(|setState\(/u, 'processing only changes the input draft; save/analyze still requires user action');
   assert.match(sourceText, /storyPreparationUndo\.after === storyInput/u, 'restore must not replace text the user has edited after processing');
   assert.doesNotMatch(actionSource, /年龄|成年|未成年|\bage\b/iu);
@@ -190,9 +190,11 @@ test('every optimization result is pending user review before any editor write, 
     assert.ok(adopt.includes(guard), `adoption must recheck ${guard} at click time`);
   }
   assert.match(adopt, /setStoryInput\(review\.result\.text\)/u, 'adoption uses the actual AI text, not a local rewrite');
-  assert.match(adopt, /setStoryPreparationUndo\(\{ projectId: review\.projectId, before: review\.before, after: review\.result\.text \}\)/u);
+  assert.match(adopt, /setStoryPreparationUndo\(\{ projectId: review\.projectId, chapterId: review\.chapterId, before: review\.before, after: review\.result\.text \}\)/u);
   assert.ok(adopt.indexOf('pendingStoryReviewRef.current = null') < adopt.indexOf('setStoryInput('), 'consume the preview before writing so duplicate clicks cannot apply twice');
-  assert.doesNotMatch(adopt, /\b(?:setState|persistPrimarySourceDocument|handleAnalyzeStory)\s*\(/u, 'adopting does not save or analyze without another user action');
+  assert.doesNotMatch(adopt, /\b(?:persistPrimarySourceDocument|handleAnalyzeStory)\s*\(/u, 'adopting records provenance without replacing saved source or analyzing');
+  assert.match(adopt, /rememberStoryVisualConversion\(current\.project, snapshot\)/u);
+  assert.match(adopt, /review\.chapterId !== activeChapter\(stateRef\.current\.project\)\?\.id/u);
 
   const keep = arrowDeclaration('keepOriginalStoryReview').body.getText(sourceFile);
   assert.match(keep, /pendingStoryReviewRef\.current = null/u);
@@ -200,7 +202,8 @@ test('every optimization result is pending user review before any editor write, 
     'declining a pending result only dismisses it and cannot restore a stale original over newer user edits');
   const reviewDialogs = descendants(sourceFile, (node) => ts.isJsxSelfClosingElement(node)
     && node.tagName.getText(sourceFile) === 'StoryPreparationReviewDialog');
-  assert.equal(reviewDialogs.length, 1);
+  assert.equal(reviewDialogs.length, 2, 'pending review and read-only provenance reuse the comparison dialog');
+  assert.match(reviewDialogs[1].getText(sourceFile), /sourceOnly/u);
   assert.match(reviewDialogs[0].getText(sourceFile), /onAdopt=\{\(\) => adoptStoryReview\(pendingStoryReview\.id\)\}/u);
   assert.match(reviewDialogs[0].getText(sourceFile), /stale=\{storyReviewStale \|\| busy \|\| storyExpansionBusy\}/u);
 });
@@ -257,7 +260,7 @@ test("Rule Center exposes independent editable story preparation rules with comp
   const rulesSource = sourceText.slice(rulesStart, rulesEnd);
 
   assert.match(rulesSource, /ruleTab === ["']expansions["']/u);
-  assert.match(rulesSource, /AI 剧情优化规则/u);
+  assert.match(rulesSource, /剧情处理规则/u);
   assert.match(rulesSource, /storyExpansionPresets/u);
   assert.match(rulesSource, /updateStoryExpansion/u);
   assert.match(rulesSource, /defaultStoryExpansionPresetId/u);

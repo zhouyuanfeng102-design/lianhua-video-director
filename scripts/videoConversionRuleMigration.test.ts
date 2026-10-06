@@ -11,13 +11,16 @@ import {
   LEGACY_DEFAULT_VIDEO_CONVERSION_OUTPUT_V1_4_0, LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_3_0,
   LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_4_0, VIDEO_DIALOGUE_STAGING_RULE,
   VIDEO_SPATIAL_CONTINUITY_RULE, VIDEO_STAGING_REVIEW_RULE, VIDEO_PROMPT_FOCUS_RULE,
+  VIDEO_CAUSALITY_OUTPUT_RULE,
 } from '../src/videoConversionRules';
 import { AUDIO_PROMPT_RULE, DIALOGUE_DELIVERY_RULE } from '../src/audioPromptPolicy';
+import { STORY_CAUSALITY_RULE } from '../src/storyCausalityRules';
+import { STORY_AGE_FACT_PRESERVATION_RULE } from '../src/characterVocabulary';
+import { legacyStoryPreparationV130 } from './fixtures/storyPreparationLegacyPresets';
 import type { ConverterPreset, RuleSet } from '../src/types';
 import { sourceContentHash } from '../src/sourceIntegrity';
 import {
   MOSE_JIANGHU_NSFW_DETAIL_RULES,
-  MOSE_JIANGHU_NSFW_PROMPT_RULE,
 } from '../src/nsfwPromptRules';
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
@@ -70,8 +73,11 @@ const legacyConverterV160 = {
   ...clone(converter),
   systemPrompt: converter.systemPrompt
     .replace(AUDIO_PROMPT_RULE, legacyQuietMusicAudioRule)
+    .replace(`\n\n${STORY_CAUSALITY_RULE}`, '')
     .replace(`\n\n${DIALOGUE_DELIVERY_RULE}`, ''),
-  outputRules: converter.outputRules.replace(`\n\n${DIALOGUE_DELIVERY_RULE}`, ''),
+  outputRules: converter.outputRules
+    .replace(`\n\n${VIDEO_CAUSALITY_OUTPUT_RULE}`, '')
+    .replace(`\n\n${DIALOGUE_DELIVERY_RULE}`, ''),
   version: '1.6.0',
   updatedAt: 0,
 };
@@ -100,10 +106,15 @@ assert.equal(
   legacyConverterV150.systemPrompt,
   DEFAULT_VIDEO_CONVERSION_SYSTEM
     .replace(AUDIO_PROMPT_RULE, LEGACY_AUDIO_PROMPT_RULE_V0_6_3)
+    .replace(`\n\n${STORY_CAUSALITY_RULE}`, '')
     .replace(`\n\n${DIALOGUE_DELIVERY_RULE}`, ''),
-  'the V0.6.3 converter fixture is frozen independently of the live audio and dialogue rules',
+  'the V0.6.3 converter fixture is frozen independently of live audio, dialogue and causality rules',
 );
-assert.equal(legacyConverterV150.outputRules, DEFAULT_VIDEO_CONVERSION_OUTPUT.replace(`\n\n${DIALOGUE_DELIVERY_RULE}`, ''));
+assert.equal(legacyConverterV150.outputRules, DEFAULT_VIDEO_CONVERSION_OUTPUT
+  .replace(`\n\n${VIDEO_CAUSALITY_OUTPUT_RULE}`, '')
+  .replace(`\n\n${DIALOGUE_DELIVERY_RULE}`, ''));
+assert.ok(!legacyConverterV150.systemPrompt.includes(STORY_CAUSALITY_RULE));
+assert.ok(!legacyConverterV150.outputRules.includes(VIDEO_CAUSALITY_OUTPUT_RULE));
 assert.equal(legacyConverterV160.systemPrompt.replace(legacyQuietMusicAudioRule, LEGACY_AUDIO_PROMPT_RULE_V0_6_3), legacyConverterV150.systemPrompt,
   'the V0.6.7 converter fixture differs only by its frozen quiet-music text');
 assert.equal(legacyTimelineV140.outputRules.includes(legacyQuietMusicAudioRule), true,
@@ -156,23 +167,21 @@ assert.equal(legacyConverterV130.outputRules, LEGACY_DEFAULT_VIDEO_CONVERSION_OU
   'v1.3.0 output remains the old format/example, not the newly expanded live output');
 const storyPreparation = defaultStoryExpansionPresets[0];
 assert.ok(storyPreparation, 'the app must expose a default story-preparation preset');
-assert.equal(storyPreparation.version, '1.4.0');
+assert.equal(storyPreparation.version, '1.4.4');
 assert.ok(
   storyPreparation.systemPrompt.includes(MOSE_JIANGHU_NSFW_DETAIL_RULES),
-  'the active v1.4.0 story-preparation preset must include the complete 墨色江湖 NSFW rule block',
+  'the active v1.4.4 story-preparation preset must preserve the existing complete rule block',
 );
-const removeCurrentNsfwSuffix = (systemPrompt: string): string => {
-  for (const rule of [MOSE_JIANGHU_NSFW_DETAIL_RULES, MOSE_JIANGHU_NSFW_PROMPT_RULE]) {
-    const suffix = `\n\n${rule}`;
-    if (systemPrompt.endsWith(suffix)) return systemPrompt.slice(0, -suffix.length);
-  }
-  throw new Error('current story-preparation preset is missing its trailing NSFW rule block');
+assert.ok(storyPreparation.systemPrompt.includes(STORY_CAUSALITY_RULE));
+const legacyStoryPreparationV140WithoutAge = {
+  ...clone(legacyStoryPreparationV130),
+  systemPrompt: [legacyStoryPreparationV130.systemPrompt, MOSE_JIANGHU_NSFW_DETAIL_RULES].join('\n\n'),
+  version: '1.4.0',
 };
-const legacyStoryPreparationV130 = {
-  ...clone(storyPreparation),
-  systemPrompt: removeCurrentNsfwSuffix(storyPreparation.systemPrompt),
-  version: '1.3.0',
-  updatedAt: 0,
+const legacyStoryPreparationV140 = {
+  ...clone(legacyStoryPreparationV130),
+  systemPrompt: [legacyStoryPreparationV130.systemPrompt, STORY_AGE_FACT_PRESERVATION_RULE, MOSE_JIANGHU_NSFW_DETAIL_RULES].join('\n\n'),
+  version: '1.4.0',
 };
 const migratedV130 = normalizeState({
   ...clone(initial),
@@ -181,11 +190,30 @@ const migratedV130 = normalizeState({
 });
 assert.equal(migratedV130.converterPresets[0].version, '1.7.0');
 assert.equal(migratedV130.converterPresets[0].systemPrompt, converter.systemPrompt);
-assert.equal(migratedV130.storyExpansionPresets[0].version, '1.4.0');
+assert.equal(migratedV130.storyExpansionPresets[0].version, '1.4.4');
 assert.equal(migratedV130.storyExpansionPresets[0].systemPrompt, storyPreparation.systemPrompt);
 assert.deepEqual(migratedV130.project, projectBefore, 'v1.3.0 prompt migration must not rewrite project content');
 assert.deepEqual(migratedV130.settings, settingsBefore, 'v1.3.0 prompt migration must not change user settings');
 assert.deepEqual(normalizeState(migratedV130), migratedV130, 'v1.3.0 prompt migration must be idempotent');
+
+for (const historicStory of [legacyStoryPreparationV140WithoutAge, legacyStoryPreparationV140]) {
+  const migrated = normalizeState({ ...clone(initial), storyExpansionPresets: [clone(historicStory)] });
+  assert.equal(migrated.storyExpansionPresets[0].version, '1.4.4', 'both shipped 1.4.0 layouts upgrade');
+  assert.equal(migrated.storyExpansionPresets[0].name, storyPreparation.name);
+  assert.equal(migrated.storyExpansionPresets[0].systemPrompt, storyPreparation.systemPrompt);
+  assert.equal(migrated.storyExpansionPresets[0].outputRules, storyPreparation.outputRules);
+  assert.deepEqual(migrated.project, projectBefore);
+  assert.deepEqual(migrated.settings, settingsBefore);
+  assert.deepEqual(normalizeState(migrated), migrated);
+  for (const patch of [
+    { name: '我的画面转化规则' }, { enabled: false }, { customMetadata: '用户字段' },
+    { systemPrompt: `${historicStory.systemPrompt}\n用户自定剧情要求。` },
+  ]) {
+    const owned = { ...clone(historicStory), ...patch };
+    assert.deepEqual(normalizeState({ ...clone(initial), storyExpansionPresets: [owned] }).storyExpansionPresets, [owned],
+      'customized 1.4.0 story presets remain user-owned, including the age-rule variant');
+  }
+}
 
 for (const ownershipCase of [
   {

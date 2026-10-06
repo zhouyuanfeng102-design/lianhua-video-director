@@ -24,7 +24,7 @@ const SCENE_FIELD = /^[ \t]*(出场人物|剧情|对白|背景信息)[ \t]*[：:
 const LOOSE_SCENE_HEADER = /^[ \t]*(?:#{1,6}[ \t]+)?(?:【)?场景[ \t]*[一二三四五六七八九十\d]+[^\n]*$/gmu;
 const LOOSE_SCENE_FIELD = /^[ \t]*(?:(?:#{1,6}|[-*+])[ \t]+)?(?:\*\*)?(出场人物|人物|剧情|对白|对话|台词|背景信息)(?:\*\*)?[ \t]*[：:](?:\*\*)?[ \t]*/gmu;
 const MARKDOWN = /(?:^|\n)[ \t]*(?:```|~~~|#{1,6}[ \t]|[-*+][ \t]|>[ \t]|\|[^\n]+\||\d+[.)、][ \t])|\*\*[^\n]+\*\*/u;
-const BODY_KEYS = ['optimizedStory', 'expandedStory', 'story', 'text', 'content'] as const;
+const BODY_KEYS = ['visualStory', 'visualDescription', 'optimizedStory', 'expandedStory', 'story', 'text', 'content'] as const;
 
 const readable = (value: string): boolean => /[\p{L}\p{N}]/u.test(value);
 
@@ -40,16 +40,16 @@ const hasReadableJsonValue = (value: unknown): boolean => {
 };
 
 const unwrapReadableBody = (candidate: string): { text: string; formatNotes: string[]; dialogueReviewAvailable: boolean } => {
-  if (typeof candidate !== 'string') throw new Error('AI 视频化整理未返回可读取的正文，原文保持不变');
+  if (typeof candidate !== 'string') throw new Error('AI 画面描述转化未返回可读取的正文，原文保持不变');
   let text = candidate.replace(/^\uFEFF/u, '').replace(/\r\n?/gu, '\n').trim();
-  if (!text) throw new Error('AI 视频化整理返回了空内容，原文保持不变');
+  if (!text) throw new Error('AI 画面描述转化返回了空内容，原文保持不变');
   const formatNotes: string[] = [];
   let dialogueReviewAvailable = true;
   // A complete outer fence is transport formatting, not story content. Do not
   // strip headings, emphasis, incomplete fences or fences inside the body.
   const fenced = text.match(/^(`{3,}|~{3,})[A-Za-z0-9_-]*[ \t]*\n([\s\S]*?)\n\1[ \t]*$/u);
   if (fenced) text = fenced[2].trim();
-  if (!text) throw new Error('AI 视频化整理返回了空内容，原文保持不变');
+  if (!text) throw new Error('AI 画面描述转化返回了空内容，原文保持不变');
 
   if (/^(?:\{|\[|")/u.test(text) || /^(?:null|true|false)$/u.test(text)) {
     let parsed: unknown;
@@ -76,7 +76,7 @@ const unwrapReadableBody = (candidate: string): { text: string; formatNotes: str
             || typeof object.status === 'number' && object.status >= 400
             || typeof object.statusCode === 'number' && object.statusCode >= 400
             || /^(?:error|failed|failure)$/iu.test(String(object.status || '')))));
-        if (errorEnvelope) throw new Error('AI 视频化整理返回了错误信息，未提供可读取的剧情正文，原文保持不变');
+        if (errorEnvelope) throw new Error('AI 画面描述转化返回了错误信息，未提供可读取的剧情正文，原文保持不变');
         if (new Set(readableBodyKeys.map((key) => object[key])).size > 1) {
           dialogueReviewAvailable = false;
           formatNotes.push('返回包含多个不同的正文候选，已保留完整 JSON，未替你选择或丢弃其中任何一版。');
@@ -85,7 +85,7 @@ const unwrapReadableBody = (candidate: string): { text: string; formatNotes: str
           if (Object.keys(object).length > 1) formatNotes.push('已读取 JSON 中的剧情正文；返回还包含额外字段，请确认正文是否完整。');
         } else {
           if (BODY_KEYS.some((key) => Object.prototype.hasOwnProperty.call(object, key)) || !hasReadableJsonValue(object)) {
-            throw new Error('AI 视频化整理未返回可读取的剧情正文，原文保持不变');
+            throw new Error('AI 画面描述转化未返回可读取的剧情正文，原文保持不变');
           }
           dialogueReviewAvailable = false;
           formatNotes.push('返回为非标准 JSON 结构，已保留可读文本；无法可靠自动比对人物对白，请结合全文检查。');
@@ -94,10 +94,10 @@ const unwrapReadableBody = (candidate: string): { text: string; formatNotes: str
         if (parsed.every((value) => typeof value === 'string')) text = (parsed as string[]).join('\n').trim();
         else dialogueReviewAvailable = false;
         formatNotes.push('返回为列表结构，已保留按原顺序排列的可读内容，采用前请检查正文。');
-      } else throw new Error('AI 视频化整理未返回可读取的剧情正文，原文保持不变');
+      } else throw new Error('AI 画面描述转化未返回可读取的剧情正文，原文保持不变');
     }
   }
-  if (!text || !readable(text)) throw new Error('AI 视频化整理返回了空内容或不可读取的正文，原文保持不变');
+  if (!text || !readable(text)) throw new Error('AI 画面描述转化返回了空内容或不可读取的正文，原文保持不变');
   return { text, formatNotes, dialogueReviewAvailable };
 };
 

@@ -2,8 +2,8 @@ import { MAX_PLANNED_SEQUENCE_SEGMENT_DURATION_SEC, requestedSegmentDurationWind
 import { sourceContentHash } from './sourceContentHash';
 import type { StoryPacingContext } from './storyPacing';
 import type {
-  Character, SemanticSegmentSource, SemanticSequenceCharacter, SemanticSequencePlanningSnapshot,
-  SequenceDurationMode, SequenceFitStatus, ShotMode, VideoSegment, VideoSequencePlan,
+  Character, SemanticEventCausality, SemanticSegmentSource, SemanticSequenceCharacter, SemanticSequencePlanningSnapshot,
+  SequenceDurationMode, SequenceFitStatus, ShotMode, StoryVisualConversionSnapshot, VideoSegment, VideoSequencePlan,
 } from './types';
 import { buildVideoCreativeDirection, normalizeVideoCreativeDirection } from './videoCreativeDirection';
 import type { VideoCreativeDirection } from './videoCreativeDirection';
@@ -20,6 +20,8 @@ export interface SemanticSequencePlanningInput {
   creativeDirection: VideoCreativeDirection;
   pacing?: StoryPacingContext;
   characterContinuity?: readonly SemanticSequenceCharacter[];
+  /** Original novel paired with this adopted visual-description story. */
+  originalSourceContext?: StoryVisualConversionSnapshot;
   sourceSceneIds?: readonly string[];
   shotMode?: ShotMode;
   shotCount?: number;
@@ -121,11 +123,23 @@ const copyStrings = <Key extends string>(value: Record<string, unknown>, fields:
   return result;
 };
 const copyCharacters = (characters: readonly SemanticSequenceCharacter[] = []): SemanticSequenceCharacter[] => (
-  characters.map((character) => ({ name: character.name, ...copyStrings(character, CHARACTER_FIELDS) }))
+  characters.map((character) => ({ name: character.name, ...copyStrings(character, CHARACTER_FIELDS),
+    ...(Array.isArray(character.aliases) ? { aliases: [...character.aliases] } : {}) }))
 );
 const copyPacing = (pacing: StoryPacingContext | undefined): StoryPacingContext | undefined => (
   pacing ? { pace: pacing.pace, ...copyStrings({ ...pacing }, PACING_FIELDS) } : undefined
 );
+
+/** Strict shape-only storage/request copy. Never infer an original from a draft. */
+export const normalizeStoryVisualConversionSnapshot = (value: unknown): StoryVisualConversionSnapshot | undefined => {
+  if (!record(value) || typeof value.id !== 'string' || !value.id.trim()
+    || typeof value.chapterId !== 'string' || !value.chapterId.trim()
+    || typeof value.sourceName !== 'string' || typeof value.sourceText !== 'string' || !value.sourceText.trim()
+    || typeof value.resultText !== 'string' || !value.resultText.trim()
+    || typeof value.createdAt !== 'number' || !Number.isFinite(value.createdAt)) return undefined;
+  return { id: value.id, chapterId: value.chapterId, sourceName: value.sourceName,
+    sourceText: value.sourceText, resultText: value.resultText, createdAt: value.createdAt };
+};
 
 const segmentDurationIssues = (value: unknown): string[] => (
   typeof value !== 'number' || !Number.isFinite(value) || value < 1
@@ -178,7 +192,13 @@ export const assertSemanticSequencePlanningInput = (input: SemanticSequencePlann
     || PACING_FIELDS.some((field) => input.pacing?.[field] !== undefined && typeof input.pacing[field] !== 'string'))) issues.push('节奏快照字段格式无效');
   if (input.characterContinuity !== undefined && (!Array.isArray(input.characterContinuity)
     || input.characterContinuity.some((character) => !record(character) || typeof character.name !== 'string'
+      || (character.aliases !== undefined && !stringList(character.aliases))
       || CHARACTER_FIELDS.some((field) => character[field] !== undefined && typeof character[field] !== 'string')))) issues.push('人物事实字段格式无效');
+  if (input.originalSourceContext !== undefined) {
+    const original = normalizeStoryVisualConversionSnapshot(input.originalSourceContext);
+    if (!original) issues.push('画面描述转化原文快照格式无效');
+    else if (typeof input.story !== 'string' || original.resultText.trim() !== input.story.trim()) issues.push('画面描述转化原文快照与当前剧情不匹配');
+  }
   if (input.sourceSceneIds !== undefined && !stringList(input.sourceSceneIds)) issues.push('原场景 ID 列表格式无效');
   if (input.shotMode !== undefined && input.shotMode !== 'auto' && input.shotMode !== 'exact') issues.push('拍摄镜数模式无效');
   if (input.shotCount !== undefined && (!Number.isSafeInteger(input.shotCount) || input.shotCount < 1)) issues.push('单段镜数偏好必须是正整数');
@@ -196,9 +216,23 @@ export const copySemanticSequencePlanningInput = (input: SemanticSequencePlannin
     creativeDirection: buildVideoCreativeDirection(input.creativeDirection),
     ...(input.pacing ? { pacing: copyPacing(input.pacing) } : {}),
     characterContinuity: copyCharacters(input.characterContinuity), sourceSceneIds: [...(input.sourceSceneIds ?? [])],
+    ...(input.originalSourceContext ? { originalSourceContext: normalizeStoryVisualConversionSnapshot(input.originalSourceContext)! } : {}),
     ...(input.shotMode !== undefined ? { shotMode: input.shotMode } : {}),
     ...(input.shotCount !== undefined ? { shotCount: input.shotCount } : {}),
   };
+};
+
+const readEventCausality = (value: unknown, label: string): SemanticEventCausality => {
+  if (!record(value) || ['actor', 'target', 'action', 'result', 'evidence'].some((key) => typeof value[key] !== 'string')
+    || !['explicit', 'context-supported', 'unknown'].includes(value.certainty as string)
+    || ['actorCharacterId', 'targetCharacterId'].some((key) => value[key] !== undefined
+      && (typeof value[key] !== 'string' || !(value[key] as string).trim()))) {
+    throw new SemanticSequenceTechnicalError([`${label} 必须提供 actor、target、action、result、evidence 字符串及 certainty（explicit/context-supported/unknown）；人物 ID 仅在已确认时提供非空字符串`]);
+  }
+  return { actor: value.actor as string, target: value.target as string, action: value.action as string,
+    result: value.result as string, evidence: value.evidence as string, certainty: value.certainty as SemanticEventCausality['certainty'],
+    ...(typeof value.actorCharacterId === 'string' ? { actorCharacterId: value.actorCharacterId } : {}),
+    ...(typeof value.targetCharacterId === 'string' ? { targetCharacterId: value.targetCharacterId } : {}) };
 };
 
 const readSemanticSource = (value: unknown, label: string, sourceLength?: number): SemanticSegmentSource => {
@@ -222,7 +256,8 @@ const readSemanticSource = (value: unknown, label: string, sourceLength?: number
   const events = (value.events as unknown[]).map((item, index) => {
     if (!record(item) || typeof item.id !== 'string' || !item.id || typeof item.description !== 'string'
       || (item.phase !== undefined && typeof item.phase !== 'string')) throw new SemanticSequenceTechnicalError([`${label}.events[${index}] 字段格式无效`]);
-    return { id: item.id, description: item.description, ...(typeof item.phase === 'string' ? { phase: item.phase } : {}) };
+    return { id: item.id, description: item.description, ...(typeof item.phase === 'string' ? { phase: item.phase } : {}),
+      ...(item.causality !== undefined ? { causality: readEventCausality(item.causality, `${label}.events[${index}].causality`) } : {}) };
   });
   const dialogues = (value.dialogues as unknown[]).map((item, index) => {
     if (!record(item) || typeof item.id !== 'string' || !item.id || typeof item.speaker !== 'string' || typeof item.text !== 'string'
@@ -461,6 +496,7 @@ export const materializeSemanticSequencePlan = (
       ...(snapshot.durationMode === 'fixed' ? { requestedTotalDurationSec: snapshot.requestedTotalDurationSec } : {}),
       creativeDirection: snapshot.creativeDirection, pacing: snapshot.pacing,
       characterContinuity: copyCharacters(snapshot.characterContinuity),
+      ...(snapshot.originalSourceContext ? { originalSourceContext: normalizeStoryVisualConversionSnapshot(snapshot.originalSourceContext)! } : {}),
       ...(snapshot.shotMode !== undefined ? { shotMode: snapshot.shotMode } : {}),
       ...(snapshot.shotCount !== undefined ? { shotCount: snapshot.shotCount } : {}),
     },
@@ -499,6 +535,7 @@ export const semanticSequenceCharacters = (
       gender: '', apparentAge: '', race: '', appearance: '', outfit: '',
       signatureProps: '', personality: '', motionHabits: '', anchor: '', negativeContinuity: '',
       ...copyStrings(saved, CHARACTER_FIELDS),
+      ...(Array.isArray(saved.aliases) ? { aliases: [...saved.aliases] } : {}),
       id: savedId ?? `semantic-character-${sourceContentHash(JSON.stringify([plan.id, index, saved.name]))}`,
       name: typeof saved.name === 'string' ? saved.name : '',
       assetIds: live ? [...live.assetIds] : [],
@@ -604,6 +641,14 @@ export interface SemanticSegmentSourceContext {
   segment: SemanticSequenceResponseSegment;
   /** Complete request-only source; segment.content remains the saved AI prose. */
   generationStoryContent: string;
+  /** Read-only narrative context; never an extension of this segment's events. */
+  storyUnderstandingContext?: {
+    usage: 'understanding-only';
+    sourceStoryContent: string;
+    originalSourceContext?: StoryVisualConversionSnapshot;
+    characterIdentities: Array<Pick<SemanticSequenceCharacter, 'name' | 'id' | 'aliases'>>;
+    instruction: string;
+  };
   /** Explicit user edits take precedence without rewriting original evidence. */
   contentOverridden?: boolean;
   creativeDirection: VideoCreativeDirection;
@@ -613,14 +658,17 @@ export interface SemanticSegmentSourceContext {
   shotCount?: number;
 }
 
-/** Only this segment's assigned events/lines reach its downstream generator.
- * The full original stays on the plan, never masquerading as this segment. */
+/** Assigned events/lines are the only performance scope. The full story is
+ * separate read-only context for identity and causality, never segment prose. */
 export const semanticSegmentSourceContext = (plan: VideoSequencePlan, segment: VideoSegment): SemanticSegmentSourceContext => {
   if (!isSemanticSequencePlan(plan) || !plan.semanticPlanningSnapshot || !segment.semanticSource
     || !plan.segments.some((item) => item.id === segment.id)) throw new SemanticSequenceTechnicalError(['缺少当前语义片段来源']);
   const snapshot: SemanticSequencePlanningSnapshot = plan.semanticPlanningSnapshot;
   const creativeDirection = normalizeVideoCreativeDirection(snapshot.creativeDirection);
   if (!creativeDirection) throw new SemanticSequenceTechnicalError(['缺少语义片段创作方向']);
+  const originalSourceContext = normalizeStoryVisualConversionSnapshot(snapshot.originalSourceContext);
+  const matchingOriginal = originalSourceContext?.resultText.trim() === plan.sourceStoryContent.trim()
+    ? originalSourceContext : undefined;
   return {
     kind: 'semantic-segment-source-v1', sourceStoryTitle: plan.sourceStoryTitle,
     sourceContentHash: plan.sourceContentHash ?? sourceContentHash(plan.sourceStoryContent),
@@ -628,6 +676,15 @@ export const semanticSegmentSourceContext = (plan: VideoSequencePlan, segment: V
     segment: { ...(copyStrings(segment as unknown as Record<string, unknown>, SEGMENT_TEXT_FIELDS) as Omit<SemanticSequenceResponseSegment, 'semanticSource'>),
       semanticSource: readSemanticSource(segment.semanticSource, '当前片段', plan.sourceStoryContent.length) },
     generationStoryContent: semanticSegmentStoryContent(segment),
+    storyUnderstandingContext: {
+      usage: 'understanding-only', sourceStoryContent: plan.sourceStoryContent,
+      ...(matchingOriginal ? { originalSourceContext: matchingOriginal } : {}),
+      characterIdentities: copyCharacters(snapshot.characterContinuity).map((character) => ({
+        name: character.name, ...(character.id ? { id: character.id } : {}),
+        ...(character.aliases ? { aliases: [...character.aliases] } : {}),
+      })),
+      instruction: '本区全文及原始小说只用于理解人物指代、别名、攻击来源、比喻和跨段因果，不是本段演出清单。实际演出仅限本段已分配事件和对白，不搬入前后段新剧情，不重演已完成事件，不提前揭示身份。contentOverridden=true时以用户当前正文为准，不从旧证据或全文恢复用户已删除、修改的事件和对白。',
+    },
     ...(segment.contentOverridden ? { contentOverridden: true } : {}),
     creativeDirection, pacing: copyPacing(snapshot.pacing), characterContinuity: copyCharacters(snapshot.characterContinuity),
     ...(snapshot.shotMode !== undefined ? { shotMode: snapshot.shotMode } : {}),

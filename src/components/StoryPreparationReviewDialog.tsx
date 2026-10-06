@@ -7,6 +7,8 @@ export interface StoryPreparationReviewDialogProps {
   original: string;
   result: StoryPreparationResult;
   stale: boolean;
+  /** Reuse the comparison to inspect an already adopted source snapshot. */
+  sourceOnly?: boolean;
   fontScalePercent?: number;
   onAdopt: () => void;
   onKeepOriginal: () => void;
@@ -34,7 +36,7 @@ function DialogueDetail({ label, value }: {
 
 /** The returned story is always plain, read-only text until the caller accepts it. */
 export function StoryPreparationReviewDialog({
-  original, result, stale, fontScalePercent = 100, onAdopt, onKeepOriginal, onClose,
+  original, result, stale, sourceOnly = false, fontScalePercent = 100, onAdopt, onKeepOriginal, onClose,
 }: StoryPreparationReviewDialogProps) {
   const titleId = useId();
   const descriptionId = useId();
@@ -133,6 +135,7 @@ export function StoryPreparationReviewDialog({
   };
 
   const onTabKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
+    if (sourceOnly) return;
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
     const nextTab = event.key === 'Home' ? 'comparison' : event.key === 'End' ? 'warnings'
@@ -148,21 +151,21 @@ export function StoryPreparationReviewDialog({
       aria-labelledby={titleId} aria-describedby={descriptionId} tabIndex={-1}>
       <header className="sr-review-header">
         <div className="sr-review-heading">
-          <h2 id={titleId}>AI 剧情优化 · 结果审阅</h2>
-          <p id={descriptionId}>{result.warnings.length
-            ? '先核对原文与 AI 返回，再决定是否采用；当前原文尚未改动。'
-            : '本地语义校验已关闭。请对照原文与 AI 返回决定是否采用；当前原文尚未改动。'}</p>
+          <h2 id={titleId}>{sourceOnly ? '画面描述 · 转化来源' : 'AI 画面描述转化 · 结果审阅'}</h2>
+          <p id={descriptionId}>{sourceOnly
+            ? '当前画面描述对应的处理前原文与已采用结果，可查看和复制。'
+            : '请对照全文检查人物、动作因果和原对白，再决定是否采用；当前原文尚未改动。'}</p>
         </div>
-        <button type="button" className="btn sr-review-later" onClick={onClose}>稍后查看</button>
+        <button type="button" className="btn sr-review-later" onClick={onClose}>{sourceOnly ? '关闭' : '稍后查看'}</button>
       </header>
 
-      <div className="sr-review-tabs" role="tablist" aria-label="剧情优化审阅视图">
+      <div className="sr-review-tabs" role="tablist" aria-label="画面描述转化审阅视图">
         <button type="button" className="btn" role="tab" id={`${comparisonId}-tab`}
           data-review-tab="comparison" aria-selected={tab === 'comparison'} aria-controls={comparisonId}
           tabIndex={tab === 'comparison' ? 0 : -1} onClick={() => setTab('comparison')} onKeyDown={onTabKeyDown}>对照预览</button>
-        <button type="button" className="btn" role="tab" id={`${warningsId}-tab`}
+        {!sourceOnly && <button type="button" className="btn" role="tab" id={`${warningsId}-tab`}
           data-review-tab="warnings" aria-selected={tab === 'warnings'} aria-controls={warningsId}
-          tabIndex={tab === 'warnings' ? 0 : -1} onClick={() => setTab('warnings')} onKeyDown={onTabKeyDown}>核对提示（{result.warnings.length}）</button>
+          tabIndex={tab === 'warnings' ? 0 : -1} onClick={() => setTab('warnings')} onKeyDown={onTabKeyDown}>核对提示（{result.warnings.length}）</button>}
       </div>
 
       {stale && <p className="sr-review-stale" role="status">原文或当前项目已变化，此结果对应的是旧原文，不能覆盖当前编辑区。仍可查看、复制或保留原文。</p>}
@@ -199,18 +202,18 @@ export function StoryPreparationReviewDialog({
               <button type="button" className="btn small" disabled={currentPage === 0} onClick={() => setWarningPage(currentPage - 1)}>上一页</button>
               <button type="button" className="btn small" disabled={currentPage >= pageCount - 1} onClick={() => setWarningPage(currentPage + 1)}>下一页</button>
             </div>
-          </> : <div className="sr-review-empty" role="status">本地不再判断剧情语义或生成疑点；请对照全文与 AI 返回，自行决定是否采用。</div>}
+          </> : <div className="sr-review-empty" role="status">暂无核对提示。请对照全文确认人物、动作因果及对白是否完整。</div>}
         </section>}
       </div>
 
       <p className="sr-review-copy-status" role="status" aria-live="polite">{copyStatus || '文本只读，可选择或复制；Markdown 等内容只作为文字显示。'}</p>
       <footer className="sr-review-footer">
-        <p>采用只放入编辑区，不保存、不解析；可还原处理前文本。</p>
-        <div className="sr-review-actions">
+        <p>{sourceOnly ? '来源快照只供回查，不会覆盖当前文本。' : '采用后放入编辑区并保留转化来源；可还原处理前文本，确认后再保存或解析。'}</p>
+        {!sourceOnly && <div className="sr-review-actions">
           <button type="button" className="btn" onClick={onKeepOriginal}>不采用，保留原文</button>
           <button type="button" className="btn primary" disabled={stale} onClick={() => { if (!stale) onAdopt(); }}
             title={stale ? '原文或项目已变化，不能采用此旧结果' : undefined}>采用到编辑区</button>
-        </div>
+        </div>}
       </footer>
     </div>
   </div>;

@@ -66,7 +66,7 @@ const stageLabels: Readonly<Record<string, string>> = Object.freeze({
   'sequence-ai-segmentation': 'AI 长剧情分段',
   'sequence-semantic-planning': 'AI 理解剧情并分段',
   'story-analysis': '剧情解析',
-  'story-preparation': 'AI 剧情优化/扩写',
+  'story-preparation': 'AI 画面描述转化/扩写',
   'image-preparation': '生图准备',
   'image-reference-load': '生图参考图读取',
   'image-frame-plan': '分镜静帧规划（文本 API）',

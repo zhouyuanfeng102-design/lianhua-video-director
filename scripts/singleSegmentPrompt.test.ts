@@ -87,6 +87,8 @@ for (const [index, board] of [shortBoard, longBoard].entries()) {
     onStage: (stage) => stages.push(stage),
     request: async (system, user, stage) => {
       captured.push({ system, user, stage });
+      assert.ok(system.includes(stage === 'translate' ? 'STORY_CAUSALITY_TRANSLATION_V1' : 'STORY_CAUSALITY_V1'),
+        'canonical conversion, H3 and English retain the action-causality contract');
       assert.doesNotMatch(`${system}\n${user}`, /sequence_reference|h3_translation_units|<h3_translation|OTHER_SEGMENT|WHOLE_PLAN_PRIVATE/u);
       assert.doesNotMatch(system, /7000|字符(?:上限|预算)\s*(?:为|是|[:：=])?\s*\d+|(?:不得超过|最多|精简到|截断到)\s*\d+\s*字符/u, 'neither shared API request carries a numeric character limit; explicit no-cap instructions are allowed');
       if (stage === 'translate') return mockEnglish(user);
@@ -547,6 +549,11 @@ const semanticInput: SemanticSegmentSourceContext = {
   kind: 'semantic-segment-source-v1', sourceStoryTitle: '门廊片段', sourceContentHash: 'original-story-hash',
   segmentIndex: 1, segmentCount: 2, segmentDurationSec: 15, segment: semanticRawSegment,
   generationStoryContent: semanticSegmentStoryContent(semanticRawSegment),
+  storyUnderstandingContext: {
+    usage: 'understanding-only', sourceStoryContent: '此前阿青把钥匙交给旅人。' + content + '随后二人前往庭院。',
+    characterIdentities: [{ id: hero.id, name: hero.name, aliases: ['门口旅客'] }],
+    instruction: '只用于理解本段代词和动作来源，不扩展本段事件。',
+  },
   creativeDirection: { cameraTerms: [], lightingTerms: [], extraRequirement: '' }, characterContinuity: [],
 };
 assert.ok(!semanticInput.segment.content.includes('先开门。'), 'regression fixture must keep dialogue only in the assigned source records');
@@ -574,10 +581,15 @@ for (const { purpose, formatRepair } of [
       if (stage !== 'convert') assertH3DescriptionLanguage(system, stage === 'review' ? '中文' : '英文');
       if (stage === 'translate') {
         assert.ok(!user.includes('<semantic_segment_source_data>'), 'translation does not receive a fresh semantic assignment');
+        assert.ok(system.includes('STORY_CAUSALITY_TRANSLATION_V1'));
+        assert.ok(!user.includes('随后二人前往庭院。'), 'English translates the approved Chinese, not fresh outside events');
         assert.match(system, /以已确认的 sourcePrompt|保真已确认中文sourcePrompt/u);
         return candidateChinese;
       }
       assert.match(system, /同一次发话/u);
+      assert.ok(system.includes('STORY_UNDERSTANDING_CONTEXT_V1'));
+      assert.match(system, /contentOverridden=true.*用户当前编辑正文优先/u);
+      assert.doesNotMatch(system, /也不提供全片原文/u);
       assert.match(system, /没有对应历史逐字证据就省略坐标并标记sourceLocationStatus=unlocated/u);
       assert.match(system, /不能把generationStoryContent附加对白记录的位置冒充保存原文位置/u);
       assert.deepEqual(jsonBlock(user, 'semantic_segment_source_data').sequenceSegmentContext, semanticInput);

@@ -46,6 +46,10 @@ export default defineConfig({
           ) return 'react-vendor';
           if (normalized.includes('/node_modules/')) return 'vendor';
           if (normalized.endsWith('/src/updateLog.ts')) return 'update-log';
+          // Several eager rule catalogs read these constants at module scope.
+          // Keep them in a dependency-free chunk: the domain fallback imports
+          // those catalogs and would create a startup TDZ through their rules.
+          if (normalized.endsWith('/src/storyCausalityRules.ts')) return 'story-causality';
           // Dossier editing is independent of the large shared project domain.
           if (['characterDossierApplication.ts', 'components/CharacterDossierApplyDialog.tsx', 'components/CharacterDossierApplyDialog.css']
             .some((file) => normalized.endsWith(`/src/${file}`))) return 'character-dossier';

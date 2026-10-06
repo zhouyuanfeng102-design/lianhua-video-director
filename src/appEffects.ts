@@ -38,6 +38,7 @@ import {
 import { hasNsfwDetailSignal } from './promptConstraints';
 import { VIDEO_CREATIVE_DIRECTION_DATA_RULE, videoCreativeDirectionForBoard } from './videoCreativeDirection';
 import { VIDEO_ACTING_CAMERA_RULES } from './videoActingCameraRules';
+import { STORY_CAUSALITY_RULE } from './storyCausalityRules';
 import {
   DEFAULT_VIDEO_CONVERSION_SYSTEM, DEFAULT_VIDEO_CONVERSION_OUTPUT,
   VIDEO_CONVERSION_STORY_RULE, VIDEO_DIALOGUE_RULE, VIDEO_LOCAL_TIME_RULE,
@@ -433,6 +434,7 @@ export const convertStoryboardDraftToFinal = async (
   const characterIdentityFacts = (input.characters || []).map((character) => ({
     id: character.id,
     name: character.name,
+    ...(character.aliases?.length ? { aliases: character.aliases } : {}),
     ...(character.baseName ? { baseName: character.baseName } : {}),
     ...(character.formLabel ? { formLabel: character.formLabel } : {}),
     ...(character.variantOf ? { variantOf: character.variantOf } : {}),
@@ -482,6 +484,7 @@ export const convertStoryboardDraftToFinal = async (
   // dialogue-cutting clauses cannot override the current source contract.
   const audioContractRule = refreshConfirmedPrompt ? AUDIO_EXISTING_SCOPE_RULE : AUDIO_PROMPT_RULE;
   const sharedRules = [DEFAULT_VIDEO_CONVERSION_SYSTEM, DEFAULT_VIDEO_CONVERSION_OUTPUT,
+    STORY_CAUSALITY_RULE,
     VIDEO_CREATIVE_DIRECTION_DATA_RULE,
     VIDEO_ACTING_CAMERA_RULES,
     VIDEO_CONVERSION_STORY_RULE, VIDEO_DIALOGUE_RULE, VIDEO_LOCAL_TIME_RULE, VIDEO_SCENE_STYLE_RULE,
@@ -499,6 +502,7 @@ export const convertStoryboardDraftToFinal = async (
   ).trim()).filter(Boolean))].join('\n\n');
   const hardContract = [
     '以下为当前输出约定；旧预设中的裁句、固定字秒/动作阶段配额和强制换词要求不适用。',
+    STORY_CAUSALITY_RULE,
     VIDEO_CREATIVE_DIRECTION_DATA_RULE,
     VIDEO_ACTING_CAMERA_RULES,
     VIDEO_DIALOGUE_RULE, DIALOGUE_DELIVERY_RULE, DIALOGUE_LANGUAGE_RULE, VIDEO_SCENE_STYLE_RULE,

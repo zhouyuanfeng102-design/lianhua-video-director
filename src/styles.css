@@ -1293,6 +1293,8 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
 .story-source-textarea { height: 100%; min-height: 160px; resize: none; }
 .story-input-footer { flex-wrap: wrap; gap: 6px; }
 .story-input-actions { min-width: 0; max-width: 100%; flex-wrap: wrap; justify-content: flex-end; gap: 5px; margin-left: auto; }
+.story-source-header-actions { min-width: 0; flex-wrap: wrap; justify-content: flex-end; }
+.story-input-actions > .btn { max-width: 100%; white-space: normal; }
 .story-expansion-length-control {
   display: inline-flex;
   align-items: center;

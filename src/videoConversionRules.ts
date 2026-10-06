@@ -1,5 +1,6 @@
 import { AUDIO_PROMPT_RULE, DIALOGUE_DELIVERY_RULE, DIALOGUE_LANGUAGE_RULE } from './audioPromptPolicy';
 import { MOSE_JIANGHU_NSFW_DETAIL_RULES } from './nsfwPromptRules';
+import { STORY_CAUSALITY_RULE } from './storyCausalityRules';
 
 /** One source contract for the rule library and the live converter. */
 export const VIDEO_CONVERSION_STORY_RULE = '把小说叙述整理成具体可见的画面与人物行动，保留原有身份、关系、因果、事件结果及对白。只改需要视频化的叙述，已有清楚可拍的描述可以沿用，不为制造字面差异重写。人物说出口的原话、画外音、通信和明确的心灵交流不属于需要删改的小说修辞；按原文方式保留，不要求说话人必须出现在当前画面。图片只约束对应的可见身份、场景或构图，不替代剧情事实。';
@@ -59,16 +60,19 @@ export const LEGACY_DEFAULT_VIDEO_CONVERSION_OUTPUT_V1_4_0 = [VIDEO_CONVERSION_F
 
 export const DEFAULT_VIDEO_CONVERSION_SYSTEM = [
   LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_4_0,
+  STORY_CAUSALITY_RULE,
   DIALOGUE_DELIVERY_RULE,
   VIDEO_DIALOGUE_STAGING_RULE,
   VIDEO_SPATIAL_CONTINUITY_RULE,
   VIDEO_STAGING_REVIEW_RULE,
   VIDEO_PROMPT_FOCUS_RULE,
 ].join('\n\n');
+export const VIDEO_CAUSALITY_OUTPUT_RULE = '结合本段原文与只读理解上下文核对行动者→动作→对象→结果，保留有依据的攻击来源和具名目标；反应特写也不能让攻击因果消失，不把比喻变成新能力。中文与英文保持同一因果。';
 export const DEFAULT_VIDEO_CONVERSION_OUTPUT = [
   VIDEO_CONVERSION_FORMAT_RULE,
   DIALOGUE_DELIVERY_RULE,
   '在主体和台词字段落实每句声源、口型与听者状态；在主体、空间和镜头字段落实本镜朝向、行进目标、机位与前后承接。每镜都保留必要约束，不新增审核报告字段。',
+  VIDEO_CAUSALITY_OUTPUT_RULE,
   VIDEO_PROMPT_FOCUS_RULE,
   VIDEO_CONVERSION_EXAMPLE,
 ].join('\n\n');

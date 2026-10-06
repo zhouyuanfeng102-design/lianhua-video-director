@@ -125,6 +125,42 @@ test('a consistent legacy segmentCount remains compatible without another model 
     authored.segments.map(({ content, semanticSource }) => ({ content, semanticSource })));
 });
 
+test('planning sends original-novel evidence and stable aliases once and keeps AI-authored causality intact', async () => {
+  const request = input();
+  request.story = '敌军冲向夏提雅。夏提雅挥动枪形武器迎击，敌人被击飞。侍从说：“飞出去了……”';
+  request.characterContinuity = [{ id: 'shalltear', name: '夏提雅', aliases: ['红铠人'], signatureProps: '枪形武器' }];
+  request.originalSourceContext = { id: 'conversion-combat', chapterId: 'combat-chapter', sourceName: '战斗小说',
+    sourceText: '红铠人用形状怪异的枪形武器把敌人打上半空。冲锋者像撞上看不见的墙。侍从说：“飞出去了……”',
+    resultText: request.story, createdAt: 1 };
+  const authored = response(1);
+  authored.segments[0].content = request.story;
+  authored.segments[0].semanticSource = {
+    sourceEvidence: [{ text: request.story }],
+    events: [{ id: 'counterattack', description: '夏提雅迎击敌军', phase: '迎击', causality: {
+      actor: '夏提雅', actorCharacterId: 'shalltear', target: '敌军', action: '挥动枪形武器迎击', result: '敌人被击飞',
+      evidence: '夏提雅挥动枪形武器迎击，敌人被击飞。', certainty: 'explicit',
+    } }], dialogues: [{ id: 'witness-line', speaker: '侍从', text: '飞出去了……' }],
+  };
+  const requests = install((payload) => {
+    const data = planningEnvelope(payload);
+    assert.equal(data.story, request.story);
+    assert.deepEqual(data.originalSourceContext, request.originalSourceContext);
+    assert.deepEqual(data.characterContinuity, request.characterContinuity);
+    const system = prompt(payload, 'system');
+    assert.match(system, /背景信息、旁观者反应或被动句/u);
+    assert.match(system, /比喻不改成真实能力，原文确有的能力仍须保留/u);
+    assert.match(system, /未知攻击来源须保留未知/u);
+    assert.match(system, /content必须实际表达已分配事件的行动者、动作对象与结果/u);
+    return textReply(authored);
+  });
+  const plan = await requestSemanticSequencePlan(config(), request, undefined, options);
+  assert.equal(requests.length, 1, 'causality review belongs to the existing planning call');
+  assert.deepEqual(plan.segments[0].semanticSource, authored.segments[0].semanticSource);
+  assert.equal(plan.segments[0].content, request.story);
+  assert.deepEqual(plan.semanticPlanningSnapshot!.originalSourceContext, request.originalSourceContext);
+  assert.deepEqual(plan.semanticPlanningSnapshot!.characterContinuity, request.characterContinuity);
+});
+
 test('legacy count contradictions return to AI with real counts and full story before a complete count-free repair', async () => {
   for (const [declaredCount, actualCount, correctedCount] of [[5, 3, 3], [5, 3, 5], [2, 3, 3]]) {
     const wrong = { ...response(actualCount), segmentCount: declaredCount };

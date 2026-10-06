@@ -339,6 +339,31 @@ test('save/restart/import preserve exact metadata and review confirmation withou
   assert.equal(plan.semanticPlanningSnapshot!.creativeDirection.cameraTerms.length, 1);
 });
 
+test('causality, source novel and frozen aliases survive save/import without reinterpreting legacy events', () => {
+  const request: SemanticSequencePlanningInput = { ...input,
+    characterContinuity: [{ id: 'teacher', name: '师傅', aliases: ['蓝袍人'] }],
+    originalSourceContext: { id: 'visual-source', chapterId: 'chapter-source', sourceName: '师徒小说',
+      sourceText: '蓝袍人把药草递出去。“拿稳。”她说。徒弟朝集市前行。', resultText: story, createdAt: 1 },
+  };
+  const authored = clone(response);
+  authored.segments[0].semanticSource.events[0].causality = {
+    actor: '师傅', actorCharacterId: 'teacher', target: '徒弟', action: '递出药草', result: '徒弟接稳药草',
+    evidence: '师傅把药草递给徒弟', certainty: 'explicit',
+  };
+  const plan = materializeSemanticSequencePlan(request, authored, { planId: 'causal-plan', now: 100 });
+  const saved = normalizeState(JSON.parse(serializeStateForStorage(normalizeState(stateFor(plan))).serialized));
+  const restored = saved.project.sequencePlans[0];
+  assert.deepEqual(restored.semanticPlanningSnapshot, plan.semanticPlanningSnapshot);
+  assert.deepEqual(restored.segments.map((segment) => segment.semanticSource), plan.segments.map((segment) => segment.semanticSource));
+  assert.deepEqual(validateSequencePlan(restored), []);
+  const characters = semanticSequenceCharacters(restored, []);
+  assert.deepEqual(characters[0].aliases, ['蓝袍人']);
+  characters[0].aliases!.push('mutated clone');
+  assert.deepEqual(restored.semanticPlanningSnapshot!.characterContinuity[0].aliases, ['蓝袍人']);
+  assert.equal(Object.hasOwn(restored.segments[1].semanticSource!.events[0], 'causality'), false,
+    'older event records must not gain fabricated relations');
+});
+
 test('fixed and explicit AI duration requests survive save/restart with their own review identity', () => {
   for (const request of [
     { ...input, durationMode: 'fixed' as const, requestedTotalDurationSec: 30 },

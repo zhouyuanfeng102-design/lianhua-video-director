@@ -1,6 +1,6 @@
 {
   "name": "lianhua-video-director",
-  "version": "1.4.3",
+  "version": "1.4.5",
   "productName": "莲华视频导演台",
   "private": true,
   "description": "莲华视频导演台：从小说到连续视频分镜与提示词",
@@ -97,7 +97,7 @@
     "test:styles": "tsx scripts/styles.test.ts && tsx scripts/sidebarFit.test.ts && tsx scripts/uiInformationVisibility.test.ts && npm run test:reference-image-names",
     "test:sidebar-fit-ui": "node scripts/sidebarFitUiQa.mjs",
     "test:story-preparation-buttons-ui": "node scripts/storyPreparationButtonsUiQa.mjs",
-    "test:story-preparation": "tsx scripts/storyOptimizationDialogue.test.ts && tsx scripts/storyPreparation.test.ts && tsx scripts/videoReadyStory.test.ts && tsx scripts/storyPreparationReview.test.ts",
+    "test:story-preparation": "tsx scripts/storyOptimizationDialogue.test.ts && tsx scripts/storyPreparation.test.ts && tsx scripts/videoReadyStory.test.ts && tsx scripts/storyPreparationReview.test.ts && tsx scripts/storyVisualConversion.test.ts && tsx scripts/storyVisualConversionStorage.test.ts && tsx scripts/storyCausalityPipeline.test.ts",
     "test:sequence-planner-layout-ui": "node scripts/sequencePlannerLayoutUiQa.mjs",
     "test:director-entry-visibility-ui": "node scripts/directorEntryVisibilityUiQa.mjs",
     "test:ui-audit-fixes": "node scripts/uiAuditFixesUiQa.mjs",
@@ -269,7 +269,10 @@
     "deliver:1.3.9": "node scripts/createDelivery.mjs",
     "deliver:1.4.0": "node scripts/createDelivery.mjs",
     "deliver:1.4.1": "node scripts/createDelivery.mjs",
-    "deliver:1.4.3": "node scripts/createDelivery.mjs"
+    "deliver:1.4.3": "node scripts/createDelivery.mjs",
+    "deliver:1.4.4": "node scripts/createDelivery.mjs",
+    "deliver:1.4.5": "node scripts/createDelivery.mjs",
+    "test:packaged-cold-start": "node scripts/packagedColdStartUiQa.mjs"
   },
   "dependencies": {
     "playwright-core": "^1.62.1",

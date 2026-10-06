@@ -69,11 +69,11 @@ try {
   assert.equal(requestData().sourceTextOrRequirement, novel);
   assertNoLocalOptimizationChecklist();
   const prompt = requests[0].messages.map((item) => item.content).join('\n');
-  for (const required of ['视频化整理（optimize）', '原文', '说话人']) {
+  for (const required of ['AI画面描述转化（optimize）', '原文', '说话人']) {
     assert.ok(prompt.includes(required), required);
   }
   assert.match(prompt, /(?:通读|完整原文|全文)/u);
-  assert.match(prompt, /(?:推荐|建议).*(?:场景|组织|结构)/u);
+  assert.match(prompt, /(?:自然连贯|自然中文段落|不套固定栏目)/u);
   assert.match(prompt, /(?:完整原文|全文).*(?:理解|依据|判断)/u);
   assert.doesNotMatch(prompt, /existingDialogue(?:Lines)?|sourceExcerpt/u);
   checks += 1;
@@ -177,8 +177,8 @@ try {
   assert.equal(await requestStoryPreparation(config, '林澜推门。', undefined, oldRules), small);
   const system = requests[0].messages.filter((item) => item.role === 'system').map((item) => item.content).join('\n');
   const user = requests[0].messages.find((item) => item.role === 'user')!.content;
-  assert.ok(system.lastIndexOf('当前模式：视频化整理（optimize）') > system.indexOf(oldRules.systemPrompt));
-  assert.ok(user.lastIndexOf('当前模式：视频化整理（optimize）') > user.indexOf(oldRules.outputRules));
+  assert.ok(system.lastIndexOf('当前模式：AI画面描述转化（optimize）') > system.indexOf(oldRules.systemPrompt));
+  assert.ok(user.lastIndexOf('当前模式：AI画面描述转化（optimize）') > user.indexOf(oldRules.outputRules));
   assert.match(system, /“禁止标题或字段”等(?:硬格式)?要求不适用/u);
   assert.equal(JSON.stringify(oldRules), rulesBefore);
   checks += 1;
@@ -205,7 +205,7 @@ try {
     const expansionPrompt = requests[0].messages.map((item) => item.content).join('\n');
     assert.match(expansionPrompt, /输出使用连续中文剧情自然段/u);
     assert.match(expansionPrompt, /只返回扩写后的完整剧情正文/u);
-    assert.doesNotMatch(expansionPrompt, /当前模式：视频化整理|【场景1：|视频化重整/u);
+    assert.doesNotMatch(expansionPrompt, /当前模式：AI画面描述转化|【场景1：|视频化重整/u);
   }
   fakeResponse('林澜推开门进入房间。');
   assert.equal(await requestStoryExpansion(config, '林澜推开门进入房间。'), '林澜推开门进入房间。', 'local lexical growth checks do not reject model output');

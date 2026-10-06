@@ -6,6 +6,7 @@ import type {
   TargetParameters,
 } from './promptAdapters';
 import { translateVideoPromptToEnglish, type TranslateVideoPromptToEnglishOptions } from './promptTranslation';
+import { STORY_CAUSALITY_TRANSLATION_RULE } from './storyCausalityRules';
 
 export interface Seedance25PromptCompilation {
   targetId: 'seedance-2.5';
@@ -52,6 +53,7 @@ export const cleanSeedancePrompt = (value: string): string => value
   .trim();
 
 export const SEEDANCE_ENGLISH_TRANSLATION_RULE = [
+  STORY_CAUSALITY_TRANSLATION_RULE,
   '本次输入是 Seedance 2.5 自然语言提示词，保持视频规格、参考素材职责、主体连续性、概述、连续时间轴与全局约束的完整结构；章节标题翻译为英文，不删除开头内容。',
   '@Image N、@Video N、@Audio N、@Clay Render N 是完整参考素材标记；保留类型、空格、编号与对应职责，不重新编号。',
   '保持 Seedance 自然语言格式，不引入 MiniMax H3 专用section、[Shot N]、<Subject N>、<Picture N>、<d>或<sound>标签；声音和对白说明仍用自然语言。',
@@ -174,6 +176,8 @@ const removeH3OnlySyntax = (value: string, warnings: string[]): string => {
 
 const renderPrompt = (input: PromptAdapterInput, manifest: ReferenceManifest, warnings: string[]): string => {
   const durationSec = finiteDuration(input.durationSec);
+  // The AI-confirmed canonical timeline owns story causality. This adapter
+  // preserves that body; it never chooses an actor from reference metadata.
   const timeline = removeH3OnlySyntax(clean(input.canonicalPrompt), warnings) || '根据当前分镜计划连续呈现主体动作、镜头变化和声音事件。';
   const constraints = (input.constraints || []).map(clean).filter(Boolean);
   const subjectDefinitions = (input.subjectDefinitions || [])

@@ -130,6 +130,7 @@ import { StoryboardImageOutputSizeControls } from "./components/StoryboardImageO
 import { readGeneratedImageDimensions } from "./imageDimensions";
 import { getComfyImageSizeOverrideSupport } from "./comfyui";
 import type { StoryPreparationResult } from "./storyPreparationReview";
+import { matchingStoryVisualConversion, rememberStoryVisualConversion } from "./storyVisualConversion";
 import { VideoGenerationSettings } from "./components/VideoGenerationSettings";
 import { useVideoGenerationController } from "./useVideoGenerationController";
 import { useVideoRuntimes } from "./videoRuntimeStore";
@@ -1147,7 +1148,7 @@ const viewTitles: Record<ViewKey, { title: string; subtitle: string }> = {
   },
   rules: {
     title: "规则中心",
-    subtitle: "管理视频规则、视频转换器、AI 剧情优化规则和风格预设",
+    subtitle: "管理视频规则、视频转换器、剧情处理规则和风格预设",
   },
   settings: {
     title: "API 设置",
@@ -1924,15 +1925,16 @@ export default function App() {
   const storyPreparationModeRef = useRef(storyPreparationMode);
   storyPreparationModeRef.current = storyPreparationMode;
   const [storyPreparationUndo, setStoryPreparationUndo] = useState<{
-    projectId: string; before: string; after: string;
+    projectId: string; chapterId: string; before: string; after: string;
   } | null>(null);
   const [pendingStoryReview, setPendingStoryReview] = useState<{
-    id: string; projectId: string; before: string; sourceName: string;
+    id: string; projectId: string; chapterId: string; before: string; sourceName: string;
     workspaceEpoch: number; result: StoryPreparationResult;
   } | null>(null);
   const pendingStoryReviewRef = useRef(pendingStoryReview);
   pendingStoryReviewRef.current = pendingStoryReview;
   const [storyReviewOpen, setStoryReviewOpen] = useState(false);
+  const [storyConversionSourceOpen, setStoryConversionSourceOpen] = useState(false);
   const busyEpochRef = useRef(0);
   const setBusy = useCallback<React.Dispatch<React.SetStateAction<boolean>>>((update) => {
     busyEpochRef.current += 1;
@@ -2208,9 +2210,11 @@ export default function App() {
   if (!chapterWorkerInBackground()) storyExpansionIdentityRef.current = storyAnalysisIdentity;
   const canRestoreStoryPreparation = Boolean(storyPreparationUndo
     && storyPreparationUndo.projectId === state.project.id
+    && storyPreparationUndo.chapterId === activeChapter(state.project)?.id
     && storyPreparationUndo.after === storyInput && !busy && !storyExpansionBusy);
   const storyReviewStale = Boolean(pendingStoryReview && (
     pendingStoryReview.projectId !== state.project.id
+    || pendingStoryReview.chapterId !== activeChapter(state.project)?.id
     || pendingStoryReview.workspaceEpoch !== workspaceEpochRef.current
     || pendingStoryReview.before !== storyInput
     || pendingStoryReview.sourceName !== storyName
@@ -2219,6 +2223,9 @@ export default function App() {
     ? { warningCount: pendingStoryReview.result.warnings.length, stale: storyReviewStale }
     : null;
   const openStoryPreparationReview = () => setStoryReviewOpen(true);
+  const currentStoryVisualConversion = matchingStoryVisualConversion(state.project, activeChapter(state.project)?.id, storyInput);
+  const hasStoryVisualConversionSource = Boolean(currentStoryVisualConversion);
+  const openStoryVisualConversionSource = () => setStoryConversionSourceOpen(true);
   const sequencePlanningActivePlan = editorProject.sequencePlans?.find(
     (plan) => plan.id === activePlanId,
   );
@@ -2496,7 +2503,8 @@ export default function App() {
     pendingStoryReviewRef.current = null;
     setPendingStoryReview(null);
     setStoryReviewOpen(false);
-  }, [state.project.id]);
+    setStoryConversionSourceOpen(false);
+  }, [state.project.id, state.project.activeChapterId]);
 
   useEffect(() => {
     if (chapterWorkerInBackground()) return;
@@ -3944,6 +3952,7 @@ export default function App() {
       const result = { ...await requestSemanticSequencePlan(snapshot.settings.textApi, {
         title: storyName.trim() || "未命名剧情",
         story: sourceStory,
+        originalSourceContext: matchingStoryVisualConversion(snapshot.project, requestChapterId, sourceStory),
         segmentDurationSec,
         durationMode,
         ...(requestedTotalDurationSec !== undefined ? { requestedTotalDurationSec } : {}),
@@ -3953,7 +3962,7 @@ export default function App() {
         shotMode,
         shotCount: shotMode === "exact" ? shotCount : undefined,
         characterContinuity: snapshot.project.characters.filter((character) => !character.dossier?.archivedIntoCharacterId).map((character) => ({
-          id: character.id, name: character.name, baseName: character.baseName, formLabel: character.formLabel,
+          id: character.id, name: character.name, aliases: character.aliases, baseName: character.baseName, formLabel: character.formLabel,
           variantOf: character.variantOf, transformationType: character.transformationType,
           gender: character.gender, race: character.race, morphology: character.morphology,
           bodyPlan: character.bodyPlan, appearance: character.appearance, outfit: character.outfit, anchor: character.anchor,
@@ -5893,11 +5902,12 @@ export default function App() {
     const existingReview = pendingStoryReviewRef.current;
     if (requestMode === "optimize" && existingReview
       && existingReview.projectId === stateRef.current.project.id
+      && existingReview.chapterId === activeChapter(stateRef.current.project)?.id
       && existingReview.workspaceEpoch === workspaceEpochRef.current
       && existingReview.before === storyDraftRef.current.storyInput
       && existingReview.sourceName === storyDraftRef.current.storyName) {
       setStoryReviewOpen(true);
-      notify("已有 AI 优化结果待确认；已打开预览，没有再次请求模型。");
+      notify("已有 AI 画面转化结果待确认；已打开预览，没有再次请求模型。");
       return;
     }
     if (!storyInput.trim()) {
@@ -5907,7 +5917,7 @@ export default function App() {
     const expansionState = stateRef.current;
     if (!canUseStoryAnalysisApi(expansionState.settings.textApi)) {
       notify(
-        `${requestMode === "expand" ? "AI扩写" : "AI剧情优化"}需要文本 API，请先启用文本模型并填写 API 地址和模型名称。`,
+        `${requestMode === "expand" ? "AI扩写" : "AI画面描述转化"}需要文本 API，请先启用文本模型并填写 API 地址和模型名称。`,
         "error",
       );
       setView("settings");
@@ -5920,7 +5930,7 @@ export default function App() {
       ),
     ) || expansionState.storyExpansionPresets.find((item) => item.enabled);
     if (!expansionPreset) {
-      notify("没有启用的 AI 剧情优化规则，请先在规则中心启用一个处理预设。", "error");
+      notify("没有启用的剧情处理规则，请先在规则中心启用一个处理预设。", "error");
       setRuleTab("expansions");
       setView("rules");
       return;
@@ -5931,6 +5941,7 @@ export default function App() {
     setStoryPreparationMode(requestMode);
     const requestApiFingerprint = sourceContentHash(JSON.stringify(expansionState.settings.textApi));
     const requestPresetFingerprint = sourceContentHash(JSON.stringify(expansionPreset));
+    const requestCharacterFingerprint = sourceContentHash(JSON.stringify(expansionState.project.characters));
     const hasCurrentPreparationSettings = (): boolean => {
       const current = stateRef.current;
       const currentPreset = current.storyExpansionPresets.find((item) => (
@@ -5938,9 +5949,12 @@ export default function App() {
       )) || current.storyExpansionPresets.find((item) => item.enabled);
       return storyPreparationModeRef.current === requestMode
         && sourceContentHash(JSON.stringify(current.settings.textApi)) === requestApiFingerprint
-        && sourceContentHash(JSON.stringify(currentPreset || null)) === requestPresetFingerprint;
+        && sourceContentHash(JSON.stringify(currentPreset || null)) === requestPresetFingerprint
+        && (requestMode !== "optimize" || sourceContentHash(JSON.stringify(current.project.characters)) === requestCharacterFingerprint);
     };
     const requestProjectId = expansionState.project.id;
+    const requestChapterId = activeChapter(expansionState.project)?.id;
+    if (!requestChapterId) { notify("请先新建章节。", "error"); return; }
     const requestIdentity = buildStoryAnalysisRequestIdentity(
       chapterScopeProject(expansionState.project),
       sourceStory,
@@ -5961,12 +5975,14 @@ export default function App() {
         expansionPreset,
         requestMode,
         requestedTargetLength,
+        { characters: expansionState.project.characters.filter((character) => !character.dossier?.archivedIntoCharacterId) },
       );
       if (
         requestController.signal.aborted
         || storyExpansionOperationRef.current !== requestOperation
         || requestEpoch !== workspaceEpochRef.current
         || !isCurrentProjectOperation(requestProjectId, stateRef.current.project.id)
+        || activeChapter(stateRef.current.project)?.id !== requestChapterId
         || !isCurrentOperationIdentity(requestIdentity, storyExpansionIdentityRef.current)
         || !hasCurrentPreparationSettings()
         || storyDraftRef.current.storyInput !== sourceStory
@@ -5974,7 +5990,7 @@ export default function App() {
       ) return;
       if (requestMode === "optimize") {
         const review = {
-          id: createId("story_review"), projectId: requestProjectId,
+          id: createId("story_review"), projectId: requestProjectId, chapterId: requestChapterId,
           before: sourceStory, sourceName: sourceStoryName,
           workspaceEpoch: requestEpoch, result: preparationResult,
         };
@@ -5982,13 +5998,13 @@ export default function App() {
         setPendingStoryReview(review);
         setStoryReviewOpen(true);
         notify(preparationResult.warnings.length
-          ? `AI 优化结果已返回，有 ${preparationResult.warnings.length} 项核对提示。原文未改动，由你决定是否采用；没有自动返修。`
-          : "AI 优化结果已返回，请对照全文后决定是否采用；原文未改动。");
+          ? `AI 画面转化结果已返回，有 ${preparationResult.warnings.length} 项核对提示。原文未改动，由你决定是否采用；没有自动返修。`
+          : "AI 画面转化结果已返回，请对照全文后决定是否采用；原文未改动。");
         return;
       }
       const expandedStory = preparationResult.text;
       if (expandedStory !== sourceStory) {
-        setStoryPreparationUndo({ projectId: requestProjectId, before: sourceStory, after: expandedStory });
+        setStoryPreparationUndo({ projectId: requestProjectId, chapterId: requestChapterId, before: sourceStory, after: expandedStory });
       }
       storyDraftRef.current = {
         ...storyDraftRef.current,
@@ -5998,7 +6014,7 @@ export default function App() {
       invalidateSequenceEstimate();
       notify(expandedStory === sourceStory
         ? "AI 已检查，当前文本无需调整；原文保持不变，可继续解析。"
-        : `${requestMode === "expand" ? "扩写补全" : "视频化整理"}结果已放入输入区，未覆盖已保存原文。请确认场景、具体事件和原对白后再保存或“解析并补全”；可还原处理前文本。`);
+        : `${requestMode === "expand" ? "扩写补全" : "画面描述转化"}结果已放入输入区，未覆盖已保存原文。请确认场景、具体事件和原对白后再保存或“解析并补全”；可还原处理前文本。`);
     } catch (error) {
       if (
         isAbortError(error)
@@ -6008,7 +6024,7 @@ export default function App() {
         || !hasCurrentPreparationSettings()
       ) return;
       reportRuntimeError("story-preparation", error);
-      notify(error instanceof Error ? error.message : `${requestMode === "expand" ? "AI扩写" : "AI剧情优化"}失败，原文保持不变，请重试。`, "error");
+      notify(error instanceof Error ? error.message : `${requestMode === "expand" ? "AI扩写" : "AI画面描述转化"}失败，原文保持不变，请重试。`, "error");
     } finally {
       if (storyExpansionOperationRef.current === requestOperation) {
         storyExpansionAbortRef.current = null;
@@ -6022,17 +6038,18 @@ export default function App() {
     pendingStoryReviewRef.current = null;
     setPendingStoryReview(null);
     setStoryReviewOpen(false);
-    notify("未采用本次 AI 优化结果，编辑区原文保持不变。");
+    notify("未采用本次 AI 画面转化结果，编辑区原文保持不变。");
   };
   const adoptStoryReview = (expectedId: string) => {
     const review = pendingStoryReviewRef.current;
     const currentDraft = storyDraftRef.current;
     if (!review || review.id !== expectedId || busy || storyExpansionAbortRef.current) return;
     if (review.projectId !== stateRef.current.project.id
+      || review.chapterId !== activeChapter(stateRef.current.project)?.id
       || review.workspaceEpoch !== workspaceEpochRef.current
       || review.before !== currentDraft.storyInput
       || review.sourceName !== currentDraft.storyName) {
-      notify("原文或项目已变化，旧优化结果不能覆盖当前文本。你仍可在预览中查看和复制。", "error");
+      notify("原文或项目已变化，旧转化结果不能覆盖当前文本。你仍可在预览中查看和复制。", "error");
       return;
     }
     // Consume the preview before writing the draft, so a double-click cannot
@@ -6041,12 +6058,20 @@ export default function App() {
     setPendingStoryReview(null);
     setStoryReviewOpen(false);
     if (review.result.text !== review.before) {
-      setStoryPreparationUndo({ projectId: review.projectId, before: review.before, after: review.result.text });
+      setStoryPreparationUndo({ projectId: review.projectId, chapterId: review.chapterId, before: review.before, after: review.result.text });
     }
+    const snapshot = {
+      id: review.id, chapterId: review.chapterId, sourceName: review.sourceName,
+      sourceText: review.before, resultText: review.result.text, createdAt: Date.now(),
+    };
+    setState((current) => current.project.id === review.projectId
+      && activeChapter(current.project)?.id === review.chapterId
+      && workspaceEpochRef.current === review.workspaceEpoch
+      ? { ...current, project: rememberStoryVisualConversion(current.project, snapshot) } : current);
     storyDraftRef.current = { ...currentDraft, storyInput: review.result.text };
     setStoryInput(review.result.text);
     invalidateSequenceEstimate();
-    notify("已将你确认的 AI 正文放入编辑区，未自动改写、保存或解析；可还原处理前文本。");
+    notify("已将画面描述放入编辑区并保留转化来源；可还原处理前文本，确认后再保存或解析。");
   };
 
   const handleRestoreStoryPreparation = () => {
@@ -6487,9 +6512,18 @@ export default function App() {
       const generationCharacters = semanticSequenceCharacters(sourcePlanForGeneration, state.project.characters);
       const generationExtraRequirement = semanticContext?.creativeDirection.extraRequirement ?? extraRequirement;
       if (semanticContext) {
-        const segmentIdentityText = [sceneForGeneration.content, segmentForGeneration?.entryState,
-          segmentForGeneration?.exitState, ...semanticContext.segment.semanticSource.dialogues.map((item) => item.speaker)].join("\n");
-        sceneForGeneration.characterIds = generationCharacters.filter((character) => segmentIdentityText.includes(character.name)).map((character) => character.id);
+        const segmentIdentityText = semanticContext.contentOverridden ? sceneForGeneration.content
+          : [sceneForGeneration.content, segmentForGeneration?.entryState,
+              segmentForGeneration?.exitState, ...semanticContext.segment.semanticSource.dialogues.map((item) => item.speaker)].join("\n");
+        // Model-authored IDs and confirmed aliases may establish participation;
+        // a read-only full-story dossier does not put every character in scene.
+        const causalCharacterIds = new Set(semanticContext.contentOverridden ? []
+          : semanticContext.segment.semanticSource.events.flatMap(({ causality }) => causality
+            ? [causality.certainty === "unknown" ? undefined : causality.actorCharacterId, causality.targetCharacterId]
+                .filter((id): id is string => Boolean(id)) : []));
+        sceneForGeneration.characterIds = generationCharacters.filter((character) => causalCharacterIds.has(character.id)
+          || [character.name, ...(character.aliases || [])].some((name) => name.trim() && segmentIdentityText.includes(name)))
+          .map((character) => character.id);
       }
       if (!fullTimeline && segmentForGeneration && override?.sequencePlanId) {
         const livePlan = stateRef.current.project.sequencePlans.find(
@@ -6731,12 +6765,16 @@ export default function App() {
             ...boardCreativeDirection,
             characterContinuity: generationCharacters
               .filter((character) => (
-                sceneForGeneration.characterIds.includes(character.id)
+                // Semantic plans carry all frozen identity facts for AI to
+                // resolve implied actors; this is not a visible-cast mandate.
+                Boolean(semanticContext)
+                || sceneForGeneration.characterIds.includes(character.id)
                 || segmentGenerationSource.sourceStoryContent.includes(character.name)
               ))
               .map((character) => ({
                 id: character.id,
                 name: character.name,
+                ...(character.aliases?.length ? { aliases: [...character.aliases] } : {}),
                 ...(character.baseName ? { baseName: character.baseName } : {}),
                 ...(character.formLabel ? { formLabel: character.formLabel } : {}),
                 ...(character.variantOf ? { variantOf: character.variantOf } : {}),
@@ -8696,6 +8734,8 @@ export default function App() {
     storyPreparationMode,
     storyPreparationReviewSummary,
     openStoryPreparationReview,
+    hasStoryVisualConversionSource,
+    openStoryVisualConversionSource,
     canRestoreStoryPreparation,
     handleRestoreStoryPreparation,
     handleAnalyzeStory,
@@ -9403,6 +9443,19 @@ export default function App() {
           onClose={() => setStoryReviewOpen(false)}
         />
       )}
+      {storyConversionSourceOpen && currentStoryVisualConversion && (
+        <StoryPreparationReviewDialog
+          key={`source-${currentStoryVisualConversion.id}`}
+          original={currentStoryVisualConversion.sourceText}
+          result={{ text: currentStoryVisualConversion.resultText, warnings: [] }}
+          stale={false}
+          sourceOnly
+          fontScalePercent={uiFontScalePercent}
+          onAdopt={() => {}}
+          onKeepOriginal={() => setStoryConversionSourceOpen(false)}
+          onClose={() => setStoryConversionSourceOpen(false)}
+        />
+      )}
       {runtimeErrorLogOpen && (
         <div className="modal-backdrop" onMouseDown={() => setRuntimeErrorLogOpen(false)}>
           <div
@@ -9825,6 +9878,8 @@ interface AppContext {
   storyPreparationMode: StoryPreparationMode;
   storyPreparationReviewSummary: { warningCount: number; stale: boolean } | null;
   openStoryPreparationReview: () => void;
+  hasStoryVisualConversionSource: boolean;
+  openStoryVisualConversionSource: () => void;
   canRestoreStoryPreparation: boolean;
   handleRestoreStoryPreparation: () => void;
   handleAnalyzeStory: () => Promise<void>;
@@ -10134,6 +10189,8 @@ function StoryView(ctx: AppContext) {
     storyPreparationMode,
     storyPreparationReviewSummary,
     openStoryPreparationReview,
+    hasStoryVisualConversionSource,
+    openStoryVisualConversionSource,
     canRestoreStoryPreparation,
     handleRestoreStoryPreparation,
     handleAnalyzeStory,
@@ -10295,8 +10352,10 @@ function StoryView(ctx: AppContext) {
                 <BookOpen size={18} color="var(--pink)" />
                 <strong>原文输入</strong>
               </div>
-              <div className="row">
-
+              <div className="row story-source-header-actions">
+                {hasStoryVisualConversionSource && (
+                  <Button small variant="ghost" onClick={openStoryVisualConversionSource}>查看转化来源</Button>
+                )}
                 <Button
                   small
                   icon={<Save size={14} />}
@@ -10310,8 +10369,8 @@ function StoryView(ctx: AppContext) {
               <div className="story-review-pending" role="status">
                 <span>{storyPreparationReviewSummary.stale
                   ? "有一份先前的 AI 结果；原文已变化，仅供查看。"
-                  : `AI 优化结果待确认 · ${storyPreparationReviewSummary.warningCount} 项核对提示`}</span>
-                <Button small variant="ghost" onClick={openStoryPreparationReview}>查看优化结果</Button>
+                  : `AI 画面转化结果待确认 · ${storyPreparationReviewSummary.warningCount} 项核对提示`}</span>
+                <Button small variant="ghost" onClick={openStoryPreparationReview}>查看转化结果</Button>
               </div>
             )}
             <Field label="章节名称">
@@ -10373,12 +10432,12 @@ function StoryView(ctx: AppContext) {
                 <Button
                   small
                   variant="ghost"
-                  title="AI剧情优化"
+                  title="AI画面描述转化"
                   icon={<Brain size={14} />}
                   disabled={!storyInput.trim() || busy || storyExpansionBusy}
                   onClick={() => void handleExpandStory("optimize")}
                 >
-                  {storyExpansionBusy && storyPreparationMode === "optimize" ? "优化中…" : "AI剧情优化"}
+                  {storyExpansionBusy && storyPreparationMode === "optimize" ? "转化中…" : "AI画面描述转化"}
                 </Button>
                 {canRestoreStoryPreparation && (
                   <Button small variant="ghost" onClick={handleRestoreStoryPreparation} icon={<RotateCcw size={14} />}>
@@ -10485,7 +10544,7 @@ function StoryView(ctx: AppContext) {
               </div>
             </div>
             <div className="hint-box compact-hint">
-              “解析并补全”将完整原文交给文本 AI 识别人名、称呼关系和场景，再完善资料；未配置或请求失败不会使用本地猜测替代。“AI剧情优化”也直接发送全文，返回结果先对照确认；语义由 AI 自行判断，不再本地判错、强制返修或改写正文。
+              “解析并补全”将完整原文交给文本 AI 识别人名、称呼关系和场景，再完善资料；未配置或请求失败不会使用本地猜测替代。“AI画面描述转化”结合全文理解人物、动作因果与侧面描写，转成连贯画面并保留原对白；先对照确认，采用后可查看转化来源。
             </div>
           </Card>
         </div>
@@ -20642,7 +20701,7 @@ function RulesView(ctx: AppContext) {
     } else if (ruleTab === "expansions") {
       const item: StoryExpansionPreset = {
         id,
-        name: "新建 AI 剧情优化规则",
+        name: "新建剧情处理规则",
         systemPrompt: "",
         outputRules: "",
         enabled: true,
@@ -20754,7 +20813,7 @@ function RulesView(ctx: AppContext) {
     }
     if (ruleTab === "expansions" && currentStoryExpansion) {
       if (state.storyExpansionPresets.length <= 1) {
-        notify("至少保留一个 AI 剧情优化规则。", "error");
+        notify("至少保留一个剧情处理规则。", "error");
         return;
       }
       const remainingStoryExpansions = state.storyExpansionPresets.filter(
@@ -21403,7 +21462,7 @@ function RulesView(ctx: AppContext) {
       <SectionHeading
         eyebrow="RULE CENTER"
         title="规则中心"
-        description="统一管理视频时间轴、视频转换器、AI 剧情优化、生图规则、分类预设和风格。"
+        description="统一管理视频时间轴、视频转换器、AI 画面描述转化、生图规则、分类预设和风格。"
         action={
           <div className="row wrap">
             <label className="btn small ghost">
@@ -21475,9 +21534,9 @@ function RulesView(ctx: AppContext) {
             className={`rule-tab ${ruleTab === "expansions" ? "active" : ""}`}
             onClick={() => setRuleTab("expansions")}
           >
-            <strong>AI 剧情优化规则</strong>
+            <strong>剧情处理规则</strong>
             <br />
-            <span className="faint small-text">视频化整理与扩写补全</span>
+            <span className="faint small-text">画面描述转化与扩写补全</span>
           </button>
           <button
             className={`rule-tab ${ruleTab === "image-rules" ? "active" : ""}`}
@@ -21545,7 +21604,7 @@ function RulesView(ctx: AppContext) {
                   : ruleTab === "converters"
                     ? "转换器模板"
                     : ruleTab === "expansions"
-                      ? "AI 剧情优化规则"
+                      ? "剧情处理规则"
                       : ruleTab === "image-rules"
                         ? "生图规则集"
                         : ruleTab === "image-presets"
@@ -21860,7 +21919,7 @@ function RulesView(ctx: AppContext) {
                     </label>
                   </div>
                   <div className="hint-box">
-                    剧情页“AI扩写”和“AI剧情优化”直接调用各自的处理模式，共用启用的默认规则。优化生成场景化剧情稿，扩写补充简略剧情；结果先由你确认，本地不代写剧情。
+                    剧情页“AI扩写”和“AI画面描述转化”直接调用各自的处理模式，共用启用的默认规则。画面描述转化理解全文后保留人物对白与动作因果，扩写补充简略剧情。转化结果先对照确认；扩写字数只影响 AI扩写。
                   </div>
                   <Field label="剧情处理规则">
                     <textarea
