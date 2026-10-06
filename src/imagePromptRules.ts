@@ -4,6 +4,7 @@ import {
 import { FULL_BODY_LAYOUT_RULE } from './imageGeneration';
 import type { ImageVariant } from './types';
 import { IMAGE_PROMPT_LANDSCAPE_SCOPE_CONTRACT, isLandscapeImageRequest } from './imageLocationScope';
+import { DIRECTED_ACTION_RELATION_RULE } from './spatialContinuityRules';
 
 export type ImagePromptBackend =
   | 'all'
@@ -100,7 +101,7 @@ export interface SanitizedImagePromptSections {
 }
 
 export const IMAGE_PROMPT_RULES_SCHEMA_VERSION = 1;
-export const IMAGE_PROMPT_RULE_CATALOG_VERSION = 16;
+export const IMAGE_PROMPT_RULE_CATALOG_VERSION = 17;
 const GPT_IMAGE_RULE_ID = 'image-rule-openai-gpt-image';
 const KREA_RULE_ID = 'image-rule-krea-2';
 const COMFYUI_RULE_ID = 'image-rule-comfyui';
@@ -119,6 +120,7 @@ const FIVE_VIEW_MODEL_PRESETS_CATALOG_VERSION = 12;
 const FIVE_VIEW_MICRO_PRESET_REVISION_CATALOG_VERSION = 13;
 const GPT_IMAGE_25_MICRO_NSFW_ROLLBACK_CATALOG_VERSION = 15;
 const GPT_IMAGE_25_MICRO_NSFW_LIGHT_CLOTHING_CATALOG_VERSION = 16;
+const PRIVATE_MULTI_REGION_LAYOUT_CATALOG_VERSION = 17;
 const NOVELAI_RULE_ID = 'image-rule-novelai';
 
 export const NOVELAI_IMAGE_PRESET_IDS = {
@@ -239,9 +241,9 @@ const BASE_IMAGE_PROMPT_CATEGORY_PRESETS: readonly ImagePromptCategoryPreset[] =
     assetKind: 'character-private',
     description: '生成与普通着装参考图隔离的当前私密资料目标，版式由所选图片规格唯一决定。',
     systemPrompt: MOSE_JIANGHU_PRIVATE_IMAGE_PROMPT_RULE,
-    outputRules: '输入资料末尾的当前画面规格是唯一版式合同，最终提示词只展开该规格已经明确的画幅、主体数量、区域数量、主次关系、取景范围与焦点。当前规格为单画面时，使用正向空间描述锁定唯一完整主体沿中央轴出现、取景边缘完整、主体两侧延续同一背景；只描述当前目标，不解释替代版式。明确类人角色按当前取景所需范围保持肤色、体型和身体锚点；拟人非人角色保持当前取景涉及的人形部位、非人头部、体表或附肢；真实非类人角色保持当前取景涉及的头部或感知结构、躯干、附肢、体表材质与身体锚点。背景简洁，主体结构完整，焦点清晰。',
+    outputRules: '输入资料末尾的当前画面规格是唯一版式合同，最终提示词只展开该规格已经明确的画幅、主体数量、区域数量、主次关系、取景范围与焦点。当前规格为单画面时，使用正向空间描述锁定唯一完整主体沿中央轴出现、取景边缘完整、主体两侧延续同一背景；多区域规格按当前给出的槽位顺序组织，每个槽位只承担一个清楚内容，同一内容只出现一次，所有区域共享同一人物和身体锚点。只描述当前目标，不解释替代版式。明确类人角色按当前取景所需范围保持肤色、体型和身体锚点；拟人非人角色保持当前取景涉及的人形部位、非人头部、体表或附肢；真实非类人角色保持当前取景涉及的头部或感知结构、躯干、附肢、体表材质与身体锚点。背景简洁，主体结构完整，焦点清晰。',
     enabled: true,
-    version: '1.5.0',
+    version: '1.6.0',
     updatedAt: 0,
   },
   {
@@ -644,8 +646,8 @@ export const BUILT_IN_IMAGE_PROMPT_RULE_SETS: readonly ImagePromptRuleSet[] = [
       backend: 'openai',
       format: 'natural-language',
       description: '面向 Krea-2 的自然语言构图、单主体稳定、风格参考、Moodboard 和多人物同框描述。',
-      systemPrompt: '使用具体自然语言先说明实际主体数量、场景和唯一画面时刻，再补充构图、镜头距离、光线、色彩、材质、情绪和成像媒介；允许模型在不改变核心主体与剧情事实的前提下探索视觉方向。输入只有一个实际主体时，把它锁定为一个不可拆分的完整实例：使用一个连续背景和一个相机视点；竖向画幅让主体沿中央竖轴占据主要高度，横向画幅仍让主体居中并在左右保留连续背景，不用额外姿态填充留白。存在参考图或风格参考时，明确区分必须保持的身份、构图和材质与允许变化的画面元素。只有输入确有两个或更多实际出镜主体时才建立多人空间锚点：左侧、右侧、前景、后景、近处、远处、遮挡层和接触点；再逐人绑定各自的性别或雌雄设定、物种形态、身体结构、脸部发型、体型、服装、长期稳定装备/辨识物、动作、表情和视线；一次性购买物、食物、临时容器、借用物、交接物和当前动作手持物只在当前画面明确可见时描述。每名角色的身份事实写在自己的方位句中，不要汇总成全局属性池。',
-      outputRules: '只输出一段连贯的自然语言画面描述，不使用 NovelAI 标签、逗号标签堆叠、字段列表、JSON、Markdown 或模型参数；优先保证主体数量、身份、空间关系、动作状态和风格意图清楚，再添加有目的的审美细节。单主体画面必须用正向空间句明确唯一完整主体居中、取景边缘完整、主体两侧为同一连续背景，不把同一人物扩展成额外实例或不同姿势。多人同框时按左到右或前到后逐人描述，让每名角色保持独立完整轮廓、独立服装和独立动作；避免性别互换、身体部位串位、服装串位、道具串位和多人融合。',
+      systemPrompt: '使用具体自然语言先说明实际主体数量、场景和唯一画面时刻，再补充构图、镜头距离、光线、色彩、材质、情绪和成像媒介；允许模型在不改变核心主体与剧情事实的前提下探索视觉方向。输入只有一个实际主体时，把它锁定为一个不可拆分的完整实例：使用一个连续背景和一个相机视点；竖向画幅让主体沿中央竖轴占据主要高度，横向画幅仍让主体居中并在左右保留连续背景，不用额外姿态填充留白。设定板或多区域资料板严格以当前图片规格给出的区域数量、槽位顺序和视角为唯一版式，每个槽位只承担一个指定内容，不把同一内容复制到其它区域。存在参考图或风格参考时，明确区分必须保持的身份、构图和材质与允许变化的画面元素。只有输入确有两个或更多实际出镜主体时才建立多人空间锚点：左侧、右侧、前景、后景、近处、远处、遮挡层和接触点；再逐人绑定各自的性别或雌雄设定、物种形态、身体结构、脸部发型、体型、服装、长期稳定装备/辨识物、动作、表情和视线；一次性购买物、食物、临时容器、借用物、交接物和当前动作手持物只在当前画面明确可见时描述。每名角色的身份事实写在自己的方位句中，不要汇总成全局属性池。',
+      outputRules: '只输出一段连贯的自然语言画面描述，不使用 NovelAI 标签、逗号标签堆叠、字段列表、JSON、Markdown 或模型参数；优先保证主体数量、身份、空间关系、动作状态和风格意图清楚，再添加有目的的审美细节。单主体画面必须用正向空间句明确唯一完整主体居中、取景边缘完整、主体两侧为同一连续背景，不把同一人物扩展成额外实例或不同姿势。设定板或多区域资料板按当前规格逐槽描述，保持区域数量、槽位顺序、视角和内容一一对应，不重复绘制同一身体或部位。多人同框时按左到右或前到后逐人描述，让每名角色保持独立完整轮廓、独立服装和独立动作；避免性别互换、身体部位串位、服装串位、道具串位和多人融合。',
     }),
     categoryPresetIds: [
       ...ALL_CATEGORY_PRESET_IDS,
@@ -653,7 +655,7 @@ export const BUILT_IN_IMAGE_PROMPT_RULE_SETS: readonly ImagePromptRuleSet[] = [
       ...ALL_FIVE_VIEW_IMAGE_PRESET_IDS,
     ],
     defaultPresetByAssetKind: allCategoryBindings(),
-    version: '1.2.0',
+    version: '1.3.0',
   },
   builtInRule({
     id: 'image-rule-sd-webui',
@@ -1597,6 +1599,40 @@ export const migrateImagePromptRulesState = (value: unknown): ImagePromptRulesSt
     };
   }
 
+  if ((state.catalogVersion || 0) < PRIVATE_MULTI_REGION_LAYOUT_CATALOG_VERSION) {
+    const currentKrea = currentBuiltInRule(KREA_RULE_ID);
+    const currentPrivatePreset = BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS.find(
+      (preset) => preset.id === CATEGORY_PRESET_IDS['character-private'],
+    );
+    state = {
+      ...state,
+      catalogVersion: PRIVATE_MULTI_REGION_LAYOUT_CATALOG_VERSION,
+      ruleSets: state.ruleSets.map((rule) => {
+        const isUntouchedLegacyKrea = rule.id === KREA_RULE_ID
+          && rule.updatedAt === 0
+          && rule.version === '1.2.0'
+          && rule.name === currentKrea.name
+          && rule.systemPrompt.includes('不用额外姿态填充留白')
+          && rule.outputRules.includes('单主体画面必须');
+        return isUntouchedLegacyKrea
+          ? refreshBuiltInRuleText(rule, currentKrea, [])
+          : rule;
+      }),
+      categoryPresets: state.categoryPresets.map((preset) => {
+        const isUntouchedLegacyPrivate = Boolean(currentPrivatePreset)
+          && preset.id === currentPrivatePreset!.id
+          && preset.updatedAt === 0
+          && preset.version === '1.5.0'
+          && preset.name === currentPrivatePreset!.name
+          && preset.outputRules.includes('当前画面规格是唯一版式合同')
+          && preset.outputRules.includes('单画面');
+        return isUntouchedLegacyPrivate
+          ? { ...cloneCategoryPreset(currentPrivatePreset!), enabled: preset.enabled }
+          : preset;
+      }),
+    };
+  }
+
   return state;
 };
 
@@ -1808,6 +1844,11 @@ export const IMAGE_PROMPT_PROP_SCOPE_CONTRACT = [
   '不要按“剑”或“食物”等类别一刀切，按剧情中的归属、持续性和叙事功能判断：临时借剑不等于长期佩剑，全文明确的长期身份标志也不因物品类别被删除。保留题材、世界观、背景风格、服装与真正的长期装备；稳定装备也按当前取景与剧情状态显露，不强制每镜手持。',
 ].join('\n');
 
+/** A storyboard converter must retain the semantic destination of a directed
+ * action.  Keep this separate from identity rules so user presets cannot
+ * accidentally replace it with a generic “dynamic action” phrase. */
+export const IMAGE_PROMPT_DIRECTED_ACTION_CONTRACT = DIRECTED_ACTION_RELATION_RULE;
+
 export const IMAGE_PROMPT_VISIBLE_CHARACTER_IDENTITY_CONTRACT = [
   '人物外貌是生图身份锁，不是可省略的背景资料。输入只要提供了人物连续性事实，每名实际出镜人物都必须在最终提示词中逐人明确写出其全部非空可见身份：准确的性别或雌雄/自定义性别、种族或物种、物种形态/身体结构、体表材质、服装或外覆结构、明确属于长期稳定装备/辨识物的道具、辨识特征及连续性锚点。对明确类人角色，再保留脸型与五官、发型与发色、肤色与体型体态；对真实非人角色，改为头部或感知结构、躯干、肢体与附肢数量及连接方式、体长/高度/翼展和运动方式，不得套用人类外貌模板。',
   '人物姓名与作品／世界观归属、可见外貌共同构成身份锁，最终提示词应同时保留；姓名或“小师妹”等称谓不能替代外貌描写，不得只写姓名加动作、不得把已给出的外貌压缩成空泛形容词，也不得因为参考图存在而省略文字身份锁。',
@@ -1933,6 +1974,7 @@ export const buildImagePromptConverterSystemPrompt = (
     ? IMAGE_PROMPT_PROPORTION_CONTRACT
     : '',
   landscape ? '' : IMAGE_PROMPT_PROP_SCOPE_CONTRACT,
+  selection.assetKind === 'storyboard' ? IMAGE_PROMPT_DIRECTED_ACTION_CONTRACT : '',
   landscape ? '' : IMAGE_PROMPT_NAMED_IDENTITY_CONTRACT,
   landscape ? IMAGE_PROMPT_LANDSCAPE_SCOPE_CONTRACT : '',
   '只返回最终提示词，不要复述以上规则。',

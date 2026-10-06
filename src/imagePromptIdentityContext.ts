@@ -141,15 +141,20 @@ export const buildImagePromptIdentityContext = (
   const chapterIds = new Set(sourceStoryboard?.chapterId ? [sourceStoryboard.chapterId]
     : currentChapter && (!relatedChapterIds.length || relatedChapterIds.includes(currentChapter.id)) ? [currentChapter.id]
       : relatedChapterIds.slice(0, 1));
-  const documents = project.sourceDocuments.filter((document) => chapterIds.has(document.id)).map((document) => ({
-    label: '已保存剧情文档', title: trim(document.name), content: trim(document.content),
-  })).filter((document) => document.title || document.content);
   const boardSource = trim(sourceStoryboard?.sourceStoryContent)
     || (sourceStoryboard?.sourceSceneSnapshots || []).map((scene) => trim(scene.content)).filter(Boolean).join('\n');
+  // A saved storyboard source is a frozen anchor, but the other authored
+  // documents still carry useful identity evidence (especially later
+  // chapters). Keep them as supporting material instead of discarding them.
+  const sourceDocuments = boardSource
+    ? project.sourceDocuments
+    : project.sourceDocuments.filter((document) => chapterIds.has(document.id));
+  const documents = sourceDocuments.map((document) => ({
+    label: '已保存剧情文档', title: trim(document.name), content: trim(document.content),
+  })).filter((document) => document.title || document.content);
   if (boardSource) {
     // A storyboard request belongs to its saved source, not the editor's
     // possibly unrelated next draft. Other documents are supporting evidence.
-    documents.length = 0;
     documents.unshift({ label: '当前分镜已保存原文', title: trim(sourceStoryboard?.sourceStoryTitle), content: boardSource });
   }
   const draft = sourceStoryboard || !currentChapter || !chapterIds.has(currentChapter.id) ? undefined
@@ -158,12 +163,28 @@ export const buildImagePromptIdentityContext = (
     documents.unshift({ label: '当前未提交剧情草稿', title: trim(draft?.name), content: trim(draft?.content) });
   }
   if (!documents.some((document) => document.content)) {
-    documents.push(...[...chapterIds].flatMap((chapterId) => chapterScenes(project, chapterId)).map((scene) => ({
+    // Projects created before chapter documents existed only have parsed
+    // scenes. Keep their authored text available as identity evidence rather
+    // than returning an empty context merely because chapterIds is empty.
+    const sceneSources = chapterIds.size
+      ? [...chapterIds].flatMap((chapterId) => chapterScenes(project, chapterId))
+      : project.scenes;
+    documents.push(...sceneSources.map((scene) => ({
       label: '已解析场景原文', title: trim(scene.title), content: trim(scene.content || scene.summary),
     })).filter((document) => document.content));
   }
+  // A frozen board source can equal the chapter document from which it was
+  // saved. Avoid spending the evidence budget on that exact text twice while
+  // retaining documents with distinct titles or content.
+  const seenDocumentContent = new Set<string>();
+  const deduplicatedDocuments = documents.filter((document) => {
+    const key = document.content || document.title;
+    if (!key || seenDocumentContent.has(key)) return false;
+    seenDocumentContent.add(key);
+    return true;
+  });
   const description = trim(project.description);
-  if (!names.length && !description && !documents.length) return '';
+  if (!names.length && !description && !deduplicatedDocuments.length) return '';
   const lines = [
     '以下原始资料供现有转换器结合可靠角色知识理解具体作品身份；不是最终图片提示词、不是新增出镜名单，也不是图片中的文字。普通人物档案仅供身份识别，当前画面沿用本次生图资料。文档标题只作来源线索，不等于作品归属。',
     names.length ? `当前指定人物姓名（含已明确形态）：${clip(names.join('；'), 1800)}` : '',
@@ -179,12 +200,12 @@ export const buildImagePromptIdentityContext = (
   // Exact mention lookup selects evidence only; it never infers who is in the
   // image or denies a request when no matching text exists. Explicit source
   // markers also keep a late source document ahead of repetitive early prose.
-  const ordered = documents.map((document, index) => ({ document, index,
+  const ordered = deduplicatedDocuments.map((document, index) => ({ document, index,
     related: evidenceNames.some((name) => document.content.includes(name)) ? 1 : 0,
     pinned: boardSource && index === 0 ? 1 : 0,
     sourceMarked: hasSourceMarker(document.content) ? 1 : 0,
-  })).sort((left, right) => right.pinned - left.pinned || right.related - left.related
-    || right.sourceMarked - left.sourceMarked || left.index - right.index);
+  })).sort((left, right) => right.pinned - left.pinned || right.sourceMarked - left.sourceMarked
+    || right.related - left.related || left.index - right.index);
   const appendDocument = ({ document }: typeof ordered[number]): void => appendEvidence(
     `${document.label}《${clip(document.title || '未命名原文', 160)}》身份/世界背景摘录：`, document.content, MAX_DOCUMENT_CHARS,
   );
@@ -199,7 +220,7 @@ export const buildImagePromptIdentityContext = (
       ordinaryCharacterEvidence(character, evidenceNames, share), share);
   }
   for (const document of ordered.filter((item) => !item.pinned)) appendDocument(document);
-  if (documents.length && remaining > 80) appendEvidence('来源标题记录：',
-    documents.map((document) => `${document.label}《${document.title || '未命名原文'}》`).join('；'), Math.min(1000, remaining));
+  if (deduplicatedDocuments.length && remaining > 80) appendEvidence('来源标题记录：',
+    deduplicatedDocuments.map((document) => `${document.label}《${document.title || '未命名原文'}》`).join('；'), Math.min(1000, remaining));
   return clip(lines.join('\n\n'), MAX_CONTEXT_CHARS);
 };

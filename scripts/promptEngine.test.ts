@@ -4836,6 +4836,40 @@ runPromptEdgeCase('actor', () => {
   );
 });
 
+const directedQuantityCharacters: Character[] = [
+  { ...multiReferenceCharacters[0], id: 'character-directed-enemy', name: '敌人', race: '人类', appearance: '一群敌对战士' },
+  { ...multiReferenceCharacters[1], id: 'character-directed-target', name: '夏提雅', race: '吸血鬼', appearance: '白发红瞳的女武神形态战士' },
+];
+const directedQuantityShot = {
+  ...shots[0],
+  id: 'shot_directed_quantity_actor',
+  index: 1,
+  startSec: 0,
+  endSec: 6,
+  subject: '夏提雅',
+  action: '一群敌人从远处冲向夏提雅，夏提雅站在前方石台上',
+  space: '敌人在后景向前景收敛，夏提雅在前方石台上清晰可见',
+  direction: '敌人面向夏提雅，摄影机不在冲锋终点',
+  camera: '低机位侧后方沿敌人指向夏提雅的运动轴拍摄',
+  result: '敌人抵达夏提雅前方',
+  referenceAssetIds: [],
+};
+const directedQuantityPrompt = renderShotPrompt(
+  directedQuantityShot,
+  6,
+  [],
+  [directedQuantityShot],
+  'stereo',
+  timelineRule,
+  { characters: directedQuantityCharacters },
+);
+runPromptEdgeCase('directed actor-target quantity relation', () => {
+  assert.match(directedQuantityPrompt, /主体：@敌人/u, 'quantity-bearing actor should replace a stale target subject');
+  assert.match(directedQuantityPrompt, /面朝夏提雅/u, 'direction must name the action target');
+  assert.match(directedQuantityPrompt, /定向动作关系：敌人从动作起点向夏提雅收敛/u, 'space must retain the actor-target endpoint');
+  assert.doesNotMatch(directedQuantityPrompt, /面朝画面纵深/u, 'directed actions must not fall back to generic depth direction');
+});
+
 const orphanClosingVisibleLabelShot = {
   ...shots[0],
   id: 'shot_orphan_closing_visible_label',

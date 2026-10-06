@@ -584,16 +584,45 @@ interface SubjectActionTargetRelation {
 }
 
 const RELATION_ACTION_SOURCE = '(?:(?:发射|释放)[^，。！？；]{0,12}?(?:消灭|击中|击退|轰击|攻击|射向)|挥拳击打|挥拳打向|挥拳击向|冲撞|撞向|撞倒|冲向|扑向|追击|攻击|袭击|迎战|对抗|格挡|抓住|抓向|卷住|缠住|压制|踢向|踢|击打|击中|击退|击飞|打向|打倒|打飞|打|砸向|砸|劈向|劈|刺向|刺|推开|推倒|掀翻|射向|射击|消灭)';
-const relationActionAtStart = new RegExp(`^(?:猛然|突然|迅速|立刻|随即|径直|用[^，。！？；]{1,12})*(${RELATION_ACTION_SOURCE})([^，。！？；]{1,28})`, 'u');
+const relationActionAtStart = new RegExp(`^(?:猛然|突然|迅速|立刻|随即|径直|用[^，。！？；]{1,12})*(?:(?:从|由|沿|自)[^，。！？；]{1,12})?(${RELATION_ACTION_SOURCE})([^，。！？；]{1,28})`, 'u');
 const relationActionInClause = new RegExp(`^([^，。！？；]{2,18}?)(?:猛然|突然|迅速|立刻|随即|径直|用[^，。！？；]{1,12})*(${RELATION_ACTION_SOURCE})([^，。！？；]{1,28})`, 'u');
+
+// Quantity words are not part of an actor's identity.  Keeping them in the
+// relation parser makes a phrase such as “一群敌人冲向夏提雅” look like an
+// anonymous action and prevents the target from being carried into the
+// rendered direction/space fields.
+const RELATION_QUANTITY_PREFIX = /^(?:一群|成群(?:的)?|数(?:名|位|个|头|只|条|匹)?|多(?:名|位|个|头|只|条|匹)?|若干(?:名|位|个|头|只|条|匹)?|几(?:名|位|个|头|只|条|匹)?|一(?:名|位|个|头|只|条|匹))/u;
+
+const stripRelationQuantity = (value: string): string => value.replace(RELATION_QUANTITY_PREFIX, '').trim();
 
 const cleanRelationEntity = (value: string): string => value
   .replace(/^[\s“”"'，。！？；：]+|[\s“”"'，。！？；：]+$/gu, '')
-  .replace(/^(?:一名|一位|一个|一头|一只|一条|这名|这位|这个|这头|这只|这条)/u, '')
+  .replace(/^(?:一名|一位|一个|一头|一只|一条|一群|数名|数位|数个|数头|数只|数条|几名|几位|几只|几头|多名|多人|若干名|成群(?:的)?|这名|这位|这个|这头|这只|这条)/u, '')
   .replace(/^(?:向|朝着|朝|对着|对)/u, '')
   .replace(/^(?:了|着)/u, '')
   .replace(/(?:并|随后|然后|同时)$/u, '')
   .trim();
+
+const relationActorComparableName = (value: string): string => stripRelationQuantity(cleanRelationEntity(value))
+  .replace(/们$/u, '')
+  .trim();
+
+const relationActorNamesMatch = (left: string, right: string): boolean => {
+  const normalizedLeft = relationActorComparableName(left);
+  const normalizedRight = relationActorComparableName(right);
+  return Boolean(normalizedLeft && normalizedRight && normalizedLeft === normalizedRight);
+};
+
+const actionStartsWithRelationActor = (action: string, actor: string): boolean => {
+  const source = normalizeProse(action).replace(/^[，。！？；：\s]+/u, '');
+  const normalizedActor = relationActorComparableName(actor);
+  if (!source || !normalizedActor) return false;
+  const withoutQuantity = stripRelationQuantity(source);
+  return source.startsWith(actor)
+    || source.startsWith(normalizedActor)
+    || withoutQuantity.startsWith(normalizedActor)
+    || relationActorComparableName(source.slice(0, Math.min(source.length, actor.length + 8))).startsWith(normalizedActor);
+};
 
 const parseSubjectActionTarget = (
   value: string,
@@ -1945,7 +1974,13 @@ const resolveTimelineShotEntities = (
     const fuzzy = characters.filter((entry) => characterVariantAliases(entry).some((alias) => (
       name.includes(alias) || alias.includes(name)
     )));
-    return fuzzy.length === 1 ? fuzzy[0] : undefined;
+    if (fuzzy.length === 1) return fuzzy[0];
+    // A relation may use a quantity-bearing surface form ("一群敌人") while
+    // the character card stores the reusable group name ("敌人们"). Resolve
+    // that form only when it maps to one card, so a plural actor cannot steal
+    // another character's identity through a broad substring match.
+    const quantityNormalized = characters.filter((entry) => relationActorNamesMatch(entry.name, name));
+    return quantityNormalized.length === 1 ? quantityNormalized[0] : undefined;
   };
   const relation = parseSubjectActionTarget(shot.action, context.characters.map((entry) => entry.name));
   const relationCharacter = characterByName(relation?.actor || '');
@@ -2185,14 +2220,28 @@ const subjectNameForTimeline = (
       return baseMatches.length === 1 ? baseMatches[0] : undefined;
     })();
     const localCharacter = entities.character;
+    const actionRelation = parseSubjectActionTarget(action, context.characters.map((entry) => entry.name));
+    const relationActor = actionRelation?.actor || '';
+    const relationCharacter = relationActor
+      ? context.characters.find((entry) => relationActorNamesMatch(entry.name, relationActor))
+      : undefined;
+    const explicitLocalActor = relationCharacter || localCharacter;
     // Preserve the existing stale-character correction only when the declared
     // subject is one known character and another known character explicitly
-    // performs the action. Reference ordering and object mentions cannot win.
-    if (namedDeclaredCharacter && localCharacter && localCharacter.id !== namedDeclaredCharacter.id
+    // performs the action. Quantity words ("一群", "数名") and plural
+    // endings are surface grammar, not a reason to lose the actor. Reference
+    // ordering and object mentions cannot win.
+    const explicitActorStartsAction = Boolean(
+      explicitLocalActor
+      && (actionStartsWithRelationActor(action, explicitLocalActor.name)
+        || action.startsWith(normalizeStoryboardSubject(explicitLocalActor.name))),
+    );
+    if (namedDeclaredCharacter && explicitLocalActor && explicitLocalActor.id !== namedDeclaredCharacter.id
       && !characterVariantFormLabel(namedDeclaredCharacter)
-      && action.startsWith(normalizeStoryboardSubject(localCharacter.name))
-      && !storyboardSubjectValidationError(localCharacter.name)) {
-      return characterVariantDisplayName(localCharacter) || normalizeStoryboardSubject(localCharacter.name);
+      && (relationActor ? relationActorNamesMatch(explicitLocalActor.name, relationActor) : explicitActorStartsAction)
+      && explicitActorStartsAction
+      && !storyboardSubjectValidationError(explicitLocalActor.name)) {
+      return characterVariantDisplayName(explicitLocalActor) || normalizeStoryboardSubject(explicitLocalActor.name);
     }
     return declaredSubject;
   }
@@ -2303,12 +2352,44 @@ const isObservationAnalysisTimeline = (value: string): boolean => (
   && /(?:回传|汇聚|标记|分析)/u.test(value)
 );
 
-const directionForTimeline = (shot: VideoShot, motion: TimelineMotionContext): string => {
+/** Resolve the directional relation that must survive into the video prompt.
+ * Local kinetic stages often omit the actor name because it is already the
+ * `主体`, so relation parsing first checks the full actor→target form and then
+ * recovers a target from a verb such as “冲向夏提雅”. */
+const relationForTimelineShot = (
+  shot: VideoShot,
+  subject: string,
+  actorCandidates: readonly string[] = [],
+): SubjectActionTargetRelation | undefined => {
+  const source = actionWithoutDialogue(shot.action);
+  const parsed = parseSubjectActionTarget(source, actorCandidates.length ? actorCandidates : (subject ? [subject] : []));
+  if (parsed?.target) return parsed;
+  const targetMatch = source.match(new RegExp(`(${RELATION_ACTION_SOURCE})([^，。！？；→]{1,28})`, 'u'));
+  const target = cleanRelationEntity(targetMatch?.[2] || '');
+  if (!target || !targetMatch?.[1]) return undefined;
+  return {
+    actor: subject || '主体',
+    verb: targetMatch[1],
+    target,
+  };
+};
+
+const directionForTimeline = (
+  shot: VideoShot,
+  motion: TimelineMotionContext,
+  subject = '',
+  actorCandidates: readonly string[] = [],
+): string => {
   const text = `${shot.action}${shot.camera}`;
   const humanLike = motion.kind === 'human' || motion.kind === 'humanoid';
   if (isObservationAnalysisTimeline(text)) {
     const conclusion = shot.action.match(/→([^→]{1,48}?)被(?:高亮)?标记/u)?.[1]?.trim();
     return `观测视轴聚焦${conclusion || '分析终端的结论标记'}`;
+  }
+  const relation = relationForTimelineShot(shot, subject, actorCandidates);
+  if (relation) {
+    const orientation = humanLike ? '面朝' : '躯体运动轴线指向';
+    return `${orientation}${relation.target}（动作关系：${relation.actor}${relation.verb}${relation.target}）`;
   }
   const direction = /画面?右|向右/u.test(text) ? '画右'
     : /画面?左|向左/u.test(text) ? '画左'
@@ -2492,7 +2573,11 @@ const spaceForTimeline = (
     ? `@${subject}、分析终端与${analysisEvidence || '多源观测数据'}投影`
     : `@${subject}与可见动作接触点`;
   const background = `${resolvedEnvironment}的可见纵深`;
-  return `前景-${foreground} 中景-${middle} 背景-${background}`;
+  const relation = relationForTimelineShot(shot, subject, context.characters.map((entry) => entry.name));
+  const directedRelation = relation
+    ? `；定向动作关系：${relation.actor}从动作起点向${relation.target}收敛，${relation.target}位于运动轴终点；摄影机不作为动作目标`
+    : '';
+  return `前景-${foreground} 中景-${middle} 背景-${background}${directedRelation}`;
 };
 
 const lightingForTimeline = (shot: VideoShot, entities: TimelineShotEntities): string => {
@@ -2736,7 +2821,7 @@ const renderTimelineShot = (
   const statefulAction = [actionChainForTimeline(shot, motion, subject), endStateSuffix]
     .filter(Boolean)
     .join('；');
-  return `【${start}s-${end}s】 主体：@${subject}（${visiblePerformance}）[朝向：${directionForTimeline(shot, motion)}] 正在 [${continuityLead}${statefulAction}${continuityTail}]（${narrativeRoleForTimeline(shot, shotIndex)}）；空间：${spaceForTimeline(shot, context, entities, subject)}；光影：${lighting}；镜头：${cameraForTimeline(shot, shotIndex, motion)}；台词：${dialogueForTimeline(shot, subject, context.scene, [...context.characters])}；音效：${soundForTimeline(shot, audioMode, entities, motion)}`;
+  return `【${start}s-${end}s】 主体：@${subject}（${visiblePerformance}）[朝向：${directionForTimeline(shot, motion, subject, context.characters.map((entry) => entry.name))}] 正在 [${continuityLead}${statefulAction}${continuityTail}]（${narrativeRoleForTimeline(shot, shotIndex)}）；空间：${spaceForTimeline(shot, context, entities, subject)}；光影：${lighting}；镜头：${cameraForTimeline(shot, shotIndex, motion)}；台词：${dialogueForTimeline(shot, subject, context.scene, [...context.characters])}；音效：${soundForTimeline(shot, audioMode, entities, motion)}`;
 };
 
 export const usesNsfwDetailMode = (content: string, extra = ''): boolean => (
@@ -3050,7 +3135,7 @@ export const buildImagePrompt = (
         })
         .join('；');
       return appendDirection(
-        `角色私密外貌四合一资料图；${identity}；${panelFacts}；版式固定为恰好四个区域：左侧或中央一个私密全身最大主画面，占据画布大部分面积并展示完整主体比例，右侧或下方三个私密部位仅作为较小辅助窗，按辅助窗一、辅助窗二、辅助窗三排列；私密全身为主画面，全身主体只出现一次，三个私密部位辅助窗各出现一次且互不重复；全部区域必须是同一人物、同一身体锚点、同一体表与体型结构，静态资料姿态符合其物种，背景简洁，焦点清晰。`,
+        `角色私密外貌四合一资料图；${identity}；固定槽位资料：${panelFacts}；私密全身为主画面且只使用私密全身资料，全身主体只出现一次，三个私密部位仅作为较小辅助窗，辅助窗一、辅助窗二、辅助窗三只使用各自绑定的部位资料，三个辅助部位辅助窗各出现一次且互不重复；每个槽位只绘制一次，四个槽位属于同一人物、同一身体锚点、同一体表与体型结构，静态资料姿态符合其物种，背景简洁，焦点清晰。`,
       );
     }
     const selected = privateFields[nsfwPrivatePart];

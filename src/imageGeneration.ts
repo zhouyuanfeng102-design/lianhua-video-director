@@ -672,7 +672,7 @@ export const FIVE_VIEW_LAYOUT_RULE = [
 
 /** Do not reuse single-image negatives such as "multiple views" or
  * "cropped body": the layout intentionally contains two portrait crops. */
-export const FIVE_VIEW_NEGATIVE_PROMPT = 'extra sixth panel, five full-body columns, repeated full-body angle, extra three-quarter view, mismatched identity between views, inconsistent anatomy between views, inconsistent outfit state between views, cut-off feet in full-body regions, overlapping regions, stretched body, compressed body, squashed body, distorted body proportions, wide-angle distortion, fisheye distortion, text, logo, watermark';
+export const FIVE_VIEW_NEGATIVE_PROMPT = 'extra sixth panel, five full-body columns, repeated full-body angle, extra three-quarter view, repeated body part, duplicate body part, duplicated inset, extra anatomical inset, mixed anatomy, mismatched identity between views, inconsistent anatomy between views, inconsistent outfit state between views, cut-off feet in full-body regions, overlapping regions, stretched body, compressed body, squashed body, distorted body proportions, wide-angle distortion, fisheye distortion, text, logo, watermark';
 
 /** Shared geometry contract for body-bearing reference images.  This only
  * constrains framing and lens geometry; it does not alter clothing, private
@@ -697,6 +697,24 @@ export const FULL_BODY_LAYOUT_RULE = [
 ].join('；') + '。';
 
 export const FULL_BODY_NEGATIVE_PROMPT = 'half body, upper body, bust, waist-up, knee-up, lower-body crop, legs-only, torso-only, cropped head, cropped legs, cut-off feet, cut-off shoes, out of frame, close-up, medium shot, partial body, duplicate body, extra person, stretched body, compressed body, squashed body, distorted body proportions, wide-angle distortion, fisheye distortion, text, logo, watermark';
+
+/** Private multi-region sheets need their own structural addendum.  The shared
+ * five-view negative intentionally allows multiple regions; these terms only
+ * reject duplicated content inside the regions that were already requested. */
+export const PRIVATE_FIVE_VIEW_LAYOUT_RULE = [
+  '这是私密资料五视图，仍然严格只有五个固定区域：左上正面头肩、左下严格90度左侧面头肩、右侧正面全身、右侧严格90度左侧面全身、右侧背面全身',
+  '私密全身资料和局部资料只作为同一人物的身份与身体锚点；局部资料不能另开辅助窗、不能替换头肩区域、不能重复进入多个区域',
+  '五个区域各自只承担指定的一种取景，右侧三个全身区域只出现一次且不混入其它私密部位特写，所有区域共享同一人物和同一身体比例',
+].join('；') + '。';
+
+export const PRIVATE_FOUR_IN_ONE_LAYOUT_RULE = [
+  '这是严格私密四合一资料板，横向3:2画布固定为恰好四个区域：左侧约70%是唯一私密全身主画面，右侧约30%从上到下是三个辅助部位窗（辅助窗一、辅助窗二、辅助窗三）',
+  '左侧主画面从头到脚完整入画且只出现一次；右侧三个辅助窗各只表现当前提示词指定的一个不同私密部位，按槽位顺序各出现一次',
+  '四个槽位属于同一人物和同一身体锚点，主画面与辅助窗按槽位一一对应；全身内容只归入主画面，部位内容各归入自己的辅助窗，总区域保持四块，单个辅助窗保持单一部位边界',
+  '所有区域使用统一中性背景、统一光线和稳定比例，主画面保持完整身体比例，辅助窗保持对应部位的局部比例与清晰边界',
+].join('；') + '。';
+
+export const PRIVATE_FOUR_IN_ONE_NEGATIVE_PROMPT = 'extra fifth panel, extra inset, extra anatomical window, duplicate inset, repeated body part, duplicate body part, repeated full body, duplicate full body, extra full body, multiple full bodies, mixed anatomy, swapped anatomy, merged body parts, overlapping panels, split screen, random collage, contact sheet, unrequested view, text, logo, watermark';
 
 /** Request-time layout adaptation only. Preserve the stored preset and all
  * non-layout restrictions; intentional portraits/multiple depictions are not
@@ -735,7 +753,7 @@ const IMAGE_VARIANT_SPECS: Readonly<Record<ImageVariant, ImageVariantGenerationS
   'private-five-view': {
     id: 'private-five-view',
     label: '私密五视图',
-    direction: `私密人物五视图资料板，沿用当前人物的私密资料模式和已确认身份，仅改变参考板布局。${FIVE_VIEW_LAYOUT_RULE}`,
+    direction: `私密人物五视图资料板，沿用当前人物的私密资料模式和已确认身份，仅改变参考板布局。${FIVE_VIEW_LAYOUT_RULE}${PRIVATE_FIVE_VIEW_LAYOUT_RULE}`,
     canvas: FIVE_VIEW_CANVAS,
   },
   'private-turnaround': {
@@ -755,13 +773,7 @@ const IMAGE_VARIANT_SPECS: Readonly<Record<ImageVariant, ImageVariantGenerationS
   'private-four-in-one': {
     id: 'private-four-in-one',
     label: '私密四合一',
-    direction: [
-      '私密资料四合一设定板，横向3:2画布，固定为恰好四个区域：一个私密全身最大主画面和三个较小辅助部位窗',
-      `左侧或中央为唯一私密全身主画面，占据画布大部分面积，展示从头到脚完整裸体全身，整体比例、体态、肤色和永久标记清晰；${BODY_PROPORTION_STABILITY_RULE}`,
-      '旁侧或下方排列三个较小辅助部位窗，为当前人物性别和资料匹配的三个不同私密部位资料特写，每个辅助窗只表现一个指定部位，稳定形状、比例、颜色、纹理和肤质清晰可见',
-      '主次层级明确，私密全身是视觉中心且只出现一次；三个辅助窗各出现一次且互不重复；全部区域保持同一人物、同一身体锚点与同一视觉风格',
-      '纯净中性灰无缝背景，均匀柔和棚拍光，无文字、无编号、无Logo、无水印',
-    ].join('；') + '。',
+    direction: `私密资料四合一设定板。${PRIVATE_FOUR_IN_ONE_LAYOUT_RULE}${BODY_PROPORTION_STABILITY_RULE}纯净中性灰无缝背景，均匀柔和棚拍光，无文字、无编号、无Logo、无水印。`,
     canvas: FOUR_VIEW_CANVAS,
   },
   'five-view': {
@@ -959,13 +971,13 @@ export const privateImageVariantConverterRule = (
     return `当前目标是${label}单部位近景：最终提示词采用一幅连续近景或微距画面，${label}占据画面主体，紧邻皮肤提供解剖方位；人物一致性由当前部位的肤色、肤质、体表纹理与比例锚定，画面只建立这一处部位资料。`;
   }
   if (variant === 'private-five-view') {
-    return `当前目标是私密五视图参考板：横向 3:2 画布沿用当前人物的私密资料模式和已确认身份，仅改变参考板布局。${FIVE_VIEW_LAYOUT_RULE}当前全身资料用于右侧三个完整全身视图；左侧两格呈现同一人物的头肩近景，头像区保持头肩取景，全身区保持完整全身取景。`;
+    return `当前目标是私密五视图参考板：横向 3:2 画布沿用当前人物的私密资料模式和已确认身份，仅改变参考板布局。${FIVE_VIEW_LAYOUT_RULE}${PRIVATE_FIVE_VIEW_LAYOUT_RULE}当前全身资料用于右侧三个完整全身视图；左侧两格呈现同一人物的头肩近景，头像区保持头肩取景，全身区保持完整全身取景。`;
   }
   if (variant === 'private-turnaround') {
     return `当前目标是私密四视图参考板：横向 3:2 画布，恰好四个同身份、同裸体身体锚点、同尺寸、同基线的完整全身视图；依次表现正面、严格 90 度左侧面、背面、45 度前三分之四视图；正交或低透视，中性灰无缝背景。\n${BODY_PROPORTION_STABILITY_RULE}`;
   }
   if (variant === 'private-four-in-one') {
-    return `当前目标是严格私密四合一参考板：横向 3:2 画布，版式固定为恰好四个区域，一个私密全身最大主画面加三个指定私密部位较小辅助窗；私密全身主体只出现一次，三个辅助窗各出现一次且互不重复；全部区域属于同一人物、同一身体锚点、同一肤色体型，总图块数保持四块。\n${BODY_PROPORTION_STABILITY_RULE}`;
+    return `当前目标是严格私密四合一参考板。${PRIVATE_FOUR_IN_ONE_LAYOUT_RULE}\n${BODY_PROPORTION_STABILITY_RULE}`;
   }
   return '';
 };
@@ -983,7 +995,8 @@ export const privateImageVariantRepairRule = (
 export const privateImageVariantNegativePrompt = (variant: ImageVariant): string => (
   variant === 'private-full-body'
     ? 'extra person, second person, two people, duplicate person, cloned person, mirrored person, repeated body, repeated full body, multiple full bodies, multiple views, split screen, diptych, triptych, contact sheet, character sheet, turnaround, collage, panels, inset, extra limbs, stretched body, compressed body, squashed body, distorted body proportions, wide-angle distortion, fisheye distortion, text, logo, watermark'
-    : variant === 'private-five-view' ? FIVE_VIEW_NEGATIVE_PROMPT : ''
+    : variant === 'private-five-view' ? FIVE_VIEW_NEGATIVE_PROMPT
+      : variant === 'private-four-in-one' ? PRIVATE_FOUR_IN_ONE_NEGATIVE_PROMPT : ''
 );
 
 export const normalizePrivateSingleImagePrompt = (

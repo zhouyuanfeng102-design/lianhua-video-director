@@ -19,6 +19,29 @@ export interface Seedance25PromptCompilation {
   sourceFingerprint: string;
 }
 
+/**
+ * Identity captured when an asynchronous Seedance request starts.  A result
+ * may only be written back to the same project, chapter, and storyboard that
+ * produced it.  The workspace epoch also rejects results from a project
+ * switch even when two projects happen to reuse the same storyboard id.
+ */
+export interface SeedanceOutputSaveIdentity {
+  projectId: string;
+  workspaceEpoch: number;
+  chapterId: string;
+  storyboardId: string;
+  storyboardUpdatedAt: number;
+}
+
+export const isSeedanceOutputSaveIdentityCurrent = (
+  request: SeedanceOutputSaveIdentity,
+  current: SeedanceOutputSaveIdentity,
+): boolean => request.projectId === current.projectId
+  && request.workspaceEpoch === current.workspaceEpoch
+  && request.chapterId === current.chapterId
+  && request.storyboardId === current.storyboardId
+  && request.storyboardUpdatedAt === current.storyboardUpdatedAt;
+
 const clean = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
 
 /** Seedance prose can precede the first timeline row; the H3 cleaner would discard it. */

@@ -4,6 +4,8 @@ import {
   CHARACTER_PRIVATE_PROFILE_FORM_FIELDS,
   IMAGE_ASSET_FORM_FIELDS,
   IMAGE_VARIANT_OPTIONS,
+  PRIVATE_FOUR_IN_ONE_LAYOUT_RULE,
+  PRIVATE_FIVE_VIEW_LAYOUT_RULE,
   buildImageWorkbenchEntity,
   getImageVariantGenerationSpec,
   hasDuplicateImageWorkbenchEntityName,
@@ -104,6 +106,9 @@ assert.deepEqual(privateFourInOne.canvas, { width: 1536, height: 1024 });
 assert.match(privateFourInOne.direction, /私密全身.*主画面/u);
 assert.match(privateFourInOne.direction, /辅助部位窗/u);
 assert.doesNotMatch(privateFourInOne.direction, /2×2四格布局/u, 'four-in-one must prioritize the full-body main image instead of equal quadrants');
+assert.ok(privateFourInOne.direction.includes(PRIVATE_FOUR_IN_ONE_LAYOUT_RULE));
+assert.doesNotMatch(privateFourInOne.direction, /左侧或中央|右侧或下方/u, 'four-in-one must use deterministic slots instead of ambiguous placement');
+assert.ok(getImageVariantGenerationSpec('private-five-view').direction.includes(PRIVATE_FIVE_VIEW_LAYOUT_RULE));
 
 const partiallyCompletedCharacter = {
   name: '用户填写的阿莲',
@@ -842,7 +847,7 @@ assert.doesNotMatch(privateFullBodyRule, /四视图|四合一|辅助窗|资料�
 const privateFullBodyNegative = privateImageVariantNegativePrompt('private-full-body');
 assert.match(privateFullBodyNegative, /second person.*duplicate person.*mirrored person.*multiple views.*character sheet/iu);
 assert.equal(privateImageVariantNegativePrompt('private-turnaround'), '');
-assert.equal(privateImageVariantNegativePrompt('private-four-in-one'), '');
+assert.match(privateImageVariantNegativePrompt('private-four-in-one'), /extra fifth panel.*duplicate inset.*repeated body part.*mixed anatomy/iu);
 assert.match(
   normalizePrivateSingleImagePrompt(
     'A single centered full-body subject against a clean background.',

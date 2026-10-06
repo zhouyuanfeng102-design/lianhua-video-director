@@ -43,11 +43,11 @@ export const withChapterWorkspace = <T extends ChapterProject>(project: T, patch
   return { ...project, chapterWorkspaces: { ...project.chapterWorkspaces, [chapterId]: { ...chapterWorkspace(project, chapterId), ...patch } } };
 };
 
-const chapterControls = (project: Project): Pick<ChapterWorkspace, 'directorSettingsConfirmedFingerprint' | 'directorSettingsConfirmedAt' | 'directorLookRequirement' | 'directorLookDraft'> => ({
-  directorSettingsConfirmedFingerprint: project.directorSettingsConfirmedFingerprint,
-  directorSettingsConfirmedAt: project.directorSettingsConfirmedAt,
-  directorLookRequirement: project.directorLookRequirement,
-  directorLookDraft: project.directorLookDraft,
+const chapterControls = (project: Pick<Project, 'directorSettingsConfirmedFingerprint' | 'directorSettingsConfirmedAt' | 'directorLookRequirement' | 'directorLookDraft'>): Pick<ChapterWorkspace, 'directorSettingsConfirmedFingerprint' | 'directorSettingsConfirmedAt' | 'directorLookRequirement' | 'directorLookDraft'> => ({
+  ...(project.directorSettingsConfirmedFingerprint !== undefined ? { directorSettingsConfirmedFingerprint: project.directorSettingsConfirmedFingerprint } : {}),
+  ...(project.directorSettingsConfirmedAt !== undefined ? { directorSettingsConfirmedAt: project.directorSettingsConfirmedAt } : {}),
+  ...(project.directorLookRequirement !== undefined ? { directorLookRequirement: project.directorLookRequirement } : {}),
+  ...(project.directorLookDraft !== undefined ? { directorLookDraft: project.directorLookDraft } : {}),
 });
 
 /** Global compatibility fields mirror the selected chapter, never another chapter's draft. */
@@ -189,16 +189,17 @@ export const migrateProjectChapters = (project: Project): Project => {
   // those current values before selecting a different chapter or saving source.
   const workspace = chapterWorkspaces[selected.id];
   for (const key of ['directorSettingsConfirmedFingerprint', 'directorSettingsConfirmedAt', 'directorLookRequirement', 'directorLookDraft'] as const) {
-    if (own(project, key)) Object.assign(workspace, { [key]: project[key] });
+    // `undefined` is the canonical representation for an absent optional
+    // value. Do not materialize it as an own property: persisted JSON drops
+    // those keys, so doing so would make the next normalization non-idempotent.
+    if (own(project, key) && project[key] !== undefined) Object.assign(workspace, { [key]: project[key] });
   }
   if (project.storyDraft !== undefined) workspace.storyDraft = project.storyDraft;
+  const compatibilityControls = chapterControls(workspace);
   return {
     ...next, activeChapterId: selected.id, chapterWorkspaces,
-    storyDraft: workspace.storyDraft,
-    directorSettingsConfirmedFingerprint: workspace.directorSettingsConfirmedFingerprint,
-    directorSettingsConfirmedAt: workspace.directorSettingsConfirmedAt,
-    directorLookRequirement: workspace.directorLookRequirement,
-    directorLookDraft: workspace.directorLookDraft,
+    ...(workspace.storyDraft !== undefined ? { storyDraft: workspace.storyDraft } : {}),
+    ...compatibilityControls,
   };
 };
 

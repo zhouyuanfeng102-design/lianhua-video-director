@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import {
   cleanSeedancePrompt,
   compileOfficialSeedancePrompt,
+  isSeedanceOutputSaveIdentityCurrent,
   SEEDANCE_ENGLISH_TRANSLATION_RULE,
   translateSeedancePromptToEnglish,
 } from '../src/seedancePrompt';
@@ -19,6 +20,32 @@ const base = {
   ],
   constraints: ['保持人物服装和场景光线连续。'],
 } as const;
+
+const saveIdentity = {
+  projectId: 'project-a',
+  workspaceEpoch: 4,
+  chapterId: 'chapter-a',
+  storyboardId: 'storyboard-a',
+  storyboardUpdatedAt: 123,
+};
+assert.equal(
+  isSeedanceOutputSaveIdentityCurrent(saveIdentity, { ...saveIdentity }),
+  true,
+  'an unchanged project/chapter/workspace/storyboard accepts an async result',
+);
+for (const [field, value] of Object.entries({
+  projectId: 'project-b',
+  workspaceEpoch: 5,
+  chapterId: 'chapter-b',
+  storyboardId: 'storyboard-b',
+  storyboardUpdatedAt: 124,
+} as const)) {
+  assert.equal(
+    isSeedanceOutputSaveIdentityCurrent(saveIdentity, { ...saveIdentity, [field]: value }),
+    false,
+    `${field} changes must reject a stale async result`,
+  );
+}
 
 const defaultResult = compileOfficialSeedancePrompt({ ...base, durationSec: 30 });
 assert.equal(defaultResult.targetId, 'seedance-2.5');

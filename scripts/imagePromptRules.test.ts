@@ -6,6 +6,7 @@ import {
   FIVE_VIEW_IMAGE_PRESET_IDS,
   IMAGE_PROMPT_RULE_CATALOG_VERSION,
   IMAGE_PROMPT_CURRENT_LAYOUT_CONTRACT,
+  IMAGE_PROMPT_DIRECTED_ACTION_CONTRACT,
   IMAGE_PROMPT_FULL_BODY_LAYOUT_CONTRACT,
   IMAGE_PROMPT_PROPORTION_CONTRACT,
   IMAGE_PROMPT_PROP_SCOPE_CONTRACT,
@@ -844,7 +845,7 @@ test('protocol inference recognizes untouched legacy built-ins without restricti
 });
 
 test('private character presets reuse the positive-only 墨色江湖 dossier rule without contaminating normal character presets', () => {
-  assert.equal(IMAGE_PROMPT_RULE_CATALOG_VERSION, 16);
+  assert.equal(IMAGE_PROMPT_RULE_CATALOG_VERSION, 17);
   assert.doesNotMatch(
     MOSE_JIANGHU_NSFW_IMAGE_PROMPT_RULE,
     /18\s*岁|年龄|成年|未成年|\badult\b|\bminor\b|\bchild\b|\bteen\b|安全政策|safety policy|permitted/iu,
@@ -863,7 +864,7 @@ test('private character presets reuse the positive-only 墨色江湖 dossier rul
       `${preset.description}\n${preset.systemPrompt}\n${preset.outputRules}`,
       /18\s*岁|年龄|成年|未成年|\badult\b|\bminor\b|\bchild\b|\bteen\b|禁止|不得|不要|严禁|负面|negative/iu,
     );
-    assert.equal(preset.version, '1.5.0');
+    assert.equal(preset.version, '1.6.0');
     assert.match(preset.outputRules, /当前画面规格是唯一版式合同/u,
       `${preset.name} must route by the current private target instead of expanding every layout`);
     assert.match(preset.outputRules, /单画面.*唯一完整主体.*中央轴.*两侧.*同一背景/u);
@@ -1091,10 +1092,26 @@ test('Krea-2 resolves its own natural-language rule under the OpenAI-compatible 
   assert.equal(resolved.ruleSet.format, 'natural-language');
 });
 
+test('Krea-2 private multi-region requests use the private preset and current layout contract', () => {
+  const state = normalizeImagePromptRulesState(undefined);
+  const resolved = resolveImagePromptSelection({
+    backend: 'openai',
+    model: 'krea-2',
+    assetKind: 'character-private',
+    imageVariant: 'private-four-in-one',
+    state,
+  });
+  assert.equal(resolved.ruleSet.id, 'image-rule-krea-2');
+  assert.equal(resolved.preset.id, 'image-preset-character-private');
+  assert.equal(resolved.preset.version, '1.6.0');
+  assert.match(resolved.preset.outputRules, /多区域规格.*槽位顺序.*同一内容只出现一次/u);
+  assert.doesNotMatch(resolved.preset.outputRules, /私密全身呈现.*私密四视图呈现.*四合一/u);
+});
+
 test('Krea-2 protects single-subject framing while Krea and ComfyUI keep multi-person binding presets', () => {
   const state = normalizeImagePromptRulesState(undefined);
   const krea = state.ruleSets.find((rule) => rule.id === 'image-rule-krea-2')!;
-  assert.equal(krea.version, '1.2.0');
+  assert.equal(krea.version, '1.3.0');
   assert.match(krea.description, /单主体稳定.*多人物/u);
   assert.match(krea.systemPrompt, /只有一个实际主体[\s\S]{0,160}连续背景[\s\S]{0,160}左右保留连续背景/u);
   assert.match(krea.systemPrompt, /两个或更多实际出镜主体[\s\S]{0,80}多人空间锚点/u);
@@ -1674,7 +1691,7 @@ test('catalog-v3 built-in private presets migrate to current-target private layo
     .filter((preset) => preset.assetKind === 'character-private')
     .forEach((preset) => {
       const expected = expectedById.get(preset.id)!;
-      assert.equal(preset.version, '1.5.0');
+      assert.equal(preset.version, '1.6.0');
       assert.equal(preset.systemPrompt, expected.systemPrompt);
       assert.equal(preset.outputRules, expected.outputRules);
       assert.match(preset.outputRules, /当前画面规格是唯一版式合同/u);
@@ -1708,7 +1725,7 @@ test('catalog-v7 built-in private presets migrate away from mixed layout wording
   migrated.categoryPresets
     .filter((preset) => preset.assetKind === 'character-private')
     .forEach((preset) => {
-      assert.equal(preset.version, '1.5.0');
+      assert.equal(preset.version, '1.6.0');
       assert.match(preset.outputRules, /当前画面规格是唯一版式合同/u);
       assert.doesNotMatch(preset.outputRules, /私密全身呈现[\s\S]{0,120}私密四视图呈现[\s\S]{0,120}四合一/u);
     });
@@ -1740,7 +1757,7 @@ test('catalog-v8 private presets migrate away from single-image self-trigger wor
   migrated.categoryPresets
     .filter((preset) => preset.assetKind === 'character-private')
     .forEach((preset) => {
-      assert.equal(preset.version, '1.5.0');
+      assert.equal(preset.version, '1.6.0');
       assert.match(preset.outputRules, /当前画面规格是唯一版式合同/u);
       assert.doesNotMatch(preset.outputRules, /未分格|当前目标为资料板/u);
     });
@@ -1777,10 +1794,10 @@ test('catalog-v9 upgrades untouched Krea and private presets to single-subject f
   const migrated = migrateImagePromptRulesState(legacy);
   assert.equal(migrated.catalogVersion, IMAGE_PROMPT_RULE_CATALOG_VERSION);
   const krea = migrated.ruleSets.find((rule) => rule.id === 'image-rule-krea-2')!;
-  assert.equal(krea.version, '1.2.0');
+  assert.equal(krea.version, '1.3.0');
   assert.match(krea.systemPrompt, /只有一个实际主体.*连续背景/u);
   migrated.categoryPresets.filter((preset) => preset.assetKind === 'character-private').forEach((preset) => {
-    assert.equal(preset.version, '1.5.0');
+    assert.equal(preset.version, '1.6.0');
     assert.match(preset.outputRules, /唯一完整主体.*中央轴.*两侧.*同一背景/u);
   });
   assert.equal(migrated.categoryPresets.find((preset) => preset.id === 'image-preset-character-private')?.enabled, false);
@@ -2312,6 +2329,28 @@ test('final prompt boundary accepts AI wording without local similarity, field-l
     assert.throws(() => assertValid(nonText, 'natural-language'), /必须是文本/u,
       'invalid payload types must not be coerced into plausible prompt text');
   }
+});
+
+test('storyboard converter keeps directed action actor, target, and camera axis', () => {
+  const storyboardSelection = resolveImagePromptSelection({
+    backend: 'openai',
+    assetKind: 'storyboard',
+    manualRuleSetId: 'image-rule-openai-gpt-image',
+  });
+  const storyboardSystem = buildImagePromptConverterSystemPrompt(storyboardSelection);
+  assert.ok(storyboardSystem.includes(IMAGE_PROMPT_DIRECTED_ACTION_CONTRACT));
+  assert.match(storyboardSystem, /施事者.*动作.*目标.*终点/u);
+  assert.match(storyboardSystem, /不能把摄影机.*自动当成目标/u);
+  assert.match(storyboardSystem, /目标在画外.*不得凭动作对象把画外人物补入/u);
+
+  const characterSelection = resolveImagePromptSelection({
+    backend: 'openai',
+    assetKind: 'character',
+    manualRuleSetId: 'image-rule-openai-gpt-image',
+  });
+  const characterSystem = buildImagePromptConverterSystemPrompt(characterSelection);
+  assert.equal(characterSystem.includes(IMAGE_PROMPT_DIRECTED_ACTION_CONTRACT), false,
+    'directed storyboard framing rules must not leak into ordinary character references');
 });
 
 let passed = 0;

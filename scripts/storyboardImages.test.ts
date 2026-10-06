@@ -3052,4 +3052,24 @@ assert.deepEqual(
   'a later image-workbench task must not jump ahead of already-created storyboard image tasks',
 );
 
+const directedActionBoard: Storyboard = {
+  ...storyboard,
+  id: 'directed-action-board',
+  sourceStoryContent: '敌群从山口冲向石台上的夏提雅，夏提雅在冲锋轴线终点。',
+  shots: [makeShot(1, {
+    subject: '敌群与夏提雅',
+    action: '敌群从山口向石台上的夏提雅冲锋，身体和武器朝向夏提雅',
+    space: '敌群在前景至中景，夏提雅在远处石台上且清晰可见',
+    direction: '敌群的运动终点是夏提雅，不是摄影机；敌群面向夏提雅',
+    camera: '摄影机位于敌群后侧，沿敌群指向夏提雅的运动轴拍摄',
+  })],
+  shotCount: 1,
+};
+const directedActionSource = buildStoryboardImageRequests(directedActionBoard, 'storyboard-shots')[0]?.conversionSource || '';
+assert.match(directedActionSource, /施事者.*动作.*目标.*终点/u);
+assert.match(directedActionSource, /不能把摄影机.*自动当成目标/u);
+assert.match(directedActionSource, /目标在画外.*不得凭动作对象把画外人物补入/u);
+assert.match(directedActionSource, /敌群从山口向石台上的夏提雅冲锋/u);
+assert.match(directedActionSource, /运动终点是夏提雅/u);
+
 console.log('storyboard image prompt and binding regression checks passed');

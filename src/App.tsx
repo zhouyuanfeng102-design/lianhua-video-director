@@ -171,7 +171,13 @@ import {
   type DirectorDecision,
 } from "./promptEngine";
 import { compileTargetPrompt } from "./promptAdapters";
-import { compileOfficialSeedancePrompt, getOfficialSeedanceSourceFingerprint, translateSeedancePromptToEnglish } from "./seedancePrompt";
+import {
+  compileOfficialSeedancePrompt,
+  getOfficialSeedanceSourceFingerprint,
+  isSeedanceOutputSaveIdentityCurrent,
+  translateSeedancePromptToEnglish,
+  type SeedanceOutputSaveIdentity,
+} from "./seedancePrompt";
 import {
   OFFICIAL_H3_TARGET_ID,
   applyOfficialH3Prompt,
@@ -8658,6 +8664,11 @@ export default function App() {
     activeStoryboard,
     activeStoryboardId,
     getCurrentProjectId,
+    getCurrentWorkspaceIdentity: () => ({
+      projectId: stateRef.current.project.id,
+      workspaceEpoch: workspaceEpochRef.current,
+      chapterId: activeChapter(stateRef.current.project)?.id || "",
+    }),
     getCurrentState,
     getCurrentProjectImageContext,
     getCurrentStoryboardOperationIdentity,
@@ -9754,6 +9765,7 @@ interface AppContext {
   activeStoryboard: Storyboard | undefined;
   activeStoryboardId: string;
   getCurrentProjectId: () => string;
+  getCurrentWorkspaceIdentity: () => { projectId: string; workspaceEpoch: number; chapterId: string };
   getCurrentProjectImageContext: () => StoryboardImageBuildContext;
   getCurrentState: () => AppState;
   getCurrentStoryboardOperationIdentity: () => {
@@ -11881,6 +11893,7 @@ function DirectorView(ctx: AppContext) {
     extraRequirement,
     setExtraRequirement,
     activeStoryboard: rootActiveStoryboard,
+    getCurrentWorkspaceIdentity,
     getCurrentStoryboardOperationIdentity,
     buildStoryboard,
     regenerateStoryboardEnglish,
@@ -12106,14 +12119,36 @@ function DirectorView(ctx: AppContext) {
       request: (system, user) => requestTextModel(textApi, system, user, undefined, { disableThinking: true }),
     });
   };
+  const seedanceSaveStaleMessage = "当前项目、章节或分镜已变化，Seedance 提示词未保存，请在当前分镜重新生成。";
   const saveSeedanceOutput = (
-    storyboardId: string,
+    identity: SeedanceOutputSaveIdentity,
     output: Seedance25Output,
     expectedSource?: { canonicalPrompt: string; durationSec: number },
-  ): void => {
+  ): boolean => {
+    const liveState = getCurrentState();
+    const liveBoard = liveState.project.storyboards.find((board) => board.id === identity.storyboardId);
+    if (!liveBoard) return false;
+    const liveIdentity: SeedanceOutputSaveIdentity = {
+      ...getCurrentWorkspaceIdentity(),
+      storyboardId: liveBoard.id,
+      storyboardUpdatedAt: liveBoard.updatedAt ?? 0,
+    };
+    if (!isSeedanceOutputSaveIdentityCurrent(identity, liveIdentity)) return false;
+    if (expectedSource) {
+      const liveCanonicalPrompt = liveBoard.promptPlan?.canonicalPrompt || liveBoard.finalPrompt;
+      const liveDurationSec = liveBoard.promptPlan?.durationSec || liveBoard.durationSec;
+      if (liveCanonicalPrompt !== expectedSource.canonicalPrompt || liveDurationSec !== expectedSource.durationSec) return false;
+    }
     setState((current) => {
-      const liveBoard = current.project.storyboards.find((board) => board.id === storyboardId);
+      const liveBoard = current.project.storyboards.find((board) => board.id === identity.storyboardId);
       if (!liveBoard) return current;
+      const currentIdentity: SeedanceOutputSaveIdentity = {
+        ...getCurrentWorkspaceIdentity(),
+        chapterId: liveBoard.chapterId || activeChapter(current.project)?.id || "",
+        storyboardId: liveBoard.id,
+        storyboardUpdatedAt: liveBoard.updatedAt ?? 0,
+      };
+      if (!isSeedanceOutputSaveIdentityCurrent(identity, currentIdentity)) return current;
       if (expectedSource) {
         const liveCanonicalPrompt = liveBoard.promptPlan?.canonicalPrompt || liveBoard.finalPrompt;
         const liveDurationSec = liveBoard.promptPlan?.durationSec || liveBoard.durationSec;
@@ -12123,16 +12158,23 @@ function DirectorView(ctx: AppContext) {
         ...current,
         project: {
           ...current.project,
-          storyboards: current.project.storyboards.map((board) => board.id === storyboardId
+          storyboards: current.project.storyboards.map((board) => board.id === identity.storyboardId
             ? { ...board, seedance25Output: output, updatedAt: Date.now() }
             : board),
           updatedAt: Date.now(),
         },
       };
     });
+    return true;
   };
   const generateSeedanceOfficialPrompt = async (): Promise<void> => {
     if (!directorResultStoryboard || !seedancePromptInput || !validOfficialPrompt || seedancePromptBusy) return;
+    const requestIdentity: SeedanceOutputSaveIdentity = {
+      ...getCurrentWorkspaceIdentity(),
+      chapterId: directorResultStoryboard.chapterId || getCurrentWorkspaceIdentity().chapterId,
+      storyboardId: directorResultStoryboard.id,
+      storyboardUpdatedAt: getCurrentState().project.storyboards.find((board) => board.id === directorResultStoryboard.id)?.updatedAt ?? 0,
+    };
     setSeedancePromptBusy(true);
     setSeedancePromptError("");
     try {
@@ -12156,10 +12198,15 @@ function DirectorView(ctx: AppContext) {
         englishSourceFingerprint: promptEn ? compiled.sourceFingerprint : undefined,
         englishError,
       };
-      saveSeedanceOutput(directorResultStoryboard.id, output, {
+      const saved = saveSeedanceOutput(requestIdentity, output, {
         canonicalPrompt: seedancePromptInput.canonicalPrompt,
         durationSec: seedancePromptInput.durationSec,
       });
+      if (!saved) {
+        setSeedancePromptError(seedanceSaveStaleMessage);
+        notify(seedanceSaveStaleMessage, "error");
+        return;
+      }
       setSeedancePromptError(englishError);
       notify(englishError ? "Seedance 中文稿已生成，英文版待重试。" : "Seedance 2.5 中英文官方提示词已生成。", englishError ? "error" : undefined);
     } catch (error) {
@@ -12172,11 +12219,17 @@ function DirectorView(ctx: AppContext) {
   };
   const retrySeedanceEnglish = async (): Promise<void> => {
     if (!directorResultStoryboard || !seedanceOutputFresh || !seedanceOutput?.promptZh || seedancePromptBusy) return;
+    const requestIdentity: SeedanceOutputSaveIdentity = {
+      ...getCurrentWorkspaceIdentity(),
+      chapterId: directorResultStoryboard.chapterId || getCurrentWorkspaceIdentity().chapterId,
+      storyboardId: directorResultStoryboard.id,
+      storyboardUpdatedAt: getCurrentState().project.storyboards.find((board) => board.id === directorResultStoryboard.id)?.updatedAt ?? 0,
+    };
     setSeedancePromptBusy(true);
     setSeedancePromptError("");
     try {
       const promptEn = await translateSeedancePrompt(seedanceOutput.promptZh);
-      saveSeedanceOutput(directorResultStoryboard.id, {
+      const saved = saveSeedanceOutput(requestIdentity, {
         ...seedanceOutput,
         promptEn,
         englishSourceFingerprint: seedanceOutput.sourceFingerprint,
@@ -12186,6 +12239,11 @@ function DirectorView(ctx: AppContext) {
         canonicalPrompt: seedancePromptInput.canonicalPrompt,
         durationSec: seedancePromptInput.durationSec,
       } : undefined);
+      if (!saved) {
+        setSeedancePromptError(seedanceSaveStaleMessage);
+        notify(seedanceSaveStaleMessage, "error");
+        return;
+      }
       notify("Seedance 英文提示词已生成。" );
     } catch (error) {
       const message = error instanceof Error ? error.message : "Seedance 英文提示词生成失败。";

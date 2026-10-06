@@ -28,7 +28,7 @@ import {
 import { publicVideoContinuityLock } from './videoPrivateScope';
 import { readStoryboardImageH3Source } from './storyboardImageH3Source';
 export { readStoryboardImageH3Source } from './storyboardImageH3Source';
-import { STORYBOARD_SPATIAL_FRAME_RULE } from './spatialContinuityRules';
+import { DIRECTED_ACTION_RELATION_RULE, STORYBOARD_SPATIAL_FRAME_RULE } from './spatialContinuityRules';
 import { DEFAULT_FIRST_PERSON_SUBJECT } from './semanticEvents';
 import { buildStoryboardImageBaseName, createStoryboardImageNameAllocator } from './storyboardImageNames';
 import type { StoryboardImageFramePlan } from './storyboardImagePlan';
@@ -1443,6 +1443,7 @@ export const buildStoryboardImageAssetVisualAnchor = (
 
 const finalRestrictions = [
   '只表现上述剧情在该镜头中的一个明确可见瞬间，保持人物身份、外观、当前衣物状态、当前实际可见道具、空间方位和光线连续；默认衣橱只作身份基底，不能覆盖本镜当前衣物或裸露状态。长期装备按其稳定携带方式呈现，临时物件只在剧情当前状态需要时呈现。',
+  DIRECTED_ACTION_RELATION_RULE,
   '物种形态与身体结构是不可改写的连续性事实：非类人主体必须保持资料指定的头部/感知结构、躯干、肢体与附肢数量、体表材质和运动方式；除剧情明确拟人化外，不得人类化或擅自改成另一种身体结构。',
   '禁止拼贴、九宫格、多格漫画、前后对比图；禁止字幕、文字、Logo、水印、UI、边框和镜头编号。',
 ].join('\n');

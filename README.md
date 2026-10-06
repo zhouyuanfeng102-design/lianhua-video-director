@@ -4,13 +4,13 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的 Windows 桌面工作台。
 
-当前版本：**1.3.9** · 2026-10-05 · Windows 64 位 · 便携运行
+当前版本：**1.4.3** · 2026-10-06 · Windows 64 位 · 便携运行
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows 便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-1.3.9.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-1.4.3.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
 1. 下载上面的 EXE，放在可写入的文件夹里，双击运行，无需安装 Node.js。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
@@ -28,7 +28,7 @@
 - **图像与视频任务**：配置对应服务后提交任务，管理参考图、首尾帧、批量任务与结果，查看图片任务实际使用的生图规则与分类预设。
 - **项目与资产管理**：管理图片、视频和音频，保存项目包、备份资料并导出提示词。
 
-1.3.9 延续并交付提示词导演台的 Seedance 2.5 官方 T2V/R2V 提示词能力，同时保留 MiniMax H3 原稿。详见[版本说明](docs/releases/发布说明-1.3.9.md)。
+1.4.3 在生成视频的分段参考图弹窗显示本段涉及人物，帮助选择人物参考图；提示只读显示，不改变视频生成。详见[版本说明](docs/releases/发布说明-1.4.3.md)。
 
 ## 从源码运行
 

@@ -1,7 +1,7 @@
 import type { Storyboard } from './types';
 import { readStoryboardImageH3Source } from './storyboardImageH3Source';
 import { readStoryboardImagePlanJson } from './storyboardImagePlanJson';
-import { SPATIAL_COORDINATE_RULE, SPATIAL_CONTINUITY_REVIEW_RULE, STORYBOARD_SPATIAL_FRAME_RULE } from './spatialContinuityRules';
+import { DIRECTED_ACTION_RELATION_RULE, SPATIAL_COORDINATE_RULE, SPATIAL_CONTINUITY_REVIEW_RULE, STORYBOARD_SPATIAL_FRAME_RULE } from './spatialContinuityRules';
 
 /** A custom image total is independent of the number of video shots. */
 export const STORYBOARD_IMAGE_PLAN_MAX_COUNT = 100;
@@ -86,6 +86,7 @@ const IMAGE_FRAME_PLAN_SYSTEM = [
   '每张必须用 sourceShotId 引用 source.shots 中真实存在的 id。不要创造视频镜头、改变原镜头时长或改写剧情；图片取景选择不是重新切分视频。',
   'source.confirmedH3 是最终有效 H3 正文的原文摘取；其中 shots 与 source.shots 按原镜序一一对应，包含 AI 最终复核后的空间与机位事实，优先于旧 canonicalPrompt、结构化旧分镜和历史参考图文字。confirmedH3 缺失时按原剧情、canonicalPrompt 和完整结构化分镜理解，不将未通过结构读取的 officialPromptZh 当作已确认镜头。',
   SPATIAL_COORDINATE_RULE,
+  DIRECTED_ACTION_RELATION_RULE,
   STORYBOARD_SPATIAL_FRAME_RULE,
   'description 必须明确这一个静帧的具体时刻、真实可见人物、动作状态、前后位置、朝向、机位、视线、道具和必要环境；依据原文和当前成稿保留身份与连续性。可以补充用于拍摄该瞬间的构图描述，不增编剧情事件。',
   '同一个视频镜头选择多张时，准确区分各张处于动作发生前、发生中或发生后的状态，避免把不同时刻挤在同一画面，也不要让后续结果提前出现。已有的人物走向、队列位置、衣物和道具状态应在相邻图片承接。',

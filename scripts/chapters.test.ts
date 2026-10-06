@@ -25,6 +25,10 @@ const original = empty();
 const initial = migrateProjectChapters(original);
 assert.equal(initial.sourceDocuments[0].id, 'chapter-neutral-project');
 assert.equal(activeChapter(initial)?.id, initial.activeChapterId);
+const initialWorkspace = initial.chapterWorkspaces?.[initial.activeChapterId!];
+assert.ok(initialWorkspace);
+assert.equal(Object.prototype.hasOwnProperty.call(initialWorkspace, 'directorSettingsConfirmedFingerprint'), false, 'absent chapter controls stay omitted');
+assert.equal(Object.prototype.hasOwnProperty.call(initialWorkspace, 'directorLookDraft'), false, 'absent look drafts stay omitted');
 assert.deepEqual(migrateProjectChapters(initial), initial, 'migration is deterministic and idempotent');
 assert.equal(original.sourceDocuments.length, 0, 'migration is pure');
 

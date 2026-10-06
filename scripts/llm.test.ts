@@ -2825,6 +2825,31 @@ test('private character image conversion preserves the model refusal without ret
   assert.equal(payloads.length, 1);
 });
 
+test('private multi-region conversion keeps the current five-view contract while removing only age metadata', async () => {
+  let requestBody = '';
+  installDesktopHttpFake(({ body }) => {
+    requestBody = body || '';
+    return textResponse('同一人物的五区域私密资料参考板，五个区域按当前规格清楚排列。');
+  });
+
+  await requestImagePromptConverter(
+    textConfig,
+    'character-private',
+    '名称：当前角色；当前资料：同一人物、稳定身体锚点和私密五视图资料。',
+    'natural-language',
+    [
+      '年龄门禁不属于本次转换。',
+      privateImageVariantConverterRule('private-five-view', 'full-body'),
+    ].join('\n'),
+  );
+  const payload = JSON.parse(requestBody) as { messages?: Array<{ role?: string; content?: string }> };
+  const systemPrompt = payload.messages?.find((item) => item.role === 'system')?.content || '';
+  assert.match(systemPrompt, /恰好五个区域/u);
+  assert.match(systemPrompt, /左上为正面头肩特写/u);
+  assert.match(systemPrompt, /局部资料不能另开辅助窗/u);
+  assert.doesNotMatch(systemPrompt, /年龄门禁|18\s*岁/u);
+});
+
 test('image prompt conversion returns a model refusal without a local semantic repair request', async () => {
   const payloads: HttpPayload[] = [];
   let calls = 0;

@@ -41,6 +41,7 @@ import { prepareVideoTailCharacterDraft } from '../videoTailCharacters';
 import { isVideoH3ReferenceInfo, prepareVideoH3ReferenceDraft, videoH3ReferenceCharacterIds, videoReferenceCharacterBindingWarning, videoReferenceCharacterOwners } from '../videoH3ReferenceBinding';
 import { offsetVideoReferenceSlotRoles, videoReferenceSlotLabels, videoReferenceUsage } from '../videoReferenceUsage';
 import { addVideoReference, removeVideoReference, videoReferenceSelection, videoReferenceSlotIndex, videoReferenceSlotSpan, type VideoReferenceSelection } from '../videoReferenceSlots';
+import { videoSegmentCharacterHints, type VideoSegmentCharacterHint } from '../videoSegmentCharacters';
 import '../videoDirector.css';
 
 export type { VideoDirectorLaunchRequest } from '../videoDirectorDraft';
@@ -142,7 +143,7 @@ const selectedTailFingerprint = (reference: VideoImageReference | undefined, ass
   return JSON.stringify([videoBatchReferenceFingerprint({ references: reference ? [reference] : [] }, assets), asset?.relativePath, asset?.url]);
 };
 
-function VideoPickerDialog({ title, onClose, children, className = '', closeDisabled = false }: { title: string; onClose: () => void; children: ReactNode; className?: string; closeDisabled?: boolean }) {
+function VideoPickerDialog({ title, onClose, children, className = '', closeDisabled = false, headerContent }: { title: string; onClose: () => void; children: ReactNode; className?: string; closeDisabled?: boolean; headerContent?: ReactNode }) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -163,7 +164,7 @@ function VideoPickerDialog({ title, onClose, children, className = '', closeDisa
     document.addEventListener('keydown', onKey);
     return () => { document.removeEventListener('keydown', onKey); previous?.focus(); };
   }, []);
-  return <div className="vd-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !closeDisabled) onClose(); }}><div ref={dialogRef} className={`vd-modal ${className}`} role="dialog" aria-modal="true" aria-label={title}><div className="vd-modal-header"><h2>{title}</h2><button type="button" className="btn small" disabled={closeDisabled} onClick={onClose}>关闭</button></div>{children}</div></div>;
+  return <div className="vd-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !closeDisabled) onClose(); }}><div ref={dialogRef} className={`vd-modal ${className}`} role="dialog" aria-modal="true" aria-label={title}><div className="vd-modal-header"><h2>{title}</h2>{headerContent}<button type="button" className="btn small" disabled={closeDisabled} onClick={onClose}>关闭</button></div>{children}</div></div>;
 }
 
 export interface VideoTaskCardProps {
@@ -400,6 +401,18 @@ function VideoReferencePickerPanels({ images, slots }: { images: ReactNode; slot
   </>;
 }
 
+function VideoSegmentCharacterHint({ characters }: { characters: readonly VideoSegmentCharacterHint[] }) {
+  return <div className="vd-segment-character-hint" role="note" aria-label="本段涉及人物">
+    <span className="vd-segment-character-hint-title">本段涉及人物（仅供选图参考）</span>
+    {characters.length ? <div className="vd-segment-character-hint-list">
+      {characters.map((character) => <span className="vd-segment-character-chip" key={character.id} title={character.referenceImageCount ? `${character.name}：已绑定 ${character.referenceImageCount} 张人物参考图` : `${character.name}：暂无明确绑定人物参考图`}>
+        {character.name}{character.referenceImageCount ? ` · ${character.referenceImageCount}张图` : ''}
+      </span>)}
+    </div> : <span className="vd-segment-character-hint-empty">未识别到明确人物，可继续手动选择</span>}
+    <span className="vd-segment-character-hint-note">不必选满，不影响视频生成</span>
+  </div>;
+}
+
 function VideoBatchImagePicker({ row, references, referenceSlotRoles, images, workflow, usageContext, slotOffset = 0, onApply, onClose, project }: {
   row: VideoBatchRow;
   references: readonly VideoImageReference[];
@@ -428,6 +441,10 @@ function VideoBatchImagePicker({ row, references, referenceSlotRoles, images, wo
   const pickerUsageContext = { ...usageContext, slotRoles: offsetVideoReferenceSlotRoles(selection.referenceSlotRoles, slotOffset) };
   const effectiveReferences = videoReferenceUsage(selected, pickerUsageContext, slotOffset);
   const slotLabels = videoReferenceSlotLabels(selected, pickerUsageContext, slotOffset, selection.referenceSlotRoles);
+  const plan = project.sequencePlans.find((candidate) => candidate.id === row.sequencePlanId);
+  const segment = plan?.segments.find((candidate) => candidate.id === row.segmentId);
+  const storyboard = row.storyboardId ? project.storyboards.find((candidate) => candidate.id === row.storyboardId) : undefined;
+  const characterHints = useMemo(() => segment ? videoSegmentCharacterHints(project, plan, segment, storyboard).characters : [], [project, plan, segment, storyboard]);
   const changeSlotRole = (physicalSlot: number, role: ReferenceRole) => setSelection((current) => {
     const relativeSlot = physicalSlot - slotOffset;
     if (relativeSlot < 0) return current;
@@ -441,7 +458,7 @@ function VideoBatchImagePicker({ row, references, referenceSlotRoles, images, wo
   });
   const visible = images.filter((asset) => `${asset.name} ${asset.fileName || ''} ${asset.tags.join(' ')}`.toLocaleLowerCase('zh-CN').includes(query.trim().toLocaleLowerCase('zh-CN')));
   return <>
-    <VideoPickerDialog title={`第 ${row.segmentIndex} 段 · 选择参考图`} className="vd-batch-image-dialog" onClose={onClose}>
+    <VideoPickerDialog title={`第 ${row.segmentIndex} 段 · 选择参考图`} className="vd-batch-image-dialog" onClose={onClose} headerContent={<VideoSegmentCharacterHint characters={characterHints} />}>
       <VideoReferencePickerPanels images={<>
       <div className="vd-batch-image-toolbar">
         <label className="field vd-grow"><span>搜索图片资产</span><input aria-label="批量参考图搜索" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="名称、文件名、标签" /></label>
