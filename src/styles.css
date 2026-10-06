@@ -937,6 +937,7 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
 .update-log-head { min-width: 0; margin-bottom: 0; gap: 12px; }
 .update-log-head > div:first-child { min-width: 0; }
 .update-log-actions { flex: 0 0 auto; justify-content: flex-end; gap: 6px; }
+.update-log-project-link { gap: 4px; text-decoration: none; white-space: nowrap; }
 .update-log-list {
   min-height: 0;
   display: grid;

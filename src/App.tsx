@@ -300,6 +300,8 @@ import { repairH3IdentityBindings, H3IdentityRepairCancelledError } from "./h3Id
 import { commitH3IdentityRepair } from "./h3IdentityRepairCommit";
 import lotusIcon from "../build/icon.png";
 import packageInfo from "../package.json";
+
+const GITHUB_PROJECT_URL = "https://github.com/zhouyuanfeng102-design/lianhua-video-director";
 import { assetPreviewUrl, createFrameAsset, probeAudioFile, probeVideoFile } from "./media";
 import { AssetImagePreview } from "./components/AssetImagePreview";
 import { referenceImageMimeType } from "./imageReferenceData";
@@ -9199,6 +9201,23 @@ export default function App() {
                 </div>
               </div>
               <div className="row update-log-actions">
+                <a
+                  className="btn small update-log-project-link"
+                  href={GITHUB_PROJECT_URL}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  title="打开 GitHub 项目地址"
+                  aria-label="打开 GitHub 项目地址"
+                  onClick={async (event) => {
+                    const openExternal = typeof window !== "undefined" ? window.lianhuaDesktop?.openExternal : undefined;
+                    if (typeof openExternal !== "function") return;
+                    event.preventDefault();
+                    try { await openExternal(GITHUB_PROJECT_URL); }
+                    catch { notify("无法打开 GitHub 项目地址，请复制链接后在浏览器访问。", "error"); }
+                  }}
+                >
+                  <Link2 size={14} aria-hidden="true" />项目地址
+                </a>
                 <span className="badge violet">最新在前</span>
                 <Button
                   small
