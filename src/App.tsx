@@ -17847,7 +17847,11 @@ function ImageWorkbenchView(ctx: AppContext) {
       }
     }
     const useStoryForDossier = requestedAssetKind !== "character" || dossierUsesStory(characterDossierRef.current);
-    if (requestedAssetKind === "character") requestedAssetForm = characterDossierFormForRequest(requestedAssetForm, characterDossierRef.current);
+    if (requestedAssetKind === "character") requestedAssetForm = characterDossierFormForRequest(
+      requestedAssetForm,
+      characterDossierRef.current,
+      { includePrivateProfile: Boolean(requestedNsfwPrivatePart) },
+    );
     const persistedBaseName =
       assetForm.name?.trim() ||
       (requestedAssetKind === "grid" ? "九宫格视觉母版" : "未命名参考资产");

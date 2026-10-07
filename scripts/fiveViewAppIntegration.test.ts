@@ -55,13 +55,19 @@ const assertFiveLayout = (value: string, label: string): void => {
     `${label}: a new five-view request must not include the legacy four-view layout`);
 };
 
-function fixture(variant: 'portrait' | 'five-view' | 'private-five-view', count = 1, scale: 'default' | '2x' = 'default') {
+function fixture(
+  variant: 'portrait' | 'five-view' | 'private-five-view',
+  count = 1,
+  scale: 'default' | '2x' = 'default',
+  useStory = true,
+) {
   let state = createInitialState();
   const character: Character = {
     id: 'adult-character', name: '成年测试角色', gender: '男', apparentAge: '25岁成年', actualAge: '25岁', race: '人类',
     appearance: '普通成年测试人台，短发，固定面容', outfit: '蓝色外套与长裤', signatureProps: '', personality: '沉稳',
     motionHabits: '中性站姿', anchor: '保持原身份', negativeContinuity: '', assetIds: [],
     nsfwProfile: { fullBody: 'ADULT_PRIVATE_PROFILE_SENTINEL', penis: 'UNSELECTED_PRIVATE_FIELD_SENTINEL' },
+    dossier: { useStory },
   };
   state.project = { ...state.project, id: `five-view-${variant}`, description: '测试角色属于原创世界观“云港纪事”，本次画面为中性摄影棚背景。',
     characters: [character], assets: [], generationTasks: [] };
@@ -87,7 +93,7 @@ function fixture(variant: 'portrait' | 'five-view' | 'private-five-view', count 
   const deps: Record<string, any> = {
     ...generation, ...rules, ...batch, ...tasks, ...sizes, ...effects, ...regeneration, ...apiSelection,
     buildImagePrompt, buildImagePromptIdentityContext, getSafeErrorDiagnostics, enqueueImageTask, checkNovelAIReferenceImagePreflight,
-    dossierUsesStory, characterDossierFormForRequest, characterDossierRef: { current: undefined },
+    dossierUsesStory, characterDossierFormForRequest, characterDossierRef: { current: character.dossier },
     assetKind: 'character', selectedEntityId: character.id, imageGenerationMode: mode, imageVariant: variant,
     imageGenerationCount: count, imageSizePreferences: preferences, imageSizeSupport: undefined,
     autofillTargetEpochRef: { current: 1 }, autofillWorkbenchMountedRef: { current: true }, latestImageBatchIdRef,
@@ -233,6 +239,16 @@ try {
     assert.equal(task.status, 'succeeded');
     assert.equal(run.images[0].prompt, task.prompt, 'the image request uses the converted text without an identity prefix');
     assert.doesNotMatch(run.images[0].prompt, /云港纪事|成年测试角色/u, 'the local callback must not fill in identity missing from the AI reply');
+  }
+  {
+    const run = fixture('private-five-view', 1, 'default', false);
+    await run.create(); run.assertNoErrors(); run.assertCharacterUnchanged();
+    assert.equal(run.conversions.length, 1, 'story-off private generation still reaches the converter');
+    assert.equal(run.images.length, 1, 'story-off private generation still reaches the image backend');
+    assert.match(run.conversions[0].source, /ADULT_PRIVATE_PROFILE_SENTINEL/u,
+      'the independently saved private profile survives ordinary story-source filtering');
+    assert.equal(run.conversions[0].identityContext, '', 'story-off private generation excludes story identity context');
+    assert.doesNotMatch(run.conversions[0].source, /云港纪事/u, 'story-off private generation does not leak project story');
   }
   for (const variant of ['portrait', 'private-five-view'] as const) {
     for (const stage of ['conversion', 'image'] as const) {

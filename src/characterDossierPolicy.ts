@@ -9,6 +9,9 @@ export const CHARACTER_DOSSIER_FIELDS = [
   'personality', 'age', 'actualAge', 'height', 'race', 'motion', 'anchor', 'negativeContinuity', 'style',
 ] as const;
 const fields = new Set<string>(CHARACTER_DOSSIER_FIELDS);
+const privateProfileFields = new Set<string>([
+  'nsfwFullBody', 'nsfwBreasts', 'nsfwVulva', 'nsfwAnus', 'nsfwPenis', 'nsfwScrotum',
+]);
 const sources = new Set<string>(['manual', 'reference', 'story', 'custom']);
 const uniqueStrings = (value: unknown): string[] => Array.isArray(value)
   ? [...new Set(value.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean))]
@@ -44,11 +47,14 @@ export const isDossierFieldConfirmed = (dossier: Character['dossier'], field: st
 export const characterDossierFormForRequest = (
   form: Readonly<Record<string, string>>,
   dossier: Character['dossier'],
+  options: { includePrivateProfile?: boolean } = {},
 ): Record<string, string> => {
   if (dossierUsesStory(dossier)) return { ...form };
   return Object.fromEntries(Object.entries(form).map(([field, value]) => [field,
-    field === 'style' || fields.has(field) && (isDossierFieldConfirmed(dossier, field)
-      || dossier?.fieldSources?.[field] === 'custom' || dossier?.fieldSources?.[field] === 'reference')
+    field === 'style'
+      || (options.includePrivateProfile && privateProfileFields.has(field))
+      || (fields.has(field) && (isDossierFieldConfirmed(dossier, field)
+        || dossier?.fieldSources?.[field] === 'custom' || dossier?.fieldSources?.[field] === 'reference'))
       ? value : '',
   ]));
 };

@@ -5,6 +5,7 @@ import {
   dossierSourceIsCurrent, preserveConfirmedCharacterFields,
 } from '../src/characterDossierPolicy';
 import { reconcileAuthoritativeStoryEntities } from '../src/appEffects';
+import { buildImagePrompt } from '../src/promptEngine';
 import { requestImageAssetAutofill } from '../src/services/llm';
 import { createInitialState, normalizeState } from '../src/storage';
 import { resolveImageRegenerationSource } from '../src/imageRegeneration';
@@ -18,6 +19,14 @@ const initial = { useStory: false, fieldSources: { appearance: 'story', outfit: 
 assert.deepEqual(characterDossierFormForRequest(form, initial), {
   name: '', appearance: '', outfit: form.outfit, race: form.race, motion: form.motion, anchor: '', style: form.style, nsfwFullBody: '',
 });
+assert.deepEqual(characterDossierFormForRequest(form, initial, { includePrivateProfile: true }), {
+  name: '', appearance: '', outfit: form.outfit, race: form.race, motion: form.motion, anchor: '', style: form.style, nsfwFullBody: form.nsfwFullBody,
+});
+assert.match(
+  buildImagePrompt('character', characterDossierFormForRequest(form, initial, { includePrivateProfile: true }), 'private-full-body', 'full-body'),
+  /独立资料/u,
+  'story-off private full-body generation retains the independently saved private profile',
+);
 assert.deepEqual(characterDossierFormForRequest(form, { useStory: true }), form);
 const edited = markDossierManualFields(initial, ['appearance'], 123);
 assert.equal(edited.fieldSources?.anchor, undefined);
