@@ -1,6 +1,8 @@
 import type { Project, Storyboard } from './types';
 import type { H3IdentityRepairResult } from './h3IdentityRepair';
 import { getH3IdentityBindingIssues } from './h3IdentityBindings';
+import { normalizeCharacterParticipationSnapshot, stampCharacterParticipation } from './characterParticipation';
+import { sourceContentHash } from './sourceContentHash';
 import { officialH3ContextForStoryboard } from './officialH3Context';
 import { hasCurrentOfficialH3EnglishPrompt, hasCurrentOfficialH3Prompt } from './officialPrompt';
 import { createStoryboardRevision } from './storyboardVersions';
@@ -10,8 +12,11 @@ import { buildSequencePromptHandoff, getSequencePromptHandoffStatus, sealSequenc
  * whole-body edits at the persistence boundary as well. */
 const assertInsertionsOnly = (source: string, result: H3IdentityRepairResult, language: 'zh' | 'en'): void => {
   const separator = source.includes('\r\n') ? '\r\n' : '\n';
-  if (result.edits.length !== (result.insertedSentences.length ? 1 : 0)
-    || result.edits.some((edit) => edit.text !== separator + result.insertedSentences.join(separator) + separator)) {
+  const inserted = result.edits.flatMap((edit) => edit.text.startsWith(separator) && edit.text.endsWith(separator)
+    ? edit.text.slice(separator.length, -separator.length).split(separator) : ['']);
+  if (inserted.length !== result.insertedSentences.length
+    || new Set(inserted).size !== inserted.length
+    || inserted.some((sentence) => !result.insertedSentences.includes(sentence))) {
     throw new Error('身份修复包含非身份声明的插入，原稿保持不变。');
   }
   for (const sentence of result.insertedSentences) {
@@ -60,6 +65,10 @@ export const commitH3IdentityRepair = (
   if (results.zh) {
     repaired.officialPromptZh = results.zh.prompt;
     repaired.h3IdentityBindings = results.zh.identityBindings;
+    const participation = normalizeCharacterParticipationSnapshot(source.h3CharacterParticipation);
+    if (participation?.promptFingerprint === sourceContentHash(source.officialPromptZh!)) {
+      repaired.h3CharacterParticipation = stampCharacterParticipation(results.zh.prompt, participation);
+    }
     if (source.targetOutput) repaired.targetOutput = { ...source.targetOutput, prompt: results.zh.prompt };
   }
   if (results.en) {

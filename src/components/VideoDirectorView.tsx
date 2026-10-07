@@ -20,9 +20,9 @@ import { findReusableVideoTask, frozenVideoReferenceAsset } from '../videoProven
 import { useCurrentVideoDraftImages, videoDraftReferenceAsset } from '../videoDirectorReferences';
 import {
   addVideoDraftAssets, applyVideoPromptChoice, applyVideoReferenceRoleOverrides, draftFromVideoTask, emptyVideoDraft,
-  formatVideoElapsed, isVideoDirectorImage, videoExecutionElapsedMs, videoPromptChoices,
+  formatVideoElapsed, isVideoDirectorImage, videoExecutionElapsedMs, videoPromptChoices, videoPromptReferencePreviews,
   chapterIdForVideoLaunch, readVideoDirectorChapterDraft, videoDirectorChapterKey,
-  type VideoDirectorLaunchRequest, type VideoDirectorChapterDraft, type VideoDirectorBatchDraft, videoImageRole,
+  type VideoDirectorLaunchRequest, type VideoDirectorChapterDraft, type VideoDirectorBatchDraft, type VideoPromptReferencePreview, videoImageRole,
 } from '../videoDirectorDraft';
 import {
   allVideoBatchChoiceKeys, buildVideoBatchRows, findVideoBatchDuplicate, toggleVideoBatchChoice,
@@ -38,10 +38,10 @@ import {
   type AutomaticVideoTailConfiguration, type VideoTailReferencePlacement,
 } from '../videoTailReference';
 import { prepareVideoTailCharacterDraft } from '../videoTailCharacters';
-import { isVideoH3ReferenceInfo, prepareVideoH3ReferenceDraft, videoH3ReferenceCharacterIds, videoReferenceCharacterBindingWarning, videoReferenceCharacterOwners } from '../videoH3ReferenceBinding';
+import { isVideoH3ReferenceInfo, prepareVideoH3ReferenceDraft, videoH3ReferenceCharacterIds, videoReferenceCharacterBindingWarning, videoReferenceCharacterOwners, type VideoH3CharacterReferenceState } from '../videoH3ReferenceBinding';
 import { offsetVideoReferenceSlotRoles, videoReferenceSlotLabels, videoReferenceUsage } from '../videoReferenceUsage';
 import { addVideoReference, removeVideoReference, videoReferenceSelection, videoReferenceSlotIndex, videoReferenceSlotSpan, type VideoReferenceSelection } from '../videoReferenceSlots';
-import { videoSegmentCharacterHints, type VideoSegmentCharacterHint } from '../videoSegmentCharacters';
+import { videoSegmentCharacterHints, type VideoSegmentCharacterHintResult } from '../videoSegmentCharacters';
 import '../videoDirector.css';
 
 export type { VideoDirectorLaunchRequest } from '../videoDirectorDraft';
@@ -60,6 +60,22 @@ export interface VideoDirectorViewProps {
   onOpenJobs?: () => void;
   onChangeExecution?: (patch: VideoExecutionPreferences) => void;
   onRepairIdentityBindings?: (storyboardId: string, language: 'zh' | 'en', characterIds?: string[]) => Promise<void>;
+}
+
+function SavedReferencePromptPreview({ preview, onOpenPrompt }: {
+  preview: VideoPromptReferencePreview;
+  onOpenPrompt?: VideoDirectorViewProps['onOpenPrompt'];
+}) {
+  const [copyNotice, setCopyNotice] = useState('');
+  return <>
+    <p className="vd-notice">{preview.referenceNotice}</p>
+    <div className="vd-toolbar">
+      <button type="button" className="btn small" onClick={() => { void navigator.clipboard.writeText(preview.prompt).then(() => setCopyNotice('已复制保存的原稿。'), () => setCopyNotice('复制失败，请选中下方原稿手动复制。')); }}>复制原稿</button>
+      {onOpenPrompt && <button type="button" className="btn small" onClick={() => onOpenPrompt(preview.storyboardId, { storyboardId: preview.storyboardId, chapterId: preview.chapterId, language: preview.language })}>回提示词导演台更新参考图</button>}
+    </div>
+    {copyNotice && <p className="field-hint" role="status">{copyNotice}</p>}
+    <pre className="vd-prompt-preview">{preview.prompt}</pre>
+  </>;
 }
 
 function VideoH3ReferenceNotices({ project, draft, warnings = [], onRepair, onRepairingChange, disabled = false }: {
@@ -401,20 +417,39 @@ function VideoReferencePickerPanels({ images, slots }: { images: ReactNode; slot
   </>;
 }
 
-function VideoSegmentCharacterHint({ characters }: { characters: readonly VideoSegmentCharacterHint[] }) {
+const authoredVideoPrompt = (draft: VideoGenerationDraft): string => {
+  const binding = draft.h3ReferenceBinding;
+  return binding && (draft.prompt === binding.basePrompt || draft.prompt === binding.renderedPrompt) ? binding.basePrompt : draft.prompt;
+};
+
+function VideoSegmentCharacterHint({ hint, states }: { hint: VideoSegmentCharacterHintResult; states: readonly VideoH3CharacterReferenceState[] }) {
+  const { characters, mentionedCharacters, ambiguousNames } = hint;
   return <div className="vd-segment-character-hint" role="note" aria-label="本段涉及人物">
     <span className="vd-segment-character-hint-title">本段涉及人物（仅供选图参考）</span>
     {characters.length ? <div className="vd-segment-character-hint-list">
-      {characters.map((character) => <span className="vd-segment-character-chip" key={character.id} title={character.referenceImageCount ? `${character.name}：已绑定 ${character.referenceImageCount} 张人物参考图` : `${character.name}：暂无明确绑定人物参考图`}>
-        {character.name}{character.referenceImageCount ? ` · ${character.referenceImageCount}张图` : ''}
-      </span>)}
+      {characters.map((character) => {
+        const state = states.find((entry) => entry.characterId === character.id);
+        const status = state?.status || 'unselected';
+        const statusText = status === 'bound' ? `已选 · 已关联图片 ${state!.slots.join('、')}`
+          : status === 'pending' ? '已选 · 待关联' : '未选';
+        const imageText = character.referenceImageCount ? `可用人物图 ${character.referenceImageCount} 张` : '暂无绑定人物图';
+        return <span className={`vd-segment-character-chip ${status}`} key={character.id} data-character-id={character.id}
+          data-reference-status={status} title={[character.name, imageText, state?.reason, character.shotIndexes.length ? `涉及镜头：${character.shotIndexes.join('、')}` : ''].filter(Boolean).join('；')}>
+          <span className="vd-segment-character-name">{character.name}{character.presence === 'offscreen' ? '（画外）' : ''}</span>
+          <span className="vd-segment-character-state">{statusText}</span>
+          <span className="vd-segment-character-images">{imageText}</span>
+        </span>;
+      })}
     </div> : <span className="vd-segment-character-hint-empty">未识别到明确人物，可继续手动选择</span>}
+    {mentionedCharacters.length > 0 && <span className="vd-segment-character-secondary">{hint.usedFallback ? '其他提及（出镜待确认）' : '仅被提及'}：{mentionedCharacters.map((character) => character.name).join('、')}</span>}
+    {ambiguousNames.length > 0 && <span className="vd-segment-character-secondary">人物称呼待确认：{ambiguousNames.join('、')}</span>}
     <span className="vd-segment-character-hint-note">不必选满，不影响视频生成</span>
   </div>;
 }
 
-function VideoBatchImagePicker({ row, references, referenceSlotRoles, images, workflow, usageContext, slotOffset = 0, onApply, onClose, project }: {
+function VideoBatchImagePicker({ row, draft, references, referenceSlotRoles, images, workflow, usageContext, slotOffset = 0, onApply, onClose, project }: {
   row: VideoBatchRow;
+  draft: VideoGenerationDraft;
   references: readonly VideoImageReference[];
   referenceSlotRoles?: ReferenceRole[];
   images: ReferenceAsset[];
@@ -444,7 +479,23 @@ function VideoBatchImagePicker({ row, references, referenceSlotRoles, images, wo
   const plan = project.sequencePlans.find((candidate) => candidate.id === row.sequencePlanId);
   const segment = plan?.segments.find((candidate) => candidate.id === row.segmentId);
   const storyboard = row.storyboardId ? project.storyboards.find((candidate) => candidate.id === row.storyboardId) : undefined;
-  const characterHints = useMemo(() => segment ? videoSegmentCharacterHints(project, plan, segment, storyboard).characters : [], [project, plan, segment, storyboard]);
+  const characterHints = useMemo(() => videoSegmentCharacterHints(project, plan, segment, storyboard,
+    authoredVideoPrompt(draft)), [project, plan, segment, storyboard, draft]);
+  const characterStates = useMemo(() => {
+    // Composite mode reserves a real or future tail at slot 1. Include it in
+    // this read-only preview so dense-array providers keep the same numbering
+    // as submission; it is never added to the editable image selection.
+    const previewReferences = slotOffset ? [
+      ...Array.from({ length: slotOffset }, (_, index) => ({ assetId: `__picker_reserved_tail_${index}__`, role: 'first-frame' as const, slotIndex: index })),
+      ...selection.references.map((reference, index) => ({ ...reference, slotIndex: videoReferenceSlotIndex(reference, index) + slotOffset })),
+    ] : selection.references;
+    const previewRoles = slotOffset ? [
+      ...Array.from({ length: slotOffset }, () => 'first-frame' as const), ...(selection.referenceSlotRoles || []),
+    ] : selection.referenceSlotRoles;
+    const context = { ...usageContext, slotRoles: previewRoles };
+    return prepareVideoH3ReferenceDraft(project, { ...draft, references: videoReferenceUsage(previewReferences, context), referenceSlotRoles: previewRoles,
+      reuseTaskId: undefined }, context).characterStates;
+  }, [project, draft, selection, slotOffset, usageContext]);
   const changeSlotRole = (physicalSlot: number, role: ReferenceRole) => setSelection((current) => {
     const relativeSlot = physicalSlot - slotOffset;
     if (relativeSlot < 0) return current;
@@ -458,7 +509,7 @@ function VideoBatchImagePicker({ row, references, referenceSlotRoles, images, wo
   });
   const visible = images.filter((asset) => `${asset.name} ${asset.fileName || ''} ${asset.tags.join(' ')}`.toLocaleLowerCase('zh-CN').includes(query.trim().toLocaleLowerCase('zh-CN')));
   return <>
-    <VideoPickerDialog title={`第 ${row.segmentIndex} 段 · 选择参考图`} className="vd-batch-image-dialog" onClose={onClose} headerContent={<VideoSegmentCharacterHint characters={characterHints} />}>
+    <VideoPickerDialog title={`第 ${row.segmentIndex} 段 · 选择参考图`} className="vd-batch-image-dialog" onClose={onClose} headerContent={<VideoSegmentCharacterHint hint={characterHints} states={characterStates} />}>
       <VideoReferencePickerPanels images={<>
       <div className="vd-batch-image-toolbar">
         <label className="field vd-grow"><span>搜索图片资产</span><input aria-label="批量参考图搜索" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="名称、文件名、标签" /></label>
@@ -631,7 +682,7 @@ function useOneClickVideoTail(input: {
   return { busy, select, cancel: stop };
 }
 
-function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, settings, controller, tailFrameTools, initialDraft, initialParameterText, retryTaskIds, onOpenSettings, onOpenJobs, onSubmittingChange, onRepairIdentityBindings }: {
+function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, settings, controller, tailFrameTools, initialDraft, initialParameterText, retryTaskIds, onOpenSettings, onOpenJobs, onOpenPrompt, onSubmittingChange, onRepairIdentityBindings }: {
   project: Project;
   chapterId?: string;
   savedBatch?: VideoDirectorBatchDraft;
@@ -644,6 +695,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
   retryTaskIds?: readonly string[];
   onOpenSettings?: () => void;
   onOpenJobs?: () => void;
+  onOpenPrompt?: VideoDirectorViewProps['onOpenPrompt'];
   onSubmittingChange: (submitting: boolean) => void;
   onRepairIdentityBindings?: VideoDirectorViewProps['onRepairIdentityBindings'];
 }) {
@@ -907,7 +959,9 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
       };
       return { ...row, zh: decorate(row.zh), en: decorate(row.en) };
     }), [baseRows, automaticTails, tailCharacterModes, characterDrafts, project.assets, referenceUsageContext, retryConnection, settings]);
-  const rowLanguage = (row: VideoBatchRow): 'zh' | 'en' => languages[row.segmentId] || (row.zh ? 'zh' : 'en');
+  const referencePreviews = useMemo(() => videoPromptReferencePreviews(project, chapterId), [project, chapterId]);
+  const rowReferencePreview = (row: VideoBatchRow, language: 'zh' | 'en') => referencePreviews.find((entry) => entry.storyboardId === row.storyboardId && entry.language === language);
+  const rowLanguage = (row: VideoBatchRow): 'zh' | 'en' => languages[row.segmentId] || (row.zh || rowReferencePreview(row, 'zh') ? 'zh' : 'en');
   const rowChoice = (row: VideoBatchRow): VideoBatchChoiceCandidate | undefined => row[rowLanguage(row)];
   const visibleRows = rows.filter((row) => `${row.title} 第${row.segmentIndex}段 第 ${row.segmentIndex} 段`.toLocaleLowerCase('zh-CN').includes(query.trim().toLocaleLowerCase('zh-CN')));
   const selected = rows.flatMap((row) => [row.zh, row.en].filter((candidate): candidate is VideoBatchChoiceCandidate => Boolean(candidate && selectedKeys.has(candidate.key))));
@@ -920,6 +974,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
   const selectedSignature = `${regenerateSucceeded ? 'regenerate-succeeded' : 'skip-succeeded'}|${connectionScope}|${selected.map((candidate) => `${candidate.key}:${candidate.requestFingerprint}`).join('|')}`;
   const previewRow = rows.find((row) => row.segmentId === previewSegmentId) || rows[0];
   const previewChoice = previewRow && rowChoice(previewRow);
+  const savedReferencePreview = previewRow && !previewChoice ? rowReferencePreview(previewRow, rowLanguage(previewRow)) : undefined;
   const imageRow = baseRows.find((row) => row.segmentId === imageSegmentId);
   const imageChoice = imageRow && rowChoice(imageRow);
   const connectionLabel = backend === 'comfyui' ? `ComfyUI · ${workflow?.name || '未选择工作流'}` : `${sourceKind === 'runninghub' ? 'RunningHub 云端' : '视频 API'} · ${api?.model || '未配置'}`;
@@ -981,11 +1036,18 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
       ? !retryComfy.enabled || !retryComfy.baseUrl.trim() || !workflow ? '失败任务保存的 ComfyUI 快照不完整，不能按原设置重试。' : ''
       : !settings.comfyuiVideo?.enabled || !settings.comfyuiVideo.baseUrl.trim() || !workflow ? '请先启用 ComfyUI 并选择视频工作流。' : ''
     : !api?.enabled || !api.endpoint.trim() ? '请先启用并设置视频 API。' : '');
-  const selectedIssue = selectedKeys.size !== selected.length ? '部分已选稿件已变化或不存在，请重新选择。' : pending.map((candidate) => {
+  const selectedReferencePreview = referencePreviews.find((entry) => selectedKeys.has(videoPromptChoiceKey(entry.storyboardId, entry.language)));
+  const selectedIssue = selectedKeys.size !== selected.length ? selectedReferencePreview
+    ? `第 ${selectedReferencePreview.segmentIndex || '?'} 段：${selectedReferencePreview.referenceNotice}`
+    : '部分已选稿件已变化或不存在，请重新选择。' : pending.map((candidate) => {
     const issue = referenceIssue(candidate); return issue ? `第 ${candidate.segmentIndex} 段：${issue}` : '';
   }).find(Boolean) || '';
   const selectLanguage = (row: VideoBatchRow, language: 'zh' | 'en') => {
-    const candidate = row[language]; if (!candidate) return;
+    const candidate = row[language];
+    if (!candidate) {
+      if (rowReferencePreview(row, language)) setLanguages((current) => ({ ...current, [row.segmentId]: language }));
+      return;
+    }
     setLanguages((current) => ({ ...current, [row.segmentId]: language }));
     setSelectedKeys((current) => {
       const wasSelected = Boolean(row.zh && current.has(row.zh.key) || row.en && current.has(row.en.key));
@@ -1248,14 +1310,15 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
           const automatic = automaticTails[row.segmentId];
           const characterMode = tailCharacterModes[row.segmentId];
           const previousRow = rows[rows.indexOf(row) - 1]; const previousChoice = previousRow && rowChoice(previousRow);
-          const issue = candidate ? referenceIssue(candidate) : '当前语言尚无可用提示词';
+          const savedPreview = !candidate ? rowReferencePreview(row, rowLanguage(row)) : undefined;
+          const issue = candidate ? referenceIssue(candidate) : savedPreview?.referenceNotice || '当前语言尚无可用提示词';
           return <article className={`vd-batch-row ${selectedRow ? 'selected' : ''} ${previewRow?.segmentId === row.segmentId ? 'previewing' : ''}`} key={row.segmentId} data-segment-id={row.segmentId}>
             <label className="vd-batch-check"><input type="checkbox" aria-label={`选择第 ${row.segmentIndex} 段`} checked={selectedRow} disabled={!candidate || submitting} onChange={() => { if (!candidate) return; setSelectedKeys((current) => { const next = new Set(current); const other = row[candidate.language === 'zh' ? 'en' : 'zh']; if (other) next.delete(other.key); return toggleVideoBatchChoice(next, candidate.key); }); }} /></label>
             <div className="vd-batch-row-main"><strong title={row.title}>第 {row.segmentIndex} 段 · {row.title}</strong><span>原分段计划 {plan?.segments.find((segment) => segment.id === row.segmentId)?.durationSec ?? row.durationSec} 秒 · {automatic ? '等待上段衔接帧后生成' : candidate?.duplicate && hasAutomaticSelection && selectedRow && !shouldRegenerate(candidate) ? '存在相同任务，待整链核对' : candidate?.duplicate?.kind === 'in-flight' ? '已在队列，将跳过' : candidate?.duplicate?.kind === 'succeeded' ? regenerateSucceeded ? '已生成，将重新生成' : '已生成，将跳过' : candidate?.draft.reuseTaskId ? '失败任务快照，待复核' : '尚未生成'} · {automatic ? '最终参考图' : '参考图'} {candidate ? intendedReferenceCount(candidate) : 0} 张{backend === 'comfyui' ? ` / ${workflow?.mapping.images.length || 0} 个槽` : ''}</span>{candidate && outputSummaryForDraft(candidate.draft) && <small className="vop-request-summary">{outputSummaryForDraft(candidate.draft)}</small>}{automatic && <small className="vd-auto-tail-badge">自动衔接：第 {automatic.predecessorSegmentIndex} 段 → {automatic.selectionMode === 'ai-assisted' ? 'AI 辅助选帧 → ' : '本地末帧 → '}图片槽 {automatic.placement.index + 1} · {automatic.placement.semantics === 'first-frame' ? '首帧输入' : '普通衔接参考（不保证严格首帧）'}</small>}{issue && <small className="vd-error">{issue}</small>}</div>
             <div className="vd-batch-row-tools">
-              <div className="vd-batch-language" role="group" aria-label={`第 ${row.segmentIndex} 段稿件语言`}>{(['zh', 'en'] as const).map((language) => <button type="button" key={language} className={`btn small ${rowLanguage(row) === language ? 'primary' : ''}`} title={row[language] ? '只切换已保存的稿件，不翻译或重新生成提示词' : '尚无此语言的已保存稿件，不会自动生成'} aria-pressed={rowLanguage(row) === language} disabled={!row[language] || interactionLocked} onClick={() => selectLanguage(row, language)}>{language === 'zh' ? '中文' : '英文'}</button>)}</div>
+              <div className="vd-batch-language" role="group" aria-label={`第 ${row.segmentIndex} 段稿件语言`}>{(['zh', 'en'] as const).map((language) => <button type="button" key={language} className={`btn small ${rowLanguage(row) === language ? 'primary' : ''}`} title={row[language] ? '只切换已保存的稿件，不翻译或重新生成提示词' : rowReferencePreview(row, language) ? '查看保存的原稿；参考图待更新，尚不能提交' : '尚无此语言的已保存稿件，不会自动生成'} aria-pressed={rowLanguage(row) === language} disabled={(!row[language] && !rowReferencePreview(row, language)) || interactionLocked} onClick={() => selectLanguage(row, language)}>{language === 'zh' ? '中文' : '英文'}</button>)}</div>
               <button type="button" className="btn small" title="查看已有提示词和本次图片，不重新生成提示词" onClick={() => { setPreviewSegmentId(row.segmentId); setCompactPane('preview'); }}>预览</button>
-              <button type="button" className="btn small" aria-label={`第 ${row.segmentIndex} 段选择参考图`} title="只选择本段图片和槽位用途，不重新生成提示词" disabled={!candidate || interactionLocked} onClick={() => setImageSegmentId(row.segmentId)}>选择参考图</button>
+              <button type="button" className="btn small" aria-label={`第 ${row.segmentIndex} 段选择参考图`} title={savedPreview ? '回提示词导演台更新原稿的参考图引用' : '只选择本段图片和槽位用途，不重新生成提示词'} disabled={(!candidate && !(savedPreview && onOpenPrompt)) || interactionLocked} onClick={() => { if (savedPreview) onOpenPrompt?.(savedPreview.storyboardId, { storyboardId: savedPreview.storyboardId, language: savedPreview.language }); else setImageSegmentId(row.segmentId); }}>{savedPreview ? '更新参考图' : '选择参考图'}</button>
               <button type="button" className="btn small ghost" aria-label={`第 ${row.segmentIndex} 段复制上一段参考图`} title="仅复制上一段已选择的图片，不抽取视频尾帧，不重新生成提示词" disabled={!candidate || !previousChoice || interactionLocked} onClick={() => { if (previousChoice) { copyReferences(row.segmentId, referencesForCopy(previousChoice), previousChoice.draft.referenceSlotRoles); setNotice(`已将第 ${previousRow.segmentIndex} 段的图片顺序与用途复制到第 ${row.segmentIndex} 段；未提取视频尾帧，不重新生成提示词。${automatic ? '本段自动衔接已取消。' : ''}`); } }}>复制上段选图</button>
               <button type="button" className="btn small vd-tail-entry" aria-label={`第 ${row.segmentIndex} 段用上段尾帧`} title={row.segmentIndex <= 1 ? '第一段没有上一段视频' : '本地提取真实最后一帧：前段在本批次时先配置衔接；否则直接提取前段最新成片的末帧。不调用文本或视觉AI，不重新生成提示词，不弹出设置画面。'} disabled={!candidate || row.segmentIndex <= 1 || interactionLocked} onClick={() => { if (candidate) usePreviousTail(row, candidate); }}>{automatic ? '已启用本地末帧' : '用上段尾帧'}</button>
               <button type="button" className={`btn small vd-tail-entry ${characterMode ? 'primary' : ''}`} aria-label={`第 ${row.segmentIndex} 段本地末帧加参考图`} aria-pressed={Boolean(characterMode)} title={row.segmentIndex <= 1 ? '第一段没有上一段视频' : '第1槽放本地真实最后一帧，第2槽起默认人物参考，可选场景或其它参考图；已手动选图保留。仅同步图片引用编号，不重新生成视频提示词，不调用文本或视觉AI，不提交视频。'} disabled={!candidate || row.segmentIndex <= 1 || interactionLocked} onClick={() => { if (candidate) useTailWithCharacters(row, candidate); }}>本地末帧＋参考图</button>
@@ -1285,7 +1348,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
             const staticTail = tailCharacterModes[previewChoice.segmentId]?.kind === 'static' && slotIndex === 0;
             return <div key={reference.assetId} className={replaced ? 'vd-tail-will-replace' : ''}>{asset && assetPreviewUrl(asset) && <img src={assetPreviewUrl(asset)} alt={asset.name} />}<span className="vd-batch-reference-info"><ReferenceImageName name={`${slotIndex + 1}. ${asset?.name || '图片缺失'}`} /><small>{replaced ? '此原图将在生成时被上段尾帧替换；资产保留' : staticTail ? '本地真实末帧 · 画面、构图与动作' : imageRoleLabel(effectiveRole)} · 槽 {slotIndex + 1}{!replaced && asset && effectiveRole !== videoImageRole(asset) ? ` · 原素材：${imageRoleLabel(videoImageRole(asset))}` : ''}</small></span></div>;
           })}
-          {!previewChoice.draft.references.length && !automaticTails[previewChoice.segmentId] && <p className="vd-empty">本段未带入参考图。</p>}</div> : <div className="vd-empty">本段还没有当前语言的有效提示词。</div>}</div>
+          {!previewChoice.draft.references.length && !automaticTails[previewChoice.segmentId] && <p className="vd-empty">本段未带入参考图。</p>}</div> : savedReferencePreview ? <SavedReferencePromptPreview key={savedReferencePreview.id} preview={savedReferencePreview} onOpenPrompt={onOpenPrompt} /> : <div className="vd-empty">本段还没有当前语言的有效提示词。</div>}</div>
         {previewChoice && <VideoH3ReferenceNotices key={previewChoice.key} project={project} draft={previewChoice.draft} warnings={previewChoice.draft.h3ReferenceWarnings} onRepair={onRepairIdentityBindings} onRepairingChange={setIdentityRepairing} disabled={interactionLocked} />}
         <div className="vd-batch-preview-footer"><button className="btn small" disabled={!previewChoice || !selected.length || interactionLocked} onClick={() => { if (!previewChoice) return; const copied = referencesForCopy(previewChoice); clearAutomaticTails(selected.map((candidate) => candidate.segmentId)); setReferenceOverrides((current) => { const next = { ...current }; selected.forEach((candidate) => { next[candidate.segmentId] = cloneVideoReferences(copied); }); return next; }); setReferenceRoleOverrides((current) => { const next = { ...current }; selected.forEach((candidate) => { next[candidate.segmentId] = videoReferenceSelection(copied, previewChoice.draft.referenceSlotRoles).referenceSlotRoles!; }); return next; }); setNotice(`已将第 ${previewRow.segmentIndex} 段的静态选图应用到全部 ${selected.length} 个已选段；受影响段的自动衔接已清除，需要时请重新设置。`); }}>本段图片应用到全部已选</button><span>仅改变本批次，不改原分镜；不复制待生成的尾帧依赖。</span></div>
       </aside>
@@ -1295,7 +1358,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
       <div className="vd-batch-submit-actions">{configurationIssue && onOpenSettings && <button className="btn small" disabled={interactionLocked} onClick={onOpenSettings}>连接设置</button>}{!regenerateSucceeded && completedSelectionCount > 0 && <button type="button" className="btn small" disabled={interactionLocked} onClick={() => setRegeneration(true)}>允许重新生成已完成项</button>}<button type="button" className="btn primary" disabled={interactionLocked || !pending.length || Boolean(configurationIssue || selectedIssue)} onClick={prepareConfirmation}>{submitting ? '正在建立批次…' : `检查并生成 ${hasAutomaticSelection ? selected.length : pending.length} 段视频`}</button></div>
     </div>
     {tailSelecting && <div className="vd-tail-inline-progress" role="status"><span>{tailFrameTools?.progress?.message || '正在本地提取上一段真实最后一帧…'}</span><button type="button" className="btn small" onClick={() => { void manualTail.cancel(); }}>取消末帧提取</button></div>}
-    {imageRow && imageChoice && <VideoBatchImagePicker key={imageRow.segmentId} project={project} row={imageRow} references={tailCharacterModes[imageRow.segmentId] && !characterDrafts.get(imageChoice.key)?.issue ? characterDrafts.get(imageChoice.key)!.draft.references : imageChoice.draft.references} referenceSlotRoles={tailCharacterModes[imageRow.segmentId] ? characterDrafts.get(imageChoice.key)?.draft.referenceSlotRoles : imageChoice.draft.referenceSlotRoles} images={referenceAssets(imageChoice)} workflow={backend === "comfyui" ? usageContextForDraft(imageChoice.draft).workflow : undefined} usageContext={usageContextForDraft(imageChoice.draft)} slotOffset={tailCharacterModes[imageRow.segmentId] ? 1 : 0} onApply={(references, roles) => applyBatchReferenceSelection(imageRow, imageChoice, references, roles)} onClose={() => setImageSegmentId("")} />}
+    {imageRow && imageChoice && <VideoBatchImagePicker key={imageRow.segmentId} project={project} row={imageRow} draft={imageChoice.draft} references={tailCharacterModes[imageRow.segmentId] && !characterDrafts.get(imageChoice.key)?.issue ? characterDrafts.get(imageChoice.key)!.draft.references : imageChoice.draft.references} referenceSlotRoles={tailCharacterModes[imageRow.segmentId] ? characterDrafts.get(imageChoice.key)?.draft.referenceSlotRoles : imageChoice.draft.referenceSlotRoles} images={referenceAssets(imageChoice)} workflow={backend === "comfyui" ? usageContextForDraft(imageChoice.draft).workflow : undefined} usageContext={usageContextForDraft(imageChoice.draft)} slotOffset={tailCharacterModes[imageRow.segmentId] ? 1 : 0} onApply={(references, roles) => applyBatchReferenceSelection(imageRow, imageChoice, references, roles)} onClose={() => setImageSegmentId("")} />}
     {confirmation && <VideoPickerDialog title="确认批量生成视频" className="vd-batch-confirm-dialog" closeDisabled={submitting} onClose={() => { if (!submittingRef.current) setConfirmation(undefined); }}>
       <div className="vd-batch-dialog-body"><p>{confirmation.connectionLabel} · 计划：{plan?.title || plan?.sourceStoryTitle}</p><p className="field-hint">逐段建立独立任务；自动衔接段必须等待上一段生成并落盘、准备好衔接帧后才提交。其他选图、用途及提示词保持下表快照。{hasAutomaticSelection ? '启动前会核对整条依赖链：未授权重生成的完全重复批次不再提交；只有部分任务重复时整批停止并提示。有进行中或待确认任务时也须整链核对，不会跳过该段直接衔接，不擅自套用历史成片或重复收费。' : '相同任务会跳过；进行中或结果待确认的任务不会重复提交。'}</p>{confirmation.input.items.some((item) => item.previousTail?.selectionMode === 'ai-assisted') && <p className="vd-notice">本批次包含 AI 辅助选帧：由 AI 分析末尾候选帧，遇到可恢复错误最多自动重试3次，含首次最多4次视觉API调用，每次均可能收费。仍失败或遇到不可重试错误时显示原因并暂停，不改用原尾帧；不做人物语义硬拦截。允许选择较早帧，可能动作回退，原视频不自动裁剪；不能保证人物一致。</p>}<div className="vd-batch-confirm-list">{confirmation.candidates.map((candidate) => {
         const inputItem = confirmation.input.items.find((item) => item.itemKey === candidate.key);
@@ -1349,6 +1412,8 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
   const mountedRef = useRef(true);
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
   const choices = useMemo(() => videoPromptChoices(project, chapterId), [project, chapterId]);
+  const referencePreviews = useMemo(() => videoPromptReferencePreviews(project, chapterId), [project, chapterId]);
+  const draftReferencePreview = !draft.reuseTaskId ? referencePreviews.find((entry) => entry.storyboardId === draft.source?.storyboardId && entry.language === (draft.source?.language || 'zh')) : undefined;
   const images = useMemo(() => project.assets.filter(isVideoDirectorImage), [project.assets]);
   const reusedSnapshot = draft.reuseTaskId ? findReusableVideoTask(project, draft.reuseTaskId)?.videoJob?.snapshot : undefined;
   const reusedConnection = reusedSnapshot?.connection.backend === draft.backend && reusedSnapshot.draft.runningHubWorkflowId === draft.runningHubWorkflowId ? reusedSnapshot.connection : undefined;
@@ -1416,6 +1481,15 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
     pickedSelection.referenceSlotRoles?.length || 0,
   );
   const pickedSlotLabels = videoReferenceSlotLabels(pickedImageDraft.references, pickedUsageContext, 0, pickedSelection.referenceSlotRoles);
+  const pickedCharacterHint = useMemo(() => {
+    if (picker !== 'images') return undefined;
+    const board = project.storyboards.find((entry) => entry.id === draft.source?.storyboardId);
+    const plan = project.sequencePlans.find((entry) => entry.id === (draft.source?.sequencePlanId || board?.sequencePlanId));
+    const segment = plan?.segments.find((entry) => entry.id === (draft.source?.segmentId || board?.segmentId));
+    return videoSegmentCharacterHints(project, plan, segment, board, authoredVideoPrompt(draft));
+  }, [picker, project, draft]);
+  const pickedCharacterStates = picker === 'images'
+    ? prepareVideoH3ReferenceDraft(project, { ...pickedImageDraft, references: videoReferenceUsage(pickedImageDraft.references, pickedUsageContext) }, pickedUsageContext).characterStates : [];
   const parsedParameters = useMemo(() => readVideoParameterText(parameterText), [parameterText]);
   const presentationApi = useMemo(() => videoConfiguredApiState(settings, { ...draft, parameters: parsedParameters.value }, reusedConnection?.api).api || activeApi,
     [settings, draft, parsedParameters.value, reusedConnection, activeApi]);
@@ -1466,13 +1540,18 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
     if (launchRequest.storyboardId) {
       const choice = choices.find((entry) => entry.storyboardId === launchRequest.storyboardId && entry.language === (launchRequest.language || 'zh'));
       if (choice) next = applyVideoPromptChoice({ ...next, reuseTaskId: undefined }, choice, project, true);
-      else { setError(launchRequest.language === 'en' ? '所选段还没有可用的当前英文描述，或旧英语稿改变了对白语言。已有草稿没有改动，请在提示词导演台生成当前英文描述后再选择。' : '所选提示词还没有可用稿件，请从提示词导演台生成后再选择。'); return; }
+      else {
+        const saved = referencePreviews.find((entry) => entry.storyboardId === launchRequest.storyboardId && entry.language === (launchRequest.language || 'zh'));
+        if (saved) { setError(saved.referenceNotice); setPickedPromptId(saved.id); setPicker('prompt'); }
+        else setError(launchRequest.language === 'en' ? '所选段还没有可用的当前英文描述。已有草稿没有改动，请在提示词导演台生成当前英文描述后再选择。' : '所选提示词还没有可用稿件，请从提示词导演台生成后再选择。');
+        return;
+      }
     }
     if (launchRequest.assetIds?.length) next = addVideoDraftAssets({ ...next, reuseTaskId: undefined }, launchRequest.assetIds, project.assets);
     next = applyVideoReferenceRoleOverrides(next, launchRequest.referenceRoleOverrides);
     setDraft(next); setParameterText(JSON.stringify(next.parameters, null, 2));
     setNotice('内容已带入本次生成草稿；确认并点击“生成视频”后才会提交任务。');
-  }, [launchRequest, project, chapterId, draftScope, choices, settings]);
+  }, [launchRequest, project, chapterId, draftScope, choices, referencePreviews, settings]);
   const updateParameter = (key: string, text: string) => {
     const next = changeVideoParameterText(parameterText, key, text);
     if (next.issue) { setError(next.issue); return; }
@@ -1501,6 +1580,7 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
   const generate = async () => {
     if (submitting || batchSubmitting || singleTail.busy || tailFrameTools?.busy) return;
     if (sourceStale) { setError('本章原文已更新，请更新来源提示词后再生成。历史稿保留，可查看原稿。'); return; }
+    if (draftReferencePreview) { setError(draftReferencePreview.referenceNotice); return; }
     setError(''); setNotice('');
     const parsed = readVideoParameterText(parameterText);
     if (parsed.issue) { setError(parsed.issue); return; }
@@ -1515,8 +1595,9 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
     } catch (cause) { if (mountedRef.current && projectIdRef.current === requestedProjectId) setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { if (mountedRef.current && projectIdRef.current === requestedProjectId) setSubmitting(false); }
   };
-  const visibleChoices = choices.filter((choice) => (promptLanguage === 'all' || choice.language === promptLanguage) && `${choice.label} ${choice.segmentIndex ? `第${choice.segmentIndex}段 第 ${choice.segmentIndex} 段` : '单段'} ${choice.prompt}`.toLocaleLowerCase('zh-CN').includes(promptQuery.trim().toLocaleLowerCase('zh-CN')));
-  const pickedChoice = choices.find((choice) => choice.id === pickedPromptId);
+  const visibleChoices = [...choices, ...referencePreviews].filter((choice) => (promptLanguage === 'all' || choice.language === promptLanguage) && `${choice.label} ${choice.segmentIndex ? `第${choice.segmentIndex}段 第 ${choice.segmentIndex} 段` : '单段'} ${choice.prompt}`.toLocaleLowerCase('zh-CN').includes(promptQuery.trim().toLocaleLowerCase('zh-CN')));
+  const savedPickedPreview = referencePreviews.find((choice) => choice.id === pickedPromptId);
+  const pickedChoice = choices.find((choice) => choice.id === pickedPromptId) || savedPickedPreview;
   const visibleImages = images.filter((asset) => (imageFilter === 'all' || asset.type === imageFilter) && `${asset.name} ${asset.fileName || ''} ${asset.tags.join(' ')}`.toLocaleLowerCase('zh-CN').includes(imageQuery.trim().toLocaleLowerCase('zh-CN')));
   const parameterKeys = availableVideoParameterKeys(sourceKind, activeApi, activeWorkflow);
   const slotMismatch = draft.backend === 'comfyui' && activeWorkflow && videoReferenceSlotSpan(draft.references) > activeWorkflow.mapping.images.length;
@@ -1530,9 +1611,10 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
     <div className="section-heading"><div><h1>视频导演台</h1><p>直接选择已有提示词和图片资产，生成后自动存入视频资产库。这里的编辑不会改动原分镜或原提示词。</p></div>{generationMode === 'batch' && generationModeTabs}<div className="vd-toolbar">{onOpenSettings && <button className="btn" type="button" onClick={onOpenSettings}>视频连接设置</button>}{onOpenVideoAssets && <button className="btn" type="button" onClick={onOpenVideoAssets}>视频资产库</button>}{onOpenJobs && <button className="btn" type="button" onClick={onOpenJobs}>查看生成任务</button>}</div></div>
     {chapterId && <p className="field-hint vd-chapter-context">当前章节：{project.sourceDocuments.find((chapter) => chapter.id === chapterId)?.name || '未命名章节'} · 提示词和分段按本章显示，参考图片全项目共用。</p>}
     {sourceStale && <p className="vd-notice">本章原文已更新，当前历史提示词需要重新生成后才能提交；已提交的视频任务继续运行。</p>}
+    {generationMode === 'single' && draftReferencePreview && <div className="vd-notice">{draftReferencePreview.referenceNotice}{onOpenPrompt && <button type="button" className="btn small" onClick={() => onOpenPrompt(draftReferencePreview.storyboardId, draft.source)}>回提示词导演台更新参考图</button>}</div>}
     {generationMode === 'single' && generationModeTabs}
     {onChangeExecution && <VideoExecutionControls settings={settings} onChange={onChangeExecution} />}
-    {generationMode === 'batch' && <div id="vd-batch-generation-panel" role="tabpanel" className="vd-batch-host"><VideoBatchPanel key={`${draftScope}:${launchRequest?.batchTaskIds?.length ? launchRequest.id : 'standard-batch'}`} project={project} chapterId={chapterId} savedBatch={batchDraft} onBatchDraftChange={setBatchDraft} settings={settings} controller={controller} tailFrameTools={tailFrameTools} initialDraft={draft} initialParameterText={parameterText} retryTaskIds={launchRequest?.batchTaskIds} onOpenSettings={onOpenSettings} onOpenJobs={onOpenJobs} onSubmittingChange={setBatchSubmitting} onRepairIdentityBindings={onRepairIdentityBindings} /></div>}
+    {generationMode === 'batch' && <div id="vd-batch-generation-panel" role="tabpanel" className="vd-batch-host"><VideoBatchPanel key={`${draftScope}:${launchRequest?.batchTaskIds?.length ? launchRequest.id : 'standard-batch'}`} project={project} chapterId={chapterId} savedBatch={batchDraft} onBatchDraftChange={setBatchDraft} settings={settings} controller={controller} tailFrameTools={tailFrameTools} initialDraft={draft} initialParameterText={parameterText} retryTaskIds={launchRequest?.batchTaskIds} onOpenSettings={onOpenSettings} onOpenJobs={onOpenJobs} onOpenPrompt={onOpenPrompt} onSubmittingChange={setBatchSubmitting} onRepairIdentityBindings={onRepairIdentityBindings} /></div>}
     <div id="vd-single-generation-panel" role="tabpanel" className="vd-layout" hidden={generationMode !== 'single'}><div className="vd-stack">
       <section className="card vd-prompt-card"><div className="card-title"><h2>1. 本次视频提示词</h2><button className="btn small" type="button" onClick={() => { setPicker('prompt'); setPickedPromptId(draft.source?.storyboardId ? `${draft.source.storyboardId}:${draft.source.language || 'zh'}` : ''); }}>从提示词导演台选择</button></div>
         <label className="field"><span>视频名称</span><input value={draft.name} onChange={(event) => patchDraft({ name: event.target.value })} placeholder="为本次生成的视频命名" /></label>
@@ -1564,7 +1646,7 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
         <VideoOutputParameters scope="single" source={sourceKind} parameterText={parameterText} availableKeys={parameterKeys} {...videoOutputParameterPresentation(presentationApi, parsedParameters.value)} requiresMapping={sourceKind !== 'api' || activeApi?.provider === 'runninghub'} disabled={submitting || batchSubmitting} onChange={updateParameter} onOpenSettings={onOpenSettings} />
         <details className="vd-details"><summary>可选参数覆盖（不填保持原值）</summary><div className="vd-stack"><p className="field-hint">高级参数：默认不覆盖种子、采样、尺寸和音频连接。只填写你要改变的值；留空恢复工作流 / 接口默认值。</p><div className="vd-parameter-grid">{parameterKeys.filter((key) => !isVideoOutputParameterKey(key)).map((key) => <label className="field" key={key}><span>{{ seed: '种子', steps: '采样步数', cfg: 'CFG', fps: '帧率' }[key] || key}</span><input value={videoParameterInputText(parsedParameters.value[key])} disabled={Boolean(parsedParameters.issue)} placeholder="保留原值" onChange={(event) => updateParameter(key, event.target.value)} /></label>)}</div><label className="field"><span>额外参数 JSON（仅显式覆盖字段）</span><textarea aria-label="本次额外参数 JSON" className="vd-code" rows={5} value={parameterText} onChange={(event) => setParameterText(event.target.value)} onBlur={() => { const parsed = readVideoParameterText(parameterText); if (!parsed.issue) patchDraft({ parameters: parsed.value }); }} /></label><button type="button" className="btn small" onClick={() => { patchDraft({ parameters: {} }); setParameterText('{}'); }}>清除本次参数覆盖</button></div></details>
         <details className="vd-tracking-note"><summary>任务追踪说明</summary><p>不设置等待超时。界面只显示后端提供的真实进度和已耗时，切换页面仍继续追踪。</p></details>
-        <button className="btn primary vd-generate-button" type="button" disabled={submitting || batchSubmitting || identityRepairing || singleTail.busy || tailFrameTools?.busy || sourceStale || !draft.prompt.trim() || Boolean(slotMismatch)} onClick={() => { void generate(); }}>{submitting ? '正在建立任务…' : '生成视频'}</button><p className="field-hint">点击才会提交生成，API 可能产生费用；不会自动重复提交结果不明的任务。</p>
+        <button className="btn primary vd-generate-button" type="button" disabled={submitting || batchSubmitting || identityRepairing || singleTail.busy || tailFrameTools?.busy || sourceStale || Boolean(draftReferencePreview) || !draft.prompt.trim() || Boolean(slotMismatch)} onClick={() => { void generate(); }}>{submitting ? '正在建立任务…' : '生成视频'}</button><p className="field-hint">点击才会提交生成，API 可能产生费用；不会自动重复提交结果不明的任务。</p>
         {error && <p className="vd-error" role="alert">{formatUserFacingError(error)}</p>}{notice && <p className="vd-success" role="status">{notice}</p>}
       </section>
     </div></div>
@@ -1573,10 +1655,10 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
         <div className="vd-toolbar"><span className="field-hint">当前为单段选择；多个视频段请进入批量清单。</span><button type="button" className="btn small" onClick={() => { setPicker(undefined); setGenerationMode('batch'); }}>长剧情批量</button></div>
         <div className="vd-toolbar"><label className="field vd-grow"><span>搜索剧情、场景或段号</span><input type="search" value={promptQuery} onChange={(event) => setPromptQuery(event.target.value)} placeholder="名称、段号、提示词内容" /></label><label className="field"><span>描述语言</span><select aria-label="描述语言" value={promptLanguage} onChange={(event) => setPromptLanguage(event.target.value as 'all' | 'zh' | 'en')}><option value="all">全部已有稿件</option><option value="zh">中文</option><option value="en">英文描述</option></select></label></div>
       </div>
-      <div className="vd-prompt-picker"><div className="vd-choice-list">{visibleChoices.length ? visibleChoices.map((choice) => <button type="button" className={`vd-choice ${pickedPromptId === choice.id ? 'selected' : ''}`} aria-pressed={pickedPromptId === choice.id} key={choice.id} onClick={() => setPickedPromptId(choice.id)}><strong>{choice.label}</strong><span>{choice.segmentIndex ? `长剧情 · 第 ${choice.segmentIndex} 段` : '单段'} · {choice.durationSec} 秒 · {choice.language === 'zh' ? '中文' : '英文描述'}</span><small>{choice.version} · {new Date(choice.updatedAt).toLocaleString('zh-CN')}</small></button>) : <div className="vd-empty">当前章节没有符合条件的已有提示词。</div>}</div><div className="vd-choice-preview">{pickedChoice ? <><h3>{pickedChoice.label}{pickedChoice.segmentIndex ? ` · 第 ${pickedChoice.segmentIndex} 段` : ''}</h3><pre className="vd-prompt-preview">{pickedChoice.prompt}</pre></> : <div className="vd-empty">选择一项预览完整提示词。</div>}</div></div>
-      <div className="vd-modal-footer"><label className="check-row"><input type="checkbox" checked={includeReferences} onChange={(event) => setIncludeReferences(event.target.checked)} />一并带入该提示词已有的图片参考（保留当前选图）</label><button className="btn primary" type="button" disabled={!pickedChoice} onClick={() => { if (pickedChoice) { setDraft((current) => applyVideoPromptChoice(includeReferences ? { ...current, reuseTaskId: undefined } : current, pickedChoice, project, includeReferences)); setNotice('已复制所选单段提示词；一并带入的图片使用当前资产。原稿和对白未改动，也没有提交生成。'); setPicker(undefined); } }}>使用这段提示词</button></div>
+      <div className="vd-prompt-picker"><div className="vd-choice-list">{visibleChoices.length ? visibleChoices.map((choice) => <button type="button" className={`vd-choice ${pickedPromptId === choice.id ? 'selected' : ''}`} aria-pressed={pickedPromptId === choice.id} key={choice.id} onClick={() => setPickedPromptId(choice.id)}><strong>{choice.label}</strong><span>{choice.segmentIndex ? `长剧情 · 第 ${choice.segmentIndex} 段` : '单段'} · {choice.durationSec} 秒 · {choice.language === 'zh' ? '中文' : '英文描述'}</span><small>{choice.version} · {new Date(choice.updatedAt).toLocaleString('zh-CN')}</small></button>) : <div className="vd-empty">当前章节没有符合条件的已有提示词。</div>}</div><div className="vd-choice-preview">{pickedChoice ? <><h3>{pickedChoice.label}{pickedChoice.segmentIndex ? ` · 第 ${pickedChoice.segmentIndex} 段` : ''}</h3><>{savedPickedPreview ? <SavedReferencePromptPreview key={savedPickedPreview.id} preview={savedPickedPreview} onOpenPrompt={onOpenPrompt ? (id, source) => { setPicker(undefined); onOpenPrompt(id, source); } : undefined} /> : <pre className="vd-prompt-preview">{pickedChoice.prompt}</pre>}</></> : <div className="vd-empty">选择一项预览完整提示词。</div>}</div></div>
+      <div className="vd-modal-footer"><label className="check-row"><input type="checkbox" checked={includeReferences} onChange={(event) => setIncludeReferences(event.target.checked)} />一并带入该提示词已有的图片参考（保留当前选图）</label><button className="btn primary" type="button" disabled={!pickedChoice || Boolean(savedPickedPreview)} onClick={() => { if (pickedChoice && !savedPickedPreview) { setDraft((current) => applyVideoPromptChoice(includeReferences ? { ...current, reuseTaskId: undefined } : current, pickedChoice, project, includeReferences)); setNotice('已复制所选单段提示词；一并带入的图片使用当前资产。原稿和对白未改动，也没有提交生成。'); setPicker(undefined); } }}>使用这段提示词</button></div>
     </VideoPickerDialog>}
-    {picker === 'images' && <VideoPickerDialog title="从图片资产库选择生成参考图" className="vd-reference-picker-dialog" onClose={() => setPicker(undefined)}>
+    {picker === 'images' && <VideoPickerDialog title="从图片资产库选择生成参考图" className="vd-reference-picker-dialog" onClose={() => setPicker(undefined)} headerContent={pickedCharacterHint && <VideoSegmentCharacterHint hint={pickedCharacterHint} states={pickedCharacterStates} />}>
       <VideoReferencePickerPanels images={<>
       <div className="vd-toolbar vd-reference-picker-search"><label className="field vd-grow"><span>搜索图片资产</span><input type="search" value={imageQuery} onChange={(event) => setImageQuery(event.target.value)} placeholder="名称、文件名、标签" /></label><label className="field"><span>图片分类</span><select value={imageFilter} onChange={(event) => setImageFilter(event.target.value)}><option value="all">全部图片</option><option value="character">人物</option><option value="location">场景</option><option value="prop">道具</option><option value="reference">普通参考图</option><option value="grid">九宫格</option><option value="first-frame">首帧</option><option value="last-frame">尾帧</option><option value="clay-render">Clay Render</option></select></label></div>
       <div className="vd-batch-dialog-body">

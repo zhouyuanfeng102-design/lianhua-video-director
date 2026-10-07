@@ -4,6 +4,7 @@ import type { VideoReferenceUsageContext } from './videoReferenceUsage';
 import { videoReferenceSlotIndex } from './videoReferenceSlots';
 import { getH3IdentityBindingIssues, normalizeH3IdentityBindings } from './h3IdentityBindings';
 import { officialH3ContextForStoryboard } from './officialH3Context';
+import { characterParticipationAliases, resolvePromptCharacterParticipation, resolveStoryboardCharacterParticipation } from './characterParticipation';
 
 /** This is an editing provenance record, not a second prompt or an AI review.
  * Rendering always starts from the same authored text, so repeated selections
@@ -16,11 +17,23 @@ export interface VideoH3ReferenceBinding {
   renderedPrompt: string;
   /** Original persisted manifest, never reconstructed from current slot order. */
   sourcePictures?: Array<{ number: number; assetId: string }>;
+  /** Actual result of rendering this exact request, retained by frozen retries. */
+  characterStates?: VideoH3CharacterReferenceState[];
+}
+
+export interface VideoH3CharacterReferenceState {
+  characterId: string;
+  name: string;
+  status: 'unselected' | 'bound' | 'pending';
+  /** Actual Picture numbers when known; otherwise selected physical slots. */
+  slots: number[];
+  reason?: string;
 }
 
 export interface PreparedVideoH3ReferenceDraft {
   draft: VideoGenerationDraft;
   warnings: string[];
+  characterStates: VideoH3CharacterReferenceState[];
 }
 
 export type VideoH3ReferenceContext = Omit<VideoReferenceUsageContext, 'api'> & {
@@ -126,7 +139,8 @@ export const videoH3BindingForPrompt = (
   const board = matches[0];
   const english = draft.source.language === 'en';
   const basePrompt = english ? board.officialPromptEn : board.officialPromptZh;
-  const identities = normalizeH3IdentityBindings(english ? board.h3IdentityBindingsEn : board.h3IdentityBindings);
+  const savedIdentities = english ? board.h3IdentityBindingsEn : board.h3IdentityBindings;
+  const identities = savedIdentities === undefined ? { version: 1 as const, characters: [] } : normalizeH3IdentityBindings(savedIdentities);
   if (!basePrompt || draft.prompt !== basePrompt || !identities) return undefined;
   const sourcePictures = (board.targetOutput?.referenceManifest || []).flatMap((entry) => {
     const token = typeof entry.token === 'string' ? entry.token.match(/^<Picture ([1-9]\d*)>$/u) : undefined;
@@ -249,40 +263,121 @@ export const videoH3ReferenceCharacterIds = (project: Project, draft: VideoGener
   }));
 };
 
+/** Add only a request-local identity association inside a proven visual shot.
+ * It never creates Subject/voice IDs or moves a later character to Shot 1. */
+const participationReferenceEdit = (
+  prompt: string,
+  character: Character,
+  characters: readonly Character[],
+  shotIndexes: readonly number[],
+  numbers: readonly number[],
+): VideoPictureReferenceEdit | undefined => {
+  const masked = maskReferenceLiterals(prompt);
+  const description = /^(?:integrated_multimodal_description|detailed_description):/mu.exec(masked);
+  if (!description) return undefined;
+  const sectionStart = description.index + description[0].length;
+  const nextSection = /^(?:overall_soundscape|non_diegetic_music):/mu.exec(masked.slice(sectionStart));
+  const sectionEnd = nextSection ? sectionStart + nextSection.index : prompt.length;
+  const shots = [...masked.slice(sectionStart, sectionEnd).matchAll(/\[Shot ([1-9]\d*)\]/gu)];
+  const index = shots.findIndex((shot) => shotIndexes.includes(Number(shot[1])));
+  if (index < 0) return undefined;
+  const start = sectionStart + shots[index].index! + shots[index][0].length;
+  const end = sectionStart + (shots[index + 1]?.index ?? sectionEnd - sectionStart);
+  const visualText = masked.slice(start, end);
+  const aliases = characterParticipationAliases(character, characters).slice().sort((a, b) => b.length - a.length);
+  const alias = aliases.find((value) => {
+    let at = visualText.toLocaleLowerCase('en-US').indexOf(value.toLocaleLowerCase('en-US'));
+    while (at >= 0) {
+      const before = visualText[at - 1] || ''; const after = visualText[at + value.length] || '';
+      if (!/[A-Za-z0-9_]/u.test(value[0]) && !/[A-Za-z0-9_]/u.test(value[value.length - 1])
+        || !/[A-Za-z0-9_]/u.test(before) && !/[A-Za-z0-9_]/u.test(after)) return true;
+      at = visualText.toLocaleLowerCase('en-US').indexOf(value.toLocaleLowerCase('en-US'), at + value.length);
+    }
+    return false;
+  });
+  const name = character.name.replace(/[\u200B-\u200D\uFEFF]/gu, '').trim();
+  if (!name || /[<>\r\n]/u.test(name) || alias && /[<>\r\n]/u.test(alias)) return undefined;
+  const label = alias && alias !== name ? `${name} (known as ${alias})` : name;
+  // Later shots must still begin with their authored At cut. Put the
+  // association after the visual body, before its original trailing spacing,
+  // never between [Shot N] and At or inside the next shot/section.
+  const insertion = end - (prompt.slice(start, end).match(/\s*$/u)?.[0].length || 0);
+  return { start: insertion, end: insertion,
+    text: ` Visual identity reference for ${label}: ${numbers.map((number) => `<Picture ${number}>`).join(', ')}.` };
+};
+
 /** Pure serialization of explicit identity anchors. Warning-only failures
  * return the untouched text and never ask a model to regenerate a story. */
 export const prepareVideoH3ReferenceDraft = (
   project: Project, draft: VideoGenerationDraft, context: VideoH3ReferenceContext,
 ): PreparedVideoH3ReferenceDraft => {
+  const referenceProject = videoH3ReferenceProject(project, draft);
+  const binding = videoH3BindingForPrompt(project, draft);
+  const basePrompt = binding?.basePrompt || draft.prompt;
+  const sourceBoard = referenceProject.storyboards.filter((board) => board.id === draft.source?.storyboardId);
+  const participation = isH3(basePrompt) ? sourceBoard.length === 1
+    ? resolveStoryboardCharacterParticipation(sourceBoard[0], referenceProject.characters, basePrompt)
+    : resolvePromptCharacterParticipation(basePrompt, referenceProject.characters, { identityBindings: binding?.identities })
+    : { characters: [], ambiguousNames: [], usedFallback: true };
+  const plan = videoH3PictureNumbers(draft.references, context.api?.provider === 'rhtv_web'
+    ? { ...context, api: { ...context.api, rhtvMode: (draft.parameters.rhtv_mode || context.api.rhtvMode) as VideoTaskApiConfig['rhtvMode'] } } : context);
+  const selectedSlots = new Map<string, number[]>();
+  for (const [index, reference] of draft.references.entries()) {
+    if (!['character', 'subject'].includes(reference.role) && reference.characterIds === undefined) continue;
+    const assets = project.assets.filter((asset) => asset.id === reference.assetId && !asset.missing);
+    if (assets.length !== 1) continue;
+    for (const owner of videoReferenceCharacterOwners(referenceProject, assets[0], reference)) {
+      selectedSlots.set(owner.id, unique([...(selectedSlots.get(owner.id) || []), plan.numbers?.[index] || videoReferenceSlotIndex(reference, index) + 1]));
+    }
+  }
+  const relevantIds = unique([...participation.characters.map((entry) => entry.characterId),
+    ...(binding?.identities.characters || []).map((entry) => entry.characterId), ...selectedSlots.keys()]);
+  const characterStates: VideoH3CharacterReferenceState[] = relevantIds.flatMap((characterId) => {
+    const character = referenceProject.characters.find((entry) => entry.id === characterId);
+    if (!character) return [];
+    const slots = selectedSlots.get(characterId) || [];
+    return [{ characterId, name: character.name, status: slots.length ? 'pending' : 'unselected', slots,
+      ...(slots.length ? { reason: plan.numbers ? '尚未证明本次图片与正文人物的对应关系。' : plan.warning || '图片编号尚未确定。' } : {}) }];
+  });
+  const markBound = (characterId: string, numbers: number[]) => {
+    const item = characterStates.find((entry) => entry.characterId === characterId);
+    if (item) { item.status = 'bound'; item.slots = [...numbers]; delete item.reason; }
+  };
+  const markPending = (characterId: string, reason: string) => {
+    const item = characterStates.find((entry) => entry.characterId === characterId);
+    if (item && item.slots.length) item.reason = reason;
+  };
   const referenceWarnings = draft.references.flatMap((reference, index) => {
     const warning = videoReferenceCharacterBindingWarning(reference);
     return warning ? [`图片槽 ${videoReferenceSlotIndex(reference, index) + 1} ${warning}`] : [];
   });
   const unchanged = (issues: string[]): PreparedVideoH3ReferenceDraft => {
     const warnings = unique([...referenceWarnings, ...issues]);
-    return { draft: { ...draft, h3ReferenceWarnings: warnings }, warnings };
+    return { draft: { ...draft, h3ReferenceWarnings: warnings }, warnings, characterStates };
   };
   if (!isH3(draft.prompt)) return unchanged([]);
   // A true retry retains its frozen, already-displayed submission. Selecting
   // current images explicitly removes reuseTaskId in the picker.
-  if (draft.reuseTaskId) return referenceWarnings.length ? unchanged(draft.h3ReferenceWarnings || []) : { draft, warnings: draft.h3ReferenceWarnings || [] };
-  const binding = videoH3BindingForPrompt(project, draft);
+  if (draft.reuseTaskId) {
+    const savedStates = binding?.renderedPrompt === draft.prompt ? binding.characterStates : undefined;
+    const frozenStates = Array.isArray(savedStates) ? structuredClone(savedStates) : characterStates.map((entry) => entry.status === 'pending'
+      ? { ...entry, reason: '沿用原任务冻结的提示词与图片；缺少已保存的关联状态，不依据当前资料重新绑定。' } : entry);
+    if (referenceWarnings.length) return { ...unchanged(draft.h3ReferenceWarnings || []), characterStates: frozenStates };
+    return { draft, warnings: draft.h3ReferenceWarnings || [], characterStates: frozenStates };
+  }
   if (!binding) return unchanged(draft.references.length
     ? ['这份 H3 稿没有可信的可定位人物绑定，已保留原文；未猜测参考图是谁，不阻止生成。需要补齐时请明确修复本段提示词。'] : []);
   const warnings: string[] = [...referenceWarnings];
   // Match the frozen public identities used to author this segment. Same-ID
   // live asset associations and this submission's explicit characterIds are
   // still authoritative for pictures, while later display-name edits are not.
-  const referenceProject = videoH3ReferenceProject(project, draft);
-  const plan = videoH3PictureNumbers(draft.references, context.api?.provider === 'rhtv_web'
-    ? { ...context, api: { ...context.api, rhtvMode: (draft.parameters.rhtv_mode || context.api.rhtvMode) as VideoTaskApiConfig['rhtvMode'] } } : context);
   if (draft.references.length && plan.warning) warnings.push(plan.warning);
   const characterPictures = new Map<string, number[]>();
   for (const [index, reference] of draft.references.entries()) {
     if (videoReferenceCharacterBindingWarning(reference)) continue;
     // A continuity/scene picture is not an extra face or voice source.
     if (!['character', 'subject'].includes(reference.role) && reference.characterIds === undefined) continue;
-    const assets = project.assets.filter((asset) => asset.id === reference.assetId);
+    const assets = project.assets.filter((asset) => asset.id === reference.assetId && !asset.missing);
     const asset = assets.length === 1 ? assets[0] : undefined;
     const owners = asset ? videoReferenceCharacterOwners(referenceProject, asset, reference) : [];
     if (!owners.length) {
@@ -346,17 +441,27 @@ export const prepareVideoH3ReferenceDraft = (
     if (!numbers.length) continue;
     const issues = identityIssues.filter((issue) => issue.characterId === identity.characterId);
     if (issues.length) {
-      warnings.push(`人物“${identity.name || '未命名'}”的 H3 身份锚点已失效：${unique(issues.map((issue) => issue.message)).join('；')}。本次未绑定该人物图片，未猜测或改写其剧情。`);
+      const reason = `人物“${identity.name || '未命名'}”的 H3 身份锚点已失效：${unique(issues.map((issue) => issue.message)).join('；')}。本次未绑定该人物图片，未猜测或改写其剧情。`;
+      warnings.push(reason); markPending(identity.characterId, reason);
       continue;
     }
     const end = binding.basePrompt.indexOf(identity.referenceAnchor) + identity.referenceAnchor.length;
     edits.push({ start: end, end,
       text: ` Visual identity reference for ${identity.name}${identity.subjectToken ? ` ${identity.subjectToken}` : ''}${identity.speakerToken ? ` ${identity.speakerToken}` : ''}: ${numbers.map((number) => `<Picture ${number}>`).join(', ')}.` });
+    markBound(identity.characterId, numbers);
   }
   for (const id of characterPictures.keys()) if (!identities.some((identity) => identity.characterId === id)) {
-    warnings.push('部分已选人物图不在本段已保存身份清单中，未新增角色或台词；仅提示，不阻止生成。');
+    const character = referenceProject.characters.find((entry) => entry.id === id);
+    const visible = participation.characters.find((entry) => entry.characterId === id && entry.presence === 'visible');
+    const edit = character && visible ? participationReferenceEdit(binding.basePrompt, character, referenceProject.characters, visible.visibleShotIndexes, characterPictures.get(id)!) : undefined;
+    if (edit) {
+      edits.push(edit); markBound(id, characterPictures.get(id)!);
+    } else {
+      const reason = `人物“${character?.name || '未命名'}”已选图但尚未关联：本段缺少唯一且可定位的出镜身份依据；仅提示，不阻止生成。`;
+      warnings.push(reason); markPending(id, reason);
+    }
   }
   let prompt = binding.basePrompt;
   for (const edit of edits.sort((a, b) => b.start - a.start)) prompt = prompt.slice(0, edit.start) + edit.text + prompt.slice(edit.end);
-  return { draft: { ...draft, prompt, h3ReferenceBinding: { ...binding, renderedPrompt: prompt }, h3ReferenceWarnings: unique(warnings) }, warnings: unique(warnings) };
+  return { draft: { ...draft, prompt, h3ReferenceBinding: { ...binding, renderedPrompt: prompt, characterStates: structuredClone(characterStates) }, h3ReferenceWarnings: unique(warnings) }, warnings: unique(warnings), characterStates };
 };

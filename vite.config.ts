@@ -82,6 +82,9 @@ export default defineConfig({
             'imageApiSelection.ts',
             'characterVocabulary.ts',
             'characterVariants.ts',
+            // H3 rule catalogs read its rule at module scope; it must stay in
+            // this pure contract layer rather than create a domain back edge.
+            'characterParticipation.ts',
             'imagePromptIdentityContext.ts',
             'imageLocationScope.ts',
             'sequencePromptHandoffStamp.ts',

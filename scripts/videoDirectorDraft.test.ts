@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
 import { createInitialState } from '../src/storage';
-import { buildOfficialH3SourceFingerprint } from '../src/officialPrompt';
+import { buildOfficialH3SourceFingerprint, hasCurrentOfficialH3Prompt, officialH3MissingReferenceNotice } from '../src/officialPrompt';
+import { buildVideoBatchRows } from '../src/videoBatch';
 import type { ImageGenerationTask, ReferenceAsset, Storyboard, VideoGenerationTask } from '../src/types';
 import { bindStoryboardImageAsset, buildCustomStoryboardImageRequests } from '../src/storyboardImages';
-import { addVideoDraftAssets, applyVideoPromptChoice, draftFromVideoTask, emptyVideoDraft, formatVideoElapsed, isVideoDirectorImage, reorderVideoReference, videoExecutionElapsedMs, videoPromptChoices } from '../src/videoDirectorDraft';
+import { addVideoDraftAssets, applyVideoPromptChoice, draftFromVideoTask, emptyVideoDraft, formatVideoElapsed, isVideoDirectorImage, reorderVideoReference, videoExecutionElapsedMs, videoPromptChoices, videoPromptReferencePreviews } from '../src/videoDirectorDraft';
 
 const state = createInitialState();
 const project = state.project;
@@ -326,4 +327,34 @@ assert.equal(currentChoices.find((choice) => choice.language === 'en')?.prompt, 
 const currentH3ModelEnglish = { ...currentH3, officialPromptEn: englishH3.replace('别走，我有话要说。', 'Do not go. I have something to say.') };
 assert.equal(videoPromptChoices({ ...project, storyboards: [currentH3ModelEnglish] }).find((choice) => choice.language === 'en')?.prompt, currentH3ModelEnglish.officialPromptEn,
   'current H3 English also remains selectable after model-authored dialogue wording changes');
-console.log('videoDirectorDraft: prompt selection, custom-image exclusion, explicit references, parameter preservation and snapshot tests passed');
+// A missing source picture exposes the exact saved original without making it
+// a valid candidate. The pure output-deletion path is covered by assetDeletion.
+const missingReferenceBoard: Storyboard = { ...currentH3, globalReferenceAssetIds: [],
+  targetOutput: { ...currentH3.targetOutput!, referenceManifest: [{ id: 'composition', token: '<Picture 1>', mediaType: 'image' }] },
+};
+const missingReferenceProject = { ...project, assets: project.assets.filter((item) => item.id !== 'composition'), storyboards: [missingReferenceBoard] };
+const beforeMissingPreview = JSON.stringify(missingReferenceProject);
+assert.equal(hasCurrentOfficialH3Prompt(missingReferenceBoard), true, 'the saved canonical and official body still agree');
+assert.equal(hasCurrentOfficialH3Prompt(missingReferenceBoard, { ...h3Context, assets: missingReferenceProject.assets }), false);
+const savedReferencePreviews = videoPromptReferencePreviews(missingReferenceProject);
+assert.deepEqual(savedReferencePreviews.map((item) => item.prompt), [chineseH3, englishH3], 'both original languages remain available byte for byte');
+assert.ok(savedReferencePreviews.every((item) => item.referenceNotice.startsWith('参考图待更新')));
+assert.equal(videoPromptChoices(missingReferenceProject).length, 0, 'read-only original previews must never enter single submission choices');
+const referencePlan = { id: 'sequence', title: '参考图测试', sourceStoryTitle: '剧情', sourceStoryContent: '原剧情',
+  durationMode: 'fixed' as const, totalDurationSec: 15, segmentDurationSec: 15, segmentationMode: 'fixed' as const,
+  fitStatus: 'balanced' as const, segments: [{ id: 'segment-2', index: 2, title: '原段', globalStartSec: 0, globalEndSec: 15,
+    durationSec: 15, content: '原剧情', summary: '原剧情', sourceSceneIds: [board.sceneId], sourceBeatIds: [], sourceShotIds: [],
+    narrativePurpose: '', entryState: '', exitState: '', transitionHint: '', storyboardId: board.id, status: 'ready' as const }], createdAt: 1, updatedAt: 1 };
+const missingRows = buildVideoBatchRows(missingReferenceProject, referencePlan, state.settings);
+assert.equal(missingRows.length, 1);
+assert.equal(missingRows[0].zh, undefined, 'batch selection remains guarded');
+assert.equal(missingRows[0].en, undefined, 'batch English selection remains guarded');
+assert.equal(JSON.stringify(missingReferenceProject), beforeMissingPreview, 'preview cannot change source hashes or saved text');
+assert.equal(videoPromptReferencePreviews({ ...missingReferenceProject, storyboards: [{ ...missingReferenceBoard, finalPrompt: '用户改过剧情' }] }).length, 0,
+  'canonical story edits are not classified as a reference-only recovery');
+assert.equal(videoPromptReferencePreviews({ ...missingReferenceProject, storyboards: [{ ...missingReferenceBoard, sourceStale: true }] }).length, 0);
+assert.equal(videoPromptReferencePreviews({ ...missingReferenceProject, storyboards: [{ ...missingReferenceBoard, officialPromptEnSource: '旧中文' }] }).length, 1,
+  'mismatched English is not exposed as a recoverable current translation');
+assert.equal(officialH3MissingReferenceNotice(currentH3, h3Context), undefined, 'valid output remains normal');
+assert.equal(videoPromptReferencePreviews({ ...project, storyboards: [staleH3] }).length, 0, 'legacy invalid artifacts do not bypass validation');
+console.log('videoDirectorDraft: prompt selection, missing-reference original previews, explicit references and snapshot tests passed');

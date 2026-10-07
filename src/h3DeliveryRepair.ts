@@ -1,6 +1,7 @@
 import { H3DeliveryValidationError, H3IdentityMetadataError, H3_IDENTITY_SCHEMA_RULE, H3_METADATA_SCHEMA_RULE, h3FieldIssue, h3Record, type H3DeliveryFieldIssue } from './h3DeliverySchema';
+import { CHARACTER_PARTICIPATION_RULE } from './characterParticipation';
 
-const fields = ['identityBindings', 'shotSourceIds', 'shotMetadata'] as const;
+const fields = ['identityBindings', 'characterParticipation', 'shotSourceIds', 'shotMetadata'] as const;
 type MetadataField = typeof fields[number];
 
 export interface H3MetadataRepairPlan {
@@ -38,6 +39,7 @@ export const H3_METADATA_REPAIR_RULE = [
   '不能为通过校验删除人物、清空绑定、编造人物ID或镜头来源；结合给定原始证据修复必要字段。仅可选空值的写法可规范化。若正文与绑定在语义上冲突，不能擅自更改正文掩盖问题。',
   H3_IDENTITY_SCHEMA_RULE,
   H3_METADATA_SCHEMA_RULE,
+  CHARACTER_PARTICIPATION_RULE,
 ].join('\n\n');
 
 /** Deterministic field replacement only. No guessed defaults or text edits.

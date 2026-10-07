@@ -1,6 +1,6 @@
 {
   "name": "lianhua-video-director",
-  "version": "1.4.5",
+  "version": "1.4.8",
   "productName": "莲华视频导演台",
   "private": true,
   "description": "莲华视频导演台：从小说到连续视频分镜与提示词",
@@ -20,6 +20,8 @@
     "test:source-integrity": "tsx scripts/sourceIntegrity.test.ts",
     "test:long-story-regression": "tsx scripts/longStoryRegression.test.ts",
     "test:sequence-plan": "tsx scripts/sequencePlan.test.ts",
+    "test:sequence-plan-deletion": "tsx scripts/sequencePlanDeletion.test.ts",
+    "test:sequence-plan-deletion-ui": "node scripts/sequencePlanDeletionUiQa.mjs",
     "test:sequence-reference": "tsx scripts/sequenceReferencePrompt.test.ts && npm run test:sequence-prompt-handoff",
     "test:sequence-prompt-handoff": "tsx scripts/sequencePromptHandoff.test.ts && tsx scripts/sequencePromptHandoffPipeline.test.ts && tsx scripts/sequencePromptHandoffApp.test.ts",
     "test:sequence-prompt-handoff-ui": "node scripts/sequencePromptHandoffUiQa.mjs",
@@ -94,6 +96,8 @@
     "test:workspace-history": "tsx scripts/workspaceHistory.test.ts && tsx scripts/storyDraftPersistence.test.ts && tsx scripts/storyboardRequestIdentity.test.ts",
     "test:project-library": "tsx scripts/projectLibrary.test.ts",
     "test:asset-deletion": "tsx scripts/assetDeletion.test.ts",
+    "test:asset-deletion-ui": "node scripts/assetDeletionUiQa.mjs",
+    "test:deleted-asset-prompt-recovery": "tsx scripts/deletedAssetPromptRecovery.test.ts",
     "test:styles": "tsx scripts/styles.test.ts && tsx scripts/sidebarFit.test.ts && tsx scripts/uiInformationVisibility.test.ts && npm run test:reference-image-names",
     "test:sidebar-fit-ui": "node scripts/sidebarFitUiQa.mjs",
     "test:story-preparation-buttons-ui": "node scripts/storyPreparationButtonsUiQa.mjs",
@@ -219,7 +223,7 @@
     "test:video-workbench": "tsx scripts/videoWorkbenchEditing.test.ts && tsx scripts/videoWorkbench.test.ts && tsx scripts/videoWorkbenchSelection.test.ts && tsx scripts/videoWorkbenchSinglePage.test.ts && tsx scripts/workbenchNamePages.test.ts && node --test scripts/videoWorkbenchBackend.test.mjs",
     "test:audit-recovery": "tsx scripts/imageAuditRecovery.test.ts && tsx scripts/videoAuditRecovery.test.ts && tsx scripts/fourViewPermissive.test.ts",
     "test:extended-regression": "tsx scripts/characterMorphology.test.ts && tsx scripts/dialogueCache.test.ts && npm run test:dialogue-coverage && npm run test:dialogue-source && npm run test:dialogue-quote-protection && npm run test:dialogue-retention && node --test scripts/imageReferenceTransport.test.mjs && tsx scripts/promptDialogueLanguage.test.ts && tsx scripts/runtimeErrorLog.test.ts && tsx scripts/storageLegacy120Compatibility.test.ts && npm run test:video-conversion-rule-migration && npm run test:video-prompt-navigation && npm run test:video-provenance",
-    "test": "npm run test:typecheck && npm run test:rhtv && npm run test:rhtv-electron && npm run test:story-preparation && npm run test:video-tail-reference && npm run test:video-workbench && npm run test:grid-director && npm run test:master-timeline && npm run test:segmentation && npm run test:source-integrity && npm run test:long-story-regression && npm run test:dialogue-speaker && npm run test:dialogue-performance && npm run test:sequence-plan && npm run test:single-segment-prompt && npm run test:prompt-delivery-recovery && npm run test:sequence-reference && npm run test:h3-english-budget && npm run test:h3-reference-budget && npm run test:h3-multi-reference && npm run test:visual-styles && npm run test:director-styles && npm run test:prompt && npm run test:nsfw-continuity && npm run test:nsfw-private-assets && npm run test:audio-policy && npm run test:soundscape && npm run test:prompt-translation && npm run test:official-prompt && npm run test:storage && npm run test:adapters && npm run test:workflow && npm run test:integrity && npm run test:video-tasks && npm run test:video-generation && npm run test:video-cancellation-persistence && npm run test:renderer-crash-recovery && npm run test:video-settings && npm run test:runninghub && npm run test:runninghub-credentials && npm run test:video-batch && npm run test:video-batch-deletion && npm run test:video-director-draft && npm run test:semantic-video-prompt-context && npm run test:h3-identity && npm run test:video-director-references && npm run test:video-reference-slots && npm run test:video-preparation-recovery && npm run test:video-desktop-transport && npm run test:app-effects && npm run test:project-library && npm run test:project-background && npm run test:styles && npm run test:media-unit && npm run test:image-generation && npm run test:reference-image-format && npm run test:image-size && npm run test:image-rules && npm run test:landscape-image && npm run test:image-rule-app && npm run test:novelai && npm run test:image-queue && npm run test:storyboard-images && npm run test:storyboard-image-to-image && npm run test:llm && npm run test:storyboard-repair && npm run test:comfyui && npm run test:comfyui-settings && npm run test:comfyui-request && npm run test:media-assets && npm run test:storyboard-versions && npm run test:app-context && npm run test:audit-recovery && npm run test:extended-regression && npm run test:security && npm run test:bundle-budget && npm run test:electron-review && npm run test:release-review && npm run test:workflow-smoke-unit",
+    "test": "npm run test:typecheck && npm run test:rhtv && npm run test:rhtv-electron && npm run test:story-preparation && npm run test:video-tail-reference && npm run test:video-workbench && npm run test:grid-director && npm run test:master-timeline && npm run test:segmentation && npm run test:source-integrity && npm run test:long-story-regression && npm run test:dialogue-speaker && npm run test:dialogue-performance && npm run test:sequence-plan && npm run test:single-segment-prompt && npm run test:character-participation && npm run test:prompt-delivery-recovery && npm run test:sequence-reference && npm run test:h3-english-budget && npm run test:h3-reference-budget && npm run test:h3-multi-reference && npm run test:visual-styles && npm run test:director-styles && npm run test:prompt && npm run test:nsfw-continuity && npm run test:nsfw-private-assets && npm run test:audio-policy && npm run test:soundscape && npm run test:prompt-translation && npm run test:official-prompt && npm run test:storage && npm run test:adapters && npm run test:workflow && npm run test:integrity && npm run test:video-tasks && npm run test:video-generation && npm run test:video-cancellation-persistence && npm run test:renderer-crash-recovery && npm run test:video-settings && npm run test:runninghub && npm run test:runninghub-credentials && npm run test:video-batch && npm run test:video-batch-deletion && npm run test:video-director-draft && npm run test:semantic-video-prompt-context && npm run test:h3-identity && npm run test:video-director-references && npm run test:video-reference-slots && npm run test:video-preparation-recovery && npm run test:video-desktop-transport && npm run test:app-effects && npm run test:project-library && npm run test:project-background && npm run test:styles && npm run test:media-unit && npm run test:image-generation && npm run test:reference-image-format && npm run test:image-size && npm run test:image-rules && npm run test:landscape-image && npm run test:image-rule-app && npm run test:novelai && npm run test:image-queue && npm run test:storyboard-images && npm run test:storyboard-image-to-image && npm run test:llm && npm run test:storyboard-repair && npm run test:comfyui && npm run test:comfyui-settings && npm run test:comfyui-request && npm run test:media-assets && npm run test:storyboard-versions && npm run test:app-context && npm run test:audit-recovery && npm run test:extended-regression && npm run test:security && npm run test:bundle-budget && npm run test:electron-review && npm run test:release-review && npm run test:workflow-smoke-unit",
     "preview": "vite preview",
     "desktop": "npm run build && electron .",
     "desktop:dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron . --dev\"",
@@ -272,7 +276,12 @@
     "deliver:1.4.3": "node scripts/createDelivery.mjs",
     "deliver:1.4.4": "node scripts/createDelivery.mjs",
     "deliver:1.4.5": "node scripts/createDelivery.mjs",
-    "test:packaged-cold-start": "node scripts/packagedColdStartUiQa.mjs"
+    "deliver:1.4.6": "node scripts/createDelivery.mjs",
+    "deliver:1.4.7": "node scripts/createDelivery.mjs",
+    "test:packaged-cold-start": "node scripts/packagedColdStartUiQa.mjs",
+    "deliver:1.4.8": "node scripts/createDelivery.mjs",
+    "test:character-participation": "tsx scripts/characterParticipation.test.ts && tsx scripts/characterParticipationPersistence.test.ts && tsx scripts/videoSegmentCharacters.test.ts",
+    "test:character-participation-ui": "node scripts/videoCharacterParticipationUiQa.mjs"
   },
   "dependencies": {
     "playwright-core": "^1.62.1",

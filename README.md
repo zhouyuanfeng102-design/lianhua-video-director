@@ -4,13 +4,13 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的 Windows 桌面工作台。
 
-当前版本：**1.4.5** · 2026-10-06 · Windows 64 位 · 便携运行
+当前版本：**1.4.8** · 2026-10-07 · Windows 64 位 · 便携运行
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows 便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-1.4.5.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-1.4.8.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
 1. 下载上面的 EXE，放在可写入的文件夹里，双击运行，无需安装 Node.js。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
@@ -28,7 +28,7 @@
 - **图像与视频任务**：配置对应服务后提交任务，管理参考图、首尾帧、批量任务与结果，查看图片任务实际使用的生图规则与分类预设。
 - **项目与资产管理**：管理图片、视频和音频，保存项目包、备份资料并导出提示词。
 
-1.4.5 修复 1.4.4 打开白屏的问题，保留 AI 画面描述转化、转化原文对照及分段、H3、Seedance 的剧情因果信息。无需清理项目数据。详见[版本说明](docs/releases/发布说明-1.4.5.md)。
+1.4.8 修复正文已有人物但选图提醒和人物图片关联遗漏的问题，显示每个人物的实际图片关联状态，支持简称与后续镜头出场人物。保留已有提示词及删图保护。详见[版本说明](docs/releases/发布说明-1.4.8.md)。
 
 ## 从源码运行
 

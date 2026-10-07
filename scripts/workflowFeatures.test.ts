@@ -1041,8 +1041,13 @@ assert.match(
 );
 assert.match(
   deleteAssetSource,
-  /masterPromptConfirmationFingerprint\([\s\S]*?invalidateSequenceSegmentsForMasterPrompt\([\s\S]*?invalidatedStoryboardIds/su,
-  'deleting an asset must invalidate old segments when rebuilding changes an authoritative master prompt',
+  /deleteAssetFromProject\(current\.project, id\)/u,
+  'asset deletion must only detach media references through the shared deletion transaction',
+);
+assert.doesNotMatch(
+  deleteAssetSource,
+  /rebuildStoryboard|invalidateSequenceSegmentsForMasterPrompt|masterPromptConfirmationFingerprint/u,
+  'deleting an asset must preserve authored prompts and all existing sequence segments',
 );
 assert.match(
   appSource,

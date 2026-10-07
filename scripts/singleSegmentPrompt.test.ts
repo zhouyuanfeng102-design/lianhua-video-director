@@ -10,7 +10,7 @@ import { normalizeCanonicalDialogueQuotes } from '../src/dialogueCoverage';
 import { applyOfficialH3Prompt, hasCurrentOfficialH3Prompt, type OfficialH3ProjectContext } from '../src/officialPrompt';
 import { sourceContentHash } from '../src/sourceIntegrity';
 import { semanticSegmentStoryContent, type SemanticSegmentSourceContext } from '../src/semanticSequencePlan';
-import type { Character, ConverterPreset, ReferenceAsset, Storyboard, VideoSegment, VideoSequencePlan, VideoShot } from '../src/types';
+import type { Character, ConverterPreset, H3IdentityBindings, PromptCharacterParticipation, ReferenceAsset, Storyboard, VideoSegment, VideoSequencePlan, VideoShot } from '../src/types';
 
 const hero: Character = {
   id: 'hero', name: '旅人', gender: '男', apparentAge: '成年', race: '人类', appearance: '黑发长眉',
@@ -573,6 +573,8 @@ for (const { purpose, formatRepair } of [
   };
   const sourceSnapshot = JSON.stringify(sourceBoard);
   let candidateChinese = '';
+  let candidateIdentityBindings: H3IdentityBindings | undefined;
+  let candidateParticipation: PromptCharacterParticipation | undefined;
   const generated = await generateSingleSegmentPrompt({
     board: sourceBoard, context, converter, purpose, sequenceSegmentContext: semanticInput,
     sourceStoryContent: semanticInput.segment.content, reviewWithAi: true, clean,
@@ -584,7 +586,7 @@ for (const { purpose, formatRepair } of [
         assert.ok(system.includes('STORY_CAUSALITY_TRANSLATION_V1'));
         assert.ok(!user.includes('随后二人前往庭院。'), 'English translates the approved Chinese, not fresh outside events');
         assert.match(system, /以已确认的 sourcePrompt|保真已确认中文sourcePrompt/u);
-        return candidateChinese;
+        return candidateIdentityBindings ? JSON.stringify({ h3Prompt: candidateChinese, identityBindings: candidateIdentityBindings }) : candidateChinese;
       }
       assert.match(system, /同一次发话/u);
       assert.ok(system.includes('STORY_UNDERSTANDING_CONTEXT_V1'));
@@ -603,7 +605,8 @@ for (const { purpose, formatRepair } of [
         assert.equal(data.sourceContext.taskAuthority, 'preserve-confirmed-schedule');
         assert.equal(data.sourceContext.shotSourceCoordinateBasis, 'segmentScope.savedSegmentSourceStoryContent');
         assert.equal(data.sourceContext.segmentScope.savedSegmentSourceStoryContent, semanticRawSegment.content);
-        return candidateChinese;
+        return candidateIdentityBindings ? JSON.stringify({ h3Prompt: candidateChinese, identityBindings: candidateIdentityBindings,
+          characterParticipation: candidateParticipation }) : candidateChinese;
       }
       const data = jsonBlock(user, 'video_staging_review_data');
       assert.equal(data.sourceStoryContent, semanticInput.generationStoryContent, 'H3 and explicit dialogue repair must see the complete primary source');
@@ -618,9 +621,21 @@ for (const { purpose, formatRepair } of [
         assert.equal(data.revisionScope, 'reference-refresh-non-audio-only');
         return candidateChinese;
       }
+      const anchors = ['Identity: 旅人，黑色斗篷。', 'Identity: 阿青，青色短袍。'];
+      candidateChinese = candidateChinese.startsWith('subject_definitions:')
+        ? candidateChinese.replace('subject_definitions:', `subject_definitions:\n${anchors.join('\n')}`)
+        : candidateChinese.replace('[Shot 1]', `[Shot 1] ${anchors.join(' ')}`);
+      candidateIdentityBindings = { version: 1, characters: [hero, companion].map((person, index) => ({
+        characterId: person.id, name: person.name, referenceAnchor: anchors[index],
+      })) };
+      candidateParticipation = { version: 1, characters: [hero, companion].map((person) => ({
+        characterId: person.id, name: person.name, presence: 'visible', shotIndex: 1, evidence: person.name,
+      })) };
       return JSON.stringify({
         canonicalPrompt: data.canonicalPrompt,
         h3Prompt: formatRepair ? candidateChinese.replace('overall_soundscape:', 'invalid_soundscape:') : candidateChinese,
+        identityBindings: candidateIdentityBindings,
+        characterParticipation: candidateParticipation,
         shotSourceIds: data.shots.map((shot: { id: string }) => [shot.id]),
       });
     },

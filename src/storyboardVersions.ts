@@ -4,6 +4,7 @@ import type {
   Storyboard as ProjectStoryboard,
   StoryboardRevision as ProjectStoryboardRevision,
   H3IdentityBindings,
+  PromptCharacterParticipationSnapshot,
   AudioCue,
   PromptPlanSnapshot,
   PromptTrace,
@@ -12,6 +13,7 @@ import type {
 } from './types';
 import { normalizeSequencePromptHandoffStamp } from './sequencePromptHandoffStamp';
 import { normalizeH3IdentityBindings } from './h3IdentityBindings';
+import { normalizeCharacterParticipationSnapshot } from './characterParticipation';
 import { normalizeVideoCreativeDirection, type VideoCreativeDirection } from './videoCreativeDirection';
 
 export interface VersionShotLike {
@@ -43,6 +45,7 @@ export interface StoryboardRevisionSource {
   officialPromptEnSource?: string;
   h3IdentityBindings?: H3IdentityBindings;
   h3IdentityBindingsEn?: H3IdentityBindings;
+  h3CharacterParticipation?: PromptCharacterParticipationSnapshot;
   shotMode?: ShotMode;
   shotCount?: number;
   recommendedShotCount?: number;
@@ -75,6 +78,7 @@ export interface StoryboardRevision {
   officialPromptEnSource?: string;
   h3IdentityBindings?: H3IdentityBindings;
   h3IdentityBindingsEn?: H3IdentityBindings;
+  h3CharacterParticipation?: PromptCharacterParticipationSnapshot;
   shotMode?: ShotMode;
   shotCount?: number;
   recommendedShotCount?: number;
@@ -212,6 +216,7 @@ export function createStoryboardRevision(
     ...(source.officialPromptEnSource !== undefined ? { officialPromptEnSource: textOf(source.officialPromptEnSource) } : {}),
     ...(source.h3IdentityBindings !== undefined ? { h3IdentityBindings: normalizeH3IdentityBindings(source.h3IdentityBindings) } : {}),
     ...(source.h3IdentityBindingsEn !== undefined ? { h3IdentityBindingsEn: normalizeH3IdentityBindings(source.h3IdentityBindingsEn) } : {}),
+    ...(source.h3CharacterParticipation !== undefined ? { h3CharacterParticipation: normalizeCharacterParticipationSnapshot(source.h3CharacterParticipation) } : {}),
     ...(source.shotMode !== undefined ? { shotMode: source.shotMode } : {}),
     ...(typeof source.shotCount === 'number' ? { shotCount: source.shotCount } : {}),
     ...(typeof source.recommendedShotCount === 'number' ? { recommendedShotCount: source.recommendedShotCount } : {}),
@@ -257,6 +262,7 @@ export function restoreStoryboardRevisionSnapshot<
     officialPromptEnSource: revision.officialPromptEnSource,
     h3IdentityBindings: normalizeH3IdentityBindings(revision.h3IdentityBindings),
     h3IdentityBindingsEn: normalizeH3IdentityBindings(revision.h3IdentityBindingsEn),
+    h3CharacterParticipation: normalizeCharacterParticipationSnapshot(revision.h3CharacterParticipation),
     // New snapshots distinguish an absent auto-mode user setting from the
     // actual AI shot count. Legacy snapshots keep their former fallback.
     ...(revision.shotMode !== undefined ? {

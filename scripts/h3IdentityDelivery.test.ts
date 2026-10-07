@@ -46,10 +46,10 @@ await test('missing, translated and duplicate anchors report exact reasons per p
   assert.equal(getH3IdentityBindingIssues(prompt(), bindings(), [{ id: 'adult-a', name: '其他原名' }])[0].code, 'character-name-mismatch');
 });
 
-await test('payload, section, second-shot and substring anchors cannot become visual bindings', () => {
+await test('payload, section and substring anchors are rejected; later-shot first appearances are accepted', () => {
   for (const tag of ['d', 'sound']) assert.ok(codes(prompt(`<${tag}>${anchor}</${tag}>`)).includes('anchor-payload'));
   assert.ok(codes(`integrated_multimodal_description:\n[Shot 1] 甲在桌旁。\noverall_soundscape: ${anchor}\nnon_diegetic_music: N/A`).includes('anchor-section'));
-  assert.ok(codes(prompt(`甲在桌旁。\n[Shot 2] At 00:07.500 ${anchor}`)).includes('anchor-shot'));
+  assert.deepEqual(codes(prompt(`甲在桌旁。\n[Shot 2] At 00:07.500 ${anchor}`)), []);
   assert.ok(codes(prompt(`前文${anchor}`)).includes('anchor-boundary'));
   for (const suffix of [' <Picture 1>', ' [Shot 1]', ' At 00:01.000', ' 1–3秒', ' 2 seconds']) {
     const bad = `${anchor}${suffix}`;
@@ -145,7 +145,9 @@ await test('missing Chinese identity sentence escalates from a locked metadata p
     request: async (_system, _user, stage) => {
       if (stage === 'review') {
         reviews += 1;
-        return JSON.stringify({ canonicalPrompt: canonical, h3Prompt: reviews === 1 ? official.officialPromptZh : zh, identityBindings: quietBindings(), shotSourceIds: [['s1']] });
+        return JSON.stringify({ canonicalPrompt: canonical, h3Prompt: reviews === 1 ? official.officialPromptZh : zh, identityBindings: quietBindings(),
+          characterParticipation: { version: 1, characters: [{ characterId: character.id, name: character.name,
+            presence: 'visible', shotIndex: 1, evidence: '成年甲', speaking: false }] }, shotSourceIds: [['s1']] });
       }
       translations += 1; return envelope(en, quietBindings(quietEnglishAnchor));
     } });

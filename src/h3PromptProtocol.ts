@@ -1,6 +1,7 @@
 import { AUDIO_EXISTING_SCOPE_RULE, AUDIO_TRANSLATION_SCOPE_RULE, DIALOGUE_DELIVERY_RULE } from './audioPromptPolicy';
 import { getH3IdentityBindingIssues, h3IdentityBindingRetentionIssue, H3_IDENTITY_BINDINGS_RULE, readH3DeliveryEnvelope, type H3IdentityCharacter } from './h3IdentityBindings';
-import type { H3IdentityBindings } from './types';
+import { CHARACTER_PARTICIPATION_RULE, characterParticipationCoverageIssues, characterParticipationIssues } from './characterParticipation';
+import type { H3IdentityBindings, PromptCharacterParticipation } from './types';
 
 /** Final H3 uses one clock: seconds since this submitted clip began. */
 export const H3_CLIP_TIME_RULE = [
@@ -256,6 +257,12 @@ export interface RepairH3PromptProtocolOptions {
     characters?: readonly H3IdentityCharacter[];
     onBindings: (bindings: H3IdentityBindings) => void;
   };
+  /** The same repair returns evidence for its final text, without another call. */
+  participationDelivery?: {
+    participation: PromptCharacterParticipation;
+    characters: readonly H3IdentityCharacter[];
+    onParticipation: (participation: PromptCharacterParticipation) => void;
+  };
 }
 
 /** Return the AI-authored body unchanged, or ask the same API a bounded number
@@ -264,16 +271,24 @@ export interface RepairH3PromptProtocolOptions {
  * synthesizes, reorders shots or restores prose locally. */
 export const repairH3PromptProtocolWithAi = async ({
   formatReferencePrompt, additionalReferenceTags = [], candidatePrompt, language, request, sourceContext,
-  maxAttempts: remainingAttempts = 3, identityDelivery,
+  maxAttempts: remainingAttempts = 3, identityDelivery, participationDelivery,
 }: RepairH3PromptProtocolOptions): Promise<string> => {
   const initialCandidate = candidatePrompt.trim();
   const selectedReferenceTags = [...additionalReferenceTags];
   let candidate = initialCandidate;
   let bindings = identityDelivery?.bindings;
+  let participation = participationDelivery?.participation;
   const validationIssue = (): string | undefined => getH3PromptProtocolIssue(candidate, formatReferencePrompt, selectedReferenceTags)
     || h3IdentityBindingRetentionIssue(identityDelivery?.bindings, bindings)
-    || getH3IdentityBindingIssues(candidate, bindings, identityDelivery?.characters).map((item) => `人物“${item.name}”[${item.code}] ${item.message}`).join(' ') || undefined;
-  const accept = (): string => { if (identityDelivery && bindings) identityDelivery.onBindings(bindings); return candidate; };
+    || getH3IdentityBindingIssues(candidate, bindings, identityDelivery?.characters).map((item) => `人物“${item.name}”[${item.code}] ${item.message}`).join(' ')
+    || (participationDelivery ? !participation ? '本次修复缺少characterParticipation，须与最终正文同步返回。'
+      : [...characterParticipationIssues(candidate, participation, participationDelivery.characters, bindings),
+        ...characterParticipationCoverageIssues(candidate, participation, participationDelivery.characters)].join(' ') : '') || undefined;
+  const accept = (): string => {
+    if (identityDelivery && bindings) identityDelivery.onBindings(bindings);
+    if (participationDelivery && participation) participationDelivery.onParticipation(participation);
+    return candidate;
+  };
   let issue = validationIssue();
   if (!issue) return accept();
   const baselineProtocol = readH3PromptProtocol(formatReferencePrompt);
@@ -295,9 +310,11 @@ export const repairH3PromptProtocolWithAi = async ({
       h3DescriptionLanguageRule(language),
       language === '英文' ? AUDIO_TRANSLATION_SCOPE_RULE : AUDIO_EXISTING_SCOPE_RULE,
       '本次仅修复协议序列化与本次格式转换造成的遗漏。对白以sourceContext的当前段原稿/已确认sourcePrompt为准，不能把具体原话压成“催促声/交谈声”等声音概述，也不能将未定台词交给视频模型自由编词；不利用旧格式基准恢复已在AI复核中去掉的配乐。源稿的无对白区间、原有非语言声与非说话动作按原范围保留；明确要求的不可辨人声仅在不与无对白要求冲突的区间保留，不把视觉姓名/资料/参考职责变成发声内容，不新增剧情、声源或台词。',
-      `不要返回【0s-6s】主体/空间/光影/镜头/台词/音效等普通六字段时间轴，不要返回审核说明、问题清单、代码围栏。${identityDelivery ? '外层返回下述正文与绑定JSON对象。' : '只返回完整H3正文，不返回JSON。'}所有内容修复由你生成完整正文，程序不替你改人物、对白或动作。`,
+      `不要返回【0s-6s】主体/空间/光影/镜头/台词/音效等普通六字段时间轴，不要返回审核说明、问题清单、代码围栏。${identityDelivery || participationDelivery ? '外层返回下述正文与元数据JSON对象。' : '只返回完整H3正文，不返回JSON。'}所有内容修复由你生成完整正文，程序不替你改人物、对白或动作。`,
       ...(identityDelivery ? [H3_IDENTITY_BINDINGS_RULE,
         '本次外层交付仅返回完整JSON对象{"h3Prompt":"完整正文","identityBindings":{"version":1,"characters":[]}}，绑定记录与最终正文逐字对应。保留所有已有characterId、name与Subject/声源映射，不省略或清空旧记录，不复用未出现在本次正文中的旧referenceAnchor。仅修复结构及绑定一致性，不新增剧情或调整镜头时间。'] : []),
+      ...(participationDelivery ? [CHARACTER_PARTICIPATION_RULE,
+        '本次完整JSON同时包含characterParticipation；按最终修复后的正文同步逐字evidence，保持已有实际参与类型与镜头，不省略该字段或用旧正文的证据。身份和人物参与记录与正文在本次同一回答中交付，不另行调用。'] : []),
     ].join('\n\n');
     const payload = JSON.stringify({
       formatReferencePrompt,
@@ -305,9 +322,12 @@ export const repairH3PromptProtocolWithAi = async ({
       requiredProtocol,
       formatIssue: issue,
       repairAttempt: attempt,
-      ...(sourceContext || bindings ? { sourceContext: { ...sourceContext, ...(bindings ? { identityBindings: bindings } : {}) } } : {}),
+      ...(sourceContext || bindings || participation ? { sourceContext: { ...sourceContext,
+        ...(bindings ? { identityBindings: bindings } : {}),
+        ...(participation ? { characterParticipation: participation } : {}),
+      } } : {}),
     }).replace(/</gu, '\\u003c').replace(/>/gu, '\\u003e');
-    const response = (await request(system, `<h3_format_repair_data>\n${payload}\n</h3_format_repair_data>\n请由你完成格式修复，${identityDelivery ? '返回h3Prompt与identityBindings同步的完整JSON交付。' : '只返回完整H3正文。'}`)).trim();
+    const response = (await request(system, `<h3_format_repair_data>\n${payload}\n</h3_format_repair_data>\n请由你完成格式修复，${participationDelivery ? '返回h3Prompt、characterParticipation及已有identityBindings同步的完整JSON交付。' : identityDelivery ? '返回h3Prompt与identityBindings同步的完整JSON交付。' : '只返回完整H3正文。'}`)).trim();
     try {
       // Parse even an unexpected envelope: a model-declared binding is never
       // silently discarded merely because the source was a legacy prompt.
@@ -315,6 +335,7 @@ export const repairH3PromptProtocolWithAi = async ({
       if (!identityDelivery && delivery.identityBindings) throw new Error('本次旧稿未请求新增身份绑定，请保持已有完整正文交付，不能新增无人接收的元数据。');
       candidate = delivery.h3Prompt;
       bindings = delivery.identityBindings;
+      if (participationDelivery) participation = delivery.characterParticipation;
       issue = validationIssue();
     } catch (error) {
       issue = error instanceof Error ? error.message : String(error);

@@ -235,7 +235,8 @@ import {
   nsfwPrivatePartForAsset,
 } from "./nsfwPrivateAssets";
 import { appendShotRewriteGuidance } from "./shotRewrite";
-import { storyboardReferencesAsset } from "./assetDeletion";
+import { deleteAssetFromProject } from "./assetDeletion";
+import { deleteSequencePlanFromProject } from "./sequencePlanDeletion";
 import { buildGenerationPlan } from "./generationPlan";
 import {
   compareStoryboardRevisions,
@@ -298,6 +299,7 @@ import { requestSemanticSequencePlan } from "./services/semanticSequencePlanner"
 import { isSemanticSequencePlan, normalizeSemanticSequenceRequestedTotalDuration, semanticSegmentSourceContext, semanticSequenceSourceFingerprint, semanticSequenceCharacters } from "./semanticSequencePlan";
 import { officialH3ContextForStoryboard } from "./officialH3Context";
 import { repairH3IdentityBindings, H3IdentityRepairCancelledError } from "./h3IdentityRepair";
+import { resolvePromptCharacterParticipation, resolveStoryboardCharacterParticipation } from "./characterParticipation";
 import { commitH3IdentityRepair } from "./h3IdentityRepairCommit";
 import lotusIcon from "../build/icon.png";
 import packageInfo from "../package.json";
@@ -5515,6 +5517,58 @@ export default function App() {
     return withProjectLibrary({ ...sourceState, project }, sourceState);
   };
 
+  const sequencePlanDeletionIsBusy = () => Boolean(
+    busy || planningBusy || sequenceBatchRunning || hasActiveStoryboardBuild()
+    || sequencePlanningAbortRef.current || sequenceBatchIdentityRef.current
+    || sequencePromptRefreshRef.current,
+  );
+  const handleDeleteSequencePlan = (planId: string): boolean => {
+    if (sequencePlanDeletionIsBusy()) {
+      notify("正在生成或更新剧情提示词，请完成或停止后再删除方案。", "error");
+      return false;
+    }
+    const current = stateRef.current;
+    const plan = chapterPlans(current.project).find((item) => item.id === planId);
+    if (!plan) return false;
+    const preview = deleteSequencePlanFromProject(current.project, planId);
+    if (!window.confirm(
+      `确定删除分段方案“${plan.title}”（${plan.segments.length} 段）吗？\n将移除此方案及其 ${preview.removedStoryboardIds.length} 份分镜提示词。\n图片、视频和生成任务保留；删除后可用顶部“撤销”恢复。`,
+    )) return false;
+    if (sequencePlanDeletionIsBusy() || stateRef.current.project.id !== current.project.id
+      || activeChapter(stateRef.current.project)?.id !== activeChapter(current.project)?.id) return false;
+    const source = stateWithCurrentDraft(stateRef.current);
+    const removal = deleteSequencePlanFromProject(source.project, planId);
+    if (removal.project === source.project) return false;
+    const selectedPlanRemoved = activePlanIdRef.current === planId || activePlanId === planId;
+    const selectedBoardRemoved = removal.removedStoryboardIds.includes(activeStoryboardId);
+    const selectedSegmentRemoved = removal.removedSegmentIds.includes(activeSegmentId);
+    setState({ ...source, project: removal.project });
+    if (selectedPlanRemoved || selectedBoardRemoved || selectedSegmentRemoved) {
+      cancelSequenceGeneration(false);
+      const remainingPlans = chapterPlans(removal.project);
+      const fallback = remainingPlans.find((item) => item.id === activePlanId) || remainingPlans[0];
+      const segment = fallback?.segments[0];
+      activePlanIdRef.current = fallback?.id || "";
+      setActivePlanId(fallback?.id || "");
+      setActiveSegmentId(segment?.id || "");
+      setActiveStoryboardId(segment?.storyboardId || fallback?.masterStoryboardId
+        || (!fallback ? chapterBoards(removal.project)[0]?.id : "") || "");
+      setConfirmedSequencePlanFingerprint(fallback?.reviewConfirmedFingerprint || "");
+      setAcceptedSequencePlanMismatchFingerprint("");
+      setAcknowledgedCompressedPlanFingerprint(fallback?.compressedRiskAcknowledgedFingerprint || "");
+      setSequenceStage(fallback?.planningStage === "segmented" ? "direct" : "plan");
+      setProductionMode(fallback ? "sequence" : "single");
+      setSequenceMasterGenerationIssue("");
+      if (fallback) {
+        restoreSequencePlanTiming(fallback);
+        if (isSemanticSequencePlan(fallback)) restoreSequenceDirectorSettings(fallback.semanticPlanningSnapshot?.directorSettingsFingerprint);
+        if (segment) setDirectorDurationForSegment(segment);
+      }
+    }
+    notify("分段方案已删除，图片、视频和生成任务保留；可用顶部撤销恢复。");
+    return true;
+  };
+
   const changeChapterProject = (change: (project: AppState['project']) => AppState['project']) => {
     const source = stateWithCurrentDraft(stateRef.current);
     if (!backgroundChapterRef.current && (busy || planningBusy || sequenceBatchRunning || hasActiveStoryboardBuild() || sequencePromptRefreshRef.current)) {
@@ -6521,8 +6575,10 @@ export default function App() {
           : semanticContext.segment.semanticSource.events.flatMap(({ causality }) => causality
             ? [causality.certainty === "unknown" ? undefined : causality.actorCharacterId, causality.targetCharacterId]
                 .filter((id): id is string => Boolean(id)) : []));
+        const participatingIds = new Set(resolvePromptCharacterParticipation(segmentIdentityText, generationCharacters)
+          .characters.filter((item) => item.presence !== "mentioned").map((item) => item.characterId));
         sceneForGeneration.characterIds = generationCharacters.filter((character) => causalCharacterIds.has(character.id)
-          || [character.name, ...(character.aliases || [])].some((name) => name.trim() && segmentIdentityText.includes(name)))
+          || participatingIds.has(character.id))
           .map((character) => character.id);
       }
       if (!fullTimeline && segmentForGeneration && override?.sequencePlanId) {
@@ -7516,8 +7572,13 @@ export default function App() {
     // Both language deliveries belong to this explicit repair selection. Old
     // English may have no metadata; it must not invent a different cast or
     // discard a completed Chinese repair just because its own list is absent.
-    const repairTargetIds = characterIds ?? (language === "zh"
-      ? sourceBoard.h3IdentityBindings : sourceBoard.h3IdentityBindingsEn)?.characters.map((item) => item.characterId);
+    const participation = resolveStoryboardCharacterParticipation(sourceBoard, context.characters || [],
+      language === "zh" ? sourceBoard.officialPromptZh! : sourceBoard.officialPromptEn!);
+    const suggestedTargetIds = [...new Set([
+      ...((language === "zh" ? sourceBoard.h3IdentityBindings : sourceBoard.h3IdentityBindingsEn)?.characters.map((item) => item.characterId) || []),
+      ...participation.characters.filter((item) => item.presence === "visible").map((item) => item.characterId),
+    ])];
+    const repairTargetIds = characterIds ?? (suggestedTargetIds.length ? suggestedTargetIds : undefined);
     const epoch = workspaceEpochRef.current;
     const boardSnapshot = JSON.stringify({ ...sourceBoard, imageToImage: undefined });
     const plansSnapshot = JSON.stringify(snapshot.project.sequencePlans);
@@ -7776,6 +7837,7 @@ export default function App() {
             officialPromptZh: refreshedChinesePrompt,
             officialPromptSource: refreshedOfficialBoard.officialPromptSource,
             h3IdentityBindings: refreshedOfficialBoard.h3IdentityBindings,
+            h3CharacterParticipation: refreshedOfficialBoard.h3CharacterParticipation,
             sequencePromptHandoff: refreshedOfficialBoard.sequencePromptHandoff,
           } : {}),
           officialPromptEn: englishPrompt,
@@ -8795,6 +8857,8 @@ export default function App() {
     activeSegmentId,
     chooseSequenceSegment,
     sequenceBatchRunning,
+    handleDeleteSequencePlan,
+    sequencePlanDeletionBlocked: sequencePlanDeletionIsBusy(),
     sequenceBatchProgress,
     cancelSequenceGeneration,
     generateCurrentSequenceSegment,
@@ -9938,6 +10002,8 @@ interface AppContext {
   setActivePlanId: React.Dispatch<React.SetStateAction<string>>;
   activeSegmentId: string;
   chooseSequenceSegment: (segmentId: string, planId?: string) => void;
+  handleDeleteSequencePlan: (planId: string) => boolean;
+  sequencePlanDeletionBlocked: boolean;
   sequenceBatchRunning: boolean;
   sequenceBatchProgress: SequenceBatchProgress;
   cancelSequenceGeneration: (announce?: boolean) => void;
@@ -14509,6 +14575,8 @@ function StoryboardView(ctx: AppContext) {
     activeStoryboardId,
     setActiveStoryboardId,
     chooseSequenceSegment,
+    handleDeleteSequencePlan,
+    sequencePlanDeletionBlocked,
     setView,
     updateStoryboard,
     rebuildStoryboard,
@@ -14814,6 +14882,7 @@ function StoryboardView(ctx: AppContext) {
       officialPromptEnSource: revision.officialPromptEnSource,
       h3IdentityBindings: revision.h3IdentityBindings,
       h3IdentityBindingsEn: revision.h3IdentityBindingsEn,
+      h3CharacterParticipation: revision.h3CharacterParticipation,
       shotMode: revision.shotMode,
       shotCount: revision.shotCount,
       recommendedShotCount: revision.recommendedShotCount,
@@ -15400,8 +15469,22 @@ function StoryboardView(ctx: AppContext) {
           <div className="row-between">
             <div className="grid" style={{ gap: 7, minWidth: 0, flex: 1 }}>
               {sequencePlans.map((plan) => (
-                <div key={plan.id} className="row wrap storyboard-sequence-group">
-                  <strong className="small-text">{plan.title}</strong>
+                <div key={plan.id} className="storyboard-sequence-group" data-plan-id={plan.id}>
+                  <div className="storyboard-sequence-head">
+                    <div className="storyboard-sequence-label">
+                      <strong className="small-text">{plan.title}</strong>
+                      <span className="muted small-text">{plan.segments.length} 段 · {formatTime(plan.totalDurationSec)} · {new Date(plan.createdAt).toLocaleString("zh-CN")}</span>
+                    </div>
+                    <Button small variant="danger" className="storyboard-sequence-delete" icon={<Trash2 size={13} />}
+                      ariaLabel={`删除方案：${plan.title}（${plan.segments.length}段）`}
+                      disabled={sequencePlanDeletionBlocked || targetBusy}
+                      title={sequencePlanDeletionBlocked || targetBusy ? "请先完成或停止当前提示词生成" : "删除这组分段方案及其分镜提示词，保留图片、视频和任务"}
+                      onClick={() => {
+                        if (!handleDeleteSequencePlan(plan.id)) return;
+                        setShotPage(1); setSelectedShotId(""); setSelectedShotIds([]); setDraggedShotId("");
+                      }}>删除方案</Button>
+                  </div>
+                  <div className="row wrap storyboard-sequence-segments">
                   {[...plan.segments]
                     .sort((left, right) => left.index - right.index)
                     .map((segment) => {
@@ -15422,6 +15505,7 @@ function StoryboardView(ctx: AppContext) {
                         </button>
                       );
                     })}
+                  </div>
                 </div>
               ))}
               {legacyBoards.length > 0 && (
@@ -19459,7 +19543,6 @@ function AssetsView(ctx: AppContext) {
     activeStoryboard,
     getCurrentProjectId,
     updateStoryboard,
-    rebuildStoryboard,
     setSelectedAssetIds,
     notify,
   } = ctx;
@@ -19737,109 +19820,10 @@ function AssetsView(ctx: AppContext) {
       current.filter((assetId) => assetId !== id),
     );
     setState((current: AppState) => {
-      if (!current.project.assets.some((asset) => asset.id === id)) return current;
-      const projectWithoutAsset: AppState["project"] = {
-        ...current.project,
-        assets: current.project.assets.filter((asset) => asset.id !== id),
-        characters: current.project.characters.map((item) => ({
-          ...item,
-          assetIds: item.assetIds.filter((assetId) => assetId !== id),
-        })),
-        locations: current.project.locations.map((item) => ({
-          ...item,
-          assetIds: item.assetIds.filter((assetId) => assetId !== id),
-        })),
-        props: current.project.props.map((item) => ({
-          ...item,
-          assetIds: item.assetIds.filter((assetId) => assetId !== id),
-        })),
-      };
-      const stateWithoutAsset: AppState = {
-        ...current,
-        project: projectWithoutAsset,
-      };
-      let storyboards = projectWithoutAsset.storyboards.map((board) => {
-        if (!storyboardReferencesAsset(board, id)) return board;
-        const shots = board.shots.map((shot) => ({
-          ...shot,
-          referenceAssetIds: shot.referenceAssetIds.filter(
-            (assetId) => assetId !== id,
-          ),
-        }));
-        return rebuildStoryboard(
-          {
-            ...board,
-            globalReferenceAssetIds: (board.globalReferenceAssetIds || []).filter(
-              (assetId) => assetId !== id,
-            ),
-            shots,
-            promptTrace: board.promptTrace
-              ? {
-                  ...board.promptTrace,
-                  referenceAssetIds: board.promptTrace.referenceAssetIds.filter(
-                    (assetId) => assetId !== id,
-                  ),
-                }
-              : undefined,
-            firstFrameAssetId: board.firstFrameAssetId === id ? undefined : board.firstFrameAssetId,
-            lastFrameAssetId: board.lastFrameAssetId === id ? undefined : board.lastFrameAssetId,
-            audioLedger: (board.audioLedger || []).filter((cue) => cue.sourceAssetId !== id),
-          },
-          shots,
-          stateWithoutAsset,
-        );
-      });
-      const updatedAt = Date.now();
-      let sequencePlans = projectWithoutAsset.sequencePlans;
-      const invalidatedStoryboardIds = new Set<string>();
-      projectWithoutAsset.sequencePlans.forEach((plan) => {
-        if (!plan.masterStoryboardId) return;
-        const previousMaster = current.project.storyboards.find(
-          (board) => board.id === plan.masterStoryboardId,
-        );
-        const rebuiltMaster = storyboards.find(
-          (board) => board.id === plan.masterStoryboardId,
-        );
-        if (
-          !previousMaster
-          || !rebuiltMaster
-          || masterPromptConfirmationFingerprint(plan, previousMaster)
-            === masterPromptConfirmationFingerprint(plan, rebuiltMaster)
-        ) return;
-        const invalidated = invalidateSequenceSegmentsForMasterPrompt(
-          plan,
-          storyboards,
-          updatedAt,
-        );
-        invalidated.invalidatedStoryboardIds.forEach((storyboardId) =>
-          invalidatedStoryboardIds.add(storyboardId),
-        );
-        storyboards = invalidated.storyboards;
-        sequencePlans = sequencePlans.map((candidate) =>
-          candidate.id === invalidated.plan.id ? invalidated.plan : candidate,
-        );
-      });
-      return {
-        ...current,
-        project: {
-          ...projectWithoutAsset,
-          storyboards,
-          sequencePlans,
-          scenes: invalidatedStoryboardIds.size
-            ? projectWithoutAsset.scenes.map((scene) => {
-                const storyboardIds = scene.storyboardIds.filter(
-                  (storyboardId) => !invalidatedStoryboardIds.has(storyboardId),
-                );
-                return storyboardIds.length === scene.storyboardIds.length
-                  ? scene
-                  : { ...scene, storyboardIds, updatedAt };
-              })
-            : projectWithoutAsset.scenes,
-          updatedAt,
-        },
-      };
+      const project = deleteAssetFromProject(current.project, id);
+      return project === current.project ? current : { ...current, project };
     });
-    notify("资产已删除，相关实体、镜头和最终提示词已同步更新。");
+    notify("资产已删除并解除当前绑定，原有提示词已保留。");
   };
   const bindToStoryboard = (assetId: string) => {
     if (!activeStoryboard) {

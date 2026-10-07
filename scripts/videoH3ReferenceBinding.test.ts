@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createInitialState } from '../src/storage';
-import { readH3PromptProtocol } from '../src/h3PromptProtocol';
+import { getH3PromptProtocolIssue, readH3PromptProtocol } from '../src/h3PromptProtocol';
 import { isVideoH3ReferenceInfo, prepareVideoH3ReferenceDraft, videoH3PictureNumbers, videoH3ReferenceCharacterIds, videoReferenceCharacterOwners, videoReferenceLocationOwners } from '../src/videoH3ReferenceBinding';
 import { prepareVideoTailCharacterDraft } from '../src/videoTailCharacters';
 import { buildVideoApiBody } from '../src/videoGenerationApi';
@@ -403,6 +403,110 @@ await test('批量未来尾帧在入队时即冻结最终Picture绑定，等待�
     assert.equal(task.videoJob!.snapshot.draft.prompt, expected);
     assert.equal(task.videoJob!.snapshot.draft.references[1].assetId, 'a-image');
   } finally { engine.dispose(); }
+});
+
+const legacyHeroFixture = () => {
+  const { project, draft } = fixture();
+  const king = character('king', '里尤洛', []);
+  const hero = { ...character('hero', '夏提雅-女武神形态\u200c', ['hero-image']), aliases: ['夏提雅', 'Shalltear'] };
+  project.characters = [king, hero]; project.assets = [image('hero-image', 'hero'), image('tail')];
+  const kingAnchor = 'Identity: 里尤洛 (S1), the orc king.';
+  const prompt = `integrated_multimodal_description: [Shot 1] ${kingAnchor} 里尤洛望着前方。他提到了夏提雅。\n[Shot 2] At 00:07.500 夏提雅挥动长枪，将冲来的敌人击飞。<sound>金属撞击</sound>\noverall_soundscape: N/A\nnon_diegetic_music: N/A`;
+  draft.prompt = prompt; draft.parameters = {}; draft.references = [{ assetId: 'hero-image', role: 'character', slotIndex: 2 }];
+  draft.h3ReferenceBinding = { version: 1, projectId: project.id, basePrompt: prompt, renderedPrompt: prompt,
+    identities: { version: 1, characters: [{ characterId: 'king', name: king.name, speakerToken: '(S1)', referenceAnchor: kingAnchor }] } };
+  return { project, draft, hero, prompt };
+};
+
+await test('旧稿漏人物表项，出镜别名与选图身份唯一时仅本次提交补关联，使用真实云端槽位', () => {
+  const { project, draft, prompt } = legacyHeroFixture();
+  const before = structuredClone({ project, draft });
+  const result = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api: cloud() });
+  const association = ' Visual identity reference for 夏提雅-女武神形态 (known as 夏提雅): <Picture 3>.';
+  assert.equal(result.draft.prompt.replace(association, ''), prompt);
+  assert.ok(result.draft.prompt.indexOf(association) > result.draft.prompt.indexOf('[Shot 2]'), 'never move a later appearance to Shot 1');
+  assert.equal(getH3PromptProtocolIssue(prompt), undefined, 'the authored fixture has valid shot cuts');
+  assert.equal(getH3PromptProtocolIssue(result.draft.prompt, prompt, ['<Picture 3>']), undefined, 'only the explicitly selected picture extends the protocol');
+  assert.deepEqual(result.characterStates.find((entry) => entry.characterId === 'hero'), {
+    characterId: 'hero', name: '夏提雅-女武神形态\u200c', status: 'bound', slots: [3],
+  });
+  const body = buildVideoApiBody(cloud(), result.draft, ['hero-upload.png']);
+  const nodes = body.nodeInfoList as Array<{ nodeId: string; fieldValue: string }>;
+  assert.equal(nodes.find((node) => node.nodeId === 'i2')?.fieldValue, 'hero-upload.png');
+  assert.equal(nodes.find((node) => node.nodeId === 'p')?.fieldValue, result.draft.prompt);
+  assert.equal(prepareVideoH3ReferenceDraft(project, result.draft, { backend: 'api', api: cloud() }).draft.prompt, result.draft.prompt);
+  assert.deepEqual({ project, draft }, before, 'saved source and selected assets are immutable');
+  const deselected = prepareVideoH3ReferenceDraft(project, { ...result.draft, references: [] }, { backend: 'api', api: cloud() });
+  assert.equal(deselected.draft.prompt, prompt);
+  assert.equal(deselected.characterStates.find((entry) => entry.characterId === 'hero')?.status, 'unselected');
+  const frozenDraft = { ...result.draft, reuseTaskId: 'frozen' };
+  project.characters[1].name = '后来改名';
+  const frozen = prepareVideoH3ReferenceDraft(project, frozenDraft, { backend: 'api', api: cloud() });
+  assert.strictEqual(frozen.draft, frozenDraft);
+  assert.deepEqual(frozen.characterStates, result.characterStates);
+});
+
+await test('只有对白提及、明确画外、歧义别名、场景用途和不明槽位均不能冒充人物已关联', () => {
+  for (const visual of ['里尤洛说<d>[Chinese] 夏提雅在哪里？</d>。', '夏提雅在画外说话，镜头只拍里尤洛。']) {
+    const { project, draft } = legacyHeroFixture();
+    const prompt = draft.prompt.replace('夏提雅挥动长枪，将冲来的敌人击飞。', visual);
+    draft.prompt = prompt; draft.h3ReferenceBinding = { ...draft.h3ReferenceBinding!, basePrompt: prompt, renderedPrompt: prompt };
+    const result = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api: cloud() });
+    assert.equal(result.draft.prompt, prompt);
+    assert.equal(result.characterStates.find((entry) => entry.characterId === 'hero')?.status, 'pending');
+  }
+  const { project, draft } = legacyHeroFixture();
+  project.characters.push({ ...character('other-form', '夏提雅-礼服形态', []), aliases: ['夏提雅'] });
+  const ambiguous = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api: cloud() });
+  assert.equal(ambiguous.draft.prompt, draft.prompt);
+  assert.equal(ambiguous.characterStates.find((entry) => entry.characterId === 'hero')?.status, 'pending');
+  project.characters.pop();
+  const scene = prepareVideoH3ReferenceDraft(project, { ...draft, references: [{ assetId: 'hero-image', role: 'scene' }] }, { backend: 'api', api: cloud() });
+  assert.equal(scene.draft.prompt, draft.prompt);
+  assert.equal(scene.characterStates.find((entry) => entry.characterId === 'hero')?.status, 'unselected');
+  const unknown = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api: { ...cloud(), runningHubMappedFields: undefined } });
+  assert.equal(unknown.draft.prompt, draft.prompt);
+  assert.equal(unknown.characterStates.find((entry) => entry.characterId === 'hero')?.status, 'pending');
+});
+
+await test('可信旧英文原稿完全无身份表仍按唯一英文别名补派生关联，中文名和英文名同指一个ID', () => {
+  const { project, draft } = legacyHeroFixture();
+  const prompt = 'integrated_multimodal_description: [Shot 1] Shalltear thrusts her spear at the charging orcs.\noverall_soundscape: N/A\nnon_diegetic_music: N/A';
+  const board = { id: 'legacy-english', sceneId: project.scenes[0]?.id || '', shots: [], finalPrompt: prompt,
+    officialPromptZh: prompt, officialPromptEn: prompt, officialPromptEnSource: prompt } as Project['storyboards'][number];
+  project.storyboards = [board];
+  draft.prompt = prompt; draft.h3ReferenceBinding = undefined; draft.source = { storyboardId: board.id, language: 'en' };
+  project.assets.push(image('hero-second', 'hero'));
+  draft.references = [{ assetId: 'hero-image', role: 'character', slotIndex: 1 }, { assetId: 'hero-second', role: 'character', slotIndex: 4 }];
+  const before = structuredClone(project);
+  const result = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api });
+  assert.match(result.draft.prompt, /Visual identity reference for 夏提雅-女武神形态 \(known as Shalltear\): <Picture 1>, <Picture 2>\./u);
+  assert.deepEqual(result.characterStates.find((entry) => entry.characterId === 'hero')?.slots, [1, 2], 'generic arrays use upload order, not sparse slot numbers');
+  assert.equal(result.characterStates.find((entry) => entry.characterId === 'hero')?.status, 'bound');
+  assert.deepEqual(project, before);
+  assert.equal(draft.h3ReferenceBinding, undefined);
+});
+
+await test('后镜补关联保留At紧随镜号，三字段与六字段稿都不越入下一镜或声音章节', () => {
+  for (const fullReference of [false, true]) {
+    const { project, draft, prompt } = legacyHeroFixture();
+    const withNextShot = prompt.replace('\noverall_soundscape:', '\n[Shot 3] At 00:12.000 里尤洛退回军阵。\noverall_soundscape:');
+    const source = fullReference ? withNextShot.replace('integrated_multimodal_description:',
+      'subject_definitions:\n<Subject 1> is 里尤洛: the orc king.\nsummary:\n远处交战。\nretention_analysis:\nKeep the established identities.\ndetailed_description:') : withNextShot;
+    draft.prompt = source;
+    draft.h3ReferenceBinding = { ...draft.h3ReferenceBinding!, basePrompt: source, renderedPrompt: source };
+    const before = structuredClone(draft);
+    assert.equal(getH3PromptProtocolIssue(source), undefined);
+    const result = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api: cloud() });
+    assert.equal(result.characterStates.find((entry) => entry.characterId === 'hero')?.status, 'bound');
+    assert.equal(getH3PromptProtocolIssue(result.draft.prompt, source, ['<Picture 3>']), undefined);
+    assert.match(result.draft.prompt, /\[Shot 2\] At 00:07\.500 夏提雅/u);
+    const associationStart = result.draft.prompt.indexOf(' Visual identity reference for 夏提雅');
+    assert.ok(associationStart > result.draft.prompt.indexOf('At 00:07.500'));
+    assert.ok(associationStart < result.draft.prompt.indexOf('[Shot 3]'));
+    assert.deepEqual(literals(result.draft.prompt), literals(source));
+    assert.deepEqual(draft, before);
+  }
 });
 
 console.log(`${groups} H3 reference-binding regression groups passed (synthetic inputs, no real API)`);

@@ -220,6 +220,24 @@ export interface H3IdentityBindings {
   }>;
 }
 
+export type CharacterPresence = 'visible' | 'offscreen' | 'mentioned';
+/** Model-authored participation in the paired final H3, never a cast mandate. */
+export interface PromptCharacterParticipation {
+  version: 1;
+  characters: Array<{
+    characterId: string;
+    name: string;
+    presence: CharacterPresence;
+    shotIndex: number;
+    /** A literal short excerpt from the corresponding final H3 shot. */
+    evidence: string;
+    speaking?: boolean;
+  }>;
+}
+export interface PromptCharacterParticipationSnapshot extends PromptCharacterParticipation {
+  promptFingerprint: string;
+}
+
 export interface StoryboardRevision {
   id: string;
   storyboardId?: string;
@@ -235,6 +253,8 @@ export interface StoryboardRevision {
   officialPromptEnSource?: string;
   h3IdentityBindings?: H3IdentityBindings;
   h3IdentityBindingsEn?: H3IdentityBindings;
+  /** Chinese final-delivery participation; English may share only its exact paired source. */
+  h3CharacterParticipation?: PromptCharacterParticipationSnapshot;
   /** Text-only adjacent-segment handoff paired with this exact saved prompt. */
   sequencePromptHandoff?: SequencePromptHandoffStamp;
   /** Complete saved creative controls paired with this revision, if available. */
@@ -854,6 +874,8 @@ export interface Storyboard {
   /** Exact AI-authored anchors paired with the current Chinese/English H3 bodies. */
   h3IdentityBindings?: H3IdentityBindings;
   h3IdentityBindingsEn?: H3IdentityBindings;
+  /** Chinese final-delivery participation; English may share only its exact paired source. */
+  h3CharacterParticipation?: PromptCharacterParticipationSnapshot;
   createdAt: number;
   updatedAt: number;
   promptTrace?: PromptTrace;

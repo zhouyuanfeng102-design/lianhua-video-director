@@ -88,10 +88,16 @@ main:has(> .workspace.view-video) > .chapter-toolbar svg { width: 13px; height: 
 .vd-modal { width: min(1040px, 95vw); max-height: 90vh; background: var(--panel); border: 1px solid var(--line); box-shadow: var(--shadow); border-radius: 13px; display: flex; flex-direction: column; gap: 12px; padding: 18px; overflow: auto; color: var(--text); }
 .vd-modal-header { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
 .vd-modal-header h2 { margin: 0; font-size: calc(16px * var(--ui-font-scale, 1)); min-width: 0; }
-.vd-segment-character-hint { flex: 1 1 360px; min-width: 0; display: flex; align-items: center; gap: 6px 9px; flex-wrap: wrap; padding: 5px 9px; border: 1px solid color-mix(in srgb, var(--violet) 28%, var(--line)); border-radius: 8px; background: color-mix(in srgb, var(--violet) 7%, var(--panel)); color: var(--muted); font-size: calc(10px * var(--ui-font-scale, 1)); line-height: 1.4; overflow-wrap: anywhere; }
+.vd-segment-character-hint { flex: 1 1 440px; min-width: 0; max-height: min(25vh, 190px); overflow: auto; scrollbar-width: thin; display: flex; align-items: center; gap: 6px 9px; flex-wrap: wrap; padding: 6px 9px; border: 1px solid color-mix(in srgb, var(--violet) 28%, var(--line)); border-radius: 8px; background: color-mix(in srgb, var(--violet) 7%, var(--panel)); color: var(--muted); font-size: calc(10px * var(--ui-font-scale, 1)); line-height: 1.4; overflow-wrap: anywhere; }
 .vd-segment-character-hint-title { color: var(--violet); font-weight: 650; white-space: nowrap; }
-.vd-segment-character-hint-list { display: inline-flex; align-items: center; gap: 4px; flex-wrap: wrap; min-width: 0; }
-.vd-segment-character-chip { display: inline-flex; align-items: center; max-width: 220px; padding: 2px 7px; border: 1px solid color-mix(in srgb, var(--violet) 35%, var(--line)); border-radius: 999px; color: var(--text); background: var(--panel); overflow-wrap: anywhere; }
+.vd-segment-character-hint-list { display: flex; flex-basis: 100%; align-items: stretch; gap: 5px; flex-wrap: wrap; min-width: 0; }
+.vd-segment-character-chip { display: inline-flex; flex-direction: column; align-items: flex-start; min-width: 0; max-width: min(100%, 280px); gap: 1px; padding: 4px 7px; border: 1px solid color-mix(in srgb, var(--violet) 35%, var(--line)); border-radius: 6px; color: var(--text); background: var(--panel); overflow-wrap: anywhere; }
+.vd-segment-character-name { font-weight: 600; }
+.vd-segment-character-chip.bound { border-color: color-mix(in srgb, var(--green) 45%, var(--line)); }
+.vd-segment-character-chip.bound .vd-segment-character-state { color: var(--green); }
+.vd-segment-character-chip.pending .vd-segment-character-state { color: var(--amber); }
+.vd-segment-character-images, .vd-segment-character-secondary { color: var(--muted); }
+.vd-segment-character-secondary { flex-basis: 100%; }
 .vd-segment-character-hint-empty, .vd-segment-character-hint-note { color: var(--muted); }
 .vd-segment-character-hint-note { margin-left: auto; }
 .vd-modal-footer { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; border-top: 1px solid var(--line); padding-top: 12px; font-size: calc(11px * var(--ui-font-scale, 1)); }

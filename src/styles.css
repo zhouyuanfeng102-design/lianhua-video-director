@@ -2077,6 +2077,13 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
 /* Storyboard pages */
 .storyboard-view { height: auto; grid-template-rows: none; grid-auto-rows: max-content; align-content: start; gap: 6px !important; }
 .storyboard-switcher { padding: 5px 7px; }
+.storyboard-sequence-group { display: grid; gap: 6px; min-width: 0; padding: 6px 0 8px; }
+.storyboard-sequence-group + .storyboard-sequence-group { border-top: 1px solid var(--line); }
+.storyboard-sequence-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 12px; min-width: 0; }
+.storyboard-sequence-label { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; min-width: 0; overflow-wrap: anywhere; }
+.storyboard-sequence-delete { flex: 0 0 auto; margin-left: auto; }
+.storyboard-sequence-segments { min-width: 0; }
+.storyboard-sequence-segments .segment { max-width: 100%; white-space: normal; text-align: left; }
 .storyboard-view > .card.highlight { padding: 6px 8px; }
 .storyboard-view > .card.highlight h2 { margin-top: 6px !important; font-size: calc(14px * var(--ui-font-scale, 1)) !important; }
 .storyboard-view > .card.highlight p { margin-top: 3px !important; line-height: 1.3; }

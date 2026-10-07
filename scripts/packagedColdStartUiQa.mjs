@@ -106,6 +106,17 @@ const run = async () => {
 };
 
 let failure;
+// A failed renderer may disappear before CDP acknowledges detach. Keep the
+// original failure/report observable instead of leaving top-level await hung.
+const closeConnection = async (close) => {
+  let timer;
+  try {
+    await Promise.race([
+      Promise.resolve().then(close).catch(() => {}),
+      new Promise((resolve) => { timer = setTimeout(resolve, 2500); }),
+    ]);
+  } finally { clearTimeout(timer); }
+};
 try {
   await Promise.race([run(), harness.qaFailure]);
 } catch (error) {
@@ -116,8 +127,8 @@ try {
   // Only the EXE process we spawned and its children are eligible for fallback
   // termination; no executable-name matching or existing app processes.
   try { await harness.stopAll(); } catch (error) { failure ||= error; }
-  await cdp?.detach().catch(() => {});
-  await browser?.close().catch(() => {});
+  await closeConnection(() => cdp?.detach());
+  await closeConnection(() => browser?.close());
   collectRendererLog();
   if (!failure && Object.values(errors).some((entries) => entries.length)) failure = new Error('Runtime or renderer errors were recorded during shutdown');
   fs.writeFileSync(path.join(outputDirectory, 'process.log'), harness.readElectronLog());

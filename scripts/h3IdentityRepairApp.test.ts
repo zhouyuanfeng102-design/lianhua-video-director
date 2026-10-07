@@ -7,6 +7,7 @@ import { officialH3ContextForStoryboard } from '../src/officialH3Context';
 import { commitH3IdentityRepair } from '../src/h3IdentityRepairCommit';
 import { H3IdentityRepairCancelledError, repairH3IdentityBindings as actualRepairEngine, type RepairH3IdentityBindingsInput } from '../src/h3IdentityRepair';
 import { sourceContentHash } from '../src/sourceIntegrity';
+import { resolveStoryboardCharacterParticipation } from '../src/characterParticipation';
 import { createInitialState } from '../src/storage';
 import type { AppState } from '../src/types';
 import { identityRepairResultFor, makeIdentityRepairProject } from './h3IdentityRepairCommit.test';
@@ -62,7 +63,7 @@ const fixture = () => {
   };
   const dependencies: Record<string, unknown> = {
     ...official, canUseFinalPromptConverter, officialH3ContextForStoryboard, commitH3IdentityRepair,
-    H3IdentityRepairCancelledError, sourceContentHash, stateRef,
+    H3IdentityRepairCancelledError, sourceContentHash, resolveStoryboardCharacterParticipation, stateRef,
     get busy() { return busy; },
     sequencePromptRefreshRef: operationRef, workspaceEpochRef: epochRef,
     storyboardBuildLeaseRef: leaseRef, sequenceBatchIdentityRef: batchRef,

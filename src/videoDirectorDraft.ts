@@ -1,7 +1,7 @@
 import type { AppSettings, Project, ReferenceAsset, ReferenceRole, Storyboard, StoryboardImageFrameMetadata, VideoGenerationTask } from './types';
 import type { VideoGenerationDraft, VideoGenerationRuntime, VideoImageReference } from './videoGenerationTypes';
 import { addVideoReference, moveVideoReference, removeVideoReference, videoReferenceSelection } from './videoReferenceSlots';
-import { hasCurrentOfficialH3EnglishPrompt, hasCurrentOfficialH3Prompt, isOfficialH3TargetId } from './officialPrompt';
+import { hasCurrentOfficialH3EnglishPrompt, hasCurrentOfficialH3Prompt, isOfficialH3TargetId, officialH3MissingReferenceNotice } from './officialPrompt';
 import { officialH3ContextForStoryboard } from './officialH3Context';
 import { videoH3BindingForPrompt } from './videoH3ReferenceBinding';
 import { chapterBoards, chapterIdForPlan, chapterIdForStoryboard } from './chapters';
@@ -154,6 +154,27 @@ export const videoPromptChoices = (project: Project, chapterId?: string): VideoP
       version,
       chapterId: chapterIdForStoryboard(project, board),
     }));
+  })
+);
+
+export interface VideoPromptReferencePreview extends VideoPromptChoice {
+  referenceNotice: string;
+}
+
+/** Separate from selectable choices so a preserved original never becomes a
+ * batch candidate or paid request merely because it can still be read. */
+export const videoPromptReferencePreviews = (project: Project, chapterId?: string): VideoPromptReferencePreview[] => (
+  (chapterId ? chapterBoards(project, chapterId) : project.storyboards).flatMap((board) => {
+    if (board.sourceStale || project.sequencePlans.find((plan) => plan.id === board.sequencePlanId)?.sourceStale) return [];
+    const referenceNotice = officialH3MissingReferenceNotice(board, officialH3ContextForStoryboard(project, board));
+    if (!referenceNotice) return [];
+    const label = board.sourceStoryTitle || project.scenes.find((scene) => scene.id === board.sceneId)?.title || '未命名剧情';
+    const prompts = [['zh', board.officialPromptZh], ['en', hasCurrentOfficialH3EnglishPrompt(board) ? board.officialPromptEn : undefined]] as const;
+    return prompts.flatMap(([language, prompt]) => prompt?.trim() ? [{
+      id: `${board.id}:${language}`, storyboardId: board.id, label, language, prompt,
+      durationSec: board.durationSec, updatedAt: board.updatedAt, segmentIndex: board.segmentIndex,
+      version: '已保存原稿 · 参考图待更新', chapterId: chapterIdForStoryboard(project, board), referenceNotice,
+    }] : []);
   })
 );
 

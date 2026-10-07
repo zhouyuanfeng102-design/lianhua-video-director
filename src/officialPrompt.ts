@@ -543,6 +543,25 @@ export const hasCurrentOfficialH3EnglishPrompt = (
   && board.officialPromptEnSource === board.officialPromptZh,
 );
 
+/** Read-only recovery status. This never makes an outdated delivery eligible
+ * for submission: the saved canonical/protocol must still match, and a real
+ * picture in its frozen manifest must be missing from today's assets. */
+export const officialH3MissingReferenceNotice = (
+  board: Storyboard,
+  context: OfficialH3ProjectContext,
+): string | undefined => {
+  if (!hasCurrentOfficialH3Prompt(board) || hasCurrentOfficialH3Prompt(board, context)) return undefined;
+  const missingPicture = board.targetOutput?.referenceManifest.some((entry) => {
+    const picture = entry.mediaType === 'image' || entry.mediaType === 'clay-render'
+      || typeof entry.token === 'string' && /^<Picture [1-9]\d*>$/u.test(entry.token);
+    const assetId = typeof entry.id === 'string' ? entry.id : typeof entry.assetId === 'string' ? entry.assetId : '';
+    return picture && Boolean(assetId) && !context.assets.some((asset) => asset.id === assetId && !asset.missing);
+  });
+  return missingPicture
+    ? '参考图待更新：原提示词已保留。请回提示词导演台重新选择参考图并更新引用后再生成视频。'
+    : undefined;
+};
+
 /**
  * Validate the exact H3 payload that is about to cross the HTTP boundary.
  *
