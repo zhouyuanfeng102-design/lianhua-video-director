@@ -62,6 +62,7 @@ import { sourceContentHash } from './sourceIntegrity';
 import { normalizeSequencePromptHandoffStamp } from './sequencePromptHandoffStamp';
 import { normalizeH3IdentityBindings } from './h3IdentityBindings';
 import { normalizeCharacterParticipationSnapshot } from './characterParticipation';
+import { normalizeH3DeliveryWarnings } from './h3DeliveryWarnings';
 import { normalizeVideoCreativeDirection } from './videoCreativeDirection';
 import { normalizeDirectorLookDraft } from './directorLookDraft';
 import { normalizeStoryDraft } from './storyDraft';
@@ -2676,10 +2677,13 @@ const normalizePersistedProject = (
       nsfwPrivatePart: rawNsfwPrivatePart,
       imageGenerationMode: rawImageGenerationMode,
       imageRegenerationSnapshot: rawImageRegenerationSnapshot,
+      characterReferenceId: rawCharacterReferenceId,
       ...asset
     } = item;
     return {
       ...asset,
+      ...(rawCharacterReferenceId !== undefined ? { characterReferenceId:
+        typeof rawCharacterReferenceId === 'string' && rawCharacterReferenceId.trim() ? rawCharacterReferenceId : null } : {}),
       ...normalizeStoryboardImageFrameMetadata(item),
       ...(rawImageGenerationMode === 'image-to-image' || rawImageGenerationMode === 'text-to-image'
         ? { imageGenerationMode: rawImageGenerationMode } : {}),
@@ -2845,6 +2849,10 @@ const normalizePersistedProject = (
       sequencePromptHandoff: normalizeSequencePromptHandoffStamp(board.sequencePromptHandoff),
       h3IdentityBindings: normalizeH3IdentityBindings(board.h3IdentityBindings),
       h3IdentityBindingsEn: normalizeH3IdentityBindings(board.h3IdentityBindingsEn),
+      ...(Object.prototype.hasOwnProperty.call(board, 'h3DeliveryWarnings')
+        ? { h3DeliveryWarnings: normalizeH3DeliveryWarnings(board.h3DeliveryWarnings) } : {}),
+      ...(Object.prototype.hasOwnProperty.call(board, 'h3DeliveryWarningsEn')
+        ? { h3DeliveryWarningsEn: normalizeH3DeliveryWarnings(board.h3DeliveryWarningsEn) } : {}),
       ...(Object.prototype.hasOwnProperty.call(board, 'h3CharacterParticipation')
         ? { h3CharacterParticipation: normalizeCharacterParticipationSnapshot(board.h3CharacterParticipation) } : {}),
       ...(Object.prototype.hasOwnProperty.call(board, 'creativeDirection')
@@ -2867,6 +2875,10 @@ const normalizePersistedProject = (
             sequencePromptHandoff: normalizeSequencePromptHandoffStamp(revision?.sequencePromptHandoff),
             h3IdentityBindings: normalizeH3IdentityBindings(revision?.h3IdentityBindings),
             h3IdentityBindingsEn: normalizeH3IdentityBindings(revision?.h3IdentityBindingsEn),
+            ...(Object.prototype.hasOwnProperty.call(revision ?? {}, 'h3DeliveryWarnings')
+              ? { h3DeliveryWarnings: normalizeH3DeliveryWarnings(revision.h3DeliveryWarnings) } : {}),
+            ...(Object.prototype.hasOwnProperty.call(revision ?? {}, 'h3DeliveryWarningsEn')
+              ? { h3DeliveryWarningsEn: normalizeH3DeliveryWarnings(revision.h3DeliveryWarningsEn) } : {}),
             ...(Object.prototype.hasOwnProperty.call(revision ?? {}, 'h3CharacterParticipation')
               ? { h3CharacterParticipation: normalizeCharacterParticipationSnapshot(revision.h3CharacterParticipation) } : {}),
             ...(Object.prototype.hasOwnProperty.call(revision ?? {}, 'creativeDirection')

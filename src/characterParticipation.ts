@@ -69,7 +69,11 @@ const promptShots = (prompt: string): Array<{ index: number; text: string }> => 
   const section = /^(?:integrated_multimodal_description|detailed_description):\s*/gmu.exec(prompt);
   const bodyStart = section ? section.index + section[0].length : 0;
   const body = prompt.slice(bodyStart).split(/^(?:overall_soundscape|non_diegetic_music):/mu)[0];
-  const markers = [...body.matchAll(/\[Shot\s+([1-9]\d*)\]/gu)];
+  // Read compact markers just like the H3 reader. Marker-shaped words in
+  // dialogue or quoted examples are text, not a new shot boundary.
+  const structuralBody = body.replace(/<d>[\s\S]*?<\/d>|"(?:\\.|[^"\\])*"|“[^”]*”|‘[^’]*’|「[^」]*」|『[^』]*』/gu,
+    (literal) => ' '.repeat(literal.length));
+  const markers = [...structuralBody.matchAll(/\[Shot[ \t]*([1-9]\d*)\]/gu)];
   return markers.length ? markers.map((match, index) => ({
     index: Number(match[1]), text: body.slice(match.index! + match[0].length, markers[index + 1]?.index),
   })) : [{ index: 1, text: body }];

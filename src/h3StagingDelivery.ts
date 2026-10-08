@@ -103,6 +103,126 @@ export const synchronizeH3StagingDelivery = (
   };
 };
 
+export interface AiAuthoredH3StagingSyncResult {
+  board: Storyboard;
+  warnings: string[];
+  timelineSynchronized: boolean;
+}
+
+/**
+ * Store the model's readable timeline without evaluating its narrative or
+ * exact-count compliance. H3 prose is saved separately by the caller: failure
+ * to deserialize this optional companion never rejects that prose.
+ */
+export const synchronizeAiAuthoredH3StagingDelivery = (
+  board: Storyboard,
+  canonicalPrompt?: string,
+  shotSourceIds?: readonly (readonly string[])[],
+  shotMetadata?: readonly (H3StagingShotMetadata | null)[],
+): AiAuthoredH3StagingSyncResult => {
+  const pending = (reason: string): AiAuthoredH3StagingSyncResult => ({
+    board, warnings: [`正文已保留，时间轴待同步：${reason}`], timelineSynchronized: false,
+  });
+  if (!canonicalPrompt?.trim()) return pending('本次未返回可读取的逐镜排程。');
+  let entries: ReturnType<typeof parseMasterTimelinePrompt>;
+  try {
+    // Existing parser also protects the timeline renderer from invalid ranges.
+    // Its failure is a synchronization notice, never a prompt rejection.
+    entries = parseMasterTimelinePrompt(canonicalPrompt, board.durationSec);
+  } catch {
+    return pending('本次逐镜排程暂不能读取，保留原时间轴。');
+  }
+  const warnings: string[] = [];
+  const sourceById = new Map(board.shots.map((shot) => [shot.id, shot]));
+  const hasSourceMetadata = (shot: VideoShot): boolean => shot.sourceBeatIds !== undefined || shot.sourceExcerpt !== undefined
+    || shot.sourceStart !== undefined || shot.sourceEnd !== undefined || shot.nsfwContinuity !== undefined
+    || shot.visiblePrivatePartsByCharacter !== undefined;
+  const mappingAligned = shotSourceIds?.length === entries.length;
+  const metadataAligned = shotMetadata?.length === entries.length;
+  if (shotSourceIds && !mappingAligned) warnings.push('镜头来源记录数量不同，未按位置套用来源资料。');
+  if (shotMetadata && !metadataAligned) warnings.push('镜头附属记录数量不同，未按位置套用附属资料。');
+  const mappedSources = entries.map((_entry, index) => {
+    if (!mappingAligned) return [];
+    const ids = shotSourceIds[index];
+    if (!Array.isArray(ids) || ids.some((id) => !sourceById.has(id)) || new Set(ids).size !== ids.length) {
+      warnings.push(`第${index + 1}镜来源记录待关联，未猜测原镜头。`);
+      return [];
+    }
+    return ids.map((id) => sourceById.get(id)!);
+  });
+  const sourceUses = new Map<string, number>();
+  mappedSources.flat().forEach((shot) => sourceUses.set(shot.id, (sourceUses.get(shot.id) || 0) + 1));
+  const sources = entries.map((entry, index) => {
+    const explicit = mappedSources[index];
+    if (explicit.length === 1 && sourceUses.get(explicit[0].id) === 1) return explicit[0];
+    if (!shotSourceIds) {
+      const unchanged = board.shots.filter((shot) => shot.prompt === entry.prompt);
+      if (unchanged.length === 1 && entries.filter((item) => item.prompt === entry.prompt).length === 1) return unchanged[0];
+    }
+    return undefined;
+  });
+  for (const [index, source] of sources.entries()) {
+    if (source || (metadataAligned && shotMetadata[index])) continue;
+    const mapped = mappedSources[index];
+    if ((mapped.length ? mapped : board.shots).some(hasSourceMetadata)) {
+      return pending(`第${index + 1}镜来源或附属资料尚未明确；未合并、复制或清空旧镜头资料。`);
+    }
+  }
+  const reservedIds = new Set(sources.flatMap((source) => source ? [source.id] : []));
+  let shots: VideoShot[] = entries.map((entry, index) => {
+    const source = sources[index];
+    const metadata = metadataAligned ? shotMetadata[index] : undefined;
+    let id = source?.id || `${board.id}:h3-shot-${index + 1}`;
+    if (!source) {
+      while (reservedIds.has(id)) id += '-new';
+      reservedIds.add(id);
+    }
+    const fields = fieldsOf(entry.prompt);
+    const unchanged = source?.prompt === entry.prompt;
+    return {
+      ...(source || {}),
+      id, index: index + 1, startSec: entry.startSec, endSec: entry.endSec,
+      purpose: source?.purpose || '',
+      // Fallback display data if the optional subject/action subformat cannot
+      // be read. Normal canonical output is unpacked below using the existing
+      // parser, without editing the AI-authored shot prompt.
+      subject: fields['主体：'] || '', action: '', space: fields['空间：'],
+      lighting: fields['光影：'] || '', camera: fields['镜头：'] || '',
+      dialogue: fields['台词：'], sound: fields['音效：'] || '',
+      result: unchanged ? source?.result || '' : '', transition: unchanged ? source?.transition || '' : '',
+      performance: unchanged ? source?.performance : undefined, direction: unchanged ? source?.direction : undefined,
+      referenceAssetIds: [...new Set(mappedSources[index].length
+        ? mappedSources[index].flatMap((shot) => shot.referenceAssetIds) : source?.referenceAssetIds || [])],
+      prompt: entry.prompt, locked: source?.locked || false, authoredBy: 'text-api',
+      ...(!source ? { sourceLocationStatus: 'unlocated' as const } : {}),
+      ...(metadata ? {
+        sourceBeatIds: [...metadata.sourceBeatIds], sourceExcerpt: metadata.sourceExcerpt,
+        sourceLocationStatus: metadata.sourceLocationStatus, sourceStart: metadata.sourceStart, sourceEnd: metadata.sourceEnd,
+        nsfwContinuity: metadata.nsfwContinuity ? { ...metadata.nsfwContinuity } : undefined,
+        visiblePrivatePartsByCharacter: Object.fromEntries(Object.entries(metadata.visiblePrivatePartsByCharacter).map(([key, parts]) => [key, [...parts]])),
+      } : {}),
+    };
+  });
+  try {
+    shots = applyConvertedPromptToShots(shots, canonicalPrompt, board.durationSec);
+  } catch {
+    // A missing @ / action marker affects structured display only. The full
+    // authored subject field and original per-shot prose remain available.
+  }
+  return {
+    board: {
+      ...board, finalPrompt: canonicalPrompt, shots,
+      // The requested exact count remains a user preference, not rewritten to
+      // pretend that the AI necessarily followed it.
+      ...(board.shotMode === 'auto' ? { recommendedShotCount: shots.length } : {}),
+      promptPlan: board.promptPlan ? { ...board.promptPlan, canonicalPrompt, shotIds: shots.map((shot) => shot.id) } : undefined,
+      promptTrace: board.promptTrace ? { ...board.promptTrace, convertedPromptFingerprint: sourceContentHash(canonicalPrompt) } : undefined,
+      audioLedger: undefined,
+    },
+    warnings, timelineSynchronized: true,
+  };
+};
+
 export const H3_STAGING_DELIVERY_RULE = [
   H3_METADATA_SCHEMA_RULE,
   '本次是未确认的新稿或用户明确请求的本段对白排时修复，不是翻译/选图/衔接/格式修复。sourceStoryContent、本段原文证据及用户要求是事实；candidatePrompt、shots和canonicalPrompt是可修的时间草稿，不把AI先前写坏的短发话时窗当成用户锁定。先理解每句完整原话、原说话人、先后因果、情绪停顿与换人交接，再在当前固定durationSec内安排对白及动作，最后安排镜头。不要固定每秒字数估算、加速说话、截断/删改台词、重演事件、靠无意义停留凑时长；妨碍发话的口部动作结束后才开口。',

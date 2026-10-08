@@ -25,7 +25,7 @@ const anchorIssue = (prompt: string, anchor: string): Pick<H3IdentityBindingIssu
   const first = prompt.indexOf(anchor);
   if (first < 0) return { code: 'anchor-missing', message: '身份定位句不在当前语言的正文中。' };
   if (prompt.indexOf(anchor, first + 1) >= 0) return { code: 'anchor-ambiguous', message: '身份定位句在正文中重复，无法唯一定位。' };
-  if (/[\r\n]|<\/?(?:d|sound|Picture|Video|Audio)\b|\[Shot\s|\bAt\s+\d{2}:|\d+(?:\.\d+)?\s*(?:秒|seconds?\b|s\b)|\b\d{1,2}:\d{2}(?:\.\d+)?\b/iu.test(anchor)) {
+  if (/[\r\n]|<\/?(?:d|sound|Picture|Video|Audio)\b|\[Shot[ \t]*\d|\bAt\s+\d{2}:|\d+(?:\.\d+)?\s*(?:秒|seconds?\b|s\b)|\b\d{1,2}:\d{2}(?:\.\d+)?\b/iu.test(anchor)) {
     return { code: 'anchor-protocol-content', message: '身份定位句包含图片、镜头、时间或声音协议内容，不能作为纯身份定位。' };
   }
   for (const match of prompt.matchAll(/<(d|sound)>[\s\S]*?(?:<\/\1>|$)/giu)) {
@@ -39,15 +39,15 @@ const anchorIssue = (prompt: string, anchor: string): Pick<H3IdentityBindingIssu
     return { code: 'anchor-section', message: '身份定位句不在 subject_definitions 或逐镜视觉正文中。' };
   }
   if (section[1] === 'integrated_multimodal_description') {
-    const shots = [...prompt.slice(section.index! + section[0].length, first).matchAll(/\[Shot\s+(\d+)\]/gu)];
+    const shots = [...prompt.slice(section.index! + section[0].length, first).matchAll(/\[Shot[ \t]*(\d+)\]/gu)];
     if (!shots.length) return { code: 'anchor-shot', message: '三字段正文的身份定位句必须位于一个实际 [Shot N] 内。' };
-    if (/\[Shot\s+\d+\]/u.test(prompt.slice(first, first + anchor.length))) return { code: 'anchor-shot', message: '身份定位句不能跨越镜头边界。' };
+    if (/\[Shot[ \t]*\d+\]/u.test(prompt.slice(first, first + anchor.length))) return { code: 'anchor-shot', message: '身份定位句不能跨越镜头边界。' };
   }
   // Only check literal sentence boundaries; do not infer whether prose is a
   // name, an action or a visual description from word lists.
   const before = prompt.slice(0, first).trimEnd();
   const after = prompt.slice(first + anchor.length);
-  if (before && !/[\n。.!?！？:：;；]$/u.test(before) && !/\[Shot\s+[1-9]\d*\](?:\s+At\s+\d{2}:\d{2}(?:\.\d+)?\s*[,，:]?)?$/u.test(before)
+  if (before && !/[\n。.!?！？:：;；]$/u.test(before) && !/\[Shot[ \t]*[1-9]\d*\](?:\s+At\s+\d{2}:\d{2}(?:\.\d+)?\s*[,，:]?)?$/u.test(before)
     && !/\r?\n[ \t]*$/u.test(prompt.slice(0, first))) return { code: 'anchor-boundary', message: '身份定位句的开头不是独立句边界。' };
   if (!/[。.!?！？;；]$/u.test(anchor.trimEnd()) && !/^(?:[ \t]*\r?\n|$)/u.test(after)) {
     return { code: 'anchor-boundary', message: '身份定位句的结尾不是独立句边界。' };
@@ -117,17 +117,82 @@ export const normalizeH3IdentityBindings = (value: unknown): H3IdentityBindings 
   return inspectH3IdentityBindings(value).value;
 };
 
-/** One response may carry structured delivery metadata without putting JSON in H3. */
-export const readH3DeliveryEnvelope = (response: string): {
+export interface H3DeliveryReadOptions {
+  /** Content belongs to the AI. Only unreadable transport/body data may reject it. */
+  acceptAiAuthoredContent?: boolean;
+}
+
+interface H3DeliveryEnvelope {
   h3Prompt: string;
   canonicalPrompt?: string;
   identityBindings?: H3IdentityBindings;
   characterParticipation?: PromptCharacterParticipation;
   shotSourceIds?: string[][];
   shotMetadata?: Array<H3StagingShotMetadata | null>;
+  deliveryWarnings?: string[];
   envelope: boolean;
-} => {
+}
+
+/** Read optional data item by item. Bad auxiliary records must not discard the
+ * AI's body, and no identity, evidence or missing source mapping is invented. */
+const readAiAuthoredEnvelope = (value: Record<string, unknown>): H3DeliveryEnvelope => {
+  const warnings: string[] = [];
+  const delivery: H3DeliveryEnvelope = { h3Prompt: (value.h3Prompt as string).trim(), envelope: true };
+  if (typeof value.canonicalPrompt === 'string' && value.canonicalPrompt.trim()) delivery.canonicalPrompt = value.canonicalPrompt.trim();
+  else if (value.canonicalPrompt !== undefined) warnings.push('分镜排程附属数据无法读取，已保留提示词正文，排程待完善。');
+
+  if (value.identityBindings !== undefined) {
+    const metadata = value.identityBindings;
+    if (!record(metadata) || ![1, '1'].includes(metadata.version as string | number) || !Array.isArray(metadata.characters)) {
+      warnings.push('人物身份绑定数据无法读取，已保留正文，参考图关联待完善。');
+    } else {
+      const characters: H3IdentityBindings['characters'] = [];
+      metadata.characters.forEach((item: unknown, index: number) => {
+        const entry = inspectH3IdentityBindings({ version: 1, characters: [item] }).value?.characters[0];
+        if (entry) characters.push(entry);
+        else warnings.push(`第 ${index + 1} 项人物身份绑定数据无法读取，已跳过该项，参考图关联待完善。`);
+      });
+      if (!metadata.characters.length || characters.length) delivery.identityBindings = { version: 1, characters };
+    }
+  }
+  if (value.characterParticipation !== undefined) {
+    const metadata = value.characterParticipation;
+    if (!record(metadata) || ![1, '1'].includes(metadata.version as string | number) || !Array.isArray(metadata.characters)) {
+      warnings.push('人物参与记录无法读取，已保留正文，选图人物提醒待完善。');
+    } else {
+      const characters: PromptCharacterParticipation['characters'] = [];
+      metadata.characters.forEach((item: unknown, index: number) => {
+        const entry = inspectCharacterParticipation({ version: 1, characters: [item] }).value?.characters[0];
+        if (entry) characters.push(entry);
+        else warnings.push(`第 ${index + 1} 项人物参与记录无法读取，已跳过该项，选图人物提醒待完善。`);
+      });
+      if (!metadata.characters.length || characters.length) delivery.characterParticipation = { version: 1, characters };
+    }
+  }
+  if (value.shotSourceIds !== undefined) {
+    if (!Array.isArray(value.shotSourceIds)) warnings.push('镜头来源记录无法读取，来源关联待完善。');
+    else delivery.shotSourceIds = value.shotSourceIds.map((ids: unknown, index: number) => {
+      if (!Array.isArray(ids)) { warnings.push(`第 ${index + 1} 镜来源记录无法读取，来源关联待完善。`); return []; }
+      const readable = ids.filter((id): id is string => typeof id === 'string' && Boolean(id.trim()));
+      if (readable.length !== ids.length) warnings.push(`第 ${index + 1} 镜存在无法读取的来源编号，已跳过，来源关联待完善。`);
+      return readable;
+    });
+  }
+  if (value.shotMetadata !== undefined) {
+    if (!Array.isArray(value.shotMetadata)) warnings.push('镜头附属资料无法读取，已保留正文，镜头资料待完善。');
+    else delivery.shotMetadata = value.shotMetadata.map((item: unknown, index: number) => {
+      try { return readH3StagingShotMetadata([item])?.[0] ?? null; }
+      catch { warnings.push(`第 ${index + 1} 镜附属资料无法读取，已保留正文，镜头资料待完善。`); return null; }
+    });
+  }
+  if (warnings.length) delivery.deliveryWarnings = warnings;
+  return delivery;
+};
+
+/** One response may carry structured delivery metadata without putting JSON in H3. */
+export const readH3DeliveryEnvelope = (response: string, options: H3DeliveryReadOptions = {}): H3DeliveryEnvelope => {
   const text = response.trim();
+  if (options.acceptAiAuthoredContent && !text) throw new Error('AI返回空提示词正文，原有结果保持不变。');
   if (!text.startsWith('{') && !text.startsWith('```')) return { h3Prompt: text, envelope: false };
   const json = text.replace(/^```(?:json)?\s*/iu, '').replace(/\s*```$/u, '');
   let value: unknown;
@@ -137,6 +202,7 @@ export const readH3DeliveryEnvelope = (response: string): {
   if (!record(value) || typeof value.h3Prompt !== 'string' || !value.h3Prompt.trim()) {
     throw new Error('AI交付数据缺少完整h3Prompt正文，原有结果保持不变。');
   }
+  if (options.acceptAiAuthoredContent) return readAiAuthoredEnvelope(value);
   if (value.canonicalPrompt !== undefined && (typeof value.canonicalPrompt !== 'string' || !value.canonicalPrompt.trim())) {
     throw new Error('AI交付数据的canonicalPrompt必须是完整六字段排程，原有结果保持不变。');
   }
@@ -184,7 +250,7 @@ export const readH3DeliveryEnvelope = (response: string): {
 export const createH3IdentityDeliveryReader = (
   initialBindings?: H3IdentityBindings,
   characters?: readonly H3IdentityCharacter[],
-  options: { requireParticipation?: boolean } = {},
+  options: H3DeliveryReadOptions & { requireParticipation?: boolean } = {},
 ) => {
   const requiredBindings = initialBindings ? structuredClone(initialBindings) : undefined;
   // Draft voice/Subject choices are not confirmed facts. Only protect known
@@ -193,6 +259,18 @@ export const createH3IdentityDeliveryReader = (
   let declared = initialBindings !== undefined;
   let hadCharacters = Boolean(initialBindings?.characters.length);
   return (response: string): ReturnType<typeof readH3DeliveryEnvelope> => {
+    if (options.acceptAiAuthoredContent) {
+      const delivery = readH3DeliveryEnvelope(response, options);
+      const warnings = [...(delivery.deliveryWarnings || [])];
+      if (!delivery.identityBindings && (initialBindings || characters?.length)) {
+        warnings.push('未取得可读取的人物身份绑定，已保留正文，参考图关联待完善。');
+      }
+      if (options.requireParticipation && !delivery.characterParticipation) {
+        warnings.push('未取得可读取的人物参与记录，已保留正文，选图人物提醒待完善。');
+      }
+      if (warnings.length) delivery.deliveryWarnings = [...new Set(warnings)];
+      return delivery;
+    }
     const text = response.trim();
     if (text.startsWith('{') || text.startsWith('```')) {
       let raw: unknown;

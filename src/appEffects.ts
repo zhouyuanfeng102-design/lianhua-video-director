@@ -307,6 +307,9 @@ const DERIVED_VISUAL_STYLE_ATOM = /(?:风格预设视觉|视觉风格锚点)〔[
 
 export interface StoryboardDraftConversionInput {
   draft: Storyboard;
+  /** An existing downstream AI review owns content/format repair. Parsing the
+   * intermediate canonical timeline is best-effort and must not add calls. */
+  acceptAiAuthoredContent?: boolean;
   /** Reference refresh may preserve already verified text; an initial
    * conversion may also keep any wording the model judges correct. */
   purpose?: 'initial' | 'reference-refresh';
@@ -327,7 +330,8 @@ export interface StoryboardDraftConversionInput {
 
 /**
  * Ask the model to read the full source, resolve content and self-correct in
- * the same response. Local checks only ensure a readable, usable timeline.
+ * the same response. Callers with an existing downstream AI review may keep
+ * an unreadable intermediate timeline and let that review finish the work.
  * The caller commits the returned board atomically; every failure leaves
  * the input object and previously saved prompt untouched.
  */
@@ -361,9 +365,16 @@ export const convertStoryboardDraftToFinal = async (
   // Preserve authored source and plan data. Alias resolution, speaker
   // attribution and identity continuity belong to the model reading the full
   // story, not to a local whitelist or quotation/beat extraction heuristic.
-  const expectedTimeline = parseMasterTimelinePrompt(draftPrompt, input.draft.durationSec);
-  if (expectedTimeline.length !== input.draft.shots.length) {
-    throw new Error('本地结构草稿的镜头数量与分镜数据不一致，无法安全转化。');
+  let expectedTimeline: Array<{ startSec: number; endSec: number; prompt: string }>;
+  try {
+    expectedTimeline = parseMasterTimelinePrompt(draftPrompt, input.draft.durationSec);
+    if (expectedTimeline.length !== input.draft.shots.length) {
+      throw new Error('本地结构草稿的镜头数量与分镜数据不一致，无法安全转化。');
+    }
+  } catch (error) {
+    if (!input.acceptAiAuthoredContent) throw error;
+    // Saved shot facts remain evidence, not a locally reconstructed prompt.
+    expectedTimeline = input.draft.shots.map(({ startSec, endSec, prompt }) => ({ startSec, endSec, prompt }));
   }
   const shotPlanFacts = input.draft.shots.map((shot, index) => ({
     shot: index + 1,
@@ -548,9 +559,9 @@ export const convertStoryboardDraftToFinal = async (
   let convertedPrompt = unwrapConversionResponse(rawResult);
   if (!convertedPrompt) throw new Error('转化器没有返回最终视频提示词。');
   const rejected = convertedPrompt.match(/^CONVERSION_REJECTED\s*[:：]\s*(.+)$/iu);
-  if (rejected) throw new Error(`转化器拒绝：${rejected[1].trim() || '无法满足当前时长与证据约束'}`);
+  if (rejected && !input.acceptAiAuthoredContent) throw new Error(`转化器拒绝：${rejected[1].trim() || '无法满足当前时长与证据约束'}`);
   const refusalReason = standaloneConversionRefusalReason(convertedPrompt);
-  if (refusalReason) throw new Error(`转化器返回了拒绝说明，本次结果未保存：${refusalReason}`);
+  if (refusalReason && !input.acceptAiAuthoredContent) throw new Error(`转化器返回了拒绝说明，本次结果未保存：${refusalReason}`);
 
   const validateReadableStructure = (candidatePrompt: string): void => {
     const convertedEntries = parseMasterTimelinePrompt(candidatePrompt, input.draft.durationSec);
@@ -575,7 +586,7 @@ export const convertStoryboardDraftToFinal = async (
     applyConvertedPromptToShots(input.draft.shots, candidatePrompt, input.draft.durationSec);
   };
 
-  for (let repairAttempt = 0; ; repairAttempt += 1) {
+  for (let repairAttempt = 0; !input.acceptAiAuthoredContent; repairAttempt += 1) {
     assertNotAborted();
     let initialStructureFailure: string;
     try {
@@ -643,6 +654,15 @@ export const convertStoryboardDraftToFinal = async (
   }
 
   const generatedAt = (input.now || Date.now)();
+  let synchronizedShots = input.draft.shots;
+  try {
+    synchronizedShots = applyConvertedPromptToShots(input.draft.shots, convertedPrompt, input.draft.durationSec)
+      .map((shot) => ({ ...shot, authoredBy: 'text-api' as const }));
+  } catch (error) {
+    if (!input.acceptAiAuthoredContent) throw error;
+    // Preserve the authored canonical body for the existing final review;
+    // unreadable intermediate metadata must not be guessed or block it.
+  }
   const existingTrace = input.draft.promptTrace || {
     modelRuleSetId: input.draft.ruleSetId,
     converterPresetId: input.converter.id,
@@ -656,9 +676,7 @@ export const convertStoryboardDraftToFinal = async (
     ...input.draft,
     converterPresetId: input.converter.id,
     finalPrompt: convertedPrompt,
-    shots: applyConvertedPromptToShots(
-      input.draft.shots, convertedPrompt, input.draft.durationSec,
-    ).map((shot) => ({ ...shot, authoredBy: 'text-api' })),
+    shots: synchronizedShots,
     englishPrompt: '',
     englishPromptSource: '',
     updatedAt: generatedAt,

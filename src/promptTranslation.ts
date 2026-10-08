@@ -16,6 +16,9 @@ import type { H3IdentityBindings } from './types';
 import { VIDEO_ACTING_CAMERA_TRANSLATION_RULE } from './videoActingCameraRules';
 
 export interface TranslateVideoPromptToEnglishOptions {
+  /** Keep AI-authored content; optional metadata must not veto the translation. */
+  acceptAiAuthoredContent?: boolean;
+  onDeliveryWarnings?: (warnings: string[]) => void;
   /** AI-authored metadata paired with sourcePrompt; absent for legacy prompts. */
   identityBindings?: H3IdentityBindings;
   onIdentityBindings?: (bindings: H3IdentityBindings | undefined) => void;
@@ -194,6 +197,8 @@ export const translateVideoPromptToEnglish = async ({
   stagingContext,
   identityBindings,
   onIdentityBindings,
+  acceptAiAuthoredContent = false,
+  onDeliveryWarnings,
 }: TranslateVideoPromptToEnglishOptions): Promise<string> => {
   identityBindings = identityBindings ? structuredClone(identityBindings) : undefined;
   const assertCurrent = (): void => {
@@ -208,7 +213,8 @@ export const translateVideoPromptToEnglish = async ({
     throw new Error('没有可翻译的视频提示词，请先生成中文提示词。');
   }
 
-  const sourceIsH3 = Boolean(readH3PromptProtocol(sourcePrompt));
+  const sourceIsH3 = Boolean(readH3PromptProtocol(sourcePrompt))
+    || (acceptAiAuthoredContent && /^(?:subject_definitions|integrated_multimodal_description):/mu.test(sourcePrompt));
   let serializationRepairs = 0;
   const checkedRequest = async (system: string, user: string, includesStagingContext = false, withIdentityEnvelope = false, serializationRepair = false): Promise<string> => {
     assertCurrent();
@@ -251,7 +257,7 @@ export const translateVideoPromptToEnglish = async ({
     }
   };
 
-  if (reviewWithAi || (sourceIsH3 && identityBindings)) {
+  if (acceptAiAuthoredContent || reviewWithAi || (sourceIsH3 && identityBindings)) {
     // The model receives the actual names, dialogue and complete source. The
     // second request sees the untouched first response, even if its contents
     // would have failed the legacy token-count or timestamp checks below.
@@ -260,18 +266,20 @@ export const translateVideoPromptToEnglish = async ({
       identityBindings ? `<translation_identity_data>\n${JSON.stringify({ sourcePrompt, sourceIdentityBindings: identityBindings }).replace(/</gu, '\\u003c').replace(/>/gu, '\\u003e')}\n</translation_identity_data>` : sourcePrompt,
       false, Boolean(identityBindings),
     );
-    const readIdentityDelivery = createH3IdentityDeliveryReader(identityBindings);
+    const readIdentityDelivery = createH3IdentityDeliveryReader(identityBindings, undefined, { acceptAiAuthoredContent });
     const readDelivery = async (response: string): Promise<ReturnType<typeof readH3DeliveryEnvelope>> => {
-      if (!sourceIsH3) return { h3Prompt: response.trim(), envelope: false };
+      if (!sourceIsH3 && !acceptAiAuthoredContent) return { h3Prompt: response.trim(), envelope: false };
       let candidate = response;
       let patchIssue: unknown;
       let attemptedIdentityPatch = false;
       for (let attempt = 0; ; attempt += 1) {
         try {
           const delivery = readIdentityDelivery(candidate);
-          const issues = getH3IdentityBindingIssues(delivery.h3Prompt, delivery.identityBindings,
-            identityBindings?.characters.map((entry) => ({ id: entry.characterId, name: entry.name })));
-          if (issues.length) throw new Error(issues.map((issue) => `人物“${issue.name}”[${issue.code}] ${issue.message}`).join(' '));
+          if (!acceptAiAuthoredContent) {
+            const issues = getH3IdentityBindingIssues(delivery.h3Prompt, delivery.identityBindings,
+              identityBindings?.characters.map((entry) => ({ id: entry.characterId, name: entry.name })));
+            if (issues.length) throw new Error(issues.map((issue) => `人物“${issue.name}”[${issue.code}] ${issue.message}`).join(' '));
+          }
           return delivery;
         } catch (error) {
           const reason = patchIssue || error;
@@ -298,33 +306,42 @@ export const translateVideoPromptToEnglish = async ({
     const candidateDelivery = await readDelivery(candidateResponse);
     const candidateEnglishPrompt = candidateDelivery.h3Prompt;
     assertCurrent();
-    if (reviewWithAi) onReview?.();
-    const reviewed = reviewWithAi ? await checkedRequest(
-      sourceIsH3
-        ? VIDEO_PROMPT_ENGLISH_AI_REVIEW_SYSTEM_PROMPT
-        : VIDEO_PROMPT_ENGLISH_AI_REVIEW_BASE_SYSTEM_PROMPT,
-      [
-        '<review_data>',
-        // JSON preserves the complete source/candidate after decoding. Escape
-        // authored tag delimiters so a preceding prompt cannot break out of
-        // this evidence envelope; this is not local content rewriting.
-        JSON.stringify({ sourcePrompt, candidateEnglishPrompt, ...(identityBindings || candidateDelivery.identityBindings ? {
-          sourceIdentityBindings: identityBindings || candidateDelivery.identityBindings, candidateIdentityBindings: candidateDelivery.identityBindings,
-        } : {}), ...(stagingContext ? { stagingContext } : {}) }, null, 2)
-          .replace(/</gu, '\\u003c').replace(/>/gu, '\\u003e'),
-        '</review_data>',
-        `请校验并修复候选译文，${identityBindings || candidateDelivery.identityBindings ? '返回h3Prompt与identityBindings完整JSON对象' : '返回完整英文提示词正文'}；保留源稿指定语言的全部对白。`,
-      ].join('\n'),
-      true, Boolean(identityBindings || candidateDelivery.identityBindings),
-    ) : candidateResponse;
-    // Do not run the legacy cleaner, name/dialogue protection, timestamp
-    // replacement or local semantic validation on AI-reviewed text. H3's
-    // required serialization is repaired by this same API, never synthesized.
-    const reviewedDelivery = reviewWithAi ? await readDelivery(reviewed) : candidateDelivery;
+    let reviewedDelivery = candidateDelivery;
+    try {
+      if (reviewWithAi) onReview?.();
+      const reviewed = reviewWithAi ? await checkedRequest(
+        sourceIsH3
+          ? VIDEO_PROMPT_ENGLISH_AI_REVIEW_SYSTEM_PROMPT
+          : VIDEO_PROMPT_ENGLISH_AI_REVIEW_BASE_SYSTEM_PROMPT,
+        [
+          '<review_data>',
+          // JSON preserves the complete source/candidate after decoding. Escape
+          // authored tag delimiters so a preceding prompt cannot break out of
+          // this evidence envelope; this is not local content rewriting.
+          JSON.stringify({ sourcePrompt, candidateEnglishPrompt, ...(identityBindings || candidateDelivery.identityBindings ? {
+            sourceIdentityBindings: identityBindings || candidateDelivery.identityBindings, candidateIdentityBindings: candidateDelivery.identityBindings,
+          } : {}), ...(stagingContext ? { stagingContext } : {}) }, null, 2)
+            .replace(/</gu, '\\u003c').replace(/>/gu, '\\u003e'),
+          '</review_data>',
+          `请校验并修复候选译文，${identityBindings || candidateDelivery.identityBindings ? '返回h3Prompt与identityBindings完整JSON对象' : '返回完整英文提示词正文'}；保留源稿指定语言的全部对白。`,
+        ].join('\n'),
+        true, Boolean(identityBindings || candidateDelivery.identityBindings),
+      ) : candidateResponse;
+      // Do not run the legacy cleaner, name/dialogue protection, timestamp
+      // replacement or local semantic validation on AI-reviewed text. H3's
+      // required serialization is repaired by this same API, never synthesized.
+      reviewedDelivery = reviewWithAi ? await readDelivery(reviewed) : candidateDelivery;
+    } catch (error) {
+      assertCurrent();
+      if (!acceptAiAuthoredContent || (error instanceof Error && error.name === 'AbortError')) throw error;
+      reviewedDelivery = { ...candidateDelivery, deliveryWarnings: [...(candidateDelivery.deliveryWarnings || []),
+        '英文 AI 复核未完成，已保留本次取得的英文正文，可稍后重新复核。'] };
+    }
     let english = reviewedDelivery.h3Prompt;
     if (!english) throw new Error('英文 AI 校验与修复返回空内容，未保存，原有结果保持不变。');
     if (readH3PromptProtocol(sourcePrompt)) {
       english = await repairH3PromptProtocolWithAi({
+        acceptAiAuthoredContent,
         formatReferencePrompt: sourcePrompt, candidatePrompt: english, language: '英文',
         request: (system, user) => checkedRequest(system, user, true, false, true),
         maxAttempts: Math.max(0, 3 - serializationRepairs),
@@ -336,6 +353,7 @@ export const translateVideoPromptToEnglish = async ({
     }
     assertCurrent();
     onIdentityBindings?.(reviewedDelivery.identityBindings);
+    onDeliveryWarnings?.(reviewedDelivery.deliveryWarnings || []);
     return english;
   }
 

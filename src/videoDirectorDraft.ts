@@ -114,6 +114,7 @@ const isVideoDirectorVisualAsset = (asset: ReferenceAsset): boolean => (
 export const isVideoDirectorImage = (asset: ReferenceAsset): boolean => isVideoDirectorVisualAsset(asset);
 
 export const videoImageRole = (asset: ReferenceAsset): ReferenceRole => {
+  if (typeof asset.characterReferenceId === 'string' && asset.characterReferenceId.trim()) return 'character';
   if (asset.referenceRole && !['unknown', 'audio', 'dialogue'].includes(asset.referenceRole)) return asset.referenceRole;
   if (asset.role === 'grid') return 'composition';
   if (asset.role !== 'audio') return asset.role;

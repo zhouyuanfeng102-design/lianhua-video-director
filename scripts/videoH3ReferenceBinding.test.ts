@@ -446,6 +446,26 @@ await test('旧稿漏人物表项，出镜别名与选图身份唯一时仅本�
   assert.deepEqual(frozen.characterStates, result.characterStates);
 });
 
+await test('紧凑镜号与带制表符镜号也把后镜人物参考图关联到真实云端槽位', () => {
+  for (const separator of ['', '\t']) {
+    const { project, draft, prompt } = legacyHeroFixture();
+    const source = prompt.replace(/\[Shot /gu, `[Shot${separator}`);
+    draft.prompt = source;
+    draft.h3ReferenceBinding = { ...draft.h3ReferenceBinding!, basePrompt: source, renderedPrompt: source };
+    const result = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api: cloud() });
+    const association = ' Visual identity reference for 夏提雅-女武神形态 (known as 夏提雅): <Picture 3>.';
+    assert.equal(result.characterStates.find((entry) => entry.characterId === 'hero')?.status, 'bound');
+    assert.deepEqual(result.characterStates.find((entry) => entry.characterId === 'hero')?.slots, [3]);
+    assert.equal(result.draft.prompt.replace(association, ''), source);
+    assert.ok(result.draft.prompt.indexOf(association) > result.draft.prompt.indexOf(`[Shot${separator}2] At 00:07.500`));
+    assert.ok(result.draft.prompt.indexOf(association) < result.draft.prompt.indexOf('overall_soundscape:'));
+    const body = buildVideoApiBody(cloud(), result.draft, ['hero-upload.png']);
+    const nodes = body.nodeInfoList as Array<{ nodeId: string; fieldValue: string }>;
+    assert.equal(nodes.find((node) => node.nodeId === 'i2')?.fieldValue, 'hero-upload.png');
+    assert.equal(nodes.find((node) => node.nodeId === 'p')?.fieldValue, result.draft.prompt);
+  }
+});
+
 await test('只有对白提及、明确画外、歧义别名、场景用途和不明槽位均不能冒充人物已关联', () => {
   for (const visual of ['里尤洛说<d>[Chinese] 夏提雅在哪里？</d>。', '夏提雅在画外说话，镜头只拍里尤洛。']) {
     const { project, draft } = legacyHeroFixture();

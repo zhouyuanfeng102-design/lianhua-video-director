@@ -1527,10 +1527,21 @@ function buildPrompt(
   ].join('\n');
 }
 
-/**
- * Compile the app's canonical six-field timeline prompt for one target model.
- * This is pure and deterministic: no network calls, mutation, or model guess.
- */
+/** Provider parameters and actual reference ordering only; never compile or
+ * evaluate an AI-authored body to obtain its accompanying metadata. */
+export function buildTargetDeliveryMetadata(input: PromptAdapterInput): Pick<CompiledTargetPrompt, 'targetId' | 'parameters' | 'referenceManifest'> {
+  const requestedTarget = clean(input.targetId) || 'unknown';
+  const profile = resolveModelProfile(requestedTarget);
+  const targetId = profile.id === 'unknown' ? requestedTarget : profile.id;
+  return {
+    targetId,
+    parameters: buildParameters(input, profile),
+    referenceManifest: { ...buildManifest(profile, (input.references || []).map(normalizeReference)), targetId },
+  };
+}
+
+/** Compile the app's canonical six-field timeline for one target model.
+ * Pure and deterministic: no network calls, mutation, or model guess. */
 export function compileTargetPrompt(input: PromptAdapterInput): CompiledTargetPrompt {
   const requestedTarget = clean(input.targetId) || 'unknown';
   const profile = resolveModelProfile(requestedTarget);

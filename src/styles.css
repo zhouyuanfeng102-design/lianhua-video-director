@@ -780,6 +780,12 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
 .asset-info strong { font-size: calc(11px * var(--ui-font-scale, 1)); display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .asset-info small { display: block; color: var(--faint); margin-top: 4px; line-height: 1.42; font-size: calc(10px * var(--ui-font-scale, 1)); }
 .asset-actions { display: flex; gap: 5px; margin-top: 8px; flex-wrap: wrap; align-items: flex-start; }
+.asset-page-grid .asset-info small.asset-character-binding-note { white-space: normal; overflow: visible; overflow-wrap: anywhere; color: var(--purple); }
+.modal.asset-character-binding-modal { width: min(520px, 100%); }
+.asset-character-binding-preview { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+.asset-character-binding-preview img { width: 84px; height: 64px; flex: 0 0 84px; object-fit: contain; border-radius: 6px; background: var(--bg); }
+.asset-character-binding-preview strong { min-width: 0; overflow-wrap: anywhere; }
+.asset-character-binding-actions { margin-top: 16px; justify-content: flex-end; flex-wrap: wrap; }
 .modal.asset-preview-modal { width: min(940px, calc(100vw - 48px)); height: min(88vh, 760px); max-height: calc(100vh - 48px); overflow: hidden; display: grid; grid-template-rows: auto minmax(0, 1fr); }
 .asset-preview-body { min-height: 0; height: 100%; display: grid; grid-template-rows: minmax(0, 1fr) auto auto; gap: 8px; overflow: hidden; }
 .asset-image-viewer { min-width: 0; min-height: 0; display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 6px; }

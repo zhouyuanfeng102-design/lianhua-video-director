@@ -139,9 +139,10 @@ import type { TailFrameSelectionContext, TailFrameSelectionResult } from "./comp
 import { useVideoWorkbenchController } from "./useVideoWorkbenchController";
 import { VideoWorkbenchView } from "./components/VideoWorkbenchView";
 import { isVideoDirectorImage } from "./videoDirectorDraft";
+import { assetReferenceCharacterOwners, bindAssetCharacter, isAssetCharacterBindingImage } from "./assetCharacterBinding";
 import { directorLookSource } from "./directorLookSource";
 import { normalizeDirectorLookDraft, type DirectorLookDraft } from "./directorLookDraft";
-import { getH3PromptProtocolIssue } from "./h3PromptProtocol";
+import { storyboardH3DeliveryWarnings } from "./h3DeliveryWarnings";
 import { AutoFitSidebarNav } from "./components/AutoFitSidebarNav";
 import { AssetVideoThumbnail } from "./components/AssetVideoThumbnail";
 import { AssetVideoPlayerDialog } from "./components/AssetVideoPlayerDialog";
@@ -12192,9 +12193,7 @@ function DirectorView(ctx: AppContext) {
     && officialPromptContext
     && hasCurrentOfficialH3Prompt(directorResultStoryboard, officialPromptContext),
   );
-  const savedOfficialH3FormatIssue = directorResultStoryboard?.officialPromptZh?.trim()
-    ? getH3PromptProtocolIssue(directorResultStoryboard.officialPromptZh)
-    : undefined;
+  const savedOfficialH3Warnings = storyboardH3DeliveryWarnings(directorResultStoryboard, promptLanguage);
   const activeSequencePromptAction = productionMode === "sequence" && activeSequencePlan
     ? resolveSequenceSegmentPromptAction(
       activeSequenceSegment,
@@ -14415,6 +14414,12 @@ function DirectorView(ctx: AppContext) {
                         </Button>
                       </div>
                     </div>
+                    {directorPromptFormat === "h3" && savedOfficialH3Warnings.length > 0 && (
+                      <details className="sequence-result-status" role="status" style={{ display: "block" }}>
+                        <summary>正文已保留 · 有处理提醒（{savedOfficialH3Warnings.length} 项），不阻挡选图与视频生成</summary>
+                        {savedOfficialH3Warnings.map((warning) => <div key={warning}>{warning}</div>)}
+                      </details>
+                    )}
                     {directorPromptFormat === "h3" ? <div className="faint small-text director-result-language-note" title="English只改变画面等描述语言；对白保留剧情原语言，只有剧情明确要求时才使用英文对白。">English翻译画面描述，对白保留剧情指定语言。</div> : (
                       <div className="faint small-text director-result-language-note" title="Seedance 中文和英文稿独立保存；英文只翻译画面、动作和声音描述，对白保留剧情原语言；时长沿用导演台设置，无有效值时按30秒。">Seedance 中英文稿独立保存；英文只翻译描述，对白保留剧情原语言；时长沿用导演台设置，无有效值时按30秒。</div>
                     )}
@@ -14507,9 +14512,7 @@ function DirectorView(ctx: AppContext) {
                   <div className="director-result-pane empty-result-pane">
                     <Empty
                       title={
-                        savedOfficialH3FormatIssue
-                          ? "已保存稿件的 H3 格式不完整"
-                          : productionMode === "sequence" && activeSequenceSegment
+                        productionMode === "sequence" && activeSequenceSegment
                           ? activeSequenceSegment.failureReason
                             ? `第 ${activeSequenceSegment.index} 段生成失败`
                             : activeSequenceHasRealResult
@@ -14522,9 +14525,7 @@ function DirectorView(ctx: AppContext) {
                             : "还没有最近结果"
                       }
                       description={
-                        savedOfficialH3FormatIssue
-                          ? "旧稿未保留 H3 官方格式，不是显示问题。原内容仍保留；请重新生成当前段，新流程会让 AI 复核并自动修复格式，不会自动重跑视频。"
-                          : productionMode === "sequence" && activeSequenceSegment
+                        productionMode === "sequence" && activeSequenceSegment
                           ? (activeSequenceSegment.failureReason ? formatUserFacingError(activeSequenceSegment.failureReason) : "")
                             || (activeSequenceHasRealResult
                               ? "参考素材已变化；将调用 API 按当前参考图重新生成本段中英文提示词，保留本段镜数和时间边界，不重做全片或其他分段。"
@@ -14730,9 +14731,7 @@ function StoryboardView(ctx: AppContext) {
     && officialContext
     && hasCurrentOfficialH3Prompt(board, officialContext),
   );
-  const savedOfficialH3Issue = targetIsOfficialH3 && board?.officialPromptZh?.trim()
-    ? getH3PromptProtocolIssue(board.officialPromptZh)
-    : undefined;
+  const savedOfficialH3Warnings = storyboardH3DeliveryWarnings(board);
   const liveTargetCompilation = useMemo(() => {
     // The H3 body is an AI-reviewed delivery artifact. Never rebuild it from
     // the local six-field timeline in this view: that would silently discard
@@ -14772,10 +14771,8 @@ function StoryboardView(ctx: AppContext) {
     if (targetIsOfficialH3) {
       notify(
         savedOfficialH3Ready
-          ? "当前已是 AI 校验通过的 H3 官方交付稿，无需本地重编；复制或导出当前原文即可。"
-          : savedOfficialH3Issue
-            ? `当前 H3 官方稿格式无效：${savedOfficialH3Issue}请回到提示词导演台调用 AI 重新生成/修复。`
-            : "当前 H3 官方稿已失效或尚未生成，请回到提示词导演台调用 AI 重新生成/修复。",
+          ? "当前 H3 官方交付稿已保存，可直接复制或导出原文。"
+          : "当前 H3 官方稿对应来源已变化或尚未生成，请回到提示词导演台处理。",
         savedOfficialH3Ready ? "normal" : "error",
       );
       return;
@@ -15664,14 +15661,20 @@ function StoryboardView(ctx: AppContext) {
               <div className="faint small-text" style={{ marginTop: 7 }}>
                 {targetIsOfficialH3
                   ? savedOfficialH3Ready
-                    ? "H3 官方 Shot 时间格式；以下是 AI 校验通过的原始交付稿，复制和导出使用同一字符串。"
+                    ? "以下是已保存的 H3 原始交付稿，复制和导出使用同一字符串。"
                     : "当前 H3 官方稿已失效或尚未生成；不会用本地六字段时间轴冒充 H3，请回到提示词导演台由 AI 重新生成/修复。"
                   : `当前为 ${targetProfile?.name || effectiveTargetId} 适配稿；切换到 MiniMax H3 可生成官方 Shot 执行稿。`}
               </div>
               {targetIsOfficialH3 && !savedOfficialH3Ready && (
                 <div className="prompt-validation invalid" style={{ marginTop: 8 }}>
-                  {savedOfficialH3Issue ? `H3结构原因：${savedOfficialH3Issue}` : "H3结构原因：当前稿没有通过官方 section、Shot/At、参考标签和来源一致性校验。"}
+                  当前稿尚未保存，或对应的剧情、资料及来源已变化；已保存的正文仍保留。
                 </div>
+              )}
+              {targetIsOfficialH3 && savedOfficialH3Ready && savedOfficialH3Warnings.length > 0 && (
+                <details className="sequence-result-status" role="status" style={{ display: "block", marginTop: 8 }}>
+                  <summary>正文已保留 · 有处理提醒，不阻挡复制、导出与视频生成</summary>
+                  {savedOfficialH3Warnings.map((warning) => <div key={warning}>{warning}</div>)}
+                </details>
               )}
               <div className="prompt-copy" style={{ minHeight: 120, maxHeight: 260, marginTop: 8 }}>
                 {deliveryPrompt}
@@ -19569,9 +19572,42 @@ function AssetsView(ctx: AppContext) {
   const [checkingAssets, setCheckingAssets] = useState(false);
   const [uploadEntityId, setUploadEntityId] = useState("");
   const [editingAssetId, setEditingAssetId] = useState("");
+  const [characterBindingTarget, setCharacterBindingTarget] = useState<{ projectId: string; assetId: string } | null>(null);
+  const [characterBindingId, setCharacterBindingId] = useState("");
   const [assetPreviewAsset, setAssetPreviewAsset] = useState<ReferenceAsset | null>(null);
   const [videoPreviewSelection, setVideoPreviewSelection] = useState<VideoAssetSelection | null>(null);
   const [savingAssetId, setSavingAssetId] = useState("");
+  useEffect(() => { setCharacterBindingTarget(null); }, [state.project.id, assetLibrarySection]);
+  useEffect(() => {
+    if (!characterBindingTarget) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setCharacterBindingTarget(null);
+    };
+    window.addEventListener("keydown", closeOnEscape);
+    return () => window.removeEventListener("keydown", closeOnEscape);
+  }, [characterBindingTarget]);
+  const characterBindingAsset = characterBindingTarget?.projectId === state.project.id
+    ? state.project.assets.find((asset) => asset.id === characterBindingTarget.assetId) : undefined;
+  const bindingCharacters = state.project.characters.filter((character) => !character.dossier?.archivedIntoCharacterId);
+  const openCharacterBinding = (asset: ReferenceAsset) => {
+    const owners = assetReferenceCharacterOwners(state.project, asset);
+    setCharacterBindingId(owners.length === 1 ? owners[0].id : "");
+    setCharacterBindingTarget({ projectId: state.project.id, assetId: asset.id });
+  };
+  const saveCharacterBinding = () => {
+    if (!characterBindingTarget) return;
+    try {
+      setState((current: AppState) => {
+        if (current.project.id !== characterBindingTarget.projectId) throw new Error("项目已切换，请在当前项目重新选择图片。");
+        const project = bindAssetCharacter(current.project, characterBindingTarget.assetId, characterBindingId || null);
+        return project === current.project ? current : { ...current, project };
+      });
+      setCharacterBindingTarget(null);
+      notify(characterBindingId ? "人物绑定已保存，后续选用此图生成视频时会使用该人物对应。" : "已解除人物绑定，图片仍可照常使用。");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "人物绑定未保存，请重新选择。", "error");
+    }
+  };
   useEffect(() => {
     setVideoImageSelection([]);
     setAssetPage(1);
@@ -19857,46 +19893,6 @@ function AssetsView(ctx: AppContext) {
     }));
     notify("参考图已绑定到当前分镜的第一镜。可在时间线中继续调整。");
   };
-  const bindBoundaryFrame = (asset: ReferenceAsset, boundary: "first" | "last") => {
-    if (!activeStoryboard) {
-      notify("请先生成一组分镜，再绑定首尾帧。", "error");
-      return;
-    }
-    const boundaryShot = boundary === "first"
-      ? activeStoryboard.shots[0]
-      : activeStoryboard.shots[activeStoryboard.shots.length - 1];
-    if (isNsfwPrivateProfileAsset(asset) && (!boundaryShot
-      || !canUseNsfwPrivateProfileAssetForStoryboardShot(
-        asset,
-        activeStoryboard,
-        boundaryShot,
-        state.project.characters,
-      ))) {
-      notify(`该私密资料图与当前${boundary === "first" ? "首镜" : "尾镜"}的人物、裸露状态或部位不匹配，未绑定。`, "error");
-      return;
-    }
-    updateStoryboard(activeStoryboard.id, (board: Storyboard) => ({
-      ...board,
-      firstFrameAssetId: boundary === "first" ? asset.id : board.firstFrameAssetId,
-      lastFrameAssetId: boundary === "last" ? asset.id : board.lastFrameAssetId,
-      targetModelId: undefined,
-      targetOutput: undefined,
-      seedance25Output: undefined,
-      officialPromptZh: "",
-      officialPromptEn: "",
-      officialPromptSource: "",
-      officialPromptEnSource: "",
-      generationPlan: undefined,
-      continuityReport: undefined,
-      shots: board.shots.map((shot, index) => {
-        const targetIndex = boundary === "first" ? 0 : board.shots.length - 1;
-        return index === targetIndex && !shot.referenceAssetIds.includes(asset.id)
-          ? { ...shot, referenceAssetIds: [...shot.referenceAssetIds, asset.id] }
-          : shot;
-      }),
-    }));
-    notify(`已绑定${boundary === "first" ? "首帧" : "尾帧"}：${asset.name}`);
-  };
   const addAudioCueFromAsset = (asset: ReferenceAsset) => {
     if (!activeStoryboard) {
       notify("请先生成一组分镜，再建立声音台账。", "error");
@@ -20033,7 +20029,7 @@ function AssetsView(ctx: AppContext) {
       <SectionHeading
         eyebrow="ASSET LIBRARY"
         title={assetLibrarySection === "image" ? "图片资产库" : assetLibrarySection === "video" ? "视频资产库" : "音频参考"}
-        description={assetLibrarySection === "image" ? "选择图片生成视频不会修改原分镜或提示词。Clay Render 与首尾帧继续保留。" : assetLibrarySection === "video" ? "播放已生成或导入的视频，查看关联提示词、来源图片和生成参数。" : "保留已有音频、波形和声音参考职责。"}
+        description={assetLibrarySection === "image" ? "图片可选绑定人物，方便后续选图生成视频；不绑定也能使用，原分镜和提示词保持不变。" : assetLibrarySection === "video" ? "播放已生成或导入的视频，查看关联提示词、来源图片和生成参数。" : "保留已有音频、波形和声音参考职责。"}
         action={
           <div className="row asset-upload-controls">
             <select
@@ -20177,6 +20173,8 @@ function AssetsView(ctx: AppContext) {
             const previewUrl = assetPreviewUrl(asset);
             const isVisualAsset = mediaType === "image" || mediaType === "clay-render";
             const isPrivateProfileAsset = isNsfwPrivateProfileAsset(asset);
+            const canBindCharacter = isAssetCharacterBindingImage(asset);
+            const referenceCharacters = canBindCharacter ? assetReferenceCharacterOwners(state.project, asset) : [];
             const videoSourceTask = mediaType === "video" ? findVideoAssetSourceTask(state.project, asset) : undefined;
             let regenerationTask: ReturnType<typeof resolveImageAssetRegenerationTask> = null;
             let regenerationIssue = "";
@@ -20225,6 +20223,10 @@ function AssetsView(ctx: AppContext) {
                       aria-label={`选中用于生成视频：${asset.name}`}
                       onChange={(event) => setVideoImageSelection((ids) => event.target.checked ? [...ids, asset.id] : ids.filter((id) => id !== asset.id))} />选中用于生成视频</label>)}
                 <strong title={asset.name}>{asset.name}</strong>
+                {canBindCharacter && <small className="asset-character-binding-note">
+                  {referenceCharacters.length ? `人物参考：${referenceCharacters.map((character) => characterVariantDisplayName(character) || character.name).join("、")}`
+                    : asset.characterReferenceId ? "已绑定人物不可用，可重新选择（图片仍可使用）" : "未绑定人物（可直接使用）"}
+                </small>}
                 <small className="asset-chapter-label">{assetChapterLabel(asset)}</small>
                 <small>
                   {asset.mediaType || "image"} · {asset.referenceRole || asset.role} · {asset.tags.join("、")}
@@ -20253,17 +20255,16 @@ function AssetsView(ctx: AppContext) {
                     void desktopBridge()?.saveMedia?.({ relativePath: asset.relativePath, sourceUrl: asset.url, fileName: asset.fileName, mediaType: "video", mimeType: asset.mimeType })
                       .catch((error: unknown) => notify(error instanceof Error ? error.message : "保存视频失败", "error"));
                   }}>保存视频</Button>}
-                  <Button
+                  {canBindCharacter && <Button small icon={<Link2 size={13} />} title="选择、更换或解除人物绑定" onClick={() => openCharacterBinding(asset)}>绑定</Button>}
+                  {!isVisualAsset && <Button
                     small
                     onClick={() => bindToStoryboard(asset.id)}
                     icon={<Link2 size={13} />}
                   >
                     绑定分镜
-                  </Button>
+                  </Button>}
                   {isVisualAsset && (
                     <>
-                      <Button small variant="ghost" onClick={() => bindBoundaryFrame(asset, "first")}>首帧</Button>
-                      <Button small variant="ghost" onClick={() => bindBoundaryFrame(asset, "last")}>尾帧</Button>
                       <Button
                         small
                         variant="ghost"
@@ -20402,6 +20403,29 @@ function AssetsView(ctx: AppContext) {
           </div>
         </div>
       )}
+      {characterBindingAsset && <div className="modal-backdrop" onMouseDown={() => setCharacterBindingTarget(null)}>
+        <div className="modal asset-character-binding-modal" role="dialog" aria-modal="true" aria-label="绑定人物参考图" onMouseDown={(event) => event.stopPropagation()}>
+          <div className="modal-head">
+            <h3>绑定人物参考图</h3>
+            <Button small variant="ghost" icon={<X size={14} />} onClick={() => setCharacterBindingTarget(null)}>关闭</Button>
+          </div>
+          <div className="asset-character-binding-preview">
+            {assetPreviewUrl(characterBindingAsset) && <img src={assetPreviewUrl(characterBindingAsset)} alt="当前参考图" />}
+            <strong>{characterBindingAsset.name}</strong>
+          </div>
+          <Field label="绑定人物" hint="绑定用于后续选图的人物对应。不绑定也能使用，是否选用这张图由你决定。">
+            <select autoFocus value={characterBindingId} onChange={(event) => setCharacterBindingId(event.target.value)}>
+              <option value="">不绑定人物</option>
+              {bindingCharacters.map((character) => <option key={character.id} value={character.id}>{characterVariantDisplayName(character) || character.name}</option>)}
+            </select>
+          </Field>
+          {!bindingCharacters.length && <p className="faint small-text">当前项目还没有人物，可到剧情解析中添加。图片仍可直接使用。</p>}
+          <div className="row asset-character-binding-actions">
+            <Button variant="ghost" onClick={() => setCharacterBindingTarget(null)}>取消</Button>
+            <Button variant="primary" onClick={saveCharacterBinding}>保存绑定</Button>
+          </div>
+        </div>
+      </div>}
       {editingAssetId && (
         <div
           className="modal-backdrop"

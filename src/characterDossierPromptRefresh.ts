@@ -1,5 +1,5 @@
 import { parseMasterTimelinePrompt, topLevelCanonicalFieldLocations } from './masterTimeline';
-import { synchronizeH3StagingDelivery } from './h3StagingDelivery';
+import { synchronizeAiAuthoredH3StagingDelivery, synchronizeH3StagingDelivery, type AiAuthoredH3StagingSyncResult } from './h3StagingDelivery';
 import type { Storyboard } from './types';
 import type { H3StagingShotMetadata } from './h3StagingMetadata';
 
@@ -42,5 +42,31 @@ export const synchronizeCharacterDossierRefresh = (
       result: board.shots[index].result, transition: board.shots[index].transition,
       performance: board.shots[index].performance, direction: board.shots[index].direction,
     })),
+  };
+};
+
+/** AI owns dossier refresh content; local comparisons only retain valid caches. */
+export const synchronizeAiAuthoredCharacterDossierRefresh = (
+  board: Storyboard, canonicalPrompt?: string, shotSourceIds?: readonly (readonly string[])[],
+  shotMetadata?: readonly (H3StagingShotMetadata | null)[],
+): AiAuthoredH3StagingSyncResult => {
+  const result = synchronizeAiAuthoredH3StagingDelivery(board, canonicalPrompt, shotSourceIds, shotMetadata);
+  if (!result.timelineSynchronized) return result;
+  const oldById = new Map(board.shots.map((shot) => [shot.id, shot]));
+  const sameSoundCache = result.board.shots.length === board.shots.length && result.board.shots.every((shot) => {
+    const old = oldById.get(shot.id);
+    return old && old.startSec === shot.startSec && old.endSec === shot.endSec
+      && JSON.stringify(soundFields(old.prompt)) === JSON.stringify(soundFields(shot.prompt));
+  });
+  return {
+    ...result,
+    board: {
+      ...result.board,
+      audioLedger: sameSoundCache ? board.audioLedger : undefined,
+      shots: result.board.shots.map((shot) => {
+        const old = oldById.get(shot.id);
+        return old ? { ...shot, result: old.result, transition: old.transition, performance: old.performance, direction: old.direction } : shot;
+      }),
+    },
   };
 };

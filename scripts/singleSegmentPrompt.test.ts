@@ -74,7 +74,10 @@ const longBoard: Storyboard = {
 const conversionDraft: Storyboard = { ...longBoard, sourceStoryContent: content, globalLock: shortBoard.globalLock, sourceSceneSnapshots: [], shots };
 const converter: ConverterPreset = { id: 'converter', name: '通用转换器', workflow: 'all', inputMode: 'all', scope: 'video', enabled: true, version: 'test', systemPrompt: '将剧情转换为可见视频动作。', outputRules: '保留六字段与镜头边界。', updatedAt: 1 };
 const clean = (value: string) => value.trim();
-const mockEnglish = (value: string) => value.replaceAll('先开门。', 'Open the door first.').replace(/[\p{Script=Han}]+/gu, ' translated ');
+// The simulated AI owns name/dialogue fidelity. Production now receives its
+// unmasked English directly and must not restore a destructive mock response.
+const mockEnglish = (value: string) => value.split(/(旅人|阿青|林沐|先开门。)/u)
+  .map((part) => /^(?:旅人|阿青|林沐|先开门。)$/u.test(part) ? part : part.replace(/[\p{Script=Han}]+/gu, ' translated ')).join('');
 const jsonBlock = (value: string, tag: string) => JSON.parse(value.match(new RegExp(`<${tag}>\\s*([\\s\\S]*?)\\s*</${tag}>`, 'u'))![1]);
 const before = JSON.stringify({ shortBoard, longBoard, conversionDraft, context });
 const outputs: Storyboard[] = [];
@@ -464,6 +467,51 @@ await assert.rejects(generateSingleSegmentPrompt({
   request: async () => { throw new Error('no translation or conversion may run for an unreadable timeline'); },
 }), /时间空档/u, 'real timeline structure errors must still stop before H3 compilation or translation');
 
+// With the normal AI review enabled, intermediate timeline parsing is only a
+// display aid. Gaps must reach that existing review without a local retry.
+for (const route of ['confirmed-slice', 'converted-gap', 'draft-gap'] as const) {
+  const sourceBoard: Storyboard = route === 'confirmed-slice' ? {
+    ...trusted, finalPrompt: invalidTimelinePrompt,
+    promptPlan: { ...trusted.promptPlan!, canonicalPrompt: invalidTimelinePrompt },
+    promptTrace: { ...trusted.promptTrace!, convertedPromptFingerprint: sourceContentHash(invalidTimelinePrompt) },
+  } : route === 'draft-gap' ? { ...shortBoard, finalPrompt: invalidTimelinePrompt,
+    promptPlan: { ...shortBoard.promptPlan!, canonicalPrompt: invalidTimelinePrompt } } : shortBoard;
+  const snapshot = JSON.stringify(sourceBoard);
+  const stages: SingleSegmentPromptStage[] = [];
+  const repaired = await generateSingleSegmentPrompt({ board: sourceBoard, context, clean, converter,
+    reviewWithAi: true, skipConversion: route === 'confirmed-slice',
+    request: async (_system, user, stage) => {
+      stages.push(stage);
+      if (stage === 'convert') return invalidTimelinePrompt;
+      if (stage === 'translate') return mockEnglish(outputs[0].officialPromptZh!);
+      const data = jsonBlock(user, 'video_staging_review_data');
+      assert.equal(data.canonicalPrompt, invalidTimelinePrompt, 'the existing review receives the untouched AI canonical response');
+      assert.deepEqual(data.shots.map((shot: VideoShot) => [shot.id, shot.startSec, shot.endSec, shot.prompt]),
+        sourceBoard.shots.map((shot) => [shot.id, shot.startSec, shot.endSec, shot.prompt]), 'failed parsing preserves the saved shot evidence');
+      assert.notEqual(data.candidatePrompt, invalidTimelinePrompt, 'the canonical draft must never merely be relabelled as final H3');
+      assert.equal(data.candidateState, 'canonical-awaiting-h3-delivery');
+      assert.equal(data.candidatePrompt, '', 'unreadable canonical must not compile a fake successful H3 from old shots');
+      return JSON.stringify({ canonicalPrompt: convertedCanonical, h3Prompt: outputs[0].officialPromptZh,
+        shotSourceIds: sourceBoard.shots.map((shot) => [shot.id]) });
+    },
+  });
+  assert.deepEqual(stages, [...(route === 'confirmed-slice' ? [] : ['convert']), 'review', 'translate', 'translate']);
+  assert.equal(repaired.officialPromptZh, outputs[0].officialPromptZh);
+  assert.equal(repaired.officialPromptEnError, '');
+  assert.equal(JSON.stringify(sourceBoard), snapshot);
+}
+
+let noH3Calls = 0;
+await assert.rejects(generateSingleSegmentPrompt({ board: shortBoard, context, clean, converter, reviewWithAi: true,
+  request: async (_system, _user, stage) => {
+    noH3Calls += 1;
+    if (stage === 'convert') return 'AI尚未整理成时间轴的原始画面描述。';
+    assert.equal(stage, 'review');
+    throw new Error('Final H3 API unavailable');
+  },
+}), /Final H3 API unavailable/u, 'without an actual H3 body a failed review remains a failure, not a fabricated success');
+assert.equal(noH3Calls, 2);
+
 // Every English delivery is unbounded; no planning-only exception is needed.
 // English-only must not touch conversion config or image data at all.
 const unreadableContext = Object.defineProperty({}, 'assets', { get: () => { throw new Error('English-only read image data'); } }) as OfficialH3ProjectContext;
@@ -532,7 +580,10 @@ const reviewFailed = await generateSingleSegmentPrompt({
   },
 });
 assert.equal(failingReviewCalls, 2);
-assert.match(reviewFailed.officialPromptEnError || '', /AI review API unavailable/u);
+assert.equal(reviewFailed.officialPromptEnError, '');
+assert.equal(reviewFailed.officialPromptEn, 'An incomplete candidate.', 'an unavailable reviewer must not discard the AI translation already received');
+assert.ok(reviewFailed.h3DeliveryWarningsEn?.some((warning) => warning.includes('复核未完成')),
+  'the retained candidate must be marked as awaiting review, rather than falsely reported as reviewed');
 assert.equal(JSON.stringify(aiReviewBoard), aiReviewSnapshot, 'transport failure leaves the stored input untouched for the UI atomic commit guard');
 
 const semanticRawSegment: SemanticSegmentSourceContext['segment'] = {
@@ -642,8 +693,10 @@ for (const { purpose, formatRepair } of [
   });
   assert.deepEqual(stages, [
     ...(purpose === 'dialogue-repair' ? [] : ['convert']), 'review',
-    ...(formatRepair ? ['review'] : []), 'translate', 'translate',
-  ], 'unified source must not add a check, review or request');
+    'translate', 'translate',
+  ], 'local format differences must not add another check, review or repair request');
+  if (formatRepair) assert.ok(generated.officialPromptZh?.includes('invalid_soundscape:'),
+    'the AI review result is preserved instead of being rewritten or rejected by the local protocol checker');
   assert.equal(generated.officialPromptEnError, '');
   assert.equal(JSON.stringify(sourceBoard), sourceSnapshot, 'request preparation never rewrites existing saved prompts');
 }

@@ -239,6 +239,8 @@ export const getH3PromptProtocolIssue = (
 };
 
 export interface RepairH3PromptProtocolOptions {
+  /** Accept the AI's completed text without local content/protocol vetoes. */
+  acceptAiAuthoredContent?: boolean;
   formatReferencePrompt: string;
   /** Explicitly selected input tags absent from the old text-only baseline.
    * Their identity/role evidence belongs to sourceContext, never bare tags
@@ -272,8 +274,15 @@ export interface RepairH3PromptProtocolOptions {
 export const repairH3PromptProtocolWithAi = async ({
   formatReferencePrompt, additionalReferenceTags = [], candidatePrompt, language, request, sourceContext,
   maxAttempts: remainingAttempts = 3, identityDelivery, participationDelivery,
+  acceptAiAuthoredContent = false,
 }: RepairH3PromptProtocolOptions): Promise<string> => {
   const initialCandidate = candidatePrompt.trim();
+  if (acceptAiAuthoredContent) {
+    if (!initialCandidate) throw new Error(`AI返回空${language}提示词正文，原有结果保持不变。`);
+    if (identityDelivery) identityDelivery.onBindings(identityDelivery.bindings);
+    if (participationDelivery) participationDelivery.onParticipation(participationDelivery.participation);
+    return initialCandidate;
+  }
   const selectedReferenceTags = [...additionalReferenceTags];
   let candidate = initialCandidate;
   let bindings = identityDelivery?.bindings;

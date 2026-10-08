@@ -5,6 +5,7 @@ import { videoReferenceSlotIndex } from './videoReferenceSlots';
 import { getH3IdentityBindingIssues, normalizeH3IdentityBindings } from './h3IdentityBindings';
 import { officialH3ContextForStoryboard } from './officialH3Context';
 import { characterParticipationAliases, resolvePromptCharacterParticipation, resolveStoryboardCharacterParticipation } from './characterParticipation';
+import { assetReferenceCharacterOwners } from './assetCharacterBinding';
 
 /** This is an editing provenance record, not a second prompt or an AI review.
  * Rendering always starts from the same authored text, so repeated selections
@@ -71,19 +72,14 @@ export const videoReferenceCharacterOwners = (
     return matches.length === 1 && !matches[0].dossier?.archivedIntoCharacterId ? matches : [];
   });
   if (reference?.characterIds !== undefined) return videoReferenceCharacterBindingWarning(reference) ? [] : exactCharacters(reference.characterIds);
-  if (asset.sourceEntityId || asset.sourceEntityKind) {
-    if (!asset.sourceEntityId || asset.sourceEntityKind && asset.sourceEntityKind !== 'character' || ['location', 'prop'].includes(asset.type)) return [];
-    if (project.locations.some((entity) => entity.id === asset.sourceEntityId) || project.props.some((entity) => entity.id === asset.sourceEntityId)) return [];
-    const owners = exactCharacters([asset.sourceEntityId]);
-    return asset.sourceEntityKind === 'character' ? owners : owners.filter((owner) => owner.assetIds.includes(asset.id));
-  }
-  return exactCharacters(project.characters.filter((character) => character.assetIds.includes(asset.id)).map((character) => character.id));
+  return assetReferenceCharacterOwners(project, asset);
 };
 
 /** Scene replacement needs the same explicit provenance as an identity photo.
  * A scene-looking filename, asset category or selected use is not location ID. */
 export const videoReferenceLocationOwners = (project: Project, asset: ReferenceAsset): Location[] => {
   if (!imageAsset(asset) || project.assets.filter((entry) => entry.id === asset.id).length !== 1) return [];
+  if (typeof asset.characterReferenceId === 'string' && asset.characterReferenceId.trim()) return [];
   const exactLocations = (ids: readonly string[]): Location[] => unique(ids).flatMap((id) => {
     const matches = project.locations.filter((location) => location.id === id);
     return matches.length === 1 ? matches : [];
@@ -248,9 +244,26 @@ export const videoPictureReferenceEdits = (
 
 const videoH3ReferenceProject = (project: Project, draft: VideoGenerationDraft): Project => {
   const sourceBoards = project.storyboards.filter((board) => board.id === draft.source?.storyboardId);
-  return sourceBoards.length === 1
-    ? { ...project, characters: [...(officialH3ContextForStoryboard(project, sourceBoards[0]).characters || project.characters)] }
-    : project;
+  if (sourceBoards.length !== 1) return project;
+  const explicitlyBoundIds = new Set(draft.references.flatMap((reference) => project.assets
+    .filter((asset) => asset.id === reference.assetId && typeof asset.characterReferenceId === 'string')
+    .map((asset) => asset.characterReferenceId as string)));
+  const characters = [...(officialH3ContextForStoryboard(project, sourceBoards[0]).characters || project.characters)].filter((character) => {
+    if (!explicitlyBoundIds.has(character.id)) return true;
+    const live = project.characters.filter((entry) => entry.id === character.id);
+    return live.length === 1 && !live[0].dossier?.archivedIntoCharacterId;
+  });
+  // Keep the plan's authored names for existing IDs. A newly selected explicit
+  // asset binding can still refer to a current character created after the plan;
+  // absence of a matching visual identity remains a warning, not a guessed bind.
+  for (const reference of draft.references) {
+    const assets = project.assets.filter((asset) => asset.id === reference.assetId);
+    if (assets.length !== 1 || assets[0].characterReferenceId === undefined) continue;
+    for (const owner of videoReferenceCharacterOwners(project, assets[0], reference)) {
+      if (!characters.some((character) => character.id === owner.id)) characters.push(owner);
+    }
+  }
+  return { ...project, characters };
 };
 
 /** IDs come only from the current explicit selection and asset provenance. */
@@ -278,7 +291,7 @@ const participationReferenceEdit = (
   const sectionStart = description.index + description[0].length;
   const nextSection = /^(?:overall_soundscape|non_diegetic_music):/mu.exec(masked.slice(sectionStart));
   const sectionEnd = nextSection ? sectionStart + nextSection.index : prompt.length;
-  const shots = [...masked.slice(sectionStart, sectionEnd).matchAll(/\[Shot ([1-9]\d*)\]/gu)];
+  const shots = [...masked.slice(sectionStart, sectionEnd).matchAll(/\[Shot[ \t]*([1-9]\d*)\]/gu)];
   const index = shots.findIndex((shot) => shotIndexes.includes(Number(shot[1])));
   if (index < 0) return undefined;
   const start = sectionStart + shots[index].index! + shots[index][0].length;
@@ -402,6 +415,17 @@ export const prepareVideoH3ReferenceDraft = (
     const source = binding.sourcePictures?.filter((entry) => entry.number === Number(token[1]));
     const assetId = source?.length === 1 ? source[0].assetId : undefined;
     const selected = assetId ? draft.references.findIndex((reference) => reference.assetId === assetId) : -1;
+    const sourceAssets = assetId ? project.assets.filter((asset) => asset.id === assetId) : [];
+    const sourceAsset = sourceAssets.length === 1 ? sourceAssets[0] : undefined;
+    if (sourceAsset && sourceAsset.characterReferenceId !== undefined) {
+      // Generation provenance cannot prove who an older prompt associated with
+      // this image. Rebuild only this request's picture syntax from the current
+      // explicit binding and valid identity anchors, even if the old source ID
+      // happens to equal the newly chosen character.
+      pictureNumbers.set(Number(token[1]), null);
+      warnings.push(`原 H3 的 ${token[0]} 已按本次明确人物绑定重建图片引用；原稿、人物和剧情保持不变，不阻止生成。`);
+      continue;
+    }
     let numbers = selected >= 0 && plan.numbers?.[selected] ? [plan.numbers[selected]] : [];
     if (!numbers.length && assetId) {
       const originalAssets = project.assets.filter((asset) => asset.id === assetId);

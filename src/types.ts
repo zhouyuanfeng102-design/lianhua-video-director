@@ -253,6 +253,9 @@ export interface StoryboardRevision {
   officialPromptEnSource?: string;
   h3IdentityBindings?: H3IdentityBindings;
   h3IdentityBindingsEn?: H3IdentityBindings;
+  /** Non-blocking saved notices paired with each language's delivery. */
+  h3DeliveryWarnings?: string[];
+  h3DeliveryWarningsEn?: string[];
   /** Chinese final-delivery participation; English may share only its exact paired source. */
   h3CharacterParticipation?: PromptCharacterParticipationSnapshot;
   /** Text-only adjacent-segment handoff paired with this exact saved prompt. */
@@ -405,6 +408,10 @@ export interface ReferenceAsset extends StoryboardImageFrameMetadata {
   /** Entity in the project bible that this image was generated from or uploaded for. */
   sourceEntityId?: string;
   sourceEntityKind?: 'character' | 'location' | 'prop';
+  /** Optional user association for future video references, separate from
+   * immutable generation provenance. undefined keeps legacy ownership;
+   * null explicitly clears it; a string names one current project character. */
+  characterReferenceId?: string | null;
   /** Storyboard and shot that deterministically produced this image. */
   sourceStoryboardId?: string;
   sourceVideoTaskId?: string;
@@ -874,6 +881,9 @@ export interface Storyboard {
   /** Exact AI-authored anchors paired with the current Chinese/English H3 bodies. */
   h3IdentityBindings?: H3IdentityBindings;
   h3IdentityBindingsEn?: H3IdentityBindings;
+  /** Non-blocking saved notices; never make otherwise current text unavailable. */
+  h3DeliveryWarnings?: string[];
+  h3DeliveryWarningsEn?: string[];
   /** Chinese final-delivery participation; English may share only its exact paired source. */
   h3CharacterParticipation?: PromptCharacterParticipationSnapshot;
   createdAt: number;

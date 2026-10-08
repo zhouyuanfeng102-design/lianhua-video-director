@@ -35,6 +35,13 @@ assert.equal(resolvePromptCharacterParticipation(shotPrompt('[Shot 1] 敌人向�
 const two = resolvePromptCharacterParticipation(shotPrompt('[Shot 1] 有人提到夏提雅。\n[Shot 3] At 00:20.000, 夏提雅站在门口。'), people);
 assert.deepEqual(two.characters[0].visibleShotIndexes, [3]);
 assert.deepEqual(two.characters[0].shotIndexes, [1, 3]);
+const compactShots = resolvePromptCharacterParticipation(shotPrompt('[Shot1] 空旷石台。\n[Shot5] At 00:20.000, 夏提雅站在门口。'), people);
+assert.deepEqual(compactShots.characters[0].visibleShotIndexes, [5], 'compact legacy markers retain the actual displayed shot number');
+const quotedShotMarkers = resolvePromptCharacterParticipation(shotPrompt(
+  '[Shot1] <d>[Chinese] 我说的是[Shot5]这个标记。</d> 夏提雅站在门口。字幕牌写着“[Shot8]”。夏提雅挥枪。\n[Shot2] At 00:15.000, 亚乌菈走入门口。',
+), people);
+assert.deepEqual(quotedShotMarkers.characters.find((entry) => entry.characterId === hero.id)?.shotIndexes, [1], 'dialogue and quoted marker text cannot split the current shot');
+assert.deepEqual(quotedShotMarkers.characters.find((entry) => entry.characterId === companion.id)?.visibleShotIndexes, [2]);
 const englishHero = { ...hero, aliases: ['Shalltear'] };
 const english = resolvePromptCharacterParticipation(shotPrompt('[Shot 1] Identity: Someone, a king. Shalltear thrusts her spear at the charging orcs.'), [englishHero]);
 assert.deepEqual(english.characters[0].visibleShotIndexes, [1]);
@@ -144,18 +151,16 @@ assert.equal(board.officialPromptZh, undefined, 'the caller retains its immutabl
 let pairedReviews = 0;
 const missingIdentityZh = zh.replace(`${anchor} `, '');
 const repaired = await generateSingleSegmentPrompt({ board: official, context, purpose: 'dialogue-repair', clean: (value) => value,
-  request: async (_system, user, stage) => {
+  request: async (_system, _user, stage) => {
     if (stage === 'translate') throw new Error('Synthetic offline English failure');
     pairedReviews += 1;
-    if (user.includes('<h3_metadata_repair_data>')) return JSON.stringify({ metadataPatch: {
-      identityBindings: bindings, characterParticipation: participation,
-    } });
-    return JSON.stringify({ canonicalPrompt: canonical, h3Prompt: pairedReviews === 1 ? missingIdentityZh : zh,
-      identityBindings: pairedReviews === 1 ? { version: 1, characters: [] } : bindings,
+    return JSON.stringify({ canonicalPrompt: canonical, h3Prompt: missingIdentityZh,
       characterParticipation: participation, shotSourceIds: [['shot-1'], ['shot-2']] });
   },
 });
-assert.equal(pairedReviews, 3, 'a missing identity sentence escalates once from metadata-only to paired body repair');
-assert.equal(repaired.officialPromptZh, zh);
-assert.deepEqual(repaired.h3CharacterParticipation, snapshot);
+assert.equal(pairedReviews, 1, 'missing auxiliary identities do not trigger automatic content-repair requests');
+assert.equal(repaired.officialPromptZh, missingIdentityZh, 'the AI-authored body is preserved without adding a local identity sentence');
+assert.equal(repaired.h3IdentityBindings, undefined, 'missing associations are not invented');
+assert.deepEqual(repaired.h3CharacterParticipation, stampCharacterParticipation(missingIdentityZh, participation));
+assert.match((repaired.h3DeliveryWarnings || []).join(' '), /身份绑定.*正文.*关联待完善/u);
 console.log('Character participation tests passed (actual legacy excerpts, unambiguous aliases, screen scope, later-shot identities and single delivery persistence).');

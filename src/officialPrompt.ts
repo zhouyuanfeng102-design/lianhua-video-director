@@ -7,6 +7,7 @@ import type {
   TargetOutput,
 } from './types';
 import {
+  buildTargetDeliveryMetadata,
   compileTargetPrompt,
   type CompiledTargetPrompt,
   type PromptAdapterInput,
@@ -26,7 +27,6 @@ import {
 export { officialH3CanonicalSourceMatches } from './officialH3SourceIdentity';
 import { normalizeCanonicalTimelineSoundCueTimes } from './masterTimeline';
 import { bindVerifiedGeneratedH3CharacterReferences, buildBudgetedOfficialH3References } from './officialReferenceBudget';
-import { getH3PromptProtocolIssue } from './h3PromptProtocol';
 import { publicVideoContinuityLock, selectedVideoPrivateFacts } from './videoPrivateScope';
 import {
   hasExplicitClothingStateChange,
@@ -516,6 +516,9 @@ export const compileOfficialH3Prompt = (
   };
 };
 
+/** Availability follows the saved artifact and its source identity only.
+ * Content/format decisions belong to AI; absent auxiliary records or notices
+ * never invalidate an otherwise current prompt. */
 export const hasCurrentOfficialH3Prompt = (
   board: Storyboard,
   context?: OfficialH3ProjectContext,
@@ -524,7 +527,6 @@ export const hasCurrentOfficialH3Prompt = (
   && isOfficialH3TargetId(board.targetModelId)
   && isOfficialH3TargetId(board.targetOutput?.targetId)
   && board.officialPromptZh?.trim()
-  && !getH3PromptProtocolIssue(board.officialPromptZh)
   && board.targetOutput?.prompt === board.officialPromptZh
   && officialH3CanonicalSourceMatches(board)
   && (!context || board.officialPromptSource === buildOfficialH3SourceFingerprint(board, context)),
@@ -539,12 +541,11 @@ export const hasCurrentOfficialH3EnglishPrompt = (
 ): boolean => Boolean(
   hasCurrentOfficialH3Prompt(board, context)
   && board.officialPromptEn?.trim()
-  && !getH3PromptProtocolIssue(board.officialPromptEn, board.officialPromptZh)
   && board.officialPromptEnSource === board.officialPromptZh,
 );
 
 /** Read-only recovery status. This never makes an outdated delivery eligible
- * for submission: the saved canonical/protocol must still match, and a real
+ * for submission: the saved canonical/source must still match, and a real
  * picture in its frozen manifest must be missing from today's assets. */
 export const officialH3MissingReferenceNotice = (
   board: Storyboard,
@@ -615,6 +616,37 @@ export const applyOfficialH3Prompt = (
     officialPromptEn: chineseChanged ? '' : board.officialPromptEn,
     officialPromptEnSource: chineseChanged ? '' : board.officialPromptEnSource,
     officialPromptEnError: chineseChanged ? '' : board.officialPromptEnError,
+  };
+};
+
+/** Attach output metadata to an actual AI delivery, including a first result
+ * whose intermediate canonical timeline could not be compiled. No prose is
+ * generated, parsed for compliance or rewritten in this path. */
+export const applyAiAuthoredOfficialH3Prompt = (
+  board: Storyboard,
+  prompt: string,
+  context: OfficialH3ProjectContext,
+  generatedAt = Date.now(),
+): Storyboard => {
+  if (!prompt.trim()) throw new Error('AI未返回可读取的H3正文，原有结果保持不变。');
+  const metadata = buildTargetDeliveryMetadata(buildOfficialH3CompileInput(board, context));
+  const chineseChanged = board.officialPromptZh !== prompt;
+  return {
+    ...board,
+    targetModelId: metadata.targetId,
+    targetOutput: {
+      targetId: metadata.targetId,
+      prompt,
+      parameters: mergeOfficialH3Parameters(board, metadata.parameters),
+      referenceManifest: metadata.referenceManifest.assets.map((item) => ({ ...item })),
+      warnings: board.targetOutput?.warnings || [],
+      generatedAt,
+    },
+    officialPromptZh: prompt,
+    officialPromptSource: buildOfficialH3SourceFingerprint(board, context),
+    ...(chineseChanged ? {
+      seedance25Output: undefined, officialPromptEn: '', officialPromptEnSource: '', officialPromptEnError: '',
+    } : {}),
   };
 };
 

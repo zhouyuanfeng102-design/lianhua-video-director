@@ -61,10 +61,11 @@ const isImage = (asset: ReferenceAsset): boolean => asset.mediaType !== 'audio' 
  * not a stable identity source. This is provenance routing, not visual review. */
 const isOrdinaryIdentityImage = (asset: ReferenceAsset): boolean => isImage(asset) && !asset.missing
   && !isNsfwPrivateProfileAsset(asset)
-  && !asset.sourceStoryboardId && !asset.sourceShotId && !asset.sourceVideoTaskId
+  && (typeof asset.characterReferenceId === 'string' && Boolean(asset.characterReferenceId.trim())
+  || !asset.sourceStoryboardId && !asset.sourceShotId && !asset.sourceVideoTaskId
   && !asset.sourceVideoAssetId && !asset.sourceVideoEditId && !asset.sourceClipId
   && !['first-frame', 'last-frame', 'storyboard-frame', 'snapshot', 'grid'].includes(asset.imageVariant || '')
-  && asset.type !== 'first-frame' && asset.type !== 'last-frame';
+  && asset.type !== 'first-frame' && asset.type !== 'last-frame');
 
 const characterOwners = (project: Project, asset: ReferenceAsset): Character[] => videoReferenceCharacterOwners(project, asset);
 
