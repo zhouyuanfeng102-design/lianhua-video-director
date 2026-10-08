@@ -304,7 +304,8 @@ try {
       'every asynchronous conversion uses the same frozen identity context captured before awaiting');
     assert.ok(contextual.imageTasks().every((task) => task.conversionIdentityContext === identityContexts[0]));
     assert.equal(contextual.calls.length, expectedCount);
-    assert.ok(contextual.calls.every((call) => call.input.prompt.endsWith(converted)), 'the final body is exactly the AI converter result');
+    assert.ok(contextual.calls.every((call) => call.input.prompt.includes(converted)), 'the complete AI converter body is retained before actual reference-use metadata');
+    assert.ok(contextual.calls.every((call) => /本次实际上传图片（严格按此顺序）/u.test(call.input.prompt)), 'the image model receives the actual reference ordering after conversion');
     assert.equal(JSON.stringify(contextual.getState().project.storyboards[0]), before);
     assert.equal(contextual.reported.length, 0);
     if (planning) assert.equal(planning.calls.length, 1, 'custom count still uses one existing still-planning request');

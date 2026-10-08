@@ -12,7 +12,7 @@ import { buildImagePromptIdentityContext } from './imagePromptIdentityContext';
 import { characterDossierFormForRequest, dossierUsesStory } from './characterDossierPolicy';
 import { buildLandscapeImageSource, IMAGE_PROMPT_LANDSCAPE_SCOPE_CONTRACT, isLandscapeImageRequest } from './imageLocationScope';
 import { buildImagePrompt } from './promptEngine';
-import { assertUsableConvertedStoryboardImagePrompt, buildStoryboardImageRequestFromFrame, buildStoryboardImageRequests, selectStoryboardImageReferences } from './storyboardImages';
+import { applyStoryboardImageOutputSize, assertUsableConvertedStoryboardImagePrompt, buildStoryboardImageAssetVisualAnchor, buildStoryboardImageRequestFromFrame, buildStoryboardImageRequests, selectStoryboardImageReferences } from './storyboardImages';
 import { isGenerationTaskRevoked, settleImageGenerationTask } from './generationTasks';
 import {
   isNsfwPrivateProfileAsset,
@@ -214,6 +214,97 @@ const storyboardPurpose = (task: ImageGenerationTask): 'first-frame' | 'last-fra
     : task.imageVariant === 'last-frame' ? 'last-frame'
       : 'storyboard-shot'
 );
+
+/** The explicit current-shot action is different from replaying a saved image
+ * task. Check only source availability here; queue-family locking remains with
+ * canRegenerateImageTask, so the two actions cannot bill concurrently. */
+export const canReconvertStoryboardImageTask = (
+  task: ImageGenerationTask,
+  project: Project,
+): boolean => {
+  if (task.assetKind !== 'storyboard' || task.referenceScope === 'nsfw-private-profile' || task.nsfwPrivatePart
+    || !['storyboard-frame', 'first-frame', 'last-frame'].includes(task.imageVariant)) return false;
+  const board = project.storyboards.find((item) => item.id === task.sourceStoryboardId);
+  const index = board?.shots.findIndex((shot) => shot.id === task.sourceShotId) ?? -1;
+  if (!board || index < 0) return false;
+  return task.imageVariant === 'first-frame' ? index === 0
+    : task.imageVariant === 'last-frame' ? index === board.shots.length - 1 : true;
+};
+
+const currentShotRegenerationRequest = (task: ImageGenerationTask, project: Project) => {
+  if (!canReconvertStoryboardImageTask(task, project)) {
+    throw new Error('当前分镜或来源镜头已不存在，或已不再是对应首尾镜，无法按当前镜头重新转换；不会改用旧图片提示词。请从当前分镜创建新图片。');
+  }
+  const storyboard = project.storyboards.find((item) => item.id === task.sourceStoryboardId)!;
+  const context = {
+    projectName: project.name, characters: project.characters, locations: project.locations,
+    props: project.props, scenes: project.scenes, assets: project.assets,
+    generationTaskNames: project.generationTasks.flatMap((item) => item.kind === 'image' || item.kind === 'autofill' ? [item.name] : []),
+  };
+  const purpose = storyboardPurpose(task);
+  // Deliberately rebuild from the current shot. An old selected-frame caption
+  // may contain the very camera/pose error the user is trying to replace.
+  const built = buildStoryboardImageRequests(storyboard,
+    purpose === 'storyboard-shot' ? 'storyboard-shots' : 'boundary-frames', context)
+    .find((item) => item.shotId === task.sourceShotId && item.purpose === purpose);
+  if (!built) throw new Error('无法读取当前镜头的生图资料；不会复用旧提示词。');
+  const request = task.sizeOverride
+    ? applyStoryboardImageOutputSize(built, { width: task.width, height: task.height, sizeOverride: true, issue: '', layoutNote: '' })
+    : built;
+  return { storyboard, context, request };
+};
+
+/** A fresh conversion seed, never an in-place update of the original task.
+ * The caller supplies current API/rule selection; executeImageRegeneration
+ * then performs exactly one conversion followed by one image submission. */
+export const prepareCurrentShotImageRegenerationTask = (
+  task: ImageGenerationTask,
+  project: Project,
+): ImageGenerationTask => {
+  const { storyboard, request } = currentShotRegenerationRequest(task, project);
+  return {
+    ...task,
+    imageGenerationMode: 'text-to-image',
+    prompt: '',
+    converterSystemPrompt: '',
+    conversionSource: request.conversionSource,
+    conversionIdentityContext: buildImagePromptIdentityContext(project, [], storyboard),
+    referenceAssetIds: [...request.referenceAssetIds],
+    primaryReferenceAssetIds: [...request.primaryReferenceAssetIds],
+    referenceAssetSnapshots: undefined,
+    imageApiSnapshot: undefined,
+    imagePromptRuleSetId: undefined, imagePromptRuleSetName: undefined, imagePromptRuleSetVersion: undefined,
+    imagePromptPresetId: undefined, imagePromptPresetName: undefined, imagePromptPresetVersion: undefined,
+    imagePromptFormat: undefined,
+    sourceFingerprint: undefined,
+    imageFrameBatchId: undefined, imageFrameIndex: undefined, imageFrameCount: undefined,
+    imageFrameDescription: undefined, imageFrameTimeSec: undefined,
+    width: request.width, height: request.height, sizeOverride: request.sizeOverride,
+    negativePrompt: ordinaryImageVariantNegativePrompt(task.imageVariant),
+    bindingWarning: '已按当前镜头与当前规则重新转换；原图、原任务和视频提示词保留。',
+  };
+};
+
+export const buildCurrentShotImageRegenerationVisualAnchor = (
+  task: ImageGenerationTask,
+  project: Project,
+): string => {
+  const { storyboard, request, context } = currentShotRegenerationRequest(task, project);
+  return buildStoryboardImageAssetVisualAnchor(storyboard, request, context);
+};
+
+/** Current-shot reconstruction needs a surviving source shot, not the old
+ * direct-image API/reference snapshot. This keeps deleted-task legacy assets
+ * repairable without weakening ordinary exact-replay validation. */
+export const resolveImageAssetCurrentShotRegenerationTask = (
+  asset: ReferenceAsset,
+  project: Project,
+  imageApi: ImageApiConfig,
+): ImageGenerationTask | null => {
+  const seed = resolveImageAssetRegenerationTask({ ...asset, imageGenerationMode: undefined }, project, imageApi);
+  return seed && canReconvertStoryboardImageTask(seed, project)
+    ? seed : null;
+};
 
 const snapshotSource = (task: ImageGenerationTask): RegenerationSource | null => {
   const sourceIsSaved = hasOwn(task, 'conversionSource');

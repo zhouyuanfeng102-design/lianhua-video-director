@@ -29,6 +29,7 @@ import { publicVideoContinuityLock } from './videoPrivateScope';
 import { readStoryboardImageH3Source } from './storyboardImageH3Source';
 export { readStoryboardImageH3Source } from './storyboardImageH3Source';
 import { DIRECTED_ACTION_RELATION_RULE, STORYBOARD_SPATIAL_FRAME_RULE } from './spatialContinuityRules';
+import { storyboardImageFramingInstruction, storyboardImageReferenceRole, storyboardReferenceCharacters } from './storyboardImageReferences';
 import { DEFAULT_FIRST_PERSON_SUBJECT } from './semanticEvents';
 import { buildStoryboardImageBaseName, createStoryboardImageNameAllocator } from './storyboardImageNames';
 import type { StoryboardImageFramePlan } from './storyboardImagePlan';
@@ -585,15 +586,42 @@ const managedRelativePathFromAsset = (asset: ReferenceAsset): string => {
   }
 };
 
-/** Resolve ordered asset IDs to real pixels without writing base64 back into project state. */
-export const resolveStoryboardReferenceImages = async (
+/** Keep the upload images and their metadata in the same order, including when
+ * identical pixel payloads are coalesced. Never write base64 into project state. */
+export interface StoryboardReferenceInputs {
+  referenceImages: string[];
+  referenceAssets: ReferenceAsset[];
+}
+
+export const mergeStoryboardReferenceInputs = (
+  primary: StoryboardReferenceInputs, resolved: StoryboardReferenceInputs,
+): StoryboardReferenceInputs & { primaryReferenceImageCount: number } => {
+  const referenceImages: string[] = [];
+  const referenceAssets: ReferenceAsset[] = [];
+  const seen = new Set<string>();
+  let primaryReferenceImageCount = 0;
+  for (const [groupIndex, group] of [primary, resolved].entries()) {
+    if (group.referenceImages.length !== group.referenceAssets.length) throw new Error('参考图片与用途记录数量不同，请重新读取参考图。');
+    group.referenceImages.forEach((pixels, index) => {
+      if (seen.has(pixels)) return;
+      seen.add(pixels);
+      referenceImages.push(pixels);
+      referenceAssets.push(group.referenceAssets[index]);
+      if (groupIndex === 0) primaryReferenceImageCount += 1;
+    });
+  }
+  return { referenceImages, referenceAssets, primaryReferenceImageCount };
+};
+
+export const resolveStoryboardReferenceInputs = async (
   referenceAssetIds: readonly string[],
   assets: readonly ReferenceAsset[],
   loader: StoryboardReferenceImageLoader,
   cache = new Map<string, Promise<string>>(),
-): Promise<string[]> => {
+): Promise<StoryboardReferenceInputs> => {
   const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
-  const resolved = await Promise.all(uniqueIds(referenceAssetIds).map(async (id) => {
+  const orderedIds = uniqueIds(referenceAssetIds);
+  const resolved = await Promise.all(orderedIds.map(async (id) => {
     const asset = assetsById.get(id);
     if (!asset || asset.missing) throw new Error(`参考图不存在或已丢失：${asset?.name || id}`);
     const cacheKey = cleanText(asset.checksum)
@@ -636,8 +664,23 @@ export const resolveStoryboardReferenceImages = async (
       throw error;
     }
   }));
-  return Array.from(new Set(resolved));
+  const seen = new Set<string>();
+  const referenceImages: string[] = [];
+  const referenceAssets: ReferenceAsset[] = [];
+  resolved.forEach((pixels, index) => {
+    if (seen.has(pixels)) return;
+    seen.add(pixels);
+    referenceImages.push(pixels);
+    referenceAssets.push(assetsById.get(orderedIds[index])!);
+  });
+  return { referenceImages, referenceAssets };
 };
+
+/** Compatibility API for existing retry paths that already own their prompt. */
+export const resolveStoryboardReferenceImages = async (
+  referenceAssetIds: readonly string[], assets: readonly ReferenceAsset[],
+  loader: StoryboardReferenceImageLoader, cache = new Map<string, Promise<string>>(),
+): Promise<string[]> => (await resolveStoryboardReferenceInputs(referenceAssetIds, assets, loader, cache)).referenceImages;
 
 const entityNameAppears = (name: string, source: string): boolean => {
   const normalizedName = cleanText(name);
@@ -1275,20 +1318,12 @@ const storyboardImageContinuityContext = (
     ...shot.referenceAssetIds.filter((id) => !automaticallyBoundShotAssetIds.has(id)),
   ]).filter((id) => allowedReferenceAssetIds.has(id) && validImageAsset(assetsById.get(id)));
   const primaryReferenceAssetIdSet = new Set(primaryReferenceAssetIds);
-  // Sibling custom frames are outputs too. Do not infer all N pictures as the
-  // next request's references; an explicitly selected global image still wins.
-  const replacedOutputAssetIds = new Set(context.assets
-    .filter((asset) => (
-      automaticallyBoundShotAssetIds.has(asset.id)
-      && asset.imageVariant === imageVariantForStoryboardPurpose(purpose)
-    ))
-    .map((asset) => asset.id));
+  // Every automatically attached result from this shot is an output,
+  // irrespective of purpose. A shot image must not silently become the next
+  // tail frame's composition reference. Explicit global choices still win.
   const referenceAssetIds = selectStoryboardImageReferences(uniqueIds([
     ...primaryReferenceAssetIds,
-    ...shot.referenceAssetIds.filter((id) => (
-      primaryReferenceAssetIdSet.has(id) || !replacedOutputAssetIds.has(id)
-    )),
-    ...entityAssetIds,
+    ...entityAssetIds.filter((id) => primaryReferenceAssetIdSet.has(id) || !automaticallyBoundShotAssetIds.has(id)),
   ]).filter((id) => allowedReferenceAssetIds.has(id) && validImageAsset(assetsById.get(id))), primaryReferenceAssetIds, {
     assets: context.assets,
     characters,
@@ -1299,12 +1334,17 @@ const storyboardImageContinuityContext = (
     .map((id) => assetsById.get(id))
     .filter(validImageAsset)
     .map((asset) => line(
-      `参考图“${asset.name}”可见锚点`,
-      clippedStory(Array.from(new Set([
-        ...(isNsfwPrivateProfileAsset(asset)
-          ? [nsfwPrivateReferenceResponsibility(asset)]
-          : [asset.visualAnchor, asset.prompt]),
-      ].map(cleanText).filter(Boolean))).join('；'), 3200),
+      `参考图“${asset.name}”用途与稳定身份资料`,
+      isNsfwPrivateProfileAsset(asset)
+        ? nsfwPrivateReferenceResponsibility(asset)
+        : [
+            storyboardImageReferenceRole(asset, context),
+            ...storyboardReferenceCharacters(asset, context).map((character) => [
+              line('人物', character.name), line('种族', character.race),
+              line('外观', character.appearance),
+              line('默认服装设计（本镜衣着状态优先）', character.outfit),
+            ].filter(Boolean).join('；')),
+          ].filter(Boolean).join('；'),
     ))
     .filter(Boolean);
   return {
@@ -1531,9 +1571,10 @@ const buildRequest = (
     conversionSource: [
       customFrame?.imageFrameIndex
         ? '当前图片规划优先：只表现 AI 选定的本张静帧中实际可见的人物、局部与单个瞬间；完整人物名单、动作过程和结束状态不要求全部入画，但最终 H3 明确的站位、机位、身体侧别与在画/画外状态始终有效，选帧描述不能借构图覆盖或重排它们。'
-        : '当前镜事实优先：先锁定本镜实际出镜人物及其完整外貌，再组织这个镜头的唯一可见瞬间。',
+        : '当前镜事实优先：先确定本张时刻的机位、取景与可见范围，再锁定实际可见人物或局部的身份；不为展示完整外貌改变视线、姿态与裁切。',
       STORYBOARD_SPATIAL_FRAME_RULE,
       ...purposeLines,
+      storyboardImageFramingInstruction(purpose),
       ...(officialShot ? [
         '上述权威镜头描述是最终已确认 H3 的原文；下方结构化旧稿、人物默认资料及参考图文字只补充未明确的事实，冲突时由 AI 保留最终 H3 中的空间、机位与在画/画外语义，不回滚成旧稿。',
         line('最终 H3 主体标签对应', officialSource?.subjectDefinitions),

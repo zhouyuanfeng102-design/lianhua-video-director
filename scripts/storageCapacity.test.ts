@@ -8,8 +8,8 @@ import { formatUserFacingError } from '../src/userFacingError';
 import type { AppState, Project } from '../src/types';
 
 const main = readFileSync(new URL('../electron/main.cjs', import.meta.url), 'utf8');
-assert.equal(MAX_PERSISTED_STATE_BYTES, 256 * 1024 * 1024);
-assert.match(main, /const MAX_STATE_BYTES = 256 \* 1024 \* 1024;/u);
+assert.equal(MAX_PERSISTED_STATE_BYTES, Infinity);
+assert.doesNotMatch(main, /const MAX_STATE_BYTES = 256 \* 1024 \* 1024;/u);
 assert.match(main, /const MAX_IMAGE_EXPORT_BYTES = 64 \* 1024 \* 1024;/u);
 for (const text of ['', 'ASCII', '中文', 'a\ud800b', '\udc00', '🪷你好\n\r\t', '\ud800\ud800\udc00']) {
   assert.equal(stateUtf8ByteLength(text), Buffer.byteLength(text, 'utf8'));

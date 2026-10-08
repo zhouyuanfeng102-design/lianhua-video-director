@@ -394,6 +394,8 @@ import {
   mergeStoryboardImageIdentityEnrichment,
   prepareStoryboardImageIdentityContext,
   resolveStoryboardReferenceImages,
+  resolveStoryboardReferenceInputs,
+  mergeStoryboardReferenceInputs,
   resolveStoryboardImageBinding,
   runStoryboardImageBatch,
   samePurposeGeneratedStoryboardAssetIds,
@@ -403,12 +405,17 @@ import {
   type StoryboardImageBatchLifecycle,
   type StoryboardImageGenerationRequest,
 } from "./storyboardImages";
+import { buildStoryboardImagePromptWithReferences, refreshStoryboardImageReferenceMetadata } from "./storyboardImageReferences";
 import { storyboardImageBoardLabel } from "./storyboardImageNames";
 import { requestStoryboardImageFramePlan, STORYBOARD_IMAGE_PLAN_MAX_COUNT, validateStoryboardImagePlanCount } from "./storyboardImagePlan";
 import {
   appendRegeneratedImageResult,
   buildImageRegenerationTask,
   canRegenerateImageTask,
+  canReconvertStoryboardImageTask,
+  prepareCurrentShotImageRegenerationTask,
+  buildCurrentShotImageRegenerationVisualAnchor,
+  resolveImageAssetCurrentShotRegenerationTask,
   executeImageRegeneration,
   imageRegenerationRootId,
   imageTaskNeedsLandscapeScopeRepair,
@@ -2194,6 +2201,7 @@ export default function App() {
   );
   const [assetSearch, setAssetSearch] = useState("");
   const [saveStatus, setSaveStatus] = useState<"saved" | "saving" | "error">("saved");
+  const [desktopLoadError, setDesktopLoadError] = useState("");
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const [savingBeforeClose, setSavingBeforeClose] = useState(false);
   const closingSaveRef = useRef(false);
@@ -2755,13 +2763,20 @@ export default function App() {
     let active = true;
     void loadDesktopState()
       .then((desktopState) => {
-        if (!active || !desktopState) return;
-        stateRef.current = desktopState;
-        setStateInternal(desktopState);
-        syncWorkspaceUiState(desktopState);
+        if (!active) return;
+        if (desktopState) {
+          stateRef.current = desktopState;
+          setStateInternal(desktopState);
+          syncWorkspaceUiState(desktopState);
+        }
+        setDesktopStateReady(true);
       })
-      .finally(() => {
-        if (active) setDesktopStateReady(true);
+      .catch((error) => {
+        if (!active) return;
+        setDesktopLoadError(error instanceof Error ? error.message : String(error));
+        setSaveStatus("error");
+        // Keep autosave, background submissions and close-time saving paused.
+        // A reload after the data directory is repaired can retry safely.
       });
     return () => {
       active = false;
@@ -2822,6 +2837,7 @@ export default function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (!desktopStateReady) return;
       if (!(event.ctrlKey || event.metaKey)) return;
       if (event.key.toLowerCase() === "z") {
         if (!shouldHandleAppHistoryShortcut(event)) return;
@@ -2846,7 +2862,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [undo, redo]);
+  }, [undo, redo, desktopStateReady]);
 
   useEffect(() => {
     if (!desktopStateReady || closingSaveRef.current || restoringSnapshot) return;
@@ -2862,7 +2878,11 @@ export default function App() {
         .then((result) => {
           if (superseded || stateRef.current !== state || closingSaveRef.current || restoringSnapshotRef.current) return;
           setSaveStatus("saved");
-          if (result.backupError) setNotice({ text: `主项目已保存，但跨盘备份失败：${result.backupError}`, tone: "error" });
+          const backupWarnings = [
+            result.snapshotError ? `恢复点创建失败：${result.snapshotError}` : "",
+            result.backupError ? `跨盘备份失败：${result.backupError}` : "",
+          ].filter(Boolean);
+          if (backupWarnings.length) setNotice({ text: `项目已保存；${backupWarnings.join("；")}`, tone: "error" });
         })
         .catch((error) => {
           if (superseded || isCoalescedAutoSaveCancellation(error)
@@ -8601,10 +8621,15 @@ export default function App() {
     if (!file) return;
     try {
       let raw = "";
+      let needsDesktopImport = false;
       try {
         raw = await readFileAsText(file);
-        JSON.parse(raw);
+        needsDesktopImport = Boolean(JSON.parse(raw)?.storageFormat);
       } catch {
+        needsDesktopImport = true;
+      }
+      if (needsDesktopImport) {
+        if (!desktopBridge()?.importProjectPackage) throw new Error("请用桌面版导入完整项目包或分项目备份目录中的索引文件。");
         raw = await desktopBridge()?.importProjectPackage?.(file) || "";
       }
       const imported = normalizeState(JSON.parse(raw));
@@ -8619,9 +8644,9 @@ export default function App() {
       setState(nextState);
       syncWorkspaceUiState(nextState);
       notify("项目导入成功，已加入项目库。");
-    } catch {
+    } catch (error) {
       notify(
-        "项目文件解析失败，请选择莲华视频导演台导出的 JSON 文件。",
+        error instanceof Error ? error.message : "项目文件解析失败，请选择莲华视频导演台导出的项目包或 JSON 文件。",
         "error",
       );
     }
@@ -9064,6 +9089,19 @@ export default function App() {
       ? "large"
       : "default";
 
+  if (desktopLoadError) return (
+    <div className="modal-backdrop">
+      <div className="modal" role="alertdialog" aria-modal="true" aria-labelledby="storage-load-error-title">
+        <h3 id="storage-load-error-title">项目库读取失败，已停止自动保存</h3>
+        <p>没有用空项目覆盖原存档。请保留完整数据目录，从备份恢复后重新读取；也可以安全关闭软件。</p>
+        <div className="hint-box" style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{desktopLoadError}</div>
+        <div className="row" style={{ marginTop: 16 }}>
+          <Button onClick={() => window.location.reload()}>重新读取</Button>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div
       className="app-shell"
@@ -9177,9 +9215,14 @@ export default function App() {
                 {state.project.name}
               </div>
               <div className="faint sidebar-project-save-state">
-                本地自动保存已开启
+                {saveStatus === "error" ? "最新修改尚未保存" : "本地自动保存已开启"}
               </div>
             </div>
+          )}
+          {saveStatus === "error" && (
+            <Button small variant="ghost" icon={<Download size={14} />} onClick={handleExportProject}>
+              导出当前项目备份
+            </Button>
           )}
           <div className="sidebar-version">
             <span>莲华视频导演台</span>
@@ -13023,7 +13066,7 @@ function DirectorView(ctx: AppContext) {
                 ),
               }),
             ));
-            const primaryReferenceImages = await resolveStoryboardReferenceImages(
+            const primaryReferences = await resolveStoryboardReferenceInputs(
               request.primaryReferenceAssetIds,
               projectContext.assets,
               {
@@ -13034,7 +13077,7 @@ function DirectorView(ctx: AppContext) {
               referenceImageCache,
             );
             assertTaskCurrent();
-            const resolvedReferenceImages = await resolveStoryboardReferenceImages(
+            const resolvedReferences = await resolveStoryboardReferenceInputs(
               request.referenceAssetIds,
               projectContext.assets,
               {
@@ -13045,16 +13088,12 @@ function DirectorView(ctx: AppContext) {
               referenceImageCache,
             );
             assertTaskCurrent();
-            const primaryPixels = new Set(primaryReferenceImages);
-            const referenceImages = [
-              ...primaryReferenceImages,
-              ...resolvedReferenceImages.filter((dataUrl) => !primaryPixels.has(dataUrl)),
-            ];
+            const references = mergeStoryboardReferenceInputs(primaryReferences, resolvedReferences);
             const execution = await executeStoryboardImageGeneration({
               request,
               negativePrompt: requestNegativePrompt,
-              referenceImages,
-              primaryReferenceImageCount: primaryReferenceImages.length,
+              referenceImages: references.referenceImages,
+              primaryReferenceImageCount: references.primaryReferenceImageCount,
               convertPrompt: async (source) => {
                 assertTaskCurrent();
                 imageTaskStage = "image-prompt-convert";
@@ -13069,7 +13108,10 @@ function DirectorView(ctx: AppContext) {
                   task.conversionIdentityContext,
                 );
                 assertTaskCurrent();
-                return sanitizeFinalImagePrompt(converted, imagePromptSelection.ruleSet.format);
+                const sanitized = sanitizeFinalImagePrompt(converted, imagePromptSelection.ruleSet.format);
+                return imageApi.backend === "openai" && imagePromptSelection.ruleSet.format === "natural-language"
+                  ? buildStoryboardImagePromptWithReferences(sanitized, references.referenceAssets, projectContext)
+                  : sanitized;
               },
               persistConvertedPrompt: (prompt) => {
                 assertTaskCurrent();
@@ -13090,7 +13132,7 @@ function DirectorView(ctx: AppContext) {
               generateImage: (input) => {
                 assertTaskCurrent();
                 imageTaskStage = "image-generation";
-                return requestImageModel(imageApi, input, () => {
+                return requestImageModel(imageApi, { ...input, preserveReferenceImageOrder: true }, () => {
                   assertTaskCurrent();
                   imageModelInvoked = true;
                 });
@@ -17530,6 +17572,9 @@ function ImageWorkbenchView(ctx: AppContext) {
     const requestedTargetEpoch = autofillTargetEpochRef.current;
     try {
       const dataUrl = await readImageAsDataUrl(file);
+      const managed = window.lianhuaDesktop?.storeGeneratedImage
+        ? await window.lianhuaDesktop.storeGeneratedImage({ dataUrl, fileName: file.name })
+        : undefined;
       const asset: ReferenceAsset = {
         id: createId("asset"),
         name: file.name,
@@ -17543,7 +17588,15 @@ function ImageWorkbenchView(ctx: AppContext) {
                 ? "prop"
                 : "grid",
         fileName: file.name,
-        dataUrl,
+        dataUrl: managed ? undefined : dataUrl,
+        ...(managed ? {
+          url: managed.url,
+          relativePath: managed.relativePath,
+          checksum: managed.checksum,
+          sizeBytes: managed.sizeBytes,
+          managed: true,
+          missing: false,
+        } : {}),
         mimeType: referenceImageMimeType(dataUrl),
         mediaType: "image",
         referenceRole:
@@ -18543,7 +18596,7 @@ function ImageWorkbenchView(ctx: AppContext) {
               }),
             }),
           ));
-          const primaryReferenceImages = await resolveStoryboardReferenceImages(
+          const primaryReferences = await resolveStoryboardReferenceInputs(
             request.primaryReferenceAssetIds,
             projectContext.assets,
             {
@@ -18553,7 +18606,7 @@ function ImageWorkbenchView(ctx: AppContext) {
             referenceImageCache,
           );
           assertTaskCurrent();
-          const resolvedReferenceImages = await resolveStoryboardReferenceImages(
+          const resolvedReferences = await resolveStoryboardReferenceInputs(
             request.referenceAssetIds,
             projectContext.assets,
             {
@@ -18563,16 +18616,12 @@ function ImageWorkbenchView(ctx: AppContext) {
             referenceImageCache,
           );
           assertTaskCurrent();
-          const primaryPixels = new Set(primaryReferenceImages);
-          const referenceImages = [
-            ...primaryReferenceImages,
-            ...resolvedReferenceImages.filter((dataUrl) => !primaryPixels.has(dataUrl)),
-          ];
+          const references = mergeStoryboardReferenceInputs(primaryReferences, resolvedReferences);
           const execution = await executeStoryboardImageGeneration({
             request,
             negativePrompt: requestNegativePrompt,
-            referenceImages,
-            primaryReferenceImageCount: primaryReferenceImages.length,
+            referenceImages: references.referenceImages,
+            primaryReferenceImageCount: references.primaryReferenceImageCount,
             convertPrompt: async (source) => {
               assertTaskCurrent();
               const converted = await requestImagePromptConverter(
@@ -18584,7 +18633,10 @@ function ImageWorkbenchView(ctx: AppContext) {
                 task.conversionIdentityContext,
               );
               assertTaskCurrent();
-              return sanitizeFinalImagePrompt(converted, imagePromptSelection.ruleSet.format);
+              const sanitized = sanitizeFinalImagePrompt(converted, imagePromptSelection.ruleSet.format);
+              return imageApi.backend === "openai" && imagePromptSelection.ruleSet.format === "natural-language"
+                ? buildStoryboardImagePromptWithReferences(sanitized, references.referenceAssets, projectContext)
+                : sanitized;
             },
             persistConvertedPrompt: (promptValue) => {
               assertTaskCurrent();
@@ -18600,7 +18652,7 @@ function ImageWorkbenchView(ctx: AppContext) {
             },
             generateImage: (input) => {
               assertTaskCurrent();
-              return requestImageModel(imageApi, input, assertTaskCurrent);
+              return requestImageModel(imageApi, { ...input, preserveReferenceImageOrder: true }, assertTaskCurrent);
             },
           });
           const actualImageSize = readGeneratedImageDimensions(execution.generated.dataUrl || "");
@@ -19705,7 +19757,7 @@ function AssetsView(ctx: AppContext) {
       const managedMedia = desktopBridge()?.importMedia
         ? await desktopBridge()?.importMedia?.(file)
         : null;
-      const dataUrl = mediaType === "image" || mediaType === "clay-render"
+      const dataUrl = !managedMedia && (mediaType === "image" || mediaType === "clay-render")
         ? await readImageAsDataUrl(file)
         : undefined;
       const role: AssetRole =
@@ -19744,7 +19796,7 @@ function AssetsView(ctx: AppContext) {
         managed: Boolean(managedMedia?.managed),
         missing: false,
         duplicateOfAssetId: existingDuplicate?.id,
-        mimeType: dataUrl ? referenceImageMimeType(dataUrl) : file.type || undefined,
+        mimeType: managedMedia?.mimeType || (dataUrl ? referenceImageMimeType(dataUrl) : file.type || undefined),
         importedAt: Date.now(),
         mediaType,
         referenceRole: uploadKind === "first-frame" ? "first-frame" : uploadKind === "last-frame" ? "last-frame" : uploadKind === "audio" ? "audio" : uploadKind === "video" ? "motion" : uploadKind === "clay-render" ? "clay-render" : uploadRole,
@@ -20180,7 +20232,8 @@ function AssetsView(ctx: AppContext) {
             let regenerationIssue = "";
             if (mediaType === "image") {
               try {
-                regenerationTask = resolveImageAssetRegenerationTask(asset, state.project, state.settings.imageApi);
+                regenerationTask = resolveImageAssetCurrentShotRegenerationTask(asset, state.project, state.settings.imageApi)
+                  || resolveImageAssetRegenerationTask(asset, state.project, state.settings.imageApi);
               } catch (error) {
                 regenerationIssue = formatUserFacingError(error instanceof Error ? error.message : String(error));
               }
@@ -20303,7 +20356,9 @@ function AssetsView(ctx: AppContext) {
                       title={regenerationIssue || (!regenerationTask
                         ? "该图片没有可恢复的生图提示词或任务，请先补充资料。"
                         : !canRegenerateAsset ? "该图片正在排队或生成，请完成后再重新生成。"
-                          : `重新生成：${asset.name}。保留原图，新图另存并自动改名。`)}
+                          : canReconvertStoryboardImageTask(regenerationTask, state.project)
+                            ? `重新生成：${asset.name}。按当前分镜和生图规则转换后生成，使用当前图像 API；保留原图，新图另存。`
+                            : `重新生成：${asset.name}。保留原图，新图另存并自动改名。`)}
                       onClick={() => { if (regenerationTask) void regenerateImageTask(ctx, regenerationTask); }}
                     >
                       重新生成
@@ -22242,6 +22297,7 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
   }
   const tasks = state.project.generationTasks;
   const originalTask = tasks.find((candidate): candidate is ImageGenerationTask => isImageGenerationTask(candidate) && candidate.id === requestedTask.id) || requestedTask;
+  const currentShotRegeneration = canReconvertStoryboardImageTask(originalTask, state.project);
   const originalTaskWasTracked = tasks.some((candidate) => candidate.id === originalTask.id);
   const originalTaskIdentity = JSON.stringify(originalTask);
   const regenerationKnownSecrets = [state.settings.textApi.apiKey, state.settings.imageApi.apiKey,
@@ -22256,10 +22312,15 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
   // not wait for the first generation to finish and then bill a second retry.
   const lease = storyboardImageBatchLifecycle.begin(key);
   if (!lease) return;
-  const requestedApiSourceIdentity = imageApiRegenerationSourceIdentity(state.settings, originalTask.imageApiSnapshot);
+  const requestedApiSnapshot = currentShotRegeneration ? undefined : originalTask.imageApiSnapshot;
+  const requestedApiSourceIdentity = imageApiRegenerationSourceIdentity(state.settings, requestedApiSnapshot);
   let imageApi: AppState["settings"]["imageApi"];
+  let currentApiSnapshot: ImageGenerationTask["imageApiSnapshot"];
   try {
-    imageApi = await resolveImageApiForRegeneration(state.settings, originalTask.imageApiSnapshot);
+    imageApi = await resolveImageApiForRegeneration(state.settings, requestedApiSnapshot);
+    if (currentShotRegeneration) {
+      currentApiSnapshot = await captureImageApiSnapshot(imageApi, resolveWorkbenchImageApi(state.settings, "ordinary").profileId);
+    }
   } catch (error) {
     storyboardImageBatchLifecycle.finish(lease);
     notify(getSafeErrorDiagnostics(error, {
@@ -22273,7 +22334,7 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
     isImageGenerationTask(candidate) && candidate.id === originalTask.id
   ));
   if (!storyboardImageBatchLifecycle.canSubmit(lease) || liveState.project.id !== requestedProjectId
-    || imageApiRegenerationSourceIdentity(liveState.settings, originalTask.imageApiSnapshot) !== requestedApiSourceIdentity
+    || imageApiRegenerationSourceIdentity(liveState.settings, requestedApiSnapshot) !== requestedApiSourceIdentity
     || (originalTaskWasTracked && (!liveOriginal || JSON.stringify(liveOriginal) !== originalTaskIdentity))
     || (!originalTaskWasTracked && originalTask.resultAssetId && !liveState.project.assets.some((asset) => asset.id === originalTask.resultAssetId))
     || !canRegenerateImageTask(liveOriginal || originalTask, liveState.project.generationTasks)) {
@@ -22289,7 +22350,7 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
     setView("settings");
     return;
   }
-  if (imageApi.backend !== originalTask.backend) {
+  if (!currentShotRegeneration && imageApi.backend !== originalTask.backend) {
     notify(`此任务使用 ${originalTask.backend} 后端，请先切换到同类型图像 API，以免把原提示词发送到不兼容的后端。`, "error");
     storyboardImageBatchLifecycle.finish(lease);
     setView("settings");
@@ -22316,7 +22377,7 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
         ? "full-body"
         : undefined)
     : undefined;
-  let convertedPrompt = privateRegeneration || landscapeRepair ? "" : originalTask.prompt;
+  let convertedPrompt = currentShotRegeneration || privateRegeneration || landscapeRepair ? "" : originalTask.prompt;
   let regenerationSource: ReturnType<typeof resolveImageRegenerationSource> | undefined;
   regenerationKnownSecrets.push(state.settings.textApi.apiKey, imageApi.apiKey);
   const submissionCancelledMessage = "重新生图已因撤销或任务状态变化而停止，未调用图像接口。需要生成时请重新点击“重新生图”。";
@@ -22328,27 +22389,32 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
     if (!createdTask || !submissionIsCurrent(createdTask)) throw new GenerationTaskCancelledError(submissionCancelledMessage);
   };
   try {
-    const source = resolveImageRegenerationSource(originalTask, state.project);
+    const effectiveTask = currentShotRegeneration
+      ? { ...prepareCurrentShotImageRegenerationTask(originalTask, state.project), backend: imageApi.backend, model: imageApi.model }
+      : originalTask;
+    const source = resolveImageRegenerationSource(effectiveTask, state.project);
     regenerationSource = source;
     const textApi = { ...state.settings.textApi };
     const promptKind: ImagePromptAssetKind = privateRegeneration
       ? "character-private"
-      : originalTask.assetKind === "character" && (originalTask.imageVariant === "turnaround" || originalTask.imageVariant === "five-view")
+      : effectiveTask.assetKind === "character" && (effectiveTask.imageVariant === "turnaround" || effectiveTask.imageVariant === "five-view")
         ? "character-sheet"
-        : originalTask.assetKind;
+        : effectiveTask.assetKind;
     let trace: ImageGenerationTaskPatch = {};
-    const requiresPromptConversion = privateRegeneration || landscapeRepair || !originalTask.prompt.trim();
+    const requiresPromptConversion = privateRegeneration || landscapeRepair || !effectiveTask.prompt.trim();
     if (requiresPromptConversion) {
       if (!source.conversionSource.trim()) throw new Error("该旧任务没有保存可恢复的生图资料，请返回工作台重新创建任务。");
       if (!textApi.enabled || !textApi.baseUrl.trim() || !textApi.model.trim()) throw new Error("此任务尚未生成最终提示词，请先配置文本 API 后重试。");
-      if (privateRegeneration || landscapeRepair || !source.converterSystemPrompt || !originalTask.imagePromptFormat) {
+      if (privateRegeneration || landscapeRepair || !source.converterSystemPrompt || !effectiveTask.imagePromptFormat) {
         const selection = resolveImagePromptSelection({
           backend: imagePromptBackendForApi(imageApi.backend), model: imageApi.model, assetKind: promptKind,
-          imageVariant: originalTask.imageVariant,
-          manualRuleSetId: state.imagePromptRules.ruleSets.some((rule) => rule.id === originalTask.imagePromptRuleSetId && rule.enabled)
-            ? originalTask.imagePromptRuleSetId : undefined,
-          manualPresetId: state.imagePromptRules.categoryPresets.some((preset) => preset.id === originalTask.imagePromptPresetId && preset.enabled)
-            ? originalTask.imagePromptPresetId : undefined,
+          imageVariant: effectiveTask.imageVariant,
+          manualRuleSetId: currentShotRegeneration ? state.settings.imagePromptRuleSetIdByBackend?.[imageApi.backend]
+            : state.imagePromptRules.ruleSets.some((rule) => rule.id === originalTask.imagePromptRuleSetId && rule.enabled)
+              ? originalTask.imagePromptRuleSetId : undefined,
+          manualPresetId: currentShotRegeneration ? state.settings.imagePromptPresetIdByAssetKind?.storyboard
+            : state.imagePromptRules.categoryPresets.some((preset) => preset.id === originalTask.imagePromptPresetId && preset.enabled)
+              ? originalTask.imagePromptPresetId : undefined,
           state: state.imagePromptRules,
         });
         source.converterSystemPrompt = buildImagePromptConverterSystemPrompt(
@@ -22372,9 +22438,9 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
     }
     const referencePreflight = checkNovelAIReferenceImagePreflight(imageApi.backend, [...source.primaryReferenceAssetIds, ...source.referenceAssetIds]);
     if (!referencePreflight.allowed) throw new Error(referencePreflight.message);
-    if (originalTask.imageGenerationMode === "image-to-image") assertDirectStoryboardImageApiSupport(imageApi, source.referenceAssetIds.length);
+    if (effectiveTask.imageGenerationMode === "image-to-image") assertDirectStoryboardImageApiSupport(imageApi, source.referenceAssetIds.length);
     const task = {
-      ...buildImageRegenerationTask(originalTask, state.project, {
+      ...buildImageRegenerationTask(effectiveTask, state.project, {
         id: createId("image_task"), timestamp: Date.now(), backend: imageApi.backend,
         model: imageApi.backend === "comfyui"
           ? imageApi.comfyuiWorkflows?.find((workflow) => workflow.id === imageApi.activeComfyuiWorkflowId)?.name || "ComfyUI Workflow"
@@ -22382,6 +22448,7 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
         source,
       }),
       ...(privateRegeneration || landscapeRepair ? { prompt: "" } : {}),
+      ...(currentApiSnapshot ? { imageApiSnapshot: currentApiSnapshot } : {}),
       ...trace,
     };
     createdTask = task;
@@ -22389,7 +22456,7 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
     setState((current) => applyOwnedProjectUpdate(current, requestedProjectId, (project) => ({
       ...project, generationTasks: [task, ...project.generationTasks],
     })));
-    notify(`已加入重新生图队列：${task.name}。原图和原任务会保留。`);
+    notify(`已加入${currentShotRegeneration ? "当前镜头重新转换并生图" : "重新生图"}队列：${task.name}。原图和原任务会保留。`);
     const sourceAsset = state.project.assets.find((asset) => asset.id === originalTask.resultAssetId);
     await enqueueImageTask(async () => {
       assertSubmissionCurrent();
@@ -22400,16 +22467,37 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
       const loader = { readManagedImageDataUrl: window.lianhuaDesktop?.readManagedImageDataUrl, downloadImage: window.lianhuaDesktop?.downloadImage };
       const directImageRetry = task.imageGenerationMode === "image-to-image";
       const referenceAssets = directImageRetry ? imageReferenceSnapshotAssets(source.referenceAssetSnapshots) : state.project.assets;
-      const primaryImages = directImageRetry
-        ? await resolveDirectStoryboardReferenceImages(source.referenceAssetIds, referenceAssets, loader, cache)
-        : await resolveStoryboardReferenceImages(source.primaryReferenceAssetIds, referenceAssets, loader, cache);
+      const primaryReferences = directImageRetry
+        ? {
+          referenceImages: await resolveDirectStoryboardReferenceImages(source.referenceAssetIds, referenceAssets, loader, cache),
+          referenceAssets: source.referenceAssetIds.map((id) => referenceAssets.find((asset) => asset.id === id)!),
+        }
+        : await resolveStoryboardReferenceInputs(source.primaryReferenceAssetIds, referenceAssets, loader, cache);
       assertSubmissionCurrent();
-      const resolvedImages = directImageRetry ? [] : await resolveStoryboardReferenceImages(source.referenceAssetIds, referenceAssets, loader, cache);
+      const resolvedReferences = directImageRetry ? { referenceImages: [], referenceAssets: [] }
+        : await resolveStoryboardReferenceInputs(source.referenceAssetIds, referenceAssets, loader, cache);
       assertSubmissionCurrent();
-      const primaryPixels = new Set(primaryImages);
+      // Direct retries preserve their frozen upload order, including repeated
+      // pixels. Converted requests deduplicate images and ownership together.
+      const references = directImageRetry
+        ? { ...primaryReferences, primaryReferenceImageCount: primaryReferences.referenceImages.length }
+        : mergeStoryboardReferenceInputs(primaryReferences, resolvedReferences);
+      // Saved AI prose remains unchanged. Refresh only this version's own
+      // attachment table when a legacy non-frozen retry resolves fewer images.
+      if (!directImageRetry && task.assetKind === "storyboard" && imageApi.backend === "openai"
+        && (task.imagePromptFormat || "natural-language") === "natural-language" && task.prompt.trim()) {
+        const refreshed = refreshStoryboardImageReferenceMetadata(task.prompt, references.referenceAssets, state.project);
+        if (refreshed !== task.prompt) {
+          task.prompt = refreshed;
+          convertedPrompt = refreshed;
+          setBackgroundState((current) => applyOwnedProjectUpdate(current, requestedProjectId, (project) => ({
+            ...project, generationTasks: patchImageGenerationTask(project.generationTasks, task.id, { prompt: refreshed }),
+          })));
+        }
+      }
       const result = await executeImageRegeneration(task, {
-        referenceImages: [...primaryImages, ...resolvedImages.filter((image) => !primaryPixels.has(image))],
-        primaryReferenceImageCount: primaryImages.length,
+        referenceImages: references.referenceImages,
+        primaryReferenceImageCount: references.primaryReferenceImageCount,
         convertPrompt: async () => {
           assertSubmissionCurrent();
           const format = task.imagePromptFormat || "natural-language";
@@ -22446,7 +22534,9 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
             }
           }
           assertSubmissionCurrent();
-          return prompt;
+          return promptKind === "storyboard" && imageApi.backend === "openai" && (task.imagePromptFormat || "natural-language") === "natural-language"
+            ? buildStoryboardImagePromptWithReferences(prompt, references.referenceAssets, state.project)
+            : prompt;
         },
         persistPrompt: (prompt) => {
           assertSubmissionCurrent();
@@ -22457,7 +22547,7 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
         },
         generateImage: (input) => {
           assertSubmissionCurrent();
-          return requestImageModel(imageApi, { ...input, preserveReferenceImageOrder: directImageRetry }, () => {
+          return requestImageModel(imageApi, { ...input, preserveReferenceImageOrder: true }, () => {
             // Checked inside the transport FIFO after reference uploads and
             // immediately before the paid generation POST, never just enqueue.
             assertSubmissionCurrent();
@@ -22494,7 +22584,8 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
         nsfwPrivatePart: task.nsfwPrivatePart,
         sourceStoryboardId: task.sourceStoryboardId, sourceShotId: task.sourceShotId, sourceEntityId: task.sourceEntityId,
         sourceEntityKind: task.assetKind === "character" || task.assetKind === "location" || task.assetKind === "prop" ? task.assetKind : undefined,
-        visualAnchor: sourceAsset?.visualAnchor, gridStates: sourceAsset?.gridStates?.map((entry) => ({ ...entry })),
+        visualAnchor: currentShotRegeneration ? buildCurrentShotImageRegenerationVisualAnchor(task, state.project) : sourceAsset?.visualAnchor,
+        gridStates: sourceAsset?.gridStates?.map((entry) => ({ ...entry })),
         imagePromptRuleSetId: task.imagePromptRuleSetId, imagePromptRuleSetVersion: task.imagePromptRuleSetVersion,
         imagePromptRuleSetName: task.imagePromptRuleSetName,
         imagePromptPresetId: task.imagePromptPresetId, imagePromptPresetVersion: task.imagePromptPresetVersion,
@@ -23169,7 +23260,9 @@ function GenerationTasksView(ctx: AppContext) {
               className="image-regenerate-button"
               icon={<RefreshCw size={13} />}
               disabled={!canRegenerate}
-              title={canRegenerate ? `重新生图：${task.name}。${task.imageApiSnapshot ? "沿用原生图 API 配置和尺寸" : "沿用提示词和尺寸，使用当前图像 API"}，保留原图。` : "任务正在排队或生成，请完成后再重新生图。"}
+              title={canRegenerate ? `重新生图：${task.name}。${canReconvertStoryboardImageTask(task, state.project)
+                ? "按当前分镜和生图规则转换后生成，使用当前图像 API"
+                : task.imageApiSnapshot ? "沿用原生图 API 配置和尺寸" : "沿用提示词和尺寸，使用当前图像 API"}，保留原图。` : "任务正在排队或生成，请完成后再重新生图。"}
               onClick={() => void regenerateImageTask(ctx, task)}
             >
               重新生图

@@ -1,6 +1,8 @@
 const { createHash } = require('node:crypto');
 
-const MAX_STATE_BYTES = 256 * 1024 * 1024;
+// There is no aggregate library quota. The durable store partitions projects
+// and externalizes inline media before committing its small library index.
+const MAX_STATE_BYTES = Number.POSITIVE_INFINITY;
 const stateChecksum = (content) => createHash('sha256').update(content, 'utf8').digest('hex');
 
 const validateStateSize = (content) => {
@@ -10,12 +12,15 @@ const validateStateSize = (content) => {
   return stateBytes;
 };
 
-const validateStateText = (content) => {
+const validateStateText = (content, { allowLibraryManifest = false } = {}) => {
   validateStateSize(content);
   let parsed;
   try { parsed = JSON.parse(content); }
   catch { throw new Error('项目状态 JSON 格式无效，现有文件未修改'); }
   if (!parsed || typeof parsed !== 'object' || !parsed.project || !parsed.settings) throw new Error('项目状态结构无效');
+  if (parsed.storageFormat && !allowLibraryManifest) {
+    throw new Error('这是分项目存储索引，请连同项目目录通过兼容版本读取；不能将索引当作完整项目导入');
+  }
   if (parsed.integrity?.algorithm === 'sha256' && typeof parsed.integrity.checksum === 'string') {
     const { integrity, ...state } = parsed;
     if (stateChecksum(JSON.stringify(state)) !== integrity.checksum) throw new Error('项目状态完整性校验失败');

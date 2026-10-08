@@ -9,9 +9,10 @@ import { createRequire } from 'node:module';
 
 const require = createRequire(import.meta.url);
 const { createStatePersistence } = require('../electron/statePersistence.cjs');
+const { readProjectLibrary } = require('../electron/projectLibraryStore.cjs');
 
 const main = fs.readFileSync(new URL('../electron/main.cjs', import.meta.url), 'utf8');
-const core = main.slice(main.indexOf('const MAX_STATE_BYTES ='), main.indexOf('const stripSecrets ='));
+const core = main.slice(main.indexOf('const MAX_IMAGE_EXPORT_BYTES ='), main.indexOf('const stripSecrets ='));
 const saveStart = main.indexOf("handleTrustedIpc('lianhua:save-state'");
 const saveHandler = main.slice(saveStart, main.indexOf("handleTrustedIpc('lianhua:recovery-status'", saveStart));
 const loadStart = main.indexOf("handleTrustedIpc('lianhua:load-state'");
@@ -72,7 +73,7 @@ function harness(t) {
     hydrateSecrets: (state) => state,
     handleTrustedIpc: (name, handler) => { handlers.set(name, handler); },
   });
-  vm.runInContext(`${core}\n${loadHandler}\n${saveHandler}\n;globalThis.helpers = { MAX_STATE_BYTES, MAX_IMAGE_EXPORT_BYTES, validateStateText, stateAssets, atomicWriteFile, writeExternalBackup };`, context);
+  vm.runInContext(`${core}\n${loadHandler}\n${saveHandler}\n;globalThis.helpers = { MAX_STATE_BYTES: stateSerialization.MAX_STATE_BYTES, MAX_IMAGE_EXPORT_BYTES, validateStateText, stateAssets, atomicWriteFile, writeExternalBackup };`, context);
   return {
     ...context.helpers, controls, root, dataRoot, assetRoot, snapshotRoot, stateFile, recoveryConfigFile,
     save: (...args) => handlers.get('lianhua:save-state')({}, ...args),
@@ -80,15 +81,16 @@ function harness(t) {
   };
 }
 
-test('state limit is finite and independent from media limits, with actual size in errors', (t) => {
+test('whole-library size no longer has a 256 MiB veto while media and JSON checks remain independent', (t) => {
   const h = harness(t);
-  assert.equal(h.MAX_STATE_BYTES, 256 * 1024 * 1024);
+  assert.equal(h.MAX_STATE_BYTES, Infinity);
   assert.equal(h.MAX_IMAGE_EXPORT_BYTES, 64 * 1024 * 1024);
   const text = JSON.stringify({ project: { id: 'fixture' }, settings: {} });
-  h.controls.forcedByteLength = h.MAX_STATE_BYTES;
+  h.controls.forcedByteLength = 256 * 1024 * 1024;
   assert.equal(h.validateStateText(text).project.id, 'fixture');
-  h.controls.forcedByteLength = h.MAX_STATE_BYTES + 1;
-  assert.throws(() => h.validateStateText(text), /256\.0 MiB，超过 256 MiB.*现有文件和素材未被删除/u);
+  h.controls.forcedByteLength = 513 * 1024 * 1024;
+  assert.equal(h.validateStateText(text).project.id, 'fixture');
+  assert.throws(() => h.validateStateText('{broken'), /JSON|property|position/iu);
   assert.equal(fs.existsSync(h.stateFile), false);
 });
 
@@ -100,10 +102,11 @@ test('real 65 MiB state saves, reloads and produces a valid local recovery snaps
   const result = await h.save(content);
   assert.equal(result.ok, true);
   const saved = fs.readFileSync(h.stateFile, 'utf8');
-  assert.equal(h.validateStateText(saved).project.description.length, description.length);
+  assert.equal(readProjectLibrary(saved, { root: h.dataRoot }).project.description.length, description.length);
+  assert.ok(Buffer.byteLength(saved) < 4096, 'large project content belongs in its own immutable file');
   const snapshots = fs.readdirSync(h.snapshotRoot).filter((name) => name.endsWith('.json'));
   assert.equal(snapshots.length, 1);
-  assert.equal(h.validateStateText(fs.readFileSync(path.join(h.snapshotRoot, snapshots[0]), 'utf8')).project.description.length, description.length);
+  assert.equal(readProjectLibrary(fs.readFileSync(path.join(h.snapshotRoot, snapshots[0]), 'utf8'), { root: h.dataRoot }).project.description.length, description.length);
 });
 
 test('compact active references do not omit active or archived assets from external backups', async (t) => {
@@ -160,7 +163,7 @@ test('desktop state entry points retain shared validation while durable worker s
     const start = main.indexOf(`handleTrustedIpc('lianhua:${name}'`);
     assert.ok(start >= 0);
     const next = main.indexOf('handleTrustedIpc(', start + 1);
-    assert.ok(main.slice(start, next >= 0 ? next : undefined).includes('validateStateText('), `${name} must use the shared finite state boundary`);
+    assert.ok(main.slice(start, next >= 0 ? next : undefined).includes('validateStateText('), `${name} must retain shared JSON and integrity validation`);
   }
   for (const [name, operation] of [['load-state', 'load'], ['save-state', 'save'], ['recovery-status', 'status'], ['create-restore-point', 'restore-point'], ['restore-snapshot', 'restore']]) {
     const start = main.indexOf(`handleTrustedIpc('lianhua:${name}'`);
@@ -169,7 +172,8 @@ test('desktop state entry points retain shared validation while durable worker s
   }
   const store = fs.readFileSync(new URL('../electron/statePersistenceStore.cjs', import.meta.url), 'utf8');
   const save = store.slice(store.indexOf('const save = async'), store.indexOf('const load ='));
-  assert.ok(save.indexOf('prepareStateForSave(content') < save.indexOf('await encryptSecrets('));
+  assert.ok(save.indexOf('prepare(content') >= 0);
+  assert.ok(save.indexOf('prepare(content') < save.indexOf('await encryptSecrets('));
   assert.ok(save.indexOf('await encryptSecrets(') < save.indexOf('atomicWriteFile('));
   assert.doesNotMatch(saveHandler, /JSON\.(?:parse|stringify)\(/u);
   assert.match(main, /const exportedState = JSON\.stringify\(stripSecrets\(state\)\);\s*validateStateText\(exportedState\);/u);

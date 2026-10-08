@@ -159,6 +159,7 @@ export const generateDirectStoryboardImages = async (
     > | undefined;
     let imagePromptConverterRules = '';
     let conversionIdentityContext = '';
+    let selectedPromptFormat = 'natural-language';
     try {
       const imagePromptSelection = resolveImagePromptSelection({
         backend: imagePromptBackendForApi(api.backend),
@@ -168,6 +169,7 @@ export const generateDirectStoryboardImages = async (
         manualPresetId: initial.settings.imagePromptPresetIdByAssetKind?.storyboard,
         state: initial.imagePromptRules,
       });
+      selectedPromptFormat = imagePromptSelection.ruleSet.format;
       if (isGptImage25MicroNsfwPromptSelection(imagePromptSelection)) {
         const sourceSceneIds = new Set([board.sceneId, ...(board.sourceSceneIds || [])]);
         const sourceScenes = [
@@ -223,6 +225,7 @@ export const generateDirectStoryboardImages = async (
     const size = resolveStoryboardImageOutputSize(initial.settings.storyboardImageOutputSize || defaultStoryboardImageOutputSize(), board.aspectRatio, api.backend);
     if (size.issue) throw new Error(`分镜图片分辨率无效：${size.issue}`);
     const projectContext = {
+      includeReferenceMetadata: api.backend === 'openai' && selectedPromptFormat === 'natural-language',
       characters: cloneImageBatchConfig(initial.project.characters.filter((character) => !character.dossier?.archivedIntoCharacterId)), locations: cloneImageBatchConfig(initial.project.locations),
       props: cloneImageBatchConfig(initial.project.props), scenes: cloneImageBatchConfig(initial.project.scenes),
       // Top-level copies freeze image locators/immutable pixel strings without
@@ -306,7 +309,7 @@ export const generateDirectStoryboardImages = async (
           });
           return {
             ...request,
-            directPrompt: buildDirectStoryboardImagePromptWithReferences(converted, orderedAssets),
+            directPrompt: buildDirectStoryboardImagePromptWithReferences(converted, orderedAssets, projectContext, projectContext.includeReferenceMetadata),
           };
         }))
       : rawRequests;

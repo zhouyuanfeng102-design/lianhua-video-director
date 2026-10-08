@@ -12,6 +12,7 @@ import { resolveStoryboardImageOutputSize, defaultStoryboardImageOutputSize } fr
 import { assertComfyUIWorkflowCanBindReferenceImages } from './comfyui';
 import { canUseNsfwPrivateProfileAssetForStoryboardShot } from './nsfwPrivateAssets';
 import { parseStoryboardImageFramePlan, validateStoryboardImagePlanCount, type StoryboardImageFramePlan } from './storyboardImagePlan';
+import { buildStoryboardImagePromptWithReferences, stripStoryboardImageReferenceMetadata, storyboardImageFramingInstruction, type StoryboardImageReferenceContext } from './storyboardImageReferences';
 
 const ids = (value: unknown): string[] => Array.isArray(value)
   ? [...new Set(value.filter((id): id is string => typeof id === 'string').map((id) => id.trim()).filter(Boolean))]
@@ -76,6 +77,8 @@ export interface DirectStoryboardImagePromptConversion {
 }
 
 export interface DirectStoryboardImageBuildContext extends StoryboardImageBuildContext {
+  /** Explicitly opted in only for an OpenAI natural-language image request. */
+  includeReferenceMetadata?: boolean;
   /** An old asset prompt without matching provenance is deliberately not reused. */
   currentImagePromptsByShotId?: Readonly<Record<string, { prompt: string; sourceFingerprint: string }>>;
   /** Converter provenance for direct image prompts that must not reuse plain old direct prompts. */
@@ -128,21 +131,37 @@ const fnv1a = (value: string): string => {
   return (hash >>> 0).toString(16).padStart(8, '0');
 };
 
-const directPromptReferenceLines = (assets: readonly ReferenceAsset[]): string[] => [
+const directPromptReferenceLines = (): string[] => [
   '根据实际随请求上传的参考图片生成当前目标分镜的一张独立静帧，不生成拼图或多格分镜。',
   '参考图提供对应人物身份、外貌或场景外观；当前镜头画面描述决定本镜动作、衣着状态、站位、机位和构图，不照搬参考图中的临时持物、姿态或背景。',
   '只采用下面当前镜头的可见画面；声音和发话文字不是画面文字，不增加字幕、对话气泡或协议标签。原稿中的 Subject/Picture/Video 标签只属于原视频描述，不能按编号匹配本次上传图片。',
-  '本次实际上传图片（严格按此顺序）：',
-  ...assets.map((asset, index) => `${index + 1}. ${JSON.stringify(asset.name)} — ${referenceRoleLabel(asset)}`),
 ];
 
 export const buildDirectStoryboardImagePromptWithReferences = (
   body: string,
   assets: readonly ReferenceAsset[],
-): string => [
-  ...directPromptReferenceLines(assets),
+  context: StoryboardImageReferenceContext = {},
+  includeReferenceMetadata = false,
+): string => {
+  if (includeReferenceMetadata) {
+    const authoredBody = stripStoryboardImageReferenceMetadata(body);
+    const introduction = directPromptReferenceLines().join('\n');
+    return buildStoryboardImagePromptWithReferences(
+      authoredBody.startsWith(`${introduction}\n`) ? authoredBody : `${introduction}\n${authoredBody}`,
+      assets, context,
+    );
+  }
+  return [
+  ...directPromptReferenceLines(),
+  '本次实际上传图片（严格按此顺序）：',
+  ...assets.map((asset, index) => `${index + 1}. ${JSON.stringify(asset.name)} — ${
+    asset.sourceEntityKind === 'character' || (asset.referenceRole || asset.role) === 'character' ? '人物身份与外貌'
+      : asset.sourceEntityKind === 'location' || (asset.referenceRole || asset.role) === 'scene' ? '场景环境'
+        : asset.sourceEntityKind === 'prop' || (asset.referenceRole || asset.role) === 'prop' ? '道具外观' : '画面参考'
+  }`),
   body,
 ].join('\n');
+};
 
 /** Unrelated library additions, generated outputs and video-ref picks do not
  * invalidate a frozen direct image request. Actual visual/source-pixel edits do. */
@@ -150,12 +169,14 @@ export const directStoryboardImageSourceFingerprint = (
   storyboard: Storyboard,
   request: Pick<StoryboardImageRequest, 'shotId' | 'referenceAssetIds'>
     & Partial<Pick<StoryboardImageRequest, 'purpose'>> & StoryboardImageFrameMetadata,
-  context: Pick<DirectStoryboardImageBuildContext, 'assets' | 'directPromptConversion' | 'conversionIdentityContext'>,
+  context: Pick<DirectStoryboardImageBuildContext, 'assets' | 'directPromptConversion' | 'conversionIdentityContext' | 'includeReferenceMetadata'>,
 ): string => {
   const shot = storyboard.shots.find((item) => item.id === request.shotId);
   const assets = new Map(context.assets.map((asset) => [asset.id, asset]));
   const hasConversion = Boolean(context.directPromptConversion);
   return `direct-storyboard-image-${hasConversion ? `v${context.directPromptConversion?.version ?? 2}` : 'v1'}-${fnv1a(JSON.stringify({
+    referenceFramingVersion: 2,
+    includeReferenceMetadata: Boolean(context.includeReferenceMetadata),
     boardId: storyboard.id, shotId: request.shotId,
     // Keep ordinary per-shot legacy fingerprints stable, but never reuse one
     // moment's image prompt for another moment, first frame or last frame.
@@ -171,6 +192,7 @@ export const directStoryboardImageSourceFingerprint = (
       const asset = assets.get(id);
       return asset ? {
         id, name: asset.name, role: asset.referenceRole || asset.role,
+        characterReferenceId: asset.characterReferenceId,
         checksum: asset.checksum, relativePath: asset.relativePath, url: asset.url,
         // Inline-only imports do not necessarily have a checksum.
         inlineFingerprint: asset.dataUrl ? fnv1a(asset.dataUrl) : undefined,
@@ -260,8 +282,8 @@ export const buildDirectStoryboardImageBatchRequests = (
       referenceRole: purpose === 'storyboard-shot' ? 'composition' : purpose,
       imageVariant: purpose === 'storyboard-shot' ? 'storyboard-frame' : purpose,
       referenceAssetIds: [...referenceAssetIds], primaryReferenceAssetIds: [...referenceAssetIds],
-      directPrompt: [...momentLines, template.directPrompt].join('\n'),
-      conversionSource: [...momentLines, template.conversionSource].join('\n'),
+      directPrompt: [...momentLines, storyboardImageFramingInstruction(purpose), template.directPrompt].join('\n'),
+      conversionSource: [...momentLines, storyboardImageFramingInstruction(purpose), template.conversionSource].join('\n'),
     };
     return request;
   });
@@ -286,14 +308,6 @@ const assertSelectedReferenceAssets = (
     }
     return asset;
   });
-};
-
-const referenceRoleLabel = (asset: ReferenceAsset): string => {
-  const role = asset.referenceRole || asset.role;
-  if (role === 'character' || asset.sourceEntityKind === 'character') return '人物身份与外貌';
-  if (role === 'scene' || asset.sourceEntityKind === 'location') return '场景环境';
-  if (role === 'prop' || asset.sourceEntityKind === 'prop') return '道具外观';
-  return '画面参考';
 };
 
 /** Only explicit per-shot IDs enter the request. No global references,
@@ -327,7 +341,9 @@ export const buildDirectStoryboardImageRequests = (
     const reusable = cached && text(cached.prompt) && cached.sourceFingerprint === directStoryboardImageSourceFingerprint(
       storyboard, { shotId: shot.id, referenceAssetIds }, context,
     );
-    const directPrompt = reusable ? cached.prompt : buildDirectStoryboardImagePromptWithReferences(visual.body, assets);
+    const directPrompt = reusable ? cached.prompt : buildDirectStoryboardImagePromptWithReferences(
+      [storyboardImageFramingInstruction('storyboard-shot'), visual.body].join('\n'), assets, context, context.includeReferenceMetadata,
+    );
     return {
       purpose: 'storyboard-shot',
       name: allocateName(buildStoryboardImageBaseName(storyboard, shot.index, 'storyboard-shot', context.projectName)),

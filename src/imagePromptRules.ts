@@ -4,7 +4,7 @@ import {
 import { FULL_BODY_LAYOUT_RULE } from './imageGeneration';
 import type { ImageVariant } from './types';
 import { IMAGE_PROMPT_LANDSCAPE_SCOPE_CONTRACT, isLandscapeImageRequest } from './imageLocationScope';
-import { DIRECTED_ACTION_RELATION_RULE } from './spatialContinuityRules';
+import { DIRECTED_ACTION_RELATION_RULE, STORYBOARD_FRAME_VISIBILITY_RULE } from './spatialContinuityRules';
 
 export type ImagePromptBackend =
   | 'all'
@@ -1852,6 +1852,7 @@ export const IMAGE_PROMPT_DIRECTED_ACTION_CONTRACT = DIRECTED_ACTION_RELATION_RU
 export const IMAGE_PROMPT_VISIBLE_CHARACTER_IDENTITY_CONTRACT = [
   '人物外貌是生图身份锁，不是可省略的背景资料。输入只要提供了人物连续性事实，每名实际出镜人物都必须在最终提示词中逐人明确写出其全部非空可见身份：准确的性别或雌雄/自定义性别、种族或物种、物种形态/身体结构、体表材质、服装或外覆结构、明确属于长期稳定装备/辨识物的道具、辨识特征及连续性锚点。对明确类人角色，再保留脸型与五官、发型与发色、肤色与体型体态；对真实非人角色，改为头部或感知结构、躯干、肢体与附肢数量及连接方式、体长/高度/翼展和运动方式，不得套用人类外貌模板。',
   '人物姓名与作品／世界观归属、可见外貌共同构成身份锁，最终提示词应同时保留；姓名或“小师妹”等称谓不能替代外貌描写，不得只写姓名加动作、不得把已给出的外貌压缩成空泛形容词，也不得因为参考图存在而省略文字身份锁。',
+  '可见身份以当前景别、朝向、遮挡和裁切为边界：只展开此时入画的外貌细节，未入画的眼睛、面孔、胸甲、手脚和装备不为完整列出资料而强制显露。姓名与身份归属可保留，但侧背面、单眼侧脸、背影和局部特写不需要转头对镜头、调整身体姿态或拉远构图来展示身份。',
   '多人物画面必须逐人分别绑定并对应各自资料，禁止把甲的脸、发型、体态、服装、性别、物种或固定道具串给乙；当前镜未实际出镜的人物不得写入最终提示词。',
   IMAGE_PROMPT_PROP_SCOPE_CONTRACT,
   '镜头中的受伤、散发、衣物破损等明确状态变化只能叠加在固定身份之上，不能覆盖或改写未发生变化的外貌与服装基底。',
@@ -1907,7 +1908,7 @@ export const IMAGE_PROMPT_CURRENT_LAYOUT_CONTRACT = [
  * details, or any existing NSFW/private rules from the selected preset. */
 export const IMAGE_PROMPT_PROPORTION_CONTRACT = [
   '普通人物生图必须保持资料与当前视觉风格指定的稳定纵横比例：类人主体的头身比例、肩胯宽度、四肢长度与关节连接自然，非人主体沿自身结构轴线稳定，不可被横向拉宽、纵向压扁或局部挤压。',
-  '使用正常透视或轻微透视，避免超广角近距离造成的边缘变形；构图以完整主体和自然留白为先，不为了填满画布拉伸主体。',
+  '保持当前镜头指定的透视、景别与裁切，避免无依据的超广角近距离边缘变形；只在明确全身取景时要求完整主体和自然留白，局部特写沿用局部取景，不为了补全身体拉远镜头，也不为了填满画布拉伸主体。',
   '禁止拉伸变形、压缩变形、橡皮人比例、异常宽肩宽胯、过长或过短四肢、头身比例失衡、融合或断裂的肢体；负面约束只针对几何失真，不得删除资料明确的性别、体型、服装、物种或题材风格。',
 ].join('\n');
 
@@ -1976,6 +1977,7 @@ export const buildImagePromptConverterSystemPrompt = (
   landscape ? '' : IMAGE_PROMPT_PROP_SCOPE_CONTRACT,
   selection.assetKind === 'storyboard' ? IMAGE_PROMPT_DIRECTED_ACTION_CONTRACT : '',
   landscape ? '' : IMAGE_PROMPT_NAMED_IDENTITY_CONTRACT,
+  selection.assetKind === 'storyboard' ? STORYBOARD_FRAME_VISIBILITY_RULE : '',
   landscape ? IMAGE_PROMPT_LANDSCAPE_SCOPE_CONTRACT : '',
   '只返回最终提示词，不要复述以上规则。',
 ].filter(Boolean).join('\n');

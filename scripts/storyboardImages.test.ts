@@ -239,8 +239,8 @@ assert.notEqual(
   'a frozen frame descriptor must not conceal edits to its underlying source shot',
 );
 assert.equal(shotRequests.length, storyboard.shots.length, 'one storyboard image is required for every actual generated shot');
-assert.match(shotRequests[0].conversionSource, /^当前镜事实优先：先锁定本镜实际出镜人物及其完整外貌/u,
-  'ordinary one-frame-per-shot generation keeps its existing source contract');
+assert.match(shotRequests[0].conversionSource, /^当前镜事实优先：先确定本张时刻的机位、取景与可见范围/u,
+  'ordinary one-frame-per-shot generation resolves framing before visible identity detail');
 shotRequests.forEach((request, offset) => {
   const shot = storyboard.shots[offset];
   assert.equal(request.purpose, 'storyboard-shot');
@@ -437,10 +437,10 @@ for (const detail of [
 ]) {
   assert.match(contextualSource, new RegExp(detail, 'u'), `converter input omitted project continuity detail: ${detail}`);
 }
-assert.match(
+assert.doesNotMatch(
   contextualSource,
   /左耳后有金色三角印记/u,
-  '旧版资产的 visualAnchor 没有人物外貌时，必须同时回读其最终生图 prompt',
+  '历史资产的完整生图 prompt 不再回灌当前构图；稳定身份使用人物资料与实际参考像素',
 );
 assert.deepEqual(
   contextRequests[0]?.referenceAssetIds,
@@ -617,7 +617,8 @@ assert.deepEqual(historyRequest.referenceAssetIds, currentHistoryIds,
 assert.deepEqual(historyRequest.primaryReferenceAssetIds, []);
 assert.ok(!historyRequest.conversionSource.includes('小师姐历史外貌版本1'),
   'discarded automatic history must not remain in text converter reference anchors');
-assert.ok(historyRequest.conversionSource.includes('小师姐历史外貌版本8'));
+assert.ok(!historyRequest.conversionSource.includes('小师姐历史外貌版本8'),
+  'even the selected image supplies pixels and role metadata, not historical authored framing anchors');
 
 const selectedSameEntityIds = [historyPool[1], historyPool[0], historyPool[2]];
 assert.deepEqual(
@@ -772,8 +773,8 @@ const staleOutputRequest = buildStoryboardImageRequests(
 )[0];
 assert.deepEqual(
   staleOutputRequest.referenceAssetIds,
-  [explicitShotReference.id, generatedOtherShotReference.id, generatedOtherPurposeReference.id],
-  '重新生成时不得把本镜即将替换的旧生成结果继续作为图生图像素；手工参考和其他用途资产仍保留',
+  [explicitShotReference.id, generatedOtherShotReference.id],
+  '所有同镜自动生成输出均不跨用途回流；手工选择的其他镜头参考仍保留',
 );
 assert.deepEqual(
   staleOutputRequest.primaryReferenceAssetIds,

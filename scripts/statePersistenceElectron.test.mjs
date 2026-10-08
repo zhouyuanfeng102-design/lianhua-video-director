@@ -28,7 +28,7 @@ test('packaged Electron can run state worker inside app.asar with main-only safe
     fs.rmSync(resolved, { recursive: true, force: true });
   });
   fs.mkdirSync(stage);
-  for (const file of ['statePersistence.cjs', 'statePersistenceWorker.cjs', 'statePersistenceStore.cjs', 'stateSerialization.cjs', 'imageReferenceSnapshots.cjs']) {
+  for (const file of ['statePersistence.cjs', 'statePersistenceWorker.cjs', 'statePersistenceStore.cjs', 'stateSerialization.cjs', 'imageReferenceSnapshots.cjs', 'projectLibraryStore.cjs', 'stateMediaFiles.cjs', 'imageReferenceTransport.cjs', 'webpValidation.cjs']) {
     fs.copyFileSync(path.join(moduleRoot, file), path.join(stage, file));
   }
   fs.writeFileSync(path.join(stage, 'package.json'), JSON.stringify({ name: 'state-asar-isolated-qa', version: '1.0.0', main: 'main.cjs' }));

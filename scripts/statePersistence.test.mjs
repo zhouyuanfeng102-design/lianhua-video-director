@@ -11,10 +11,12 @@ import vm from 'node:vm';
 const require = createRequire(import.meta.url);
 const { createStatePersistence } = require('../electron/statePersistence.cjs');
 const { createStateStore, atomicWriteFile } = require('../electron/statePersistenceStore.cjs');
+const { readProjectLibrary } = require('../electron/projectLibraryStore.cjs');
 const { prepareStateForSave, validateStateText, stripSecrets, stateChecksum, secretCount, MAX_STATE_BYTES } = require('../electron/stateSerialization.cjs');
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 const deferred = () => { let resolve; const promise = new Promise((done) => { resolve = done; }); return { promise, resolve }; };
 const content = (id, more = {}) => JSON.stringify({ project: { id, ...more }, projects: [{ id, __activeProjectReference: true }], activeProjectId: id, settings: {} });
+const readSaved = (h, file = h.stateFile) => readProjectLibrary(fs.readFileSync(file, 'utf8'), { root: h.dataRoot });
 
 function fixture(t, options = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'lianhua-state-worker-'));
@@ -64,7 +66,7 @@ test('normal worker save persists state, secret-free snapshots and matching encr
   const result = await h.persistence.run('save', { content: JSON.stringify(source) });
   assert.equal(result.ok, true);
   assert.equal(result.checksum, stateChecksum(fs.readFileSync(h.stateFile, 'utf8')));
-  const saved = validateStateText(fs.readFileSync(h.stateFile, 'utf8'));
+  const saved = readSaved(h);
   assert.equal(saved.settings.comfyuiVideo.apiKey, '');
   const snapshots = fs.readdirSync(path.join(h.dataRoot, 'project-snapshots'));
   assert.equal(snapshots.length, 1);
@@ -101,7 +103,7 @@ test('queued saves are strict FIFO and read/credential hydration cannot overtake
   const [a, b, loaded] = await Promise.all([first, second, load]);
   assert.notEqual(a.checksum, b.checksum);
   assert.deepEqual(order, ['fake-A', 'fake-B']);
-  assert.equal(validateStateText(fs.readFileSync(h.stateFile, 'utf8')).project.id, 'B');
+  assert.equal(readSaved(h).project.id, 'B');
   assert.equal(JSON.parse(loaded.content).settings.textApi.apiKey, 'fake-B');
 });
 
@@ -127,16 +129,16 @@ test('invalid or encryption-failed saves reject before changing state/vault; a l
   await h.persistence.run('save', { content: content('retry') });
   await h.persistence.flush();
   assert.equal(h.persistence.lastSaveError, undefined);
-  assert.equal(validateStateText(fs.readFileSync(h.stateFile, 'utf8')).project.id, 'retry');
+  assert.equal(readSaved(h).project.id, 'retry');
 });
 
-test('worker size limit includes the generated integrity envelope and does not depend on main IPC validation', async (t) => {
+test('worker accepts a library without the former aggregate cap while retaining empty, shape and integrity checks', async (t) => {
   const h = fixture(t);
   await assert.rejects(h.persistence.run('save', { content: '' }), /项目状态为空/u);
   await assert.rejects(h.persistence.run('save', { content: JSON.stringify({ settings: {} }) }), /结构无效/u);
   const prepared = prepareStateForSave(content('limit'));
   assert.ok(Buffer.byteLength(prepared.payload) > Buffer.byteLength(content('limit')));
-  assert.equal(MAX_STATE_BYTES, 256 * 1024 * 1024);
+  assert.equal(MAX_STATE_BYTES, Infinity);
   assert.equal(fs.existsSync(h.stateFile), false);
 });
 
@@ -161,7 +163,7 @@ test('close waits for every accepted save; accepted operations are not coalesced
   await Promise.all([first, second, closing]);
   assert.equal(closed, true);
   assert.equal(calls, 2);
-  assert.equal(validateStateText(fs.readFileSync(h.stateFile, 'utf8')).project.id, 'B');
+  assert.equal(readSaved(h).project.id, 'B');
 });
 
 test('worker death rejects the uncertain persistence barrier without retrying; next explicit save can restart safely', async (t) => {
@@ -179,11 +181,11 @@ test('worker death rejects the uncertain persistence barrier without retrying; n
   await entered.promise;
   await worker.terminate();
   await rejection;
-  assert.equal(validateStateText(fs.readFileSync(h.stateFile, 'utf8')).project.id, 'safe-original');
+  assert.equal(readSaved(h).project.id, 'safe-original');
   await assert.rejects(h.persistence.flush(), /退出|未确认|停止/u);
   block = false;
   await h.persistence.run('save', { content: content('explicit-retry') });
-  assert.equal(validateStateText(fs.readFileSync(h.stateFile, 'utf8')).project.id, 'explicit-retry');
+  assert.equal(readSaved(h).project.id, 'explicit-retry');
 });
 
 test('snapshot restoration is ordered after older pending saves and keeps the displaced state as a restore point', async (t) => {
@@ -194,8 +196,8 @@ test('snapshot restoration is ordered after older pending saves and keeps the di
   await saving;
   const restored = JSON.parse(await restoring);
   assert.equal(restored.project.id, 'restore-target');
-  assert.equal(validateStateText(fs.readFileSync(h.stateFile, 'utf8')).project.id, 'restore-target');
-  const snapshots = fs.readdirSync(path.join(h.dataRoot, 'project-snapshots')).map((name) => validateStateText(fs.readFileSync(path.join(h.dataRoot, 'project-snapshots', name), 'utf8')).project.id);
+  assert.equal(readSaved(h).project.id, 'restore-target');
+  const snapshots = fs.readdirSync(path.join(h.dataRoot, 'project-snapshots')).map((name) => readSaved(h, path.join(h.dataRoot, 'project-snapshots', name)).project.id);
   assert.ok(snapshots.includes('pending-old-save'));
   await assert.rejects(h.persistence.run('restore', { snapshotId: `../${path.basename(point.path)}` }), /名称无效/u);
 });
@@ -209,7 +211,7 @@ test('external worker backup covers archived assets, rejects traversal, strips s
   const backupDirectory = path.join(h.root, 'backup');
   fs.writeFileSync(path.join(h.dataRoot, 'recovery-config.json'), JSON.stringify({ backupDirectory, keepCount: 3 }));
   const input = JSON.stringify({ project: { id: 'active', assets: [{ id: 'active', relativePath: 'active.png' }] },
-    projects: [{ id: 'archived', assets: [{ id: 'archived', relativePath: 'archived.png' }, { id: 'escape', relativePath: '../outside.png' }] }],
+    projects: [{ id: 'archived', assets: [{ id: 'archived', relativePath: 'archived.png' }] }],
     settings: { imageApi: { apiKey: 'fake-key-never-in-backup' } } });
   const result = await h.persistence.run('save', { content: input });
   assert.equal(result.backupError, '');
@@ -217,15 +219,22 @@ test('external worker backup covers archived assets, rejects traversal, strips s
   const targetRoot = path.join(backupDirectory, '莲华视频导演台备份');
   const manifest = JSON.parse(fs.readFileSync(path.join(targetRoot, 'backup-integrity.json'), 'utf8'));
   assert.equal(manifest.stateChecksum, result.checksum);
-  assert.equal(manifest.assets.find((item) => item.id === 'escape').missing, true);
   assert.equal(fs.readFileSync(path.join(targetRoot, 'assets', 'archived.png'), 'utf8'), 'archived synthetic asset');
+  const traversal = JSON.parse(input);
+  traversal.projects[0].assets.push({ id: 'escape', relativePath: '../outside.png' });
+  const rejectedBackup = await h.persistence.run('save', { content: JSON.stringify(traversal) });
+  assert.equal(rejectedBackup.ok, true, 'invalid backup paths must not discard the successful local save');
+  assert.match(rejectedBackup.backupError, /路径无效/u);
+  const backupAfterRejection = JSON.parse(fs.readFileSync(path.join(targetRoot, 'backup-integrity.json'), 'utf8'));
+  assert.deepEqual(backupAfterRejection, manifest, 'invalid paths never replace the last valid external backup index');
+  assert.equal(readSaved(h).projects[0].assets.at(-1).id, 'escape', 'local data remains intact for repair');
   const blockedPath = path.join(h.root, 'not-a-directory');
   fs.writeFileSync(blockedPath, 'fixture');
   fs.writeFileSync(path.join(h.dataRoot, 'recovery-config.json'), JSON.stringify({ backupDirectory: blockedPath }));
   const failedBackup = await h.persistence.run('save', { content: content('saved-with-backup-error') });
   assert.equal(failedBackup.ok, true);
   assert.ok(failedBackup.backupError);
-  assert.equal(validateStateText(fs.readFileSync(h.stateFile, 'utf8')).project.id, 'saved-with-backup-error');
+  assert.equal(readSaved(h).project.id, 'saved-with-backup-error');
 });
 
 test('worker atomic writes retain original or complete .previous candidates after ENOSPC and blocked rename recovery', (t) => {
@@ -284,7 +293,7 @@ test('synthetic 73 MiB library saves off-thread while the main event loop remain
   // Includes one structured-clone of the IPC string. The long JSON/hash/fsync
   // stages must not monopolize main for most of the total operation.
   assert.ok(maximumGap < duration * 0.6, `max main-loop gap ${maximumGap.toFixed(1)}ms / save ${duration.toFixed(1)}ms`);
-  assert.equal(validateStateText(fs.readFileSync(h.stateFile, 'utf8')).project.description.length, 73 * 1024 * 1024);
+  assert.equal(readSaved(h).project.description.length, 73 * 1024 * 1024);
   t.diagnostic(`73 MiB save=${duration.toFixed(0)}ms; main-loop ticks=${ticks}; maximum gap=${maximumGap.toFixed(0)}ms`);
 });
 
@@ -420,7 +429,7 @@ test('flush includes a follow-up save enqueued as the first persistence barrier 
   await h.persistence.flush();
   assert.equal(h.persistence.pendingCount, 0);
   assert.ok(next);
-  assert.equal(validateStateText(fs.readFileSync(h.stateFile, 'utf8')).project.id, 'latest');
+  assert.equal(readSaved(h).project.id, 'latest');
   await next;
 });
 

@@ -23,6 +23,7 @@ const { isCompleteWebP } = require(path.join(__dirname, 'webpValidation.cjs'));
 const { createVideoWorkbench } = require(path.join(__dirname, 'videoWorkbench.cjs'));
 const { createVideoThumbnailService } = require(path.join(__dirname, 'videoThumbnail.cjs'));
 const stateSerialization = require(path.join(__dirname, 'stateSerialization.cjs'));
+const { readProjectLibraryImport } = require(path.join(__dirname, 'projectLibraryImport.cjs'));
 const { createStatePersistence } = require(path.join(__dirname, 'statePersistence.cjs'));
 const { createStateCloseGuard } = require(path.join(__dirname, 'stateCloseGuard.cjs'));
 const { createRendererCrashRecovery } = require(path.join(__dirname, 'rendererCrashRecovery.cjs'));
@@ -320,9 +321,8 @@ app.setPath('temp', tempRoot);
 app.setPath('crashDumps', crashRoot);
 app.setAppLogsPath(logsRoot);
 
-// The project library is one envelope, not a single image. Keep a finite,
-// shared 256 MiB state limit while retaining the original media limits.
-const MAX_STATE_BYTES = 256 * 1024 * 1024;
+// Project storage/export has no aggregate library quota. Image and network
+// transport bounds remain independent from the partitioned state store.
 const MAX_IMAGE_EXPORT_BYTES = 64 * 1024 * 1024;
 const MAX_HTTP_RESPONSE_BYTES = 32 * 1024 * 1024;
 const MAX_GENERATED_IMAGE_BYTES = 32 * 1024 * 1024;
@@ -1839,7 +1839,8 @@ app.whenReady().then(() => {
   handleTrustedIpc('lianhua:read-file', async (_event, filePath) => {
     const resolved = path.resolve(String(filePath || ''));
     if (!isApprovedReadPath(resolved)) throw new Error('只允许读取用户刚刚选择的文件');
-    return fs.readFileSync(resolved, 'utf8');
+    const content = fs.readFileSync(resolved, 'utf8');
+    return readProjectLibraryImport(content, { filePath: resolved, dataRoot, assetRoot });
   });
 
   handleTrustedIpc('lianhua:storage-paths', async () => ({
@@ -1863,7 +1864,7 @@ app.whenReady().then(() => {
   });
 
   handleTrustedIpc('lianhua:save-state', async (_event, content) => {
-    // Shared validateStateText + final envelope-size/integrity checks run in
+    // Shared structural/integrity checks and per-project storage run in
     // the ordered worker before any vault/state writes. Await is still durable,
     // including the external-backup result, not a fire-and-forget enqueue.
     return getStatePersistence().run('save', { content: typeof content === 'string' ? content : '' });
@@ -2010,6 +2011,14 @@ app.whenReady().then(() => {
       const result = await dialog.showOpenDialog({ title: '导入莲华项目包', properties: ['openFile'], filters: [{ name: '莲华项目包', extensions: ['lhvd'] }] });
       if (result.canceled || !result.filePaths[0]) return null;
       sourcePath = result.filePaths[0];
+    }
+    // The renderer delegates new library indexes here because file.text()
+    // alone cannot resolve sibling project blocks or restore backup media.
+    if (path.extname(sourcePath).toLowerCase() === '.json') {
+      const content = readProjectLibraryImport(fs.readFileSync(sourcePath, 'utf8'), { filePath: sourcePath, dataRoot, assetRoot });
+      const imported = validateStateText(content);
+      await getStatePersistence().flush();
+      return JSON.stringify(hydrateSecrets(imported));
     }
     const stage = ensureDirectory(path.join(tempRoot, `import-${randomUUID()}`));
     try {

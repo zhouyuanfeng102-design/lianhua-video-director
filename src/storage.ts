@@ -110,7 +110,9 @@ export const STORAGE_KEY = 'lianhua_video_director_state_v22';
 export const CURRENT_SCHEMA_VERSION = 23;
 export const STORAGE_SCHEMA_VERSION = CURRENT_SCHEMA_VERSION;
 /** Must match electron/main.cjs. This bounds the whole library, not one image. */
-export const MAX_PERSISTED_STATE_BYTES = 256 * 1024 * 1024;
+// Desktop persistence stores projects and image bytes separately. A library's
+// combined size is no longer a reason to refuse saving or emergency export.
+export const MAX_PERSISTED_STATE_BYTES = Number.POSITIVE_INFINITY;
 const DESKTOP_BROWSER_CACHE_BYTES = 2 * 1024 * 1024;
 
 export const UI_FONT_SCALE_MIN_PERCENT = 80;
@@ -3232,6 +3234,7 @@ export type DesktopSaveResult = {
   checksum: string;
   externalBackup?: string | null;
   backupError?: string;
+  snapshotError?: string;
 };
 
 type DesktopStateBridge = {
@@ -3270,7 +3273,9 @@ export const desktopBridge = (): DesktopStateBridge | undefined => desktopStateB
 export const loadDesktopState = async (): Promise<AppState | null> => {
   const raw = await desktopStateBridge()?.loadState?.();
   if (!raw) return null;
-  try { return normalizeState(JSON.parse(raw)); } catch { return null; }
+  // Only an absent file is a new workspace. A broken saved state must never
+  // silently become the temporary startup project and then be autosaved.
+  return normalizeState(JSON.parse(raw));
 };
 
 const stateSerializationPolicy = Object.freeze({
