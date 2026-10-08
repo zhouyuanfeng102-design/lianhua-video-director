@@ -28,6 +28,10 @@ import {
   type ImagePromptRulesState,
 } from '../src/imagePromptRules';
 import {
+  MODEL_FAMILY_CATEGORY_PRESETS,
+  MODEL_FAMILY_RULE_SETS,
+} from '../src/imagePromptModelFamilies';
+import {
   MOSE_JIANGHU_PRIVATE_IMAGE_PROMPT_RULE,
   MOSE_JIANGHU_NSFW_IMAGE_PROMPT_RULE,
 } from '../src/nsfwPromptRules';
@@ -51,6 +55,15 @@ const requiredAssetKinds: ImagePromptAssetKind[] = [
   'storyboard',
   'grid',
 ];
+const modelFamilyRuleIds: readonly string[] = MODEL_FAMILY_RULE_SETS.map((rule) => rule.id);
+const modelFamilyPresetIds: readonly string[] = MODEL_FAMILY_CATEGORY_PRESETS.map((preset) => preset.id);
+const ordinaryAssetKinds = requiredAssetKinds.filter((kind) => kind !== 'character-private');
+
+const withoutModelFamilyCatalog = (state: ImagePromptRulesState): ImagePromptRulesState => ({
+  ...state,
+  ruleSets: state.ruleSets.filter((rule) => !modelFamilyRuleIds.includes(rule.id)),
+  categoryPresets: state.categoryPresets.filter((preset) => !modelFamilyPresetIds.includes(preset.id)),
+});
 
 const multiPersonBindingPresetIds = [
   'image-preset-krea-2-multi-person-character',
@@ -685,12 +698,31 @@ test('built-ins expose provider and visual rule sets with every required categor
   );
   const presetIds = new Set(BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS.map((item) => item.id));
   BUILT_IN_IMAGE_PROMPT_RULE_SETS.forEach((ruleSet) => {
-    requiredAssetKinds.forEach((assetKind) => {
+    const supportedKinds = modelFamilyRuleIds.includes(ruleSet.id) ? ordinaryAssetKinds : requiredAssetKinds;
+    supportedKinds.forEach((assetKind) => {
       const presetId = ruleSet.defaultPresetByAssetKind[assetKind];
       assert.ok(presetId, `${ruleSet.name} does not bind ${assetKind}`);
       assert.ok(presetIds.has(presetId), `${ruleSet.name} binds missing preset ${presetId}`);
     });
   });
+});
+
+test('Google and Grok model families bind ordinary categories without private presets and survive normalization unchanged', () => {
+  for (const ruleId of modelFamilyRuleIds) {
+    const rule = BUILT_IN_IMAGE_PROMPT_RULE_SETS.find((item) => item.id === ruleId)!;
+    assert.equal(rule.categoryPresetIds.length, 9);
+    assert.equal(rule.defaultPresetByAssetKind['character-private'], undefined);
+    assert.deepEqual(new Set(Object.keys(rule.defaultPresetByAssetKind)), new Set(ordinaryAssetKinds));
+    assert.deepEqual(normalizeImagePromptRuleSet(rule), rule);
+    for (const presetId of rule.categoryPresetIds) {
+      const preset = BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS.find((item) => item.id === presetId)!;
+      assert.ok(preset, `${rule.name} binds missing preset ${presetId}`);
+      assert.notEqual(preset.assetKind, 'character-private');
+      assert.equal(preset.format, 'natural-language');
+      assert.equal(preset.negativePrompt, undefined);
+      assert.deepEqual(normalizeImagePromptCategoryPreset(preset), preset);
+    }
+  }
 });
 
 test('every image asset category offers cinematic, anime, Chinese-art and tokusatsu presets', () => {
@@ -845,7 +877,7 @@ test('protocol inference recognizes untouched legacy built-ins without restricti
 });
 
 test('private character presets reuse the positive-only 墨色江湖 dossier rule without contaminating normal character presets', () => {
-  assert.equal(IMAGE_PROMPT_RULE_CATALOG_VERSION, 17);
+  assert.ok(IMAGE_PROMPT_RULE_CATALOG_VERSION >= 17, 'the current catalog must retain the private-layout migrations');
   assert.doesNotMatch(
     MOSE_JIANGHU_NSFW_IMAGE_PROMPT_RULE,
     /18\s*岁|年龄|成年|未成年|\badult\b|\bminor\b|\bchild\b|\bteen\b|安全政策|safety policy|permitted/iu,
@@ -1441,7 +1473,7 @@ const withoutNovelAiCategoryCatalog = (state: ImagePromptRulesState): ImagePromp
 const catalogV1ImageRuleLibrary = (): ImagePromptRulesState => {
   const state = withoutMultiPersonBindingCatalog(
     withoutGptImage25MicroNsfwCatalog(
-      withoutPrivateCharacterCatalog(withoutNovelAiCategoryCatalog(withoutFiveViewModelPresets(normalizeImagePromptRulesState(undefined)))),
+      withoutPrivateCharacterCatalog(withoutNovelAiCategoryCatalog(withoutFiveViewModelPresets(withoutModelFamilyCatalog(normalizeImagePromptRulesState(undefined))))),
     ),
   );
   return {
@@ -1535,7 +1567,7 @@ test('legacy nine-rule libraries gain Krea and the private character catalog onc
   legacy.ruleSets[0].enabled = false;
   const before = structuredClone(legacy);
   const migrated = migrateImagePromptRulesState(legacy);
-  assert.equal(migrated.ruleSets.length, 11);
+  assert.equal(migrated.ruleSets.length, BUILT_IN_IMAGE_PROMPT_RULE_SETS.length);
   assert.equal(migrated.catalogVersion, IMAGE_PROMPT_RULE_CATALOG_VERSION);
   for (const beforeRule of before.ruleSets) {
     const afterRule = migrated.ruleSets.find((rule) => rule.id === beforeRule.id)!;
@@ -1572,6 +1604,7 @@ test('legacy nine-rule libraries gain Krea and the private character catalog onc
       )),
       ...BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS.filter((preset) => novelAiPresetIds.includes(preset.id)),
       ...BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS.filter((preset) => fiveViewPresetIds.includes(preset.id)),
+      ...MODEL_FAMILY_CATEGORY_PRESETS,
     ],
   );
   assert.deepEqual(migrated.defaultRuleSetByBackend, before.defaultRuleSetByBackend);
@@ -1592,7 +1625,7 @@ test('normalization does not falsely stamp a legacy catalog as already upgraded'
   const normalized = normalizeImagePromptRulesState(legacyImageRuleLibrary());
   assert.equal(normalized.catalogVersion, 0);
   assert.equal(normalized.ruleSets.length, 9);
-  assert.equal(migrateImagePromptRulesState(normalized).ruleSets.length, 11);
+  assert.equal(migrateImagePromptRulesState(normalized).ruleSets.length, BUILT_IN_IMAGE_PROMPT_RULE_SETS.length);
 });
 
 test('catalog-v1 libraries gain private presets and bindings without duplicating Krea or replacing user data', () => {
@@ -1809,7 +1842,7 @@ test('existing custom or disabled Krea rules are not replaced or enabled by cata
   const custom = { ...current.ruleSets.find((rule) => rule.id === 'image-rule-krea-2')!,
     name: '我的 Krea', systemPrompt: '我的规则正文', enabled: false, version: 'custom-8', updatedAt: 8 };
   const migrated = migrateImagePromptRulesState({ ...legacyImageRuleLibrary(), ruleSets: [custom] });
-  assert.deepEqual(migrated.ruleSets, [custom]);
+  assert.deepEqual(migrated.ruleSets, [custom, ...MODEL_FAMILY_RULE_SETS]);
   assert.equal(migrated.catalogVersion, IMAGE_PROMPT_RULE_CATALOG_VERSION);
 });
 
@@ -1835,6 +1868,7 @@ test('catalog migration adds only missing Krea dependencies, private, GPT Image 
       ...comfyuiMultiPersonBindingPresetIds,
       ...novelAiPresetIds,
       ...fiveViewPresetIds,
+      ...modelFamilyPresetIds,
     ],
   );
 });
@@ -1917,7 +1951,7 @@ test('legacy aliases use the same one-time catalog upgrade and cloned bindings s
   const builtInsBefore = structuredClone(BUILT_IN_IMAGE_PROMPT_RULE_SETS);
   const migrated = migrateImagePromptRulesState({ schemaVersion: 0, rules: legacy.ruleSets,
     presets: legacy.categoryPresets, defaults: legacy.defaultRuleSetByBackend });
-  assert.equal(migrated.ruleSets.length, 11);
+  assert.equal(migrated.ruleSets.length, BUILT_IN_IMAGE_PROMPT_RULE_SETS.length);
   assert.deepEqual(migrated.defaultRuleSetByBackend, legacy.defaultRuleSetByBackend);
   const krea = migrated.ruleSets.find((rule) => rule.id === 'image-rule-krea-2')!;
   krea.categoryPresetIds.push('user-preset');

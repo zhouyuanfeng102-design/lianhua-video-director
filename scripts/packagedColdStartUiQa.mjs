@@ -6,7 +6,8 @@ import { chromium } from 'playwright';
 import { createQaProcessHarness, findAvailableTcpPort, waitForCondition } from './qaProcessHarness.mjs';
 
 // Focused release check: the real portable EXE, a new isolated profile, and
-// startup/navigation only. Never reset an existing directory or submit AI jobs.
+// startup/navigation and rule selection only. Never reset an existing directory
+// or submit AI jobs.
 const root = fs.realpathSync.native(path.resolve(import.meta.dirname, '..'));
 const configuredExecutable = String(process.env.APP_EXECUTABLE || '').trim();
 assert.ok(configuredExecutable, 'APP_EXECUTABLE must point to the real portable EXE');
@@ -38,7 +39,8 @@ let closedGracefully = false;
 const errors = { runtime: [], page: [], console: [], rendererLog: [], externalRequests: [] };
 const navigation = [];
 const screenshots = [];
-const report = { executable, expectedVersion, dataDirectory, outputDirectory, launcherPid: child.pid, navigation, screenshots, errors };
+const imagePromptSelections = [];
+const report = { executable, expectedVersion, dataDirectory, outputDirectory, launcherPid: child.pid, navigation, screenshots, imagePromptSelections, errors };
 const rendererLogPath = path.join(dataDirectory, 'logs', 'renderer.log');
 const collectRendererLog = () => {
   if (!fs.existsSync(rendererLogPath)) return;
@@ -96,8 +98,43 @@ const run = async () => {
   assert.ok((await page.locator('.rules-view .rule-editor').innerText()).trim().length > 30, 'The story-processing rule editor must render');
   navigation.push('规则中心：剧情处理规则');
   await screenshot('03-story-rules.png');
+
+  await page.locator('.sidebar').getByRole('button', { name: '图像工作台', exact: true }).click();
+  const workbench = page.locator('.image-view');
+  await workbench.waitFor({ state: 'visible' });
+  const ruleSelect = workbench.getByRole('combobox', { name: '生图规则集', exact: true });
+  const presetSelect = workbench.getByRole('combobox', { name: '分类预设', exact: true });
+  for (const [index, family] of ['google-nano-banana', 'grok-imagine'].entries()) {
+    await workbench.locator('.image-asset-kind-tabs').getByRole('button', { name: '人物角色', exact: true }).click();
+    await workbench.getByRole('tab', { name: '普通生图', exact: true }).click();
+    await workbench.getByRole('group', { name: '选择普通生图画面规格', exact: true })
+      .getByRole('button', { name: '头像', exact: true }).click();
+    const ruleId = `image-rule-${family}`;
+    const presetPrefix = `image-preset-${family}-`;
+    await ruleSelect.selectOption(ruleId);
+    assert.equal(await ruleSelect.inputValue(), ruleId, `${family}: ordinary rule selection must be retained`);
+    const characterPresetIds = await presetSelect.locator('option').evaluateAll((options, prefix) =>
+      options.map((option) => option.value).filter((value) => value.startsWith(prefix)).sort(), presetPrefix);
+    assert.deepEqual(characterPresetIds, [`${presetPrefix}character`, `${presetPrefix}multi-person-character`],
+      `${family}: both ordinary character presets must be available`);
+    for (const presetId of characterPresetIds) {
+      await presetSelect.selectOption(presetId);
+      assert.equal(await presetSelect.inputValue(), presetId, `${family}: character preset selection must be retained`);
+    }
+    await workbench.getByRole('group', { name: '选择普通生图画面规格', exact: true })
+      .getByRole('button', { name: '五视图', exact: true }).click();
+    const fiveViewPresetId = `${presetPrefix}five-view`;
+    await presetSelect.selectOption(fiveViewPresetId);
+    assert.equal(await ruleSelect.inputValue(), ruleId, `${family}: changing the frame specification must retain the chosen rule`);
+    assert.equal(await presetSelect.inputValue(), fiveViewPresetId, `${family}: its five-view preset must be selectable`);
+    assert.equal(await workbench.getByRole('tab', { name: '普通生图', exact: true }).getAttribute('aria-selected'), 'true');
+    imagePromptSelections.push({ ruleId, characterPresetIds, fiveViewPresetId });
+    navigation.push(`图像工作台：${family} 普通人物与五视图预设`);
+    await presetSelect.scrollIntoViewIfNeeded();
+    await screenshot(`0${index + 4}-${family}-five-view.png`);
+  }
   collectRendererLog();
-  for (const [kind, entries] of Object.entries(errors)) assert.deepEqual(entries, [], `${kind} must contain no startup/navigation errors`);
+  for (const [kind, entries] of Object.entries(errors)) assert.deepEqual(entries, [], `${kind} must contain no startup/navigation/selection errors`);
   harness.markElectronStopping();
   await page.evaluate(() => { setTimeout(() => window.close(), 0); });
   await harness.waitForElectronClose();

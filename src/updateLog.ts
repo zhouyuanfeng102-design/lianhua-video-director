@@ -11,6 +11,17 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "1.5.4",
+    releasedAt: "2026-10-09",
+    title: "普通生图新增 Google 香蕉与 Grok 规则",
+    highlights: [
+      "按 Google 与 xAI 官方提示策略新增 Nano Banana／香蕉和 Grok Imagine 自然语言规则，各配备 9 个普通生图分类预设。",
+      "覆盖角色、多人、角色设定板、五视图、场景、道具、分镜首尾帧、多人分镜和多宫格，沿用当前取景、动作对象和视线约束。",
+      "在现有规则集与分类预设下拉框选择；兼容 API 通道识别已知图像模型名称，手选规则与预设始终优先。",
+      "升级只补入新增目录，保留自定义规则、默认选择及既有任务；五视图推荐尊重编辑、禁用和删除，不新增操作按钮。",
+    ],
+  },
+  {
     version: "1.5.3",
     releasedAt: "2026-10-08",
     title: "分镜图片人物朝向与首尾帧取景修复",

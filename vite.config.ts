@@ -162,6 +162,9 @@ export default defineConfig({
           // state. Split this leaf layer without creating a domain cycle.
           if ([
             'comfyui.ts', 'continuity.ts', 'directorStyles.ts', 'generatedImageData.ts', 'imageDimensions.ts', 'imageReferenceData.ts', 'imagePromptRules.ts',
+            // The rule catalog eagerly reads these family definitions; keep
+            // them together instead of falling back to the domain cycle.
+            'imagePromptModelFamilies.ts',
             'modelProfiles.ts', 'novelai.ts', 'nsfwPrivateAssets.ts', 'nsfwPromptRules.ts', 'promptConstraints.ts',
             'semanticEvents.ts', 'sourceIntegrity.ts', 'masterTimeline.ts', 'storyboardSubject.ts', 'storyPacing.ts', 'promptDialogueLanguage.ts', 'promptTranslation.ts',
             'userFacingError.ts', 'videoConversionRules.ts', 'visualStyles.ts',

@@ -111,6 +111,8 @@ for (const document of ['project-guide.md', 'github-publishing.md']) {
   const relativePath = path.join('docs', document);
   if (fs.existsSync(path.join(root, relativePath))) files.push(relativePath);
 }
+const imageRulesResearch = path.join('docs', 'research', 'google-grok-image-rules-2026-10-09.md');
+if (fs.existsSync(path.join(root, imageRulesResearch))) files.push(imageRulesResearch);
 const releaseNotesDirectory = path.join(root, 'docs', 'releases');
 if (fs.existsSync(releaseNotesDirectory)) {
   for (const entry of fs.readdirSync(releaseNotesDirectory, { withFileTypes: true })) {

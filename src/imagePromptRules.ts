@@ -5,6 +5,11 @@ import { FULL_BODY_LAYOUT_RULE } from './imageGeneration';
 import type { ImageVariant } from './types';
 import { IMAGE_PROMPT_LANDSCAPE_SCOPE_CONTRACT, isLandscapeImageRequest } from './imageLocationScope';
 import { DIRECTED_ACTION_RELATION_RULE, STORYBOARD_FRAME_VISIBILITY_RULE } from './spatialContinuityRules';
+import {
+  GOOGLE_NANO_BANANA_RULE_ID, GROK_IMAGINE_RULE_ID,
+  MODEL_FAMILY_CATEGORY_PRESETS, MODEL_FAMILY_RULE_SETS, MODEL_FAMILY_FIVE_VIEW_PRESET_IDS,
+  isGoogleNanoBananaImageModel, isGrokImagineImageModel,
+} from './imagePromptModelFamilies';
 
 export type ImagePromptBackend =
   | 'all'
@@ -101,7 +106,7 @@ export interface SanitizedImagePromptSections {
 }
 
 export const IMAGE_PROMPT_RULES_SCHEMA_VERSION = 1;
-export const IMAGE_PROMPT_RULE_CATALOG_VERSION = 17;
+export const IMAGE_PROMPT_RULE_CATALOG_VERSION = 18;
 const GPT_IMAGE_RULE_ID = 'image-rule-openai-gpt-image';
 const KREA_RULE_ID = 'image-rule-krea-2';
 const COMFYUI_RULE_ID = 'image-rule-comfyui';
@@ -121,6 +126,7 @@ const FIVE_VIEW_MICRO_PRESET_REVISION_CATALOG_VERSION = 13;
 const GPT_IMAGE_25_MICRO_NSFW_ROLLBACK_CATALOG_VERSION = 15;
 const GPT_IMAGE_25_MICRO_NSFW_LIGHT_CLOTHING_CATALOG_VERSION = 16;
 const PRIVATE_MULTI_REGION_LAYOUT_CATALOG_VERSION = 17;
+const GOOGLE_GROK_MODEL_CATALOG_VERSION = 18;
 const NOVELAI_RULE_ID = 'image-rule-novelai';
 
 export const NOVELAI_IMAGE_PRESET_IDS = {
@@ -169,6 +175,9 @@ export const FIVE_VIEW_IMAGE_PRESET_IDS = {
 } as const;
 
 const ALL_FIVE_VIEW_IMAGE_PRESET_IDS: readonly string[] = Object.values(FIVE_VIEW_IMAGE_PRESET_IDS);
+const LAYOUT_SPECIFIC_FIVE_VIEW_PRESET_IDS: readonly string[] = [
+  ...ALL_FIVE_VIEW_IMAGE_PRESET_IDS, ...Object.values(MODEL_FAMILY_FIVE_VIEW_PRESET_IDS),
+];
 const GPT_IMAGE_25_MICRO_NSFW_PRESET_ID_SET = new Set<string>([
   ...Object.values(GPT_IMAGE_25_MICRO_NSFW_PRESET_IDS),
   FIVE_VIEW_IMAGE_PRESET_IDS.micro,
@@ -580,6 +589,7 @@ export const BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS: readonly ImagePromptCategor
   ...MULTI_PERSON_BINDING_CATEGORY_PRESETS,
   ...NOVELAI_IMAGE_CATEGORY_PRESETS,
   ...themedImagePromptCategoryPresets(),
+  ...MODEL_FAMILY_CATEGORY_PRESETS,
 ];
 
 const builtInRule = (
@@ -657,6 +667,7 @@ export const BUILT_IN_IMAGE_PROMPT_RULE_SETS: readonly ImagePromptRuleSet[] = [
     defaultPresetByAssetKind: allCategoryBindings(),
     version: '1.3.0',
   },
+  ...MODEL_FAMILY_RULE_SETS,
   builtInRule({
     id: 'image-rule-sd-webui',
     name: 'SD WebUI 标签生图规则',
@@ -1633,6 +1644,27 @@ export const migrateImagePromptRulesState = (value: unknown): ImagePromptRulesSt
     };
   }
 
+  if ((state.catalogVersion || 0) < GOOGLE_GROK_MODEL_CATALOG_VERSION) {
+    const addedRuleIds = new Set(MODEL_FAMILY_RULE_SETS.map((rule) => rule.id));
+    const previousBuiltInIds = new Set(BUILT_IN_IMAGE_PROMPT_RULE_SETS
+      .filter((rule) => !addedRuleIds.has(rule.id)).map((rule) => rule.id));
+    const hasExistingCatalog = state.ruleSets.some((rule) => previousBuiltInIds.has(rule.id));
+    const ruleIds = new Set(state.ruleSets.map((rule) => rule.id));
+    const presetIds = new Set(state.categoryPresets.map((preset) => preset.id));
+    // Add the new families once. Keep edits, defaults, empty/custom libraries,
+    // and later deliberate deletions as explicit user choices.
+    state = {
+      ...state,
+      catalogVersion: GOOGLE_GROK_MODEL_CATALOG_VERSION,
+      ruleSets: hasExistingCatalog
+        ? [...state.ruleSets, ...MODEL_FAMILY_RULE_SETS.filter((rule) => !ruleIds.has(rule.id)).map(cloneRuleSet)]
+        : state.ruleSets,
+      categoryPresets: hasExistingCatalog
+        ? [...state.categoryPresets, ...MODEL_FAMILY_CATEGORY_PRESETS.filter((preset) => !presetIds.has(preset.id)).map(cloneCategoryPreset)]
+        : state.categoryPresets,
+    };
+  }
+
   return state;
 };
 
@@ -1690,7 +1722,12 @@ const recommendFiveViewPreset = (
   // The request layout is not inferred from the asset category: historical
   // four-view jobs also use character-sheet and must keep their original style.
   if (input.assetKind !== 'character-sheet' || input.imageVariant !== 'five-view') return undefined;
-  if (!Object.prototype.hasOwnProperty.call(FIVE_VIEW_RECOMMENDATION_BY_RULE, ruleSet.id)) return undefined;
+  const recommendations: Readonly<Record<string, string>> = {
+    ...FIVE_VIEW_RECOMMENDATION_BY_RULE,
+    [GOOGLE_NANO_BANANA_RULE_ID]: MODEL_FAMILY_FIVE_VIEW_PRESET_IDS.google,
+    [GROK_IMAGINE_RULE_ID]: MODEL_FAMILY_FIVE_VIEW_PRESET_IDS.grok,
+  };
+  if (!Object.prototype.hasOwnProperty.call(recommendations, ruleSet.id)) return undefined;
   if (ruleSet.id === GPT_IMAGE_RULE_ID && (input.backend !== 'openai'
     || !/^gpt-image-2\.5(?:$|[-_])/iu.test(cleanString(input.model)))) return undefined;
   if (ruleSet.id === GPT_IMAGE_25_MICRO_NSFW_RULE_ID && manualRuleSetId !== ruleSet.id) return undefined;
@@ -1700,13 +1737,13 @@ const recommendFiveViewPreset = (
   const boundId = ruleSet.defaultPresetByAssetKind['character-sheet'];
   const bound = state.categoryPresets.find((preset) => preset.id === boundId);
   const factoryBound = BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS.find((preset) => preset.id === boundId);
-  const recommendedId = FIVE_VIEW_RECOMMENDATION_BY_RULE[ruleSet.id];
+  const recommendedId = recommendations[ruleSet.id];
   const recommended = findPreset(state.categoryPresets, recommendedId, input.assetKind, ruleSet);
-  const factoryRecommended = FIVE_VIEW_MODEL_CATEGORY_PRESETS.find((preset) => preset.id === recommendedId)!;
+  const factoryRecommended = BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS.find((preset) => preset.id === recommendedId);
   // A rename/edit, explicit binding, disable or deletion is an opt-out. Resolve
   // the saved selection normally; never restore a missing preset or change the
   // rule library just to make an automatic recommendation available.
-  if (!factoryBound || !isUnchangedFactoryPreset(bound, factoryBound)
+  if (!factoryRecommended || !factoryBound || !isUnchangedFactoryPreset(bound, factoryBound)
     || !isUnchangedFactoryPreset(recommended, factoryRecommended)) return undefined;
   return recommended;
 };
@@ -1732,6 +1769,14 @@ export const resolveImagePromptSelection = (
     }
     ruleSet = manual;
     ruleSource = 'manual';
+  }
+
+  if (!ruleSet && input.backend === 'openai' && input.assetKind !== 'character-private') {
+    const model = cleanString(input.model);
+    const familyRuleId = isGoogleNanoBananaImageModel(model) ? GOOGLE_NANO_BANANA_RULE_ID
+      : isGrokImagineImageModel(model) ? GROK_IMAGINE_RULE_ID : undefined;
+    ruleSet = state.ruleSets.find((item) => item.id === familyRuleId && ruleCompatibleWithBackend(item, input.backend));
+    if (ruleSet) ruleSource = 'backend-default';
   }
 
   if (!ruleSet) {
@@ -1800,13 +1845,13 @@ export const resolveImagePromptSelection = (
     preset = state.categoryPresets.find((item) => (
       item.enabled
       && item.assetKind === input.assetKind
-      && !ALL_FIVE_VIEW_IMAGE_PRESET_IDS.includes(item.id)
+      && !LAYOUT_SPECIFIC_FIVE_VIEW_PRESET_IDS.includes(item.id)
       && isImagePromptPresetCompatibleWithRule(item, ruleSet)
       && (allowedPresetIds.size === 0 || allowedPresetIds.has(item.id))
     ));
     if (!preset) {
       preset = state.categoryPresets.find((item) => item.enabled && item.assetKind === input.assetKind
-        && !ALL_FIVE_VIEW_IMAGE_PRESET_IDS.includes(item.id)
+        && !LAYOUT_SPECIFIC_FIVE_VIEW_PRESET_IDS.includes(item.id)
         && isImagePromptPresetCompatibleWithRule(item, ruleSet));
     }
     presetSource = 'compatible-first';
