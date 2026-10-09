@@ -51,6 +51,7 @@ export interface VideoDirectorBatchDraft {
   promptFormat?: VideoPromptFormat;
   promptFormats?: Record<string, VideoPromptFormat>;
   referenceOverrides: Record<string, VideoImageReference[]>;
+  audioOverrides?: Record<string, import('./videoAudioTypes').VideoAudioSelectionOverride>;
   referenceRoleOverrides: Record<string, ReferenceRole[]>;
   automaticTails: Record<string, AutomaticVideoTailConfiguration>;
   tailCharacterModes: Record<string, {
@@ -376,6 +377,8 @@ export const draftFromVideoTask = (task: VideoGenerationTask): VideoGenerationDr
   return {
     ...draft, reuseTaskId: task.id, source: draft.source ? { ...draft.source } : undefined,
     references: structuredClone(draft.references),
+    audioReferences: draft.audioReferences ? structuredClone(draft.audioReferences) : undefined,
+    audioReferenceBinding: draft.audioReferenceBinding ? structuredClone(draft.audioReferenceBinding) : undefined,
     h3ReferenceBinding: draft.h3ReferenceBinding ? structuredClone(draft.h3ReferenceBinding) : undefined,
     seedanceReferenceBinding: draft.seedanceReferenceBinding ? structuredClone(draft.seedanceReferenceBinding) : undefined,
     parameters: JSON.parse(JSON.stringify(draft.parameters)) as Record<string, unknown>,

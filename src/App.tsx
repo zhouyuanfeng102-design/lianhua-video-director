@@ -122,6 +122,7 @@ import type {
 import { chapterIdForVideoLaunch } from "./videoDirectorDraft";
 import { buildSelectedSequencePromptText } from "./sequencePromptExport";
 import { VideoDirectorView, VideoTaskCard, type VideoDirectorLaunchRequest } from "./components/VideoDirectorView";
+import type { ProjectVoicePresets } from "./videoAudioTypes";
 import { StoryPreparationReviewDialog } from "./components/StoryPreparationReviewDialog";
 import { ImageOutputSizeControls } from "./components/ImageOutputSizeControls";
 import { TaskErrorDetails } from "./components/TaskErrorDetails";
@@ -6107,6 +6108,63 @@ export default function App() {
       if (stateRef.current.project.id === owner.id) notify(error instanceof Error ? error.message : "图片上传失败。", "error");
     } finally { setStoryReferenceUploading(false); }
   };
+  const handleVideoVoicePresetsChange = (presets: ProjectVoicePresets) => {
+    const projectId = stateRef.current.project.id;
+    setState((current) => applyOwnedProjectUpdate(current, projectId, (project) => ({
+      ...project, voicePresets: structuredClone(presets), updatedAt: Date.now(),
+    })));
+  };
+  const handleVideoAudioFilesImport = async (files: File[]): Promise<void> => {
+    if (!files.length) return;
+    const projectId = stateRef.current.project.id;
+    const epoch = workspaceEpochRef.current;
+    const isCurrent = () => workspaceEpochRef.current === epoch && stateRef.current.project.id === projectId;
+    const maxBytes = 30 * 1024 * 1024;
+    for (const file of files) {
+      if (!file.size) throw new Error(`音频“${file.name}”为空，请重新选择。`);
+      if (file.size >= maxBytes) throw new Error(`音频“${file.name}”达到 30 MB 本地上传限制，请选择较小的文件。`);
+      if (!/\.(?:mp3|wav|flac)$/iu.test(file.name)) throw new Error("参考音频请使用 MP3、WAV 或 FLAC 文件。");
+    }
+    const imported: ReferenceAsset[] = [];
+    const bridge = desktopBridge();
+    for (const file of files) {
+      if (!isCurrent()) throw new Error("项目已切换，本次音频导入已取消。");
+      const source = await file.arrayBuffer();
+      const headerBytes = new Uint8Array(source);
+      const header = String.fromCharCode(...headerBytes.subarray(0, 12));
+      const mimeType = header.startsWith("RIFF") && header.slice(8, 12) === "WAVE" ? "audio/wav"
+        : header.startsWith("fLaC") ? "audio/flac"
+          : header.startsWith("ID3") || headerBytes.length > 3 && headerBytes[0] === 255 && (headerBytes[1] & 0xe0) === 0xe0 ? "audio/mpeg" : undefined;
+      if (!mimeType) throw new Error(`音频“${file.name}”不是 MP3、WAV 或 FLAC 原文件。`);
+      const probe = await probeAudioFile(file);
+      if (!isCurrent()) throw new Error("项目已切换，本次音频导入已取消。");
+      const managed = bridge?.importMedia ? await bridge.importMedia(file) : null;
+      if (managed && managed.mediaType !== "audio") throw new Error(`音频“${file.name}”未识别为音频资产。`);
+      let dataUrl: string | undefined;
+      let checksum = managed?.checksum;
+      if (!managed) {
+        dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(String(reader.result));
+          reader.onerror = () => reject(new Error(`音频“${file.name}”读取失败。`));
+          reader.readAsDataURL(file.slice(0, file.size, mimeType));
+        });
+        if (globalThis.crypto?.subtle) checksum = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", source)), (value) => value.toString(16).padStart(2, "0")).join("");
+      }
+      if (!isCurrent()) throw new Error("项目已切换，本次音频导入已取消。");
+      const now = Date.now();
+      imported.push({ id: createId("asset"), name: file.name, fileName: managed?.fileName || file.name,
+        type: "audio", role: "audio", referenceRole: "audio", mediaType: "audio", source: "upload",
+        dataUrl, url: managed?.url, relativePath: managed?.relativePath, checksum, mimeType: managed?.mimeType || mimeType,
+        sizeBytes: managed?.sizeBytes || file.size, managed: Boolean(managed?.managed), missing: false,
+        durationSec: probe.durationSec, sampleRate: probe.sampleRate, channelCount: probe.channelCount, waveform: probe.waveform,
+        tags: ["参考音频", "用户上传"], importedAt: now, createdAt: now, updatedAt: now });
+    }
+    setState((current) => {
+      if (workspaceEpochRef.current !== epoch || current.project.id !== projectId) return current;
+      return applyOwnedProjectUpdate(current, projectId, (project) => ({ ...project, assets: [...imported, ...project.assets], updatedAt: Date.now() }));
+    });
+  };
   const handleStoryReferenceRecognize = async (referenceId: string) => {
     const source = stateRef.current;
     const chapterId = activeChapter(source.project)?.id;
@@ -9295,6 +9353,8 @@ export default function App() {
           onOpenSettings={() => { setOpenVideoSettings(true); setView("settings"); }}
           onOpenPrompt={openPromptSource}
           onRepairIdentityBindings={repairStoryboardIdentityBindings}
+          onVoicePresetsChange={handleVideoVoicePresetsChange}
+          onImportAudioFiles={handleVideoAudioFilesImport}
           onOpenVideoAssets={() => { setVideoAssetStoryboardFilter(""); setAssetLibrarySection("video"); setView("assets"); }}
           onOpenJobs={() => setView("jobs")} />;
       case "storyboard":
@@ -20626,7 +20686,7 @@ function AssetsView(ctx: AppContext) {
               <input
                 className="file-input"
                 type="file"
-                accept={uploadKind === "video" ? "video/mp4,video/webm,video/quicktime" : uploadKind === "audio" ? "audio/mpeg,audio/wav,audio/mp4,audio/ogg" : "image/png,image/jpeg,image/webp"}
+                accept={uploadKind === "video" ? "video/mp4,video/webm,video/quicktime" : uploadKind === "audio" ? "audio/mpeg,audio/wav,audio/mp4,audio/ogg,audio/flac,audio/x-flac,.flac" : "image/png,image/jpeg,image/webp"}
                 onChange={upload}
               />
             </label>

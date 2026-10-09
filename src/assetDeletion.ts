@@ -103,6 +103,14 @@ export const deleteAssetFromProject = (
     return mapped.some((entity, index) => entity !== entities[index]) ? mapped : entities;
   };
   const storyboards = project.storyboards.map((board) => unbindStoryboardAsset(board, assetId, updatedAt));
+  const presets = project.voicePresets;
+  const removesVoicePreset = presets && (Object.values(presets.characters).some((preset) => preset.assetId === assetId)
+    || presets.narrator?.assetId === assetId);
+  const voicePresets = removesVoicePreset ? {
+    ...presets,
+    characters: Object.fromEntries(Object.entries(presets.characters).filter(([, preset]) => preset.assetId !== assetId)),
+    ...(presets.narrator?.assetId === assetId ? { narrator: undefined } : {}),
+  } : presets;
   return detachDeletedStoryReferenceAsset({
     ...project,
     assets: project.assets.filter((asset) => asset.id !== assetId),
@@ -112,6 +120,7 @@ export const deleteAssetFromProject = (
     storyboards: storyboards.some((board, index) => board !== project.storyboards[index])
       ? storyboards
       : project.storyboards,
+    ...(removesVoicePreset ? { voicePresets } : {}),
     updatedAt,
   }, assetId, updatedAt);
 };

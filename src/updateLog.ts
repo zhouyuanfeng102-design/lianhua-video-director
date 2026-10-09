@@ -11,6 +11,18 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "1.7.3",
+    releasedAt: "2026-10-10",
+    title: "新增多人参考音频与逐段声音设置",
+    highlights: [
+      "视频导演台新增独立参考音频槽，支持人物声音、旁白和氛围用途，关联当前项目人物并试听素材。",
+      "项目人物音色预设可供各段沿用，每段可单独覆盖或明确不用；单段与长剧情批量使用相同的音频选择规则。",
+      "按真实工作流映射传入音频，reference、fully_copy、partially_copy、weak_reference模式写入本次声音参考说明；空槽与后续音频编号保持稳定。",
+      "任务冻结音频素材与选择，保存重载及重试沿用原任务输入；发现音频字段不等于识别说话人或保证音色克隆。",
+      "保留经典原色、可选日夜主题及长剧情分段条夜间修复。",
+    ],
+  },
+  {
     version: "1.7.2",
     releasedAt: "2026-10-09",
     title: "修复长剧情分段条的夜间白底",

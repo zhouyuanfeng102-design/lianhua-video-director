@@ -1,5 +1,6 @@
 import { normalizeStoryReferenceContext, normalizeStoryReferenceAssetSubjects, recoverInterruptedStoryReferenceRecognition } from './storyReferences';
 import { normalizeAppColorMode, normalizeAppColorTheme } from './appTheme';
+import { normalizeProjectVoicePresets } from './videoAudioReferences';
 ﻿import type {
   AppSettings,
   AppState,
@@ -2683,6 +2684,11 @@ const normalizePersistedProject = (
   // project's editor state during a partial import.
   project.activeChapterId = typeof incoming.activeChapterId === 'string' ? incoming.activeChapterId : undefined;
   project.chapterWorkspaces = isRecord(incoming.chapterWorkspaces) ? incoming.chapterWorkspaces : undefined;
+  // Presets belong to this project, including IDs whose assets are imported
+  // later. Never inherit another project's voices through the import fallback.
+  const voicePresets = normalizeProjectVoicePresets(incoming.voicePresets);
+  if (voicePresets) project.voicePresets = voicePresets;
+  else delete project.voicePresets;
   // This is a library/workspace label, never a request to stop generation.
   // Old or malformed records default to false instead of inheriting a marker
   // from the active project used as an import normalization fallback.
@@ -3307,6 +3313,10 @@ type DesktopStateBridge = {
   chooseBackupDirectory?: () => Promise<RecoveryStatus['recovery'] | null>;
   updateRecoveryConfig?: (patch: Partial<RecoveryStatus['recovery']>) => Promise<RecoveryStatus['recovery']>;
   importMedia?: (file: File) => Promise<ManagedMediaResult | null>;
+  storeGeneratedAudio?: (payload: { dataUrl: string; fileName?: string }) => Promise<ManagedMediaResult>;
+  readManagedAudioDataUrl?: (payload: { relativePath: string; expectedChecksum?: string }) => Promise<{
+    dataUrl: string; mimeType: 'audio/mpeg' | 'audio/wav' | 'audio/flac'; sizeBytes: number; checksum: string;
+  }>;
   assetStatus?: (relativePath: string) => Promise<Partial<ManagedMediaResult> & { exists: boolean }>;
   relinkMedia?: (asset: ReferenceAsset) => Promise<ManagedMediaResult | null>;
   revealAsset?: (relativePath: string) => Promise<boolean>;

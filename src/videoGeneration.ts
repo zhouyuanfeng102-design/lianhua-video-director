@@ -22,6 +22,7 @@ import { isUnsubmittedVideoTask, resolveVideoExecutionLimit, videoExecutionScope
 import { videoQueueBlockerSummary } from './videoQueuePresentation';
 import { getOfficialH3SubmissionIssue, isOfficialH3TargetId } from './officialPrompt';
 import { officialH3ContextForStoryboard } from './officialH3Context';
+import { isVideoDirectorAudio, prepareVideoAudioDraft, renderVideoAudioDraft, validateVideoAudioReferences, videoAudioTargetLabel } from './videoAudioReferences';
 import type { WorkbenchExtractedFrame } from './videoWorkbenchTypes';
 import type { extractVideoTailFrameSelection } from './videoFrameSelection';
 import type { AppState, Project, ReferenceAsset, VideoGenerationTask, VideoTaskApiConfig } from './types';
@@ -41,6 +42,7 @@ import type {
   VideoGenerationJob,
   VideoGenerationRuntime,
   VideoGenerationSnapshot,
+  FrozenVideoAudioReference,
   VideoTailSelectionPreparation,
 } from './videoGenerationTypes';
 
@@ -85,7 +87,9 @@ const officialH3SubmissionIssue = (
   if (!isOfficialH3TargetId(body.model)) return undefined;
   const board = project?.storyboards.find((item) => item.id === draft.source?.storyboardId);
   const binding = draft.h3ReferenceBinding;
-  const officialBody = binding && binding.projectId === project?.id && draft.prompt === binding.renderedPrompt
+  const audio = draft.audioReferenceBinding;
+  const imagePrompt = audio && draft.prompt === audio.renderedPrompt ? audio.basePrompt : draft.prompt;
+  const officialBody = binding && binding.projectId === project?.id && imagePrompt === binding.renderedPrompt
     && body.prompt === draft.prompt ? { ...body, prompt: binding.basePrompt } : body;
   return getOfficialH3SubmissionIssue(
     officialBody,
@@ -109,6 +113,16 @@ const withoutApiKey = (config: VideoTaskApiConfig): Omit<VideoTaskApiConfig, 'ap
 const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
   : record(value) ? Object.fromEntries(Object.keys(value).sort().filter((key) => value[key] !== undefined).map((key) => [key, canonical(value[key])])) : value;
 const canonicalText = (value: unknown): string => JSON.stringify(canonical(value));
+const runningHubAudioFileName = (value: unknown): value is string => isRunningHubUploadedFile(value) && !/^https?:\/\//iu.test(value);
+const audioSourceIdentity = (audio: FrozenVideoAudioReference) => ({
+  bindingId: audio.bindingId, assetId: audio.assetId, slotIndex: audio.slotIndex, target: audio.target, retainMode: audio.retainMode, notes: audio.notes,
+});
+const sameFrozenAudioSources = (left: VideoGenerationSnapshot | undefined, right: VideoGenerationSnapshot | undefined): boolean => {
+  const a = left?.audios || [], b = right?.audios || [];
+  return a.length === b.length && a.every((audio, index) => canonicalText(audioSourceIdentity(audio)) === canonicalText(audioSourceIdentity(b[index]))
+    && (audio.freezeState !== 'frozen' || b[index].freezeState !== 'frozen'
+      || canonicalText([audio.relativePath, audio.checksum, audio.dataUrl]) === canonicalText([b[index].relativePath, b[index].checksum, b[index].dataUrl])));
+};
 const apiCredentialConfig = (config: Omit<VideoTaskApiConfig, 'apiKey'>) => Object.fromEntries(Object.entries(config)
   .filter(([key]) => !['apiKey', 'id', 'name', 'createdAt', 'updatedAt', 'runningHubParameterControls'].includes(key))
   .map(([key, value]) => [key, key === 'runningHubMappedFields' && Array.isArray(value)
@@ -216,6 +230,7 @@ interface PreparedBatchItem {
   /** Preserves reference indices; the slot replaced by a future tail has no
    * original asset because those bytes will never be sent. */
   assets: Array<ReferenceAsset | undefined>;
+  audioAssets: ReferenceAsset[];
   config?: VideoTaskApiConfig;
   comfy: ComfyVideoConfig;
   workflow?: ComfyVideoWorkflowPreset;
@@ -1237,6 +1252,113 @@ export class VideoGenerationEngine {
     return { image: { assetId: image.assetId, role: image.role, ...(image.slotIndex !== undefined ? { slotIndex: image.slotIndex } : {}), name: image.name, fileName: image.fileName, dataUrl, freezeState: 'frozen', frozenAt: image.frozenAt || Date.now() }, dataUrl };
   }
 
+  private audioAssets(project: Project, draft: VideoGenerationDraft, reuse?: VideoGenerationSnapshot): ReferenceAsset[] {
+    return (draft.audioReferences || []).map((reference) => {
+      const frozen = reuse?.audios?.find((audio) => audio.assetId === reference.assetId && audio.bindingId === reference.bindingId);
+      if (frozen) {
+        if (frozen.freezeState !== 'frozen' || !frozen.checksum || !(frozen.relativePath || frozen.dataUrl?.startsWith('data:audio/'))) {
+          throw new Error(`旧任务的音频“${frozen.name}”没有可信原始字节，请重新选择音频建立新任务。`);
+        }
+        return { ...structuredClone(frozen), id: frozen.assetId, type: 'audio' as const, role: 'composition' as const, mediaType: 'audio' as const, tags: [], createdAt: 0, updatedAt: 0 };
+      }
+      const asset = project.assets.find((entry) => entry.id === reference.assetId);
+      if (!asset || !isVideoDirectorAudio(asset) || asset.missing) throw new Error('所选参考音频已不存在、文件丢失或不是音频资产。');
+      return structuredClone(asset);
+    });
+  }
+
+  private assertAudioConnection(draft: VideoGenerationDraft, config?: Omit<VideoTaskApiConfig, 'apiKey'>): void {
+    if (draft.audioReferences?.length && (draft.backend !== 'api' || config?.provider !== 'runninghub')) {
+      throw new Error('当前连接不支持参考音频，请选择 RunningHub 音频工作流。');
+    }
+  }
+
+  private async audioData(taskId: string, audio: FrozenVideoAudioReference): Promise<string> {
+    if (audio.relativePath) {
+      if (!this.options.desktop?.readManagedAudioDataUrl) throw new Error(`音频“${audio.name}”需要新版桌面程序读取托管原文件。`);
+      return (await this.options.desktop.readManagedAudioDataUrl({ relativePath: audio.relativePath, expectedChecksum: audio.checksum })).dataUrl;
+    }
+    if (audio.dataUrl?.startsWith('data:audio/')) return audio.dataUrl;
+    if (audio.freezeState === 'frozen') throw new Error(`音频“${audio.name}”的冻结原文件丢失，不能改用网络地址。`);
+    if (audio.url && /^https?:\/\//iu.test(audio.url)) {
+      const requestId = id(`video_audio_${taskId}`);
+      const requests = this.requestIds.get(taskId) || new Set<string>(); requests.add(requestId); this.requestIds.set(taskId, requests);
+      try {
+        if (this.options.desktop) {
+          const response = await this.options.desktop.videoRequest({ requestId, url: audio.url, method: 'GET', responseType: 'base64' });
+          if (response.status >= 200 && response.status < 300 && response.bodyEncoding === 'base64' && response.contentType?.startsWith('audio/')) {
+            return `data:${response.contentType.split(';')[0]};base64,${response.body}`;
+          }
+        } else {
+          const response = await fetch(audio.url);
+          if (response.ok && response.headers.get('content-type')?.startsWith('audio/')) {
+            const blob = await response.blob();
+            return await new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsDataURL(blob); });
+          }
+        }
+        throw new Error(`无法读取音频“${audio.name}”的实际音频数据。`);
+      } finally { requests.delete(requestId); }
+    }
+    throw new Error(`音频“${audio.name}”没有可读取的原文件，不能把本地路径发给视频模型。`);
+  }
+
+  private async freezeAudio(taskId: string, audio: FrozenVideoAudioReference): Promise<{ audio: FrozenVideoAudioReference; dataUrl: string }> {
+    const dataUrl = await this.audioData(taskId, audio);
+    const match = /^data:audio\/[a-z0-9.+-]+(?:;[^,]*)?;base64,([A-Za-z0-9+/=\s]+)$/iu.exec(dataUrl);
+    if (!match || dataUrl.length > 40 * 1024 * 1024 + 1024) throw new Error('参考音频数据无效或达到 30 MB 本地上传限制。');
+    const compact = match[1].replace(/\s+/gu, '');
+    if (compact.length % 4 === 1 || !/^[A-Za-z0-9+/]*={0,2}$/u.test(compact)) throw new Error('参考音频 Base64 格式无效。');
+    const binary = atob(compact);
+    if (!binary.length || binary.length >= 30 * 1024 * 1024) throw new Error('参考音频为空或达到 30 MB 本地上传限制。');
+    const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+    const signature = binary.slice(0, 4);
+    const validWav = signature === 'RIFF' && binary.slice(8, 12) === 'WAVE' && bytes.length >= 44
+      && new DataView(bytes.buffer).getUint32(4, true) + 8 <= bytes.length;
+    const validMp3 = signature.startsWith('ID3') && bytes.length >= 10
+      || bytes.length >= 4 && bytes[0] === 255 && (bytes[1] & 0xe0) === 0xe0;
+    if (!validWav && !validMp3 && !(signature === 'fLaC' && bytes.length >= 43)) throw new Error('参考音频不是有效的 MP3、WAV 或 FLAC 原文件。');
+    const checksum = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (value) => value.toString(16).padStart(2, '0')).join('');
+    if (audio.checksum && audio.checksum !== checksum) throw new Error(`音频“${audio.name}”校验失败：原文件内容已变化，尚未提交视频。`);
+    if (audio.freezeState === 'frozen') return { audio, dataUrl };
+    const { url: _url, dataUrl: _data, relativePath: _path, checksum: _checksum, ...metadata } = audio;
+    if (this.options.desktop?.storeGeneratedAudio) {
+      const managed = await this.options.desktop.storeGeneratedAudio({ dataUrl, fileName: audio.fileName || `${audio.assetId}.wav` });
+      if (managed.mediaType !== 'audio' || !managed.relativePath || managed.checksum !== checksum) throw new Error(`音频“${audio.name}”快照保存失败，尚未提交视频。`);
+      return { audio: { ...metadata, fileName: managed.fileName, relativePath: managed.relativePath, checksum,
+        mimeType: managed.mimeType, freezeState: 'frozen', frozenAt: audio.frozenAt || Date.now() }, dataUrl };
+    }
+    return { audio: { ...metadata, dataUrl, checksum, mimeType: dataUrl.slice(5, dataUrl.indexOf(';')), freezeState: 'frozen', frozenAt: audio.frozenAt || Date.now() }, dataUrl };
+  }
+
+  private async freezeDraftAudios(taskId: string, draft: VideoGenerationDraft, assets: ReferenceAsset[], project: Project): Promise<FrozenVideoAudioReference[] | undefined> {
+    if (!draft.audioReferences?.length) return undefined;
+    const audios: FrozenVideoAudioReference[] = [];
+    for (const [index, reference] of draft.audioReferences.entries()) {
+      const asset = assets[index];
+      const targetLabel = (asset as ReferenceAsset & Pick<FrozenVideoAudioReference, 'targetLabel'>).targetLabel || videoAudioTargetLabel(project, reference.target);
+      const source = { ...reference, targetLabel, name: asset.name, fileName: asset.fileName, relativePath: asset.relativePath, checksum: asset.checksum,
+        dataUrl: asset.dataUrl, url: /^https?:\/\//iu.test(asset.url || '') ? asset.url : undefined,
+        mimeType: asset.mimeType, durationSec: asset.durationSec, freezeState: 'pending' as const };
+      audios.push((await this.freezeAudio(taskId, source)).audio);
+      if (this.disposed) throw new Error('本地跟踪已停止，音频准备未提交。');
+    }
+    return audios;
+  }
+
+  /** Image rebinding must see its saved base text. Reinsert explicit audio
+   * bindings afterward without consulting mutable project voice presets. */
+  private prepareReferenceDraft(project: Project, draft: VideoGenerationDraft, context: Parameters<typeof prepareVideoH3ReferenceDraft>[2]) {
+    const audio = draft.audioReferenceBinding;
+    const unbound = audio && draft.prompt === audio.renderedPrompt ? { ...draft, prompt: audio.basePrompt, audioReferenceBinding: undefined } : draft;
+    const bound = prepareVideoH3ReferenceDraft(project, unbound, context);
+    if (bound.issue || !audio || !draft.audioReferences?.length) return bound;
+    // With unchanged image text, retain the exact frozen speaker labels and
+    // instructions even after characters or presets are edited or removed.
+    return { ...bound, draft: bound.draft.prompt === audio.basePrompt
+      ? { ...bound.draft, prompt: audio.renderedPrompt, audioReferenceBinding: audio }
+      : renderVideoAudioDraft(project, bound.draft) };
+  }
+
   /** Resolve and structurally validate one batch row without changing project
    * state, storing files, uploading inputs or issuing a generation POST. */
   private async preflightBatchItem(
@@ -1340,15 +1462,23 @@ export class VideoGenerationEngine {
     // Preflight the *future* frame slot as well. A text-only template/workflow
     // must fail before segment 1 can create a billable remote task.
     const validationImages = assets.map((asset, assetIndex) => asset ? `image-validation-${assetIndex}-${asset.fileName || asset.name}` : 'future-tail-validation.png');
-    const boundValidation = prepareVideoH3ReferenceDraft(project, validationDraft, { backend: draft.backend, workflow, api: config });
+    const boundValidation = this.prepareReferenceDraft(project, validationDraft, { backend: draft.backend, workflow, api: config });
     if (boundValidation.issue) throw new Error(boundValidation.issue);
     Object.assign(validationDraft, boundValidation.draft);
+    if (!reuse) Object.assign(validationDraft, prepareVideoAudioDraft(project, validationDraft, config));
+    this.assertAudioConnection(validationDraft, config);
+    const audioIssues = validateVideoAudioReferences(project, validationDraft, config, reuse?.audios);
+    if (audioIssues.length) throw new Error(audioIssues.join(' '));
+    const audioAssets = this.audioAssets(project, validationDraft, reuse);
     // Pending-tail drafts keep their pre-insertion image array for dependency
     // placement, but display/fingerprint the exact eventual submission text.
     draft.prompt = validationDraft.prompt;
     draft.h3ReferenceBinding = validationDraft.h3ReferenceBinding;
     draft.seedanceReferenceBinding = validationDraft.seedanceReferenceBinding;
     draft.h3ReferenceWarnings = validationDraft.h3ReferenceWarnings;
+    draft.audioReferences = validationDraft.audioReferences;
+    draft.audioSelectionMode = validationDraft.audioSelectionMode;
+    draft.audioReferenceBinding = validationDraft.audioReferenceBinding;
     if (draft.source?.promptFormat) draft.source = { ...draft.source, promptFingerprint: sourceContentHash(draft.prompt) };
     if (draft.backend === 'comfyui') {
       assertNoEmbeddedVideoCredentials(parseComfyVideoWorkflow(workflow!.workflowJson), `批量第 ${index + 1} 项 ComfyUI 工作流`);
@@ -1358,7 +1488,7 @@ export class VideoGenerationEngine {
       // director UI as a warning only; it must not block a valid upload or
       // change the user's selected image order.
     } else {
-      const body = buildVideoApiBody(config!, validationDraft, validationImages);
+      const body = buildVideoApiBody(config!, validationDraft, validationImages, audioAssets.map((_, audioIndex) => `audio-validation-${audioIndex}.wav`));
       assertOfficialH3Submission(body, validationDraft, project);
     }
     // This must be byte-for-byte identical to the candidate fingerprint shown
@@ -1371,7 +1501,7 @@ export class VideoGenerationEngine {
     );
     const requestFingerprint = videoBatchDependencyFingerprint(baseRequestFingerprint, requestedTail);
     return {
-      item: { ...item, itemKey, ...(requestedTail ? { previousTail: requestedTail } : {}) }, index, draft, assets, config, comfy, workflow,
+      item: { ...item, itemKey, ...(requestedTail ? { previousTail: requestedTail } : {}) }, index, draft, assets, audioAssets, config, comfy, workflow,
       apiKey: draft.backend === 'api' ? config!.apiKey : comfy.apiKey,
       requestFingerprint,
     };
@@ -1430,7 +1560,7 @@ export class VideoGenerationEngine {
       };
     }
     draft.references = videoReferenceUsage(draft.references, { backend: draft.backend, workflow: prepared.workflow, api: prepared.config, slotRoles: draft.referenceSlotRoles });
-    const boundDraft = prepareVideoH3ReferenceDraft(project, draft, { backend: draft.backend, workflow: prepared.workflow, api: prepared.config });
+    const boundDraft = this.prepareReferenceDraft(project, draft, { backend: draft.backend, workflow: prepared.workflow, api: prepared.config });
     if (boundDraft.issue) throw new Error(boundDraft.issue);
     Object.assign(draft, boundDraft.draft);
     if (draft.source?.promptFormat) draft.source = { ...draft.source, promptFingerprint: sourceContentHash(draft.prompt) };
@@ -1454,6 +1584,7 @@ export class VideoGenerationEngine {
           freezeState: 'pending' as const,
         };
       }),
+      audios: await this.freezeDraftAudios(taskId, draft, prepared.audioAssets, project),
       clientId: id('video_client'),
       ...(previousTail ? { previousTail } : {}),
       ...(chainEnabled ? { batchCompletionOrder: true } : {}),
@@ -1478,7 +1609,8 @@ export class VideoGenerationEngine {
       storyboardId: draft.source?.storyboardId || '',
       targetId: draft.backend === 'api' ? prepared.config?.model || 'api' : prepared.workflow?.name || 'comfyui',
       status: 'draft',
-      requestBody: { prompt: draft.prompt, parameters: draft.parameters, referenceAssetIds: draft.references.map((reference) => reference.assetId) },
+      requestBody: { prompt: draft.prompt, parameters: draft.parameters, referenceAssetIds: draft.references.map((reference) => reference.assetId),
+        ...(draft.audioReferences?.length ? { audioAssetIds: draft.audioReferences.map((reference) => reference.assetId) } : {}) },
       sequencePlanId: draft.source?.sequencePlanId,
       segmentId: draft.source?.segmentId,
       segmentIndex: draft.source?.segmentIndex,
@@ -1493,7 +1625,7 @@ export class VideoGenerationEngine {
         snapshot,
         stage: 'preparing',
         batchQueueState: 'waiting',
-        preparation: { version: 1, phase: 'preparing', uploadedImages: [] },
+        preparation: { version: 1, phase: 'preparing', uploadedImages: [], ...(snapshot.audios?.length ? { uploadedAudios: [] } : {}) },
         message: '已加入批量任务，等待安全提交',
         ...(previousTail ? { tailPreparation: { phase: 'waiting' as const, revision: 0, message: '等待上一段视频完成并保存到本地' } } : {}),
       },
@@ -1769,9 +1901,14 @@ export class VideoGenerationEngine {
     const comfy = reuse?.connection.comfyui ? { ...reuse.connection.comfyui, apiKey: await this.key(reusedTask!), workflows: reuse.connection.workflow ? [reuse.connection.workflow] : [] } : state.settings.comfyuiVideo || defaultComfyVideoConfig;
     const workflow = reuse?.connection.workflow || comfy.workflows.find((item) => item.id === (draft.workflowId || comfy.activeWorkflowId));
     draft.references = videoReferenceUsage(draft.references, { backend: draft.backend, workflow, api: config, slotRoles: draft.referenceSlotRoles });
-    const boundDraft = prepareVideoH3ReferenceDraft(project, draft, { backend: draft.backend, workflow, api: config });
+    const boundDraft = this.prepareReferenceDraft(project, draft, { backend: draft.backend, workflow, api: config });
     if (boundDraft.issue) throw new Error(boundDraft.issue);
     Object.assign(draft, boundDraft.draft);
+    if (!reuse) Object.assign(draft, prepareVideoAudioDraft(project, draft, config));
+    this.assertAudioConnection(draft, config);
+    const audioIssues = validateVideoAudioReferences(project, draft, config, reuse?.audios);
+    if (audioIssues.length) throw new Error(audioIssues.join(' '));
+    const audioAssets = this.audioAssets(project, draft, reuse);
     if (draft.source?.promptFormat) draft.source = { ...draft.source, promptFingerprint: sourceContentHash(draft.prompt) };
     const apiEndpoint = config ? videoApiSubmitEndpoint(config) : '';
     if (draft.backend === 'api' && (!config?.enabled || !apiEndpoint)) {
@@ -1788,7 +1925,7 @@ export class VideoGenerationEngine {
     if (draft.backend === 'comfyui') assertNoEmbeddedVideoCredentials(parseComfyVideoWorkflow(workflow!.workflowJson), 'ComfyUI 视频工作流');
     if (draft.backend === 'comfyui') bindComfyVideoWorkflow(workflow!, draft.prompt, assets.map((asset) => asset.fileName || asset.name), draft.parameters, draft.references);
     if (draft.backend === 'api') {
-      const body = buildVideoApiBody(config!, draft, assets.map((_, index) => `image-validation-${index}`));
+      const body = buildVideoApiBody(config!, draft, assets.map((_, index) => `image-validation-${index}`), audioAssets.map((_, index) => `audio-validation-${index}.wav`));
       assertOfficialH3Submission(body, draft, project);
     }
     // Physical workflow slot roles are informational metadata.  Each segment
@@ -1803,13 +1940,15 @@ export class VideoGenerationEngine {
         projectId: project.id, draft,
         connection: draft.backend === 'api' ? { backend: 'api', api: withoutApiKey(config!) } : { backend: 'comfyui', comfyui: safeComfy, workflow: structuredClone(workflow!) },
         images: draft.references.map((reference, index) => ({ ...reference, name: assets[index].name, fileName: assets[index].fileName, relativePath: assets[index].relativePath, checksum: assets[index].checksum, dataUrl: assets[index].dataUrl, url: /^https?:\/\//iu.test(assets[index].url || '') ? assets[index].url : undefined, freezeState: 'pending' })),
+        audios: await this.freezeDraftAudios(taskId, draft, audioAssets, project),
         clientId: id('video_client'),
       };
       const task: VideoGenerationTask = {
         id: taskId, kind: 'video', storyboardId: draft.source?.storyboardId || '', targetId: draft.backend === 'api' ? config?.model || 'api' : workflow?.name || 'comfyui',
-        status: 'submitting', requestBody: { prompt: draft.prompt, parameters: draft.parameters, referenceAssetIds: draft.references.map((item) => item.assetId) },
+        status: 'submitting', requestBody: { prompt: draft.prompt, parameters: draft.parameters, referenceAssetIds: draft.references.map((item) => item.assetId),
+          ...(draft.audioReferences?.length ? { audioAssetIds: draft.audioReferences.map((item) => item.assetId) } : {}) },
         sequencePlanId: draft.source?.sequencePlanId, segmentId: draft.source?.segmentId, segmentIndex: draft.source?.segmentIndex,
-        videoJob: { snapshot, stage: 'preparing', preparation: { version: 1, phase: 'preparing', uploadedImages: [] }, message: '正在准备已选择的提示词与图片' }, createdAt: now, updatedAt: now,
+        videoJob: { snapshot, stage: 'preparing', preparation: { version: 1, phase: 'preparing', uploadedImages: [], ...(snapshot.audios?.length ? { uploadedAudios: [] } : {}) }, message: '正在准备已选择的提示词与素材' }, createdAt: now, updatedAt: now,
       };
       // Inline images are quick local writes. Never put their full pixels in desktop project JSON.
       if (this.options.desktop?.storeGeneratedImage) for (let index = 0; index < snapshot.images.length; index += 1) {
@@ -1874,6 +2013,10 @@ export class VideoGenerationEngine {
       // fix. Migrate only this local submission copy; the immutable historical
       // snapshot remains available for audit and credential identity.
       const config = savedConfig ? migrateRunningHubVideoApiImageProtocol(savedConfig) : savedConfig;
+      this.assertAudioConnection(draft, config);
+      const snapshotAudios = task.videoJob!.snapshot.audios || [];
+      if (canonicalText(snapshotAudios.map(({ bindingId, assetId, slotIndex, target, retainMode, notes }) => ({ bindingId, assetId, slotIndex, target, retainMode, notes })))
+        !== canonicalText(draft.audioReferences || [])) throw new Error('任务的参考音频快照与原绑定不一致，已停止提交。');
       const comfy = task.videoJob!.snapshot.connection.comfyui;
       const workflow = task.videoJob!.snapshot.connection.workflow;
       // Queued descendants may also have lost their old scoped keys. Restore
@@ -1927,9 +2070,37 @@ export class VideoGenerationEngine {
         }
         imageValues.push(uploadedValue || dataUrl);
         const uploadedImages = [...task.videoJob!.preparation!.uploadedImages]; uploadedImages[index] = uploadedValue;
-        task = await this.checkpoint({ ...task, videoJob: { ...task.videoJob!, preparation: { version: 1, phase: 'preparing', uploadedImages } } });
+        task = await this.checkpoint({ ...task, videoJob: { ...task.videoJob!, preparation: { ...task.videoJob!.preparation!, uploadedImages } } });
       }
-      const body = draft.backend === 'api' ? buildVideoApiBody(config!, draft, imageValues) : {
+      const audioValues: string[] = [];
+      for (const [index, originalAudio] of snapshotAudios.entries()) {
+        this.ensureActive(task);
+        // Even an existing upload receipt cannot authorize changed local bytes.
+        const frozen = await this.freezeAudio(taskId, originalAudio);
+        this.ensureActive(task);
+        const receipt = task.videoJob!.preparation!.uploadedAudios?.[index];
+        if (receipt) {
+          if (!runningHubAudioFileName(receipt)) throw new Error('参考音频上传回执无效，已停止提交。');
+          audioValues.push(receipt); continue;
+        }
+        const audios = [...task.videoJob!.snapshot.audios!]; audios[index] = frozen.audio;
+        task = await this.checkpoint({ ...task, videoJob: { ...task.videoJob!, snapshot: { ...task.videoJob!.snapshot, audios },
+          message: `已保存音频快照，正在传入音频 ${index + 1}/${audios.length}` } });
+        const uploadEndpoint = config!.imageUploadEndpoint && /\/openapi\/v2\/media\/upload\/binary\/?$/u.test(config!.imageUploadEndpoint)
+          ? config!.imageUploadEndpoint : new URL('/openapi/v2/media/upload/binary', videoApiSubmitEndpoint(config!)).toString();
+        const result = await this.request(task, { url: uploadEndpoint, method: 'POST', headers, multipart: {
+          files: [{ fieldName: 'file', fileName: frozen.audio.fileName || 'reference.wav', dataUrl: frozen.dataUrl }],
+        } });
+        const code = nestedValue(result, 'code');
+        if (code != null && code !== '' && String(code) !== '0') throw new Error(`RunningHub 音频上传失败：${String(nestedValue(result, 'message') || nestedValue(result, 'msg') || `错误码 ${String(code)}`)}；尚未提交视频。`);
+        const fileName = nestedValue(result, 'data.fileName');
+        if (!runningHubAudioFileName(fileName)) throw new Error('RunningHub 音频上传未返回可用的 data.fileName；尚未提交视频。');
+        audioValues.push(fileName);
+        const uploadedAudios = [...(task.videoJob!.preparation!.uploadedAudios || [])]; uploadedAudios[index] = fileName;
+        // Persist every file receipt before uploading the next audio or POSTing.
+        task = await this.checkpoint({ ...task, videoJob: { ...task.videoJob!, preparation: { ...task.videoJob!.preparation!, uploadedAudios } } });
+      }
+      const body = draft.backend === 'api' ? buildVideoApiBody(config!, draft, imageValues, audioValues) : {
         prompt: bindComfyVideoWorkflow(workflow!, draft.prompt, imageValues, draft.parameters, draft.references), client_id: task.videoJob!.snapshot.clientId,
       };
       if (config?.provider === 'rhtv_web') body.client_id = task.videoJob!.snapshot.clientId;
@@ -2128,7 +2299,8 @@ export class VideoGenerationEngine {
   }
 
   private sameContinuationTask(left: VideoGenerationTask, right: VideoGenerationTask): boolean {
-    return canonicalText([left.id, left.createdAt, left.batchId, left.batchItemKey, left.batchIndex, left.batchTotal, left.requestFingerprint,
+    return sameFrozenAudioSources(left.videoJob?.snapshot, right.videoJob?.snapshot)
+      && canonicalText([left.id, left.createdAt, left.batchId, left.batchItemKey, left.batchIndex, left.batchTotal, left.requestFingerprint,
       left.videoJob?.snapshot.projectId, left.videoJob?.snapshot.clientId, left.videoJob?.snapshot.connection,
       left.videoJob?.snapshot.draft, left.videoJob?.snapshot.continuedFrom]) === canonicalText([
       right.id, right.createdAt, right.batchId, right.batchItemKey, right.batchIndex, right.batchTotal, right.requestFingerprint,
@@ -2662,11 +2834,14 @@ export class VideoGenerationEngine {
       }
       let restored = current;
       const rank = (phase: string | undefined) => phase === 'acknowledged' ? 2 : phase === 'post-started' ? 1 : 0;
-      const prepared = (job: VideoGenerationJob) => job.snapshot.images.filter((image) => image.freezeState === 'frozen').length + (job.preparation?.uploadedImages.filter(Boolean).length || 0);
+      const prepared = (job: VideoGenerationJob) => job.snapshot.images.filter((image) => image.freezeState === 'frozen').length
+        + (job.snapshot.audios?.filter((audio) => audio.freezeState === 'frozen').length || 0)
+        + (job.preparation?.uploadedImages.filter(Boolean).length || 0) + (job.preparation?.uploadedAudios?.filter(Boolean).length || 0);
       const matching = saved?.videoJob && saved.id === current.id && saved.createdAt === current.createdAt && saved.videoJob.snapshot.projectId === current.videoJob.snapshot.projectId
         && saved.videoJob.snapshot.clientId === current.videoJob.snapshot.clientId
         && JSON.stringify(canonical(saved.videoJob.snapshot.connection)) === JSON.stringify(canonical(current.videoJob.snapshot.connection))
         && JSON.stringify(canonical(saved.videoJob.snapshot.draft)) === JSON.stringify(canonical(current.videoJob.snapshot.draft))
+        && sameFrozenAudioSources(saved.videoJob.snapshot, current.videoJob.snapshot)
         && canonicalText(saved.videoJob.snapshot.previousTail) === canonicalText(current.videoJob.snapshot.previousTail)
         && saved.videoJob.snapshot.batchCompletionOrder === current.videoJob.snapshot.batchCompletionOrder
         && saved.videoJob.snapshot.batchPredecessorTaskId === current.videoJob.snapshot.batchPredecessorTaskId

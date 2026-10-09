@@ -30,6 +30,8 @@ export interface RunningHubVideoFieldControl {
 export interface RunningHubVideoMapping {
   prompt: RunningHubVideoInputBinding[];
   images: Array<RunningHubVideoInputBinding & { role?: ReferenceRole }>;
+  /** File inputs only. Labels are local metadata, not extra cloud fields. */
+  audios?: Array<RunningHubVideoInputBinding & { label?: string }>;
   /** Actual selected image count, including a continuation frame. Null disables verified-app adaptation. */
   imageCount?: RunningHubVideoInputBinding | null;
   /** Only explicitly entered task overrides are applied; omitted values keep cloud defaults. */
@@ -41,6 +43,10 @@ export interface RunningHubVideoNodeCatalogEntry {
   fieldName: string;
   fieldValue: string | number | boolean;
   description?: string;
+  /** Discovery evidence; never sent as a nodeInfoList override. */
+  fieldType?: string;
+  classType?: string;
+  audioUpload?: boolean;
   control?: RunningHubVideoFieldControl;
 }
 export interface RunningHubVideoWorkflow {

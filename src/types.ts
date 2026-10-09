@@ -201,6 +201,7 @@ export interface AudioCue {
   kind: 'dialogue' | 'ambience' | 'foley' | 'music' | 'voiceover' | 'silence';
   label: string;
   speaker?: string;
+  speakerId?: string;
   text?: string;
   startSec?: number;
   endSec?: number;
@@ -1084,6 +1085,7 @@ export interface Project {
   /** Latest explicit editor choices; independent of confirmed generation snapshots. */
   directorLookDraft?: DirectorLookDraft;
   assets: ReferenceAsset[];
+  voicePresets?: import('./videoAudioTypes').ProjectVoicePresets;
   generationTasks: GenerationTask[];
   /** Independent local post-production; does not enter the paid generation queue. */
   videoWorkbench?: VideoWorkbenchState;
@@ -1321,7 +1323,7 @@ export interface VideoTaskApiConfig {
   runningHubOutputNodeIds?: string[];
   /** Ordered image-slot capacity; individual submissions may use fewer slots. */
   runningHubImageRoles?: ReferenceRole[];
-  runningHubMappedFields?: Array<{ nodeId: string; fieldName: string; kind: 'prompt' | 'image' | 'image-count' | 'parameter'; imageIndex?: number; emptyValue?: '' | 'None' | 'example.png'; imageCountMode?: 'prefix'; imageCountSource?: 'explicit' | 'verified-app'; parameter?: string; originalValue?: unknown }>;
+  runningHubMappedFields?: Array<{ nodeId: string; fieldName: string; kind: 'prompt' | 'image' | 'audio' | 'image-count' | 'parameter'; imageIndex?: number; audioIndex?: number; emptyValue?: '' | 'None' | 'example.png'; imageCountMode?: 'prefix'; imageCountSource?: 'explicit' | 'verified-app'; parameter?: string; originalValue?: unknown }>;
   /** Local controls for mapped parameters; never included in the cloud request body. */
   runningHubParameterControls?: Record<string, RunningHubVideoFieldControl>;
   /** JSON placeholders: {{prompt}}, {{model}}, {{images}}, {{first_image}}, {{last_image}}, {{parameters}}. */

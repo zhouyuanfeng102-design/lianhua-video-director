@@ -2,6 +2,8 @@ import type { ReferenceRole, VideoGenerationTask, VideoTaskApiConfig } from './t
 import type { ManagedMediaResult } from './storage';
 import type { VideoWorkbenchStatus, WorkbenchExtractedFrame, WorkbenchFrameRequest, WorkbenchFrameResult } from './videoWorkbenchTypes';
 import type { VideoRuntimeStore, VideoRuntimeSnapshot } from './videoRuntimeStore';
+import type { FrozenVideoAudioReference, VideoAudioReference } from './videoAudioTypes';
+export type { FrozenVideoAudioReference, VideoAudioReference } from './videoAudioTypes';
 
 export interface VideoDesktopRequest {
   requestId: string;
@@ -43,7 +45,9 @@ export interface VideoGenerationDesktop {
   getVideoTaskCredential: (taskId: string) => Promise<string | null>;
   downloadGeneratedMedia: (payload: GeneratedMediaDownloadRequest) => Promise<GeneratedMediaDownloadResult>;
   readManagedImageDataUrl: (payload: { relativePath: string; expectedChecksum?: string }) => Promise<{ dataUrl: string }>;
+  readManagedAudioDataUrl?: (payload: { relativePath: string; expectedChecksum?: string }) => Promise<{ dataUrl: string }>;
   storeGeneratedImage?: (payload: { dataUrl: string; fileName?: string }) => Promise<ManagedMediaResult>;
+  storeGeneratedAudio?: (payload: { dataUrl: string; fileName?: string }) => Promise<ManagedMediaResult>;
   saveVideoTaskCheckpoint?: (task: VideoGenerationTask) => Promise<{ persisted: boolean }>;
   getVideoTaskCheckpoint?: (taskId: string) => Promise<VideoGenerationTask | null>;
   deleteVideoTaskCheckpoint?: (taskId: string) => Promise<boolean>;
@@ -93,6 +97,11 @@ export interface VideoGenerationDraft {
   backend: VideoGenerationBackend;
   source?: VideoPromptSource;
   references: VideoImageReference[];
+  audioReferences?: VideoAudioReference[];
+  /** Explicit 'none' prevents project presets being restored after clearing. */
+  audioSelectionMode?: 'project' | 'override' | 'none';
+  /** Idempotent task-only audio rendering; authored storyboard text is untouched. */
+  audioReferenceBinding?: { version: 1; basePrompt: string; renderedPrompt: string };
   /** Remembers empty slots' uses for replacement; never sent as image inputs. */
   referenceSlotRoles?: ReferenceRole[];
   /** Only explicitly entered values. Empty means preserve workflow/provider defaults. */
@@ -165,6 +174,7 @@ export interface VideoGenerationSnapshot {
     freezeState?: 'pending' | 'frozen';
     frozenAt?: number;
   }>;
+  audios?: FrozenVideoAudioReference[];
   clientId: string;
   /** Immutable dependency identity. The reserved reference ID already exists in
    * draft.references; resolving its pixels never rewrites the frozen draft. */
@@ -254,7 +264,7 @@ export interface VideoGenerationJob extends VideoGenerationRuntime {
   remoteGenerationEnded?: true;
   legacyMetadataIncomplete?: boolean;
   /** A durable post-started boundary is written BEFORE POST; it is never permission to resubmit. */
-  preparation?: { version: 1; phase: 'preparing' | 'post-started' | 'acknowledged'; uploadedImages: Array<string | null> };
+  preparation?: { version: 1; phase: 'preparing' | 'post-started' | 'acknowledged'; uploadedImages: Array<string | null>; uploadedAudios?: Array<string | null> };
   /** Persistent local submission gate for a batch task. Only ready/active entries
    * may enter prepareAndSubmit; waiting entries have not completed their durable
    * checkpoint yet and cancelled/done entries must never be auto-submitted. */

@@ -84,6 +84,11 @@
 .rhv-manager .rhv-image-slot-card .field > span { font-size: .78em; }
 .rhv-manager .rhv-image-slot-card select { font-size: .88em; }
 .rhv-manager .rhv-slot-warning { color: #a23e4f; overflow-wrap: anywhere; }
+.rhv-manager .rhv-audio-slot-card input { min-width: 0; width: 100%; }
+.rhv-manager .rhv-audio-original { color: var(--muted, var(--vwm-muted)); display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 1050px) {
+  .rhv-manager .rhv-audio-slot-grid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+}
 @media (max-height: 800px) {
   .rhv-manager .vwm-info { padding: 9px; }
   .rhv-manager .vwm-info p { margin-top: 5px; }

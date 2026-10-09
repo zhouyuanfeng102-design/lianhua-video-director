@@ -12,6 +12,7 @@ const {
   buildImageEditMultipart,
   readManagedImageDataUrl,
 } = require('./imageReferenceTransport.cjs');
+const { decodeReferenceAudioDataUrl, readManagedAudioDataUrl } = require('./audioReferenceTransport.cjs');
 const { resolveSystemProxy, createProxyTunnelAgent, MODEL_CONNECT_TIMEOUT_MS } = require('./systemProxyTransport.cjs');
 const { createVideoTransport } = require(path.join(__dirname, 'videoTransport.cjs'));
 const { createRhTvManager } = require(path.join(__dirname, 'rhtvBridge/manager.cjs'));
@@ -575,6 +576,11 @@ const assetPathFromRelative = (relativePath) => {
 };
 
 const readManagedImageDataUrlForRenderer = (payload = {}) => readManagedImageDataUrl({
+  assetRoot,
+  relativePath: payload?.relativePath,
+  expectedChecksum: payload?.expectedChecksum,
+});
+const readManagedAudioDataUrlForRenderer = (payload = {}) => readManagedAudioDataUrl({
   assetRoot,
   relativePath: payload?.relativePath,
   expectedChecksum: payload?.expectedChecksum,
@@ -1550,6 +1556,21 @@ const storeGeneratedImageInAssetStore = async (payload) => {
   };
 };
 
+const storeGeneratedAudioInAssetStore = async (payload) => {
+  const { bytes, mimeType, extension } = decodeReferenceAudioDataUrl(payload?.dataUrl);
+  const checksum = createHash('sha256').update(bytes).digest('hex');
+  const relativePath = `audio/${checksum}${extension}`;
+  const destination = assetPathFromRelative(relativePath);
+  ensureDirectory(path.dirname(destination));
+  if (!fs.existsSync(destination)) atomicWriteFile(destination, bytes);
+  else if (fileSha256(destination) !== checksum) throw new Error('托管音频校验失败：同名内容与 SHA-256 不一致');
+  return {
+    fileName: generatedImageFileName(payload?.fileName || 'reference-audio', extension), relativePath, checksum,
+    sizeBytes: bytes.length, mediaType: 'audio', mimeType, managed: true, missing: false,
+    url: `lianhua-asset://local/${relativePath.split('/').map(encodeURIComponent).join('/')}`,
+  };
+};
+
 const exportMediaToPath = async (payload, destinationPath) => {
   const destination = path.resolve(String(destinationPath || ''));
   if (!destinationPath) throw new Error('保存路径为空');
@@ -1931,6 +1952,9 @@ app.whenReady().then(() => {
   handleTrustedIpc('lianhua:store-generated-image', async (_event, payload) => (
     storeGeneratedImageInAssetStore(payload)
   ));
+  handleTrustedIpc('lianhua:store-generated-audio', async (_event, payload) => (
+    storeGeneratedAudioInAssetStore(payload)
+  ));
 
   handleTrustedIpc('lianhua:asset-status', async (_event, relativePath) => {
     try {
@@ -1943,6 +1967,9 @@ app.whenReady().then(() => {
 
   handleTrustedIpc('lianhua:read-managed-image-data-url', async (_event, payload) => (
     readManagedImageDataUrlForRenderer(payload)
+  ));
+  handleTrustedIpc('lianhua:read-managed-audio-data-url', async (_event, payload) => (
+    readManagedAudioDataUrlForRenderer(payload)
   ));
 
   handleTrustedIpc('lianhua:relink-media', async (_event, asset) => {

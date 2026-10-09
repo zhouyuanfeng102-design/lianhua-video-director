@@ -2,7 +2,7 @@ import type {
   RunningHubVideoInputBinding, RunningHubVideoNodeCatalogEntry, RunningHubVideoNodeInfo,
 } from './runningHubVideoTypes';
 
-export type RunningHubVideoFieldPurpose = 'prompt' | 'images' | 'parameters';
+export type RunningHubVideoFieldPurpose = 'prompt' | 'images' | 'audios' | 'parameters';
 
 const normalized = (value: string) => value.replace(/([a-z0-9])([A-Z])/gu, '$1_$2').toLowerCase()
   .replace(/[^a-z0-9\u3400-\u9fff]+/gu, '_').replace(/^_+|_+$/gu, '');
@@ -27,6 +27,27 @@ const imageName = /^(?:(?:input|reference|ref|first|last|start|end|source|init)_
 const technicalDescription = /(?:^|_)(?:width|height|size|resolution|fps|seed|steps|duration|model|checkpoint|lora|sampler|scheduler|resize|interpolation|format)(?:_|$)|宽度|高度|尺寸|分辨率|帧率|种子|步数|时长|模型|采样器|调度器|缩放方式/iu;
 const promptDescription = /(?:^|_)(?:prompt|text|caption)(?:_|$)|clip_?text_?encode|提示词|文本输入|输入文本|字幕/iu;
 const imageDescription = /load_?image|(?:^|_)(?:(?:reference|input|first|last|start|end)_image|image_(?:input|path|url)|(?:first|last|start|end)_frame)(?:_|$)|^(?:image|images)$|参考(?:图|图片|图像)|图片(?:输入|路径)|图像输入|输入(?:图片|图像)|^[首尾]帧$|^(?:图片|图像)$/iu;
+const audioName = /^(?:(?:input|reference|ref|source|voice)_)?audio(?:s|_?(?:\d+)|_(?:path|url|file|input))?$|^(?:reference|input)_audio_\d+$|^(?:参考|输入|声音)?音频(?:\d+)?$/iu;
+const audioTechnicalName = /(?:^|_)(?:model|encoder|decoder|codec|format|duration|rate|samplerate|sample_rate|channels|output|save|prefix|device|tensor|latent|features)(?:_|$)|模型|编码|解码|采样率|声道|输出/iu;
+const audioProcessingClass = /(?:audio.*(?:encode|decode|concat|combine|resample|trim|crop|save|output|tensor|latent|feature|spectrum|process)|(?:encode|decode|concat|combine|resample|trim|crop|save|preview|process).*audio)/iu;
+
+/** A text file widget can be suggested; AUDIO tensors and graph links cannot. */
+export const isRunningHubAudioFileField = (node: RunningHubVideoNodeInfo): boolean => {
+  if (typeof node.fieldValue !== 'string') return false;
+  const name = normalized(node.fieldName);
+  const classType = typeof node.classType === 'string' ? compact(node.classType) : '';
+  if (audioTechnicalName.test(name) || audioProcessingClass.test(classType)) return false;
+  if (node.audioUpload === true) return true;
+  const fileLoader = /^(?:vhs|rh|runninghub)?(?:(?:load|upload|input|reference)audio(?:file)?|audio(?:loader|upload))(?:\d+)?$/u.test(classType);
+  if (!fileLoader && (/^(?:true|false)$/iu.test(node.fieldValue.trim())
+    || /开关|开启|启用|禁用|(?:^|_)(?:enable|enabled|disable|disabled|switch)(?:_|$)/iu.test(normalized(descriptionOf(node))))) return false;
+  // AUDIO denotes a processing port unless a real file widget/loader proves
+  // otherwise. Unknown API graph classes remain available for explicit mapping.
+  if ((classType && !fileLoader) || (typeof node.fieldType === 'string' && node.fieldType.toUpperCase() === 'AUDIO' && !fileLoader)) return false;
+  if (audioName.test(name)) return true;
+  const fileName = /^(?:file|filename|path|url|value|input|audio_upload)$/u.test(name);
+  return fileName && fileLoader;
+};
 
 /** A display suggestion only: never infer a binding, inspect prompt content, or reject a request. */
 export const classifyRunningHubVideoField = (
@@ -34,6 +55,7 @@ export const classifyRunningHubVideoField = (
 ): RunningHubVideoFieldPurpose | 'other' => {
   const name = normalized(node.fieldName);
   const flatName = compact(node.fieldName);
+  if (isRunningHubAudioFileField(node)) return 'audios';
   if (advancedName.test(name) || advancedCompactNames.has(flatName)) return 'other';
   if (parameterNames.has(flatName)) return 'parameters';
   if (typeof node.fieldValue !== 'string') return 'other';
@@ -61,6 +83,7 @@ export const selectRunningHubVideoFieldChoices = (
   { showAll = false, search = '', keepBindings = [], catalog = [] }: RunningHubVideoFieldChoiceOptions = {},
 ): RunningHubVideoNodeInfo[] => {
   const descriptions = new Map<string, string>();
+  const evidence = new Map(catalog.map((node) => [keyOf(node.nodeId, node.fieldName), node]));
   for (const node of catalog) {
     const key = keyOf(node.nodeId, node.fieldName);
     if (!descriptions.has(key) && typeof node.description === 'string' && node.description.trim()) descriptions.set(key, node.description);
@@ -69,7 +92,11 @@ export const selectRunningHubVideoFieldChoices = (
   const query = search.trim().toLowerCase();
   return nodes.map((node) => {
     const fallback = descriptions.get(keyOf(node.nodeId, node.fieldName));
-    return { ...node, ...(!descriptionOf(node).trim() && fallback ? { description: fallback } : {}) };
+    const metadata = evidence.get(keyOf(node.nodeId, node.fieldName));
+    return { ...node, ...(!descriptionOf(node).trim() && fallback ? { description: fallback } : {}),
+      ...(node.fieldType === undefined && metadata?.fieldType ? { fieldType: metadata.fieldType } : {}),
+      ...(node.classType === undefined && metadata?.classType ? { classType: metadata.classType } : {}),
+      ...(node.audioUpload === undefined && metadata?.audioUpload !== undefined ? { audioUpload: metadata.audioUpload } : {}) };
   }).filter((node) => kept.has(keyOf(node.nodeId, node.fieldName)) || (
     (showAll || classifyRunningHubVideoField(node) === purpose)
     && (!query || `${node.nodeId}.${node.fieldName} ${descriptionOf(node)}`.toLowerCase().includes(query))

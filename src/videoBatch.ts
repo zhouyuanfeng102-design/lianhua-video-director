@@ -4,6 +4,7 @@ import { resolveConfiguredVideoApi } from './runningHubVideo';
 import { offsetVideoReferenceSlotRoles, videoReferenceUsage, type VideoReferenceUsageContext } from './videoReferenceUsage';
 import { assertVideoReferenceSlots, videoReferenceSlotIndex } from './videoReferenceSlots';
 import { prepareVideoH3ReferenceDraft, type VideoH3ReferenceContext } from './videoH3ReferenceBinding';
+import type { VideoAudioReference } from './videoAudioTypes';
 import type {
   AppState,
   AppSettings,
@@ -279,7 +280,7 @@ const assetContentIdentity = (asset: FingerprintAsset | undefined, assetId: stri
   if (!asset) return `missing:${assetId}`;
   if (asset.missing) return `missing:${assetId}`;
   if (asset.checksum?.trim()) return `checksum:${asset.checksum.trim()}`;
-  if (asset.dataUrl?.startsWith('data:image/')) {
+  if (asset.dataUrl?.startsWith('data:image/') || asset.dataUrl?.startsWith('data:audio/')) {
     return `data:${sourceContentHash(asset.dataUrl)}`;
   }
   if (asset.relativePath?.trim()) {
@@ -330,6 +331,31 @@ const snapshotReferenceManifest = (
   });
 };
 
+/** Physical audio inputs are independent of image positions. Empty audio
+ * selections add no key, preserving all historical image-only identities. */
+const audioReferenceManifest = (
+  references: readonly VideoAudioReference[],
+  assets: readonly FingerprintAsset[],
+) => {
+  const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
+  return references.map((reference) => ({
+    assetId: reference.assetId,
+    bindingId: reference.bindingId,
+    slotIndex: reference.slotIndex,
+    target: reference.target,
+    retainMode: reference.retainMode,
+    ...(reference.notes !== undefined ? { notes: reference.notes } : {}),
+    content: assetContentIdentity(assetsById.get(reference.assetId), reference.assetId),
+  })).sort((left, right) => left.slotIndex - right.slotIndex || left.bindingId.localeCompare(right.bindingId));
+};
+
+const snapshotAudioManifest = (snapshot: VideoGenerationSnapshot) => (snapshot.audios || [])
+  .map((audio) => audioReferenceManifest([audio], [{
+    id: audio.assetId, checksum: audio.checksum, dataUrl: audio.dataUrl,
+    relativePath: audio.relativePath, url: audio.url, updatedAt: audio.frozenAt || 0,
+  }])[0])
+  .sort((left, right) => left.slotIndex - right.slotIndex || left.bindingId.localeCompare(right.bindingId));
+
 export const videoPromptChoiceKey = (
   storyboardId: string,
   language: 'zh' | 'en',
@@ -345,9 +371,11 @@ export const videoBatchPromptFingerprint = (
 });
 
 export const videoBatchReferenceFingerprint = (
-  draft: Pick<VideoGenerationDraft, 'references'>,
+  draft: Pick<VideoGenerationDraft, 'references' | 'audioReferences'>,
   assets: readonly ReferenceAsset[],
-): string => fingerprint('video-reference', referenceManifest(draft.references, assets));
+): string => fingerprint('video-reference', draft.audioReferences?.length
+  ? { images: referenceManifest(draft.references, assets), audios: audioReferenceManifest(draft.audioReferences, assets) }
+  : referenceManifest(draft.references, assets));
 
 export const videoBatchConnectionIdentity = (
   settings: AppSettings,
@@ -390,6 +418,7 @@ export const videoBatchRequestFingerprint = (
   language: draft.source?.language || 'zh',
   prompt: draft.prompt,
   references: referenceManifest(referenceUsageForConnection(draft, connectionIdentity, referenceOffset), assets),
+  ...(draft.audioReferences?.length ? { audios: audioReferenceManifest(draft.audioReferences, assets) } : {}),
   backend: draft.backend,
   connection: semanticConnection(connectionIdentity),
   parameters: draft.parameters,
@@ -422,6 +451,7 @@ const snapshotRequestFingerprint = (snapshot: VideoGenerationSnapshot): string =
   language: snapshot.draft.source?.language || 'zh',
   prompt: snapshot.draft.prompt,
   references: snapshotReferenceManifest(snapshot),
+  ...(snapshot.audios?.length ? { audios: snapshotAudioManifest(snapshot) } : {}),
   backend: snapshot.draft.backend,
   connection: semanticConnection(snapshot.connection),
   parameters: snapshot.draft.parameters,

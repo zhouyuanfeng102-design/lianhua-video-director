@@ -146,12 +146,17 @@ const normalizeMapping = (raw: unknown): RunningHubVideoMapping => {
     const role = isRecord(item) && typeof item.role === 'string' && roles.has(item.role as ReferenceRole) ? item.role as ReferenceRole : undefined;
     return [{ ...binding, ...(role ? { role } : {}) }];
   }) : [];
+  const audios = Array.isArray(value.audios) ? value.audios.flatMap((item) => {
+    const binding = normalizeBinding(item); if (!binding) return [];
+    const label = isRecord(item) && typeof item.label === 'string' ? item.label.trim() : '';
+    return [{ ...binding, ...(label ? { label } : {}) }];
+  }) : undefined;
   const parameters: Record<string, RunningHubVideoInputBinding> = {};
   if (isRecord(value.parameters)) for (const [key, item] of Object.entries(value.parameters)) {
     const binding = normalizeBinding(item); if (binding) Object.defineProperty(parameters, key, { value: binding, enumerable: true, configurable: true, writable: true });
   }
   const imageCount = value.imageCount === null ? null : normalizeBinding(value.imageCount);
-  return { prompt, images, ...(imageCount !== undefined ? { imageCount } : {}), ...(Object.keys(parameters).length ? { parameters } : {}) };
+  return { prompt, images, ...(audios !== undefined ? { audios } : {}), ...(imageCount !== undefined ? { imageCount } : {}), ...(Object.keys(parameters).length ? { parameters } : {}) };
 };
 
 export const createRunningHubVideoWorkflow = (name = '新建云端工作流'): RunningHubVideoWorkflow => {
@@ -213,7 +218,7 @@ export const ensureRunningHubVideoRequestNode = (text: string, node: RunningHubV
   const spans = jsonSpans(text).filter((span) => span.path.length === 1 && span.path[0] === 'nodeInfoList');
   if (spans.length !== 1 || spans[0].kind !== 'array') throw new Error('请求中的 nodeInfoList 不唯一或不是数组，请先修复 JSON 结构。');
   const at = spans[0].end - 1;
-  const { control: _control, ...requestNode } = safe;
+  const { control: _control, fieldType: _fieldType, classType: _classType, audioUpload: _audioUpload, ...requestNode } = safe;
   return text.slice(0, at) + `${request.nodeInfoList.length ? ',' : ''}\n    ${JSON.stringify(requestNode)}\n  ` + text.slice(at);
 };
 
@@ -290,12 +295,12 @@ export const validateRunningHubVideoWorkflow = (workflow: RunningHubVideoWorkflo
   });
   if (!workflow.mapping.prompt.length) issues.push('请明确绑定至少一个提示词节点；导入不会擅自猜测节点用途。');
   const assigned = new Set<string>();
-  const check = (binding: RunningHubVideoInputBinding, kind: 'prompt' | 'image' | 'image-count' | 'parameter', label: string) => {
+  const check = (binding: RunningHubVideoInputBinding, kind: 'prompt' | 'image' | 'audio' | 'image-count' | 'parameter', label: string) => {
     try {
       const index = nodeIndex(workflow.requestTemplate, binding); const value = raw.nodeInfoList[index].fieldValue;
       const key = JSON.stringify([binding.nodeId, binding.inputName]);
       if (assigned.has(key)) issues.push(`${label} 与其他用途绑定了同一个节点字段，请明确唯一用途。`); assigned.add(key);
-      if ((kind === 'prompt' || kind === 'image') && typeof value !== 'string') issues.push(`${label} 必须映射文本字段，不能覆盖数值、数组或节点连线。`);
+      if ((kind === 'prompt' || kind === 'image' || kind === 'audio') && typeof value !== 'string') issues.push(`${label} 必须映射文本字段，不能覆盖数值、数组或节点连线。`);
       if (kind === 'parameter' && !['string', 'number', 'boolean'].includes(typeof value)) issues.push(`${label} 不是可覆盖的简单常量。`);
       if (kind === 'image-count' && !((typeof value === 'number' && Number.isSafeInteger(value) && value >= 0)
         || (typeof value === 'string' && /^\d+$/u.test(value.trim()) && Number.isSafeInteger(Number(value))))) issues.push(`${label} 必须绑定非负整数或整数字符串字段。`);
@@ -303,8 +308,9 @@ export const validateRunningHubVideoWorkflow = (workflow: RunningHubVideoWorkflo
   };
   workflow.mapping.prompt.forEach((binding, index) => check(binding, 'prompt', `提示词 ${index + 1}`));
   workflow.mapping.images.forEach((binding, index) => check(binding, 'image', `参考图 ${index + 1}`));
+  (workflow.mapping.audios || []).forEach((binding, index) => check(binding, 'audio', `参考音频 ${index + 1}`));
   for (const [name, binding] of Object.entries(workflow.mapping.parameters || {})) {
-    if (!name.trim() || ['prompt', 'images', 'references', 'first_image', 'last_image', 'model', 'parameters'].includes(name) || /^image_\d+$/u.test(name)) issues.push(`参数名称 ${name || '（空）'} 与系统字段冲突。`);
+    if (!name.trim() || ['prompt', 'images', 'audios', 'audioReferences', 'references', 'first_image', 'last_image', 'model', 'parameters'].includes(name) || /^(?:image|audio)_\d+$/u.test(name)) issues.push(`参数名称 ${name || '（空）'} 与系统字段冲突。`);
     check(binding, 'parameter', `参数 ${name}`);
   }
   const imageCount = resolveRunningHubVideoImageProtocol(workflow).imageCount;
@@ -495,6 +501,8 @@ export const compileRunningHubVideoApi = (config: RunningHubVideoConfig, workflo
   const runningHubMappedFields: NonNullable<VideoTaskApiConfig['runningHubMappedFields']> = [
     ...workflow.mapping.prompt.map((binding) => ({ nodeId: binding.nodeId, fieldName: binding.inputName, kind: 'prompt' as const })),
     ...workflow.mapping.images.map((binding, imageIndex) => ({ nodeId: binding.nodeId, fieldName: binding.inputName, kind: 'image' as const, imageIndex, emptyValue: imageProtocol.emptyImageValues[imageIndex] })),
+    ...(workflow.mapping.audios || []).map((binding, audioIndex) => ({ nodeId: binding.nodeId, fieldName: binding.inputName, kind: 'audio' as const, audioIndex,
+      originalValue: clone(readRunningHubVideoRequest(requestTemplate).nodeInfoList[nodeIndex(requestTemplate, binding)].fieldValue) })),
     ...(imageProtocol.imageCount ? [{ nodeId: imageProtocol.imageCount.nodeId, fieldName: imageProtocol.imageCount.inputName, kind: 'image-count' as const,
       imageCountSource: imageProtocol.imageCountSource,
       ...(imageProtocol.imageCountMode ? { imageCountMode: imageProtocol.imageCountMode } : {}),
@@ -535,9 +543,10 @@ export const compileRunningHubVideoApi = (config: RunningHubVideoConfig, workflo
 export const bindRunningHubVideoRequest = (
   template: string,
   mappedFields: NonNullable<VideoTaskApiConfig['runningHubMappedFields']>,
-  draft: Pick<VideoGenerationDraft, 'prompt' | 'parameters'> & Partial<Pick<VideoGenerationDraft, 'references'>>,
+  draft: Pick<VideoGenerationDraft, 'prompt' | 'parameters'> & Partial<Pick<VideoGenerationDraft, 'references' | 'audioReferences'>>,
   images: string[],
   submitContext?: Pick<VideoTaskApiConfig, 'provider' | 'runningHubAppId' | 'endpoint'>,
+  audios: string[] = [],
 ): Record<string, unknown> => {
   assertSafeNumbers(template);
   if (draft.references) {
@@ -550,6 +559,15 @@ export const bindRunningHubVideoRequest = (
     if (typeof image !== 'string' || !image.trim()) throw new Error(`RunningHub 第 ${index + 1} 张已选参考图未取得可用上传结果，请重试该图片上传。`);
     uploadBySlot.set(draft.references ? videoReferenceSlotIndex(draft.references[index], index) : index, { image, index });
   }
+  const audioReferences = draft.audioReferences || [];
+  if (audioReferences.length !== audios.length) throw new Error('参考音频数量与 RunningHub 上传结果数量不一致；不会丢弃音频或改变槽位。');
+  const audioBySlot = new Map<number, { audio: string; index: number; bindingId: string }>();
+  audioReferences.forEach((reference, index) => {
+    if (!Number.isSafeInteger(reference.slotIndex) || reference.slotIndex < 0 || audioBySlot.has(reference.slotIndex)) throw new Error('参考音频槽位无效或重复，请重新选择。');
+    const audio = audios[index];
+    if (typeof audio !== 'string' || !audio.trim()) throw new Error(`RunningHub 第 ${index + 1} 条已选参考音频未取得可用上传结果，请重试该音频上传。`);
+    audioBySlot.set(reference.slotIndex, { audio, index, bindingId: reference.bindingId });
+  });
   const request = readRunningHubVideoRequest(template);
   const submittedPrompt = submitContext && isRunningHubH3AutoPromptInput({ ...submitContext, runningHubMappedFields: mappedFields })
     ? runningHubH3AutoPromptInput(draft.prompt, uploadBySlot.size) : draft.prompt;
@@ -558,7 +576,9 @@ export const bindRunningHubVideoRequest = (
   if (unmapped.length) throw new Error(`RunningHub 参数 ${unmapped.join('、')} 尚未绑定节点字段；请配置明确映射或清空这些覆盖值。`);
   const assigned = new Set<string>(); let prompts = 0;
   const consumedImages = new Set<number>();
+  const consumedAudios = new Set<number>();
   const imageIndices = new Set<number>();
+  const audioIndices = new Set<number>();
   let imageCounts = 0;
   for (const field of mappedFields) {
     const binding = { nodeId: field.nodeId, inputName: field.fieldName };
@@ -585,6 +605,18 @@ export const bindRunningHubVideoRequest = (
         // or hand-edited snapshots fall back to the legacy empty string.
         node.fieldValue = field.emptyValue === 'None' || field.emptyValue === 'example.png' ? field.emptyValue : '';
       }
+    } else if (field.kind === 'audio') {
+      const audioIndex = field.audioIndex;
+      if (typeof node.fieldValue !== 'string' || !Number.isSafeInteger(audioIndex) || audioIndex! < 0) throw new Error(`RunningHub 音频字段 ${field.nodeId}.${field.fieldName} 的槽位映射无效，请核对工作流配置。`);
+      if (audioIndices.has(audioIndex!)) throw new Error(`RunningHub 第 ${audioIndex! + 1} 个音频槽索引重复绑定，请核对工作流映射。`);
+      audioIndices.add(audioIndex!);
+      const uploaded = audioBySlot.get(audioIndex!);
+      if (uploaded) {
+        if (uploaded.bindingId !== key) throw new Error(`参考音频槽 ${audioIndex! + 1} 的节点字段已变化，请重新选择；不会把声音填入其他节点。`);
+        node.fieldValue = uploaded.audio; consumedAudios.add(uploaded.index);
+      }
+      // No selected audio: keep the original compiled value, including "None"
+      // and empty strings. Audio slots do not use the image empty-slot protocol.
     } else if (field.kind === 'image-count') {
       if (++imageCounts > 1) throw new Error('RunningHub 实际图片数量只能绑定一个字段，请核对工作流映射。');
       if (field.imageCountMode === 'prefix' && [...uploadBySlot.keys()].some((slot) => slot >= images.length)) {
@@ -602,6 +634,7 @@ export const bindRunningHubVideoRequest = (
   }
   if (!prompts) throw new Error('RunningHub 工作流未明确绑定提示词字段。');
   if (consumedImages.size !== images.length) throw new Error('参考图数量与 RunningHub 工作流的明确图槽不一致；不会静默丢弃图片。');
+  if (consumedAudios.size !== audios.length) throw new Error('参考音频与 RunningHub 工作流的明确音频槽不一致；不会静默丢弃音频。');
   assertRunningHubPromptPictureSlots(mappedFields, submittedPrompt, [...uploadBySlot.keys()]);
   return request;
 };

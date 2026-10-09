@@ -115,6 +115,7 @@ export const runningHubVideoOutputConflict = (workflow: RunningHubVideoWorkflow,
   if (imageCount && same(imageCount, binding)) return '每段实际图片数量';
   if (workflow.mapping.prompt.some((entry) => same(entry, binding))) return '提示词输入';
   if (workflow.mapping.images.some((entry) => same(entry, binding))) return '参考图片槽';
+  if ((workflow.mapping.audios || []).some((entry) => same(entry, binding))) return '参考音频槽';
   const other = Object.entries(workflow.mapping.parameters || {}).find(([name, entry]) => name !== key && same(entry, binding));
   return other ? `参数 ${other[0]}` : '';
 };

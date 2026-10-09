@@ -40,6 +40,10 @@ interface Window {
       dataUrl: string;
       fileName?: string;
     }) => Promise<import('./storage').ManagedMediaResult>;
+    storeGeneratedAudio: (payload: { dataUrl: string; fileName?: string }) => Promise<import('./storage').ManagedMediaResult>;
+    readManagedAudioDataUrl: (payload: { relativePath: string; expectedChecksum?: string }) => Promise<{
+      dataUrl: string; mimeType: 'audio/mpeg' | 'audio/wav' | 'audio/flac'; sizeBytes: number; checksum: string;
+    }>;
     assetStatus: (relativePath: string) => Promise<Partial<import('./storage').ManagedMediaResult> & { exists: boolean }>;
     getVideoThumbnail: (payload: {
       projectId: string;

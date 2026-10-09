@@ -59,6 +59,26 @@ export const parseRunningHubVideoFieldData = (value: unknown): RunningHubVideoFi
   return type === 'STRING' || type === 'TEXT' ? { kind: 'text' } : undefined;
 };
 
+type NodeEvidence = Pick<RunningHubVideoNodeCatalogEntry, 'fieldType' | 'classType' | 'audioUpload'>;
+/** Keep upload-widget evidence separate from display controls and wire values. */
+const nodeEvidence = (value: Record<string, unknown>): NodeEvidence => {
+  let data = value.fieldData;
+  for (let attempt = 0; typeof data === 'string' && attempt < 3; attempt += 1) {
+    try { data = JSON.parse(data); } catch { data = undefined; break; }
+  }
+  const details = Array.isArray(data) && record(data[1]) ? data[1] : {};
+  const fieldType = typeof value.fieldType === 'string' ? value.fieldType
+    : Array.isArray(data) && typeof data[0] === 'string' ? data[0] : undefined;
+  const classType = typeof value.classType === 'string' ? value.classType
+    : typeof value.class_type === 'string' ? value.class_type : undefined;
+  const audioUpload = typeof value.audioUpload === 'boolean' ? value.audioUpload
+    : typeof value.audio_upload === 'boolean' ? value.audio_upload
+      : typeof details.audio_upload === 'boolean' ? details.audio_upload : undefined;
+  return { ...(fieldType?.trim() ? { fieldType: fieldType.trim() } : {}),
+    ...(classType?.trim() ? { classType: classType.trim() } : {}),
+    ...(audioUpload !== undefined ? { audioUpload } : {}) };
+};
+
 export const normalizeRunningHubVideoFieldControls = (value: unknown): Record<string, RunningHubVideoFieldControl> => {
   if (!record(value)) return {};
   const result: Record<string, RunningHubVideoFieldControl> = {};
@@ -92,6 +112,7 @@ export const normalizeRunningHubVideoNodeCatalog = (value: unknown): RunningHubV
     keys.add(key);
     const control = normalizeRunningHubVideoFieldControl(item.control) ?? parseRunningHubVideoFieldData(item.fieldData);
     result.push({ nodeId: item.nodeId, fieldName: item.fieldName, fieldValue: item.fieldValue,
+      ...nodeEvidence(item),
       ...(control ? { control } : {}),
       ...(typeof item.description === 'string' && item.description ? { description: item.description } : {}) });
   }
@@ -107,7 +128,7 @@ export const mergeRunningHubVideoNodeCatalog = (
   for (const node of normalizeRunningHubVideoNodeCatalog(incoming)) {
     const index = result.findIndex((entry) => keyOf(entry) === keyOf(node));
     if (index < 0) result.push(node);
-    else result[index] = { ...result[index], ...(node.control ? { control: node.control } : {}),
+    else result[index] = { ...result[index], ...nodeEvidence(node as unknown as Record<string, unknown>), ...(node.control ? { control: node.control } : {}),
       ...(!result[index].description && node.description ? { description: node.description } : {}) };
   }
   return result;
@@ -127,9 +148,11 @@ export const listRunningHubVideoNodes = (
   const seen = new Set<string>();
   for (const node of nodes) {
     if (!record(node) || typeof node.nodeId !== 'string' || typeof node.fieldName !== 'string' || !own(node, 'fieldValue')) continue;
-    const control = catalogByKey.get(keyOf(node as RunningHubVideoNodeInfo))?.control
+    const catalogNode = catalogByKey.get(keyOf(node as RunningHubVideoNodeInfo));
+    const control = catalogNode?.control
       ?? normalizeRunningHubVideoFieldControl(node.control) ?? parseRunningHubVideoFieldData(node.fieldData);
-    result.push({ ...node, ...(control ? { control } : {}) } as RunningHubVideoNodeInfo);
+    result.push({ ...node, ...(catalogNode ? nodeEvidence(catalogNode as unknown as Record<string, unknown>) : {}),
+      ...nodeEvidence(node), ...(control ? { control } : {}) } as RunningHubVideoNodeInfo);
     seen.add(keyOf(node as RunningHubVideoNodeInfo));
   }
   for (const node of normalizedCatalog) {
@@ -231,7 +254,7 @@ export const parseRunningHubVideoNodes = (source: string): RunningHubVideoNodesR
     const rawToken = (path: Path) => { const token = tokens.get(JSON.stringify(path)); return token ? text.slice(token.start, token.end) : ''; };
     const exactId = (value: unknown, path: Path): string => typeof value === 'string' ? value
       : typeof value === 'number' && /^\d+$/u.test(rawToken(path)) ? rawToken(path) : '';
-    const add = (nodeId: string, fieldName: string, value: unknown, path: Path, description?: unknown, control?: RunningHubVideoFieldControl) => {
+    const add = (nodeId: string, fieldName: string, value: unknown, path: Path, description?: unknown, control?: RunningHubVideoFieldControl, evidence: NodeEvidence = {}) => {
       if (!nodeId.trim() || !fieldName.trim()) throw new Error('节点列表包含空 nodeId 或 fieldName，请核对真实节点定义。');
       if (isRunningHubVideoSecretField(fieldName)) { skippedSecrets += 1; return; }
       let fieldValue = value;
@@ -244,7 +267,7 @@ export const parseRunningHubVideoNodes = (source: string): RunningHubVideoNodesR
       const key = keyOf({ nodeId, fieldName });
       if (keys.has(key)) throw new Error(`节点字段 ${nodeId}.${fieldName} 重复，请保留唯一的真实字段。`);
       keys.add(key);
-      nodes.push({ nodeId, fieldName, fieldValue, ...(control ? { control } : {}), ...(typeof description === 'string' && description ? { description } : {}) });
+      nodes.push({ nodeId, fieldName, fieldValue, ...evidence, ...(control ? { control } : {}), ...(typeof description === 'string' && description ? { description } : {}) });
     };
     const visit = (value: unknown, path: Path): void => {
       if (typeof value === 'string') { parseDocument(value, depth + 1); return; }
@@ -254,7 +277,7 @@ export const parseRunningHubVideoNodes = (source: string): RunningHubVideoNodesR
           if (!record(item) || typeof item.fieldName !== 'string' || !own(item, 'fieldValue')) throw new Error(`节点列表第 ${index + 1} 项缺少 nodeId、fieldName 或 fieldValue。`);
           add(exactId(item.nodeId, [...path, index, 'nodeId']), item.fieldName, item.fieldValue, [...path, index, 'fieldValue'],
             typeof item.description === 'string' && item.description ? item.description : item.nodeName,
-            normalizeRunningHubVideoFieldControl(item.control) ?? parseRunningHubVideoFieldData(item.fieldData));
+            normalizeRunningHubVideoFieldControl(item.control) ?? parseRunningHubVideoFieldData(item.fieldData), nodeEvidence(item));
         });
         return;
       }
@@ -266,7 +289,7 @@ export const parseRunningHubVideoNodes = (source: string): RunningHubVideoNodesR
         for (const [nodeId, rawNode] of entries) {
           const node = rawNode as { class_type: string; inputs: Record<string, unknown>; _meta?: unknown };
           const description = record(node._meta) && typeof node._meta.title === 'string' ? node._meta.title : node.class_type;
-          for (const [fieldName, value] of Object.entries(node.inputs)) add(nodeId, fieldName, value, [...path, nodeId, 'inputs', fieldName], description);
+          for (const [fieldName, value] of Object.entries(node.inputs)) add(nodeId, fieldName, value, [...path, nodeId, 'inputs', fieldName], description, undefined, { classType: node.class_type });
         }
         return;
       }

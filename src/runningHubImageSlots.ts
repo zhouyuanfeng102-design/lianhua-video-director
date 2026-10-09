@@ -15,6 +15,7 @@ export const runningHubImageCountConflict = (workflow: RunningHubVideoWorkflow, 
   const matches = (entry: RunningHubVideoInputBinding) => keyOf(entry.nodeId, entry.inputName) === key;
   if (workflow.mapping.prompt.some(matches)) return '提示词输入';
   if (workflow.mapping.images.some(matches)) return '参考图片槽';
+  if ((workflow.mapping.audios || []).some(matches)) return '参考音频槽';
   const parameter = Object.entries(workflow.mapping.parameters || {}).find(([, entry]) => matches(entry));
   return parameter ? `参数 ${parameter[0]}` : '';
 };
@@ -45,7 +46,7 @@ export const syncRunningHubImageSlots = (workflow: RunningHubVideoWorkflow): Run
     const images = workflow.mapping.images.filter((binding) => binding.nodeId.trim() || binding.inputName.trim());
     const keys = new Set(images.map((binding) => keyOf(binding.nodeId, binding.inputName)));
     const imageCount = resolveRunningHubVideoImageProtocol(workflow).imageCount;
-    const occupied = new Set([...workflow.mapping.prompt, ...Object.values(workflow.mapping.parameters || {}), ...(imageCount ? [imageCount] : [])]
+    const occupied = new Set([...workflow.mapping.prompt, ...(workflow.mapping.audios || []), ...Object.values(workflow.mapping.parameters || {}), ...(imageCount ? [imageCount] : [])]
       .map((binding) => keyOf(binding.nodeId, binding.inputName)));
     for (const node of selectRunningHubVideoFieldChoices(nodes, 'images', { catalog: workflow.nodeCatalog })) {
       const key = keyOf(node.nodeId, node.fieldName);

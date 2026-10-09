@@ -1,6 +1,7 @@
 const { randomBytes } = require('node:crypto');
 const path = require('node:path');
 const { decodeReferenceImageDataUrl } = require('./imageReferenceTransport.cjs');
+const { decodeReferenceAudioDataUrl } = require('./audioReferenceTransport.cjs');
 
 const abortError = () => Object.assign(new Error('视频请求已取消'), { name: 'AbortError', code: 'ABORT_ERR' });
 const validId = (value) => {
@@ -21,7 +22,7 @@ const videoRequestOptions = (payload, signal) => {
   if (payload.multipart != null) {
     const fields = Array.isArray(payload.multipart.fields) ? payload.multipart.fields : Object.entries(payload.multipart.fields || {}).map(([name, value]) => ({ name, value }));
     const files = payload.multipart.files;
-    if (!Array.isArray(files) || !files.length) throw new Error('视频素材上传缺少图片');
+    if (!Array.isArray(files) || !files.length) throw new Error('视频素材上传缺少媒体文件');
     const boundary = `----lianhua-video-${randomBytes(18).toString('hex')}`;
     const chunks = [];
     let total = 0;
@@ -39,7 +40,8 @@ const videoRequestOptions = (payload, signal) => {
       append(`--${boundary}\r\nContent-Disposition: form-data; name="${fieldName(field.name)}"\r\n\r\n${String(field.value ?? '')}\r\n`);
     }
     for (const [index, file] of files.entries()) {
-      const decoded = decodeReferenceImageDataUrl(file.dataUrl);
+      const decoded = /^data:audio\//iu.test(String(file.dataUrl || ''))
+        ? decodeReferenceAudioDataUrl(file.dataUrl) : decodeReferenceImageDataUrl(file.dataUrl);
       const requested = path.basename(String(file.fileName || `reference-${index + 1}`)).replace(/[\r\n"\\/]/gu, '_').slice(0, 160);
       const name = `${path.basename(requested, path.extname(requested)) || 'reference'}${decoded.extension}`;
       append(`--${boundary}\r\nContent-Disposition: form-data; name="${fieldName(file.fieldName || file.name)}"; filename="${name}"\r\nContent-Type: ${decoded.mimeType}\r\n\r\n`);

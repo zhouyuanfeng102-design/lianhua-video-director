@@ -242,6 +242,42 @@ const validateVideoResultSelection = (task) => {
     if (ids.length < 2 || task.resultAssetId !== undefined) throw resultSelectionError();
   } else if (!validId(task.resultAssetId) || !ids.includes(task.resultAssetId)) throw resultSelectionError();
 };
+const audioError = () => new Error('参考音频冻结绑定或上传回执无效；已停止提交，不能丢弃音频后生成');
+const audioIdentity = (audio) => Object.fromEntries(['bindingId', 'assetId', 'slotIndex', 'target', 'retainMode', 'notes'].map((name) => [name, audio?.[name]]));
+const audioFileName = (value) => {
+  if (typeof value !== 'string' || value.trim() !== value || !value || value.length > 4096) return false;
+  try {
+    const decoded = decodeURIComponent(value);
+    return !/[\u0000-\u001f\u007f?#]/u.test(decoded) && mediaPath(decoded);
+  } catch { return false; }
+};
+const validateVideoAudioInputs = (task) => {
+  const snapshot = task.videoJob?.snapshot, references = snapshot?.draft?.audioReferences, audios = snapshot?.audios;
+  const uploaded = task.videoJob?.preparation?.uploadedAudios;
+  if (references === undefined && audios === undefined && uploaded === undefined) return;
+  if (references !== undefined && !Array.isArray(references) || audios !== undefined && !Array.isArray(audios)
+    || uploaded !== undefined && !Array.isArray(uploaded)) throw audioError();
+  const refs = references || [], files = audios || [], receipts = uploaded || [];
+  if (refs.length !== files.length || files.length > 256 || receipts.length > files.length
+    || files.length && (snapshot.connection?.backend !== 'api' || snapshot.connection.api?.provider !== 'runninghub')) throw audioError();
+  const slots = new Set(), bindings = new Set();
+  for (const [index, audio] of files.entries()) {
+    const reference = refs[index], target = audio?.target;
+    if (!record(audio) || !record(reference) || !same(audioIdentity(audio), audioIdentity(reference))
+      || !identityText(audio.bindingId) || !identityText(audio.assetId) || !Number.isSafeInteger(audio.slotIndex) || audio.slotIndex < 0
+      || slots.has(audio.slotIndex) || bindings.has(audio.bindingId)
+      || !record(target) || !['character', 'voiceover', 'ambience'].includes(target.kind)
+      || target.kind === 'character' && !identityText(target.characterId)
+      || !['reference', 'fully_copy', 'partially_copy', 'weak_reference'].includes(audio.retainMode)
+      || !['pending', 'frozen'].includes(audio.freezeState)
+      || audio.notes !== undefined && typeof audio.notes !== 'string') throw audioError();
+    slots.add(audio.slotIndex); bindings.add(audio.bindingId);
+    if (audio.freezeState === 'frozen' && (!/^[a-f0-9]{64}$/u.test(audio.checksum || '')
+      || !(mediaPath(audio.relativePath) || typeof audio.dataUrl === 'string' && /^data:audio\/[a-z0-9.+-]+;base64,/iu.test(audio.dataUrl)))) throw audioError();
+    if (receipts[index] != null && (!audioFileName(receipts[index]) || audio.freezeState !== 'frozen')) throw audioError();
+  }
+  if (task.videoJob.preparation.phase !== 'preparing' && files.some((audio, index) => audio.freezeState !== 'frozen' || !audioFileName(receipts[index]))) throw audioError();
+};
 const validate = (task, expectedId) => {
   if (!record(task) || typeof task.id !== 'string' || (expectedId && task.id !== expectedId)
     || !record(task.videoJob) || !record(task.videoJob.snapshot)
@@ -257,6 +293,7 @@ const validate = (task, expectedId) => {
   validateVideoTaskDependency(task);
   validateVideoResultSelection(task);
   validateVideoBatchContinuation(task);
+  validateVideoAudioInputs(task);
   return task;
 };
 
@@ -281,6 +318,14 @@ const createVideoTaskCheckpointJournal = ({ directory, atomicWriteFile }) => {
         }
         const left = existing.videoJob.snapshot;
         const right = task.videoJob.snapshot;
+        if (!same(left.draft?.audioReferences || [], right.draft?.audioReferences || [])
+          || !same((left.audios || []).map(audioIdentity), (right.audios || []).map(audioIdentity))) throw audioError();
+        for (const [index, audio] of (left.audios || []).entries()) {
+          if (audio.freezeState === 'frozen' && !same(audio, right.audios?.[index])) throw audioError();
+          const receipt = existing.videoJob.preparation.uploadedAudios?.[index];
+          if (receipt && rank[existing.videoJob.preparation.phase] <= rank[task.videoJob.preparation.phase]
+            && receipt !== task.videoJob.preparation.uploadedAudios?.[index]) throw audioError();
+        }
         if (left.projectId !== right.projectId || existing.createdAt !== task.createdAt
           || JSON.stringify(canonical(left.connection)) !== JSON.stringify(canonical(right.connection))) {
           throw new Error('视频提交记录与原任务身份或接口不一致；不会覆盖原记录');
@@ -372,11 +417,17 @@ const collectVideoFrozenAssets = (project) => {
   const tasks = [...(project?.generationTasks || []), ...(project?.assets || []).map((asset) => asset.videoSourceTask).filter(Boolean)];
   for (const task of tasks) {
     const snapshot = task.videoJob?.snapshot;
-    if (!snapshot || snapshot.projectId !== project.id || !Array.isArray(snapshot.images)) continue;
-    snapshot.images.forEach((image, index) => {
+    if (!snapshot || snapshot.projectId !== project.id) continue;
+    (Array.isArray(snapshot.images) ? snapshot.images : []).forEach((image, index) => {
       if (typeof image.relativePath !== 'string' || !image.relativePath) return;
       if (!result.has(image.relativePath)) result.set(image.relativePath, {
         id: `video-input:${task.id}:${index}`, relativePath: image.relativePath, checksum: image.checksum,
+      });
+    });
+    (Array.isArray(snapshot.audios) ? snapshot.audios : []).forEach((audio, index) => {
+      if (audio.freezeState !== 'frozen' || !mediaPath(audio.relativePath) || !identityText(audio.checksum)) return;
+      if (!result.has(audio.relativePath)) result.set(audio.relativePath, {
+        id: `video-audio-input:${task.id}:${index}`, relativePath: audio.relativePath, checksum: audio.checksum,
       });
     });
     // Selection is checkpointed before its image slot is bound. Export those
@@ -391,4 +442,4 @@ const collectVideoFrozenAssets = (project) => {
   return [...result.values()];
 };
 
-module.exports = { createVideoTaskCheckpointJournal, collectVideoFrozenAssets, validateVideoTaskDependency, validateVideoResultSelection, validateVideoBatchContinuation };
+module.exports = { createVideoTaskCheckpointJournal, collectVideoFrozenAssets, validateVideoTaskDependency, validateVideoResultSelection, validateVideoBatchContinuation, validateVideoAudioInputs };

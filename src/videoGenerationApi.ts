@@ -106,7 +106,10 @@ const clearUnusedRunningHubTemplateImages = (value: unknown, occupiedSlots: Read
   }) };
 };
 
-export const buildVideoApiBody = (config: Omit<VideoTaskApiConfig, 'apiKey'>, draft: VideoGenerationDraft, images: string[]): Record<string, unknown> => {
+export const buildVideoApiBody = (config: Omit<VideoTaskApiConfig, 'apiKey'>, draft: VideoGenerationDraft, images: string[], audios: string[] = []): Record<string, unknown> => {
+  if ((draft.audioReferences?.length || audios.length) && config.provider !== 'runninghub') {
+    throw new Error('当前连接不支持参考音频，请选择 RunningHub 音频工作流。');
+  }
   assertVideoReferenceSlots(draft.references);
   if (config.provider === 'rhtv_web') return buildRhTvBody(config, draft, images);
   // Resolve the per-submission boundary usage before building either named
@@ -116,6 +119,9 @@ export const buildVideoApiBody = (config: Omit<VideoTaskApiConfig, 'apiKey'>, dr
   const lastIndex = draft.references.findIndex((image) => image.role === 'last-frame');
   const slots = draft.references.map(videoReferenceSlotIndex);
   if (config.provider === 'runninghub') {
+    if ((draft.audioReferences?.length || 0) !== audios.length) throw new Error('RunningHub 已选参考音频与上传回执数量不一致；不会漏传音频。');
+    if (audios.length && !config.runningHubMappedFields) throw new Error('RunningHub 参考音频缺少明确节点映射；尚未提交视频。');
+    if (audios.some((audio) => !isRunningHubUploadedFile(audio) || /^https?:\/\//iu.test(audio))) throw new Error('RunningHub 已选参考音频没有可用的云端 fileName；下载 URL 不能作为音频节点输入。');
     if (draft.references.length !== images.length) {
       throw new Error(`RunningHub 本次选了 ${draft.references.length} 张参考图，但仅取得 ${images.length} 张上传结果；不会丢图或补图，请重试图片上传。`);
     }
@@ -155,7 +161,7 @@ export const buildVideoApiBody = (config: Omit<VideoTaskApiConfig, 'apiKey'>, dr
     try { raw = JSON.parse(config.requestTemplate); } catch { throw new Error('视频 API 请求模板不是有效 JSON。'); }
     if (config.provider === 'runninghub') assertRunningHubTemplateNumbersSafe(config.requestTemplate);
     const result = config.provider === 'runninghub' && config.runningHubMappedFields
-      ? bindRunningHubVideoRequest(config.requestTemplate, config.runningHubMappedFields, draft, images, config)
+      ? bindRunningHubVideoRequest(config.requestTemplate, config.runningHubMappedFields, draft, images, config, audios)
       : expandTemplate(config.provider === 'runninghub' ? clearUnusedRunningHubTemplateImages(raw, new Set(slots)) : raw, {
       prompt: draft.prompt, model: config.model || '', images,
       // Generic arrays remain dense: never manufacture an empty URL. A
@@ -183,6 +189,7 @@ export const buildVideoApiBody = (config: Omit<VideoTaskApiConfig, 'apiKey'>, dr
     }
     if (!JSON.stringify(result).includes(JSON.stringify(draft.prompt).slice(1, -1))) throw new Error('视频 API 模板未引用完整 {{prompt}}，请在接口配置中绑定提示词字段。');
     for (const image of images) if (!JSON.stringify(result).includes(JSON.stringify(image).slice(1, -1))) throw new Error('视频 API 模板没有包含所有选图，请绑定 {{images}} / {{references}} 或首尾帧字段。');
+    for (const audio of audios) if (!JSON.stringify(result).includes(JSON.stringify(audio).slice(1, -1))) throw new Error('视频 API 模板没有包含所有已选音频，请检查参考音频节点映射。');
     return result;
   }
   return { ...(config.model ? { model: config.model } : {}), ...draft.parameters, prompt: draft.prompt,

@@ -61,6 +61,7 @@ const requestNodes = (workflow: RunningHubVideoWorkflow): RunningHubVideoNodeInf
 const reservedConflict = (workflow: RunningHubVideoWorkflow, binding: RunningHubVideoInputBinding): string => {
   if (workflow.mapping.prompt.some((item) => same(item, binding))) return '提示词输入';
   if (workflow.mapping.images.some((item) => same(item, binding))) return '参考图片槽';
+  if ((workflow.mapping.audios || []).some((item) => same(item, binding))) return '参考音频槽';
   const imageCount = resolveRunningHubVideoImageProtocol(workflow).imageCount;
   if (imageCount && same(imageCount, binding)) return '实际图片数量';
   const common = Object.entries(workflow.mapping.parameters || {}).find(([name, item]) => commonParameters.has(name) && same(item, binding));
