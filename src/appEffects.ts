@@ -38,6 +38,8 @@ import {
 import { hasNsfwDetailSignal } from './promptConstraints';
 import { VIDEO_CREATIVE_DIRECTION_DATA_RULE, videoCreativeDirectionForBoard } from './videoCreativeDirection';
 import { VIDEO_ACTING_CAMERA_RULES } from './videoActingCameraRules';
+import { VIDEO_ACTION_CHOREOGRAPHY_RULE, VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE,
+  VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE, withVideoActionChoreographyScope } from './videoActionChoreographyRules';
 import { STORY_CAUSALITY_RULE } from './storyCausalityRules';
 import {
   DEFAULT_VIDEO_CONVERSION_SYSTEM, DEFAULT_VIDEO_CONVERSION_OUTPUT,
@@ -515,6 +517,7 @@ export const convertStoryboardDraftToFinal = async (
   // dialogue-cutting clauses cannot override the current source contract.
   const audioContractRule = refreshConfirmedPrompt ? AUDIO_EXISTING_SCOPE_RULE : AUDIO_PROMPT_RULE;
   const sharedRules = [DEFAULT_VIDEO_CONVERSION_SYSTEM, DEFAULT_VIDEO_CONVERSION_OUTPUT,
+    VIDEO_ACTION_CHOREOGRAPHY_RULE, VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE, VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE,
     STORY_CAUSALITY_RULE,
     VIDEO_CREATIVE_DIRECTION_DATA_RULE,
     VIDEO_ACTING_CAMERA_RULES,
@@ -551,11 +554,11 @@ export const convertStoryboardDraftToFinal = async (
     requiredVisualStyleAtoms.length ? 'requiredVisualStyleAtoms 是已选风格原子，保留各项一次，不把它们当剧情。' : '',
     VIDEO_CONVERSION_EXAMPLE,
   ].filter(Boolean).join('\n\n');
-  const systemPrompt = [
+  const systemPrompt = withVideoActionChoreographyScope([
     `<video_conversion_core_task>\n${coreTask}\n</video_conversion_core_task>`,
     `<video_conversion_converter_rules>\n${converterRules}\n</video_conversion_converter_rules>`,
     `<video_conversion_hard_contract>\n${hardContract}\n</video_conversion_hard_contract>`,
-  ].join('\n\n');
+  ].join('\n\n'), input.purpose === 'reference-refresh' ? 'existing' : 'generation');
   const conversionData = serializeUntrustedConversionData({
     sourceStoryContent: sourceStoryContent
       || '[原始剧情未单独保存，请结合完整原始计划理解内容]',
@@ -621,7 +624,7 @@ export const convertStoryboardDraftToFinal = async (
     if (repairAttempt >= 1) {
       throw new Error(`转化器返回结构仍无法读取（本地时轴/字段检查，已请求 AI 修复 1 次，未覆盖已有结果）：${initialStructureFailure}`);
     }
-    const structuralRepairSystemPrompt = [
+    const structuralRepairSystemPrompt = withVideoActionChoreographyScope([
       `<video_conversion_core_task>\n${coreTask}\n</video_conversion_core_task>`,
       `<video_conversion_converter_rules>\n${converterRules}\n</video_conversion_converter_rules>`,
       `<video_conversion_hard_contract>\n${hardContract}\n</video_conversion_hard_contract>`,
@@ -629,7 +632,7 @@ export const convertStoryboardDraftToFinal = async (
       '这是一次本地时轴/字段读取失败后的结构修复，不是本地内容判定。只修复 validationFailure 所指的缺失字段、缺镜、无效镜头时间头或结构；原响应 invalidCandidate 中已正确的镜头和可读正文应保留，不要求换词、固定语速或固定每镜台词布局。',
       '结合 sourceStoryContent 全文自行判断并修正内容；人物别名、对白、身份等不受本地白名单限制。镜内时刻必须区分全片坐标。只返回完整逐镜正文，不解释。这是唯一一次结构修复。',
       '</video_conversion_structural_repair_hard_contract>',
-    ].join('\n');
+    ].join('\n'), 'format-only');
     const structuralRepairData = serializeUntrustedConversionData({
       validationFailure: initialStructureFailure,
       repairAttempt: repairAttempt + 1,

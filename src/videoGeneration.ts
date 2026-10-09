@@ -13,6 +13,7 @@ import { cancelledVideoBatchTaskBeforePost, validVideoBatchPreviousTail, videoBa
 import { videoReferenceUsage } from './videoReferenceUsage';
 import { videoReferenceSelection } from './videoReferenceSlots';
 import { prepareVideoH3ReferenceDraft } from './videoH3ReferenceBinding';
+import { sourceContentHash } from './sourceContentHash';
 import { getVideoTailCharacterPlacement, getVideoTailReferencePlacements } from './videoTailReference';
 import { videoBatchContinuationPersistenceIssue } from './videoBatchContinuation';
 import { runningHubRemoteSucceeded } from './videoResultRecovery';
@@ -1346,7 +1347,9 @@ export class VideoGenerationEngine {
     // placement, but display/fingerprint the exact eventual submission text.
     draft.prompt = validationDraft.prompt;
     draft.h3ReferenceBinding = validationDraft.h3ReferenceBinding;
+    draft.seedanceReferenceBinding = validationDraft.seedanceReferenceBinding;
     draft.h3ReferenceWarnings = validationDraft.h3ReferenceWarnings;
+    if (draft.source?.promptFormat) draft.source = { ...draft.source, promptFingerprint: sourceContentHash(draft.prompt) };
     if (draft.backend === 'comfyui') {
       assertNoEmbeddedVideoCredentials(parseComfyVideoWorkflow(workflow!.workflowJson), `批量第 ${index + 1} 项 ComfyUI 工作流`);
       bindComfyVideoWorkflow(workflow!, validationDraft.prompt, validationImages, validationDraft.parameters, validationDraft.references);
@@ -1430,6 +1433,7 @@ export class VideoGenerationEngine {
     const boundDraft = prepareVideoH3ReferenceDraft(project, draft, { backend: draft.backend, workflow: prepared.workflow, api: prepared.config });
     if (boundDraft.issue) throw new Error(boundDraft.issue);
     Object.assign(draft, boundDraft.draft);
+    if (draft.source?.promptFormat) draft.source = { ...draft.source, promptFingerprint: sourceContentHash(draft.prompt) };
     const { apiKey: _comfyKey, workflows: _workflows, ...safeComfy } = prepared.comfy;
     const snapshot: VideoGenerationSnapshot = {
       projectId: project.id,
@@ -1768,6 +1772,7 @@ export class VideoGenerationEngine {
     const boundDraft = prepareVideoH3ReferenceDraft(project, draft, { backend: draft.backend, workflow, api: config });
     if (boundDraft.issue) throw new Error(boundDraft.issue);
     Object.assign(draft, boundDraft.draft);
+    if (draft.source?.promptFormat) draft.source = { ...draft.source, promptFingerprint: sourceContentHash(draft.prompt) };
     const apiEndpoint = config ? videoApiSubmitEndpoint(config) : '';
     if (draft.backend === 'api' && (!config?.enabled || !apiEndpoint)) {
       throw new Error(config?.provider === 'runninghub' ? '请先启用 RunningHub，并选择已填写云端 ID 的工作流。' : '请先启用并设置视频 API 提交端点。');

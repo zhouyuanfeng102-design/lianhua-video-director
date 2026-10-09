@@ -76,6 +76,7 @@ export default defineConfig({
             'storyboardDelivery.ts',
             'h3OutputRecovery.ts',
             'videoH3ReferenceBinding.ts',
+            'videoSeedanceReferenceBinding.ts',
             // H3 bindings read the pattern during module initialization; keep
             // its dependency-free parser here rather than in the domain cycle.
             'videoPictureReferences.ts',
@@ -97,6 +98,8 @@ export default defineConfig({
             'imageLocationScope.ts',
             'sequencePromptHandoffStamp.ts',
             'videoActingCameraRules.ts',
+            'videoActionChoreographyRules.ts',
+            'seedancePromptRules.ts',
             'spatialContinuityRules.ts',
             'videoCreativeDirection.ts',
             'errorDiagnostics.ts',
@@ -176,7 +179,7 @@ export default defineConfig({
             'imagePromptModelFamilies.ts',
             'modelProfiles.ts', 'novelai.ts', 'nsfwPrivateAssets.ts', 'nsfwPromptRules.ts', 'promptConstraints.ts',
             'semanticEvents.ts', 'sourceIntegrity.ts', 'masterTimeline.ts', 'storyboardSubject.ts', 'storyPacing.ts', 'promptDialogueLanguage.ts', 'promptTranslation.ts',
-            'userFacingError.ts', 'videoConversionRules.ts', 'visualStyles.ts',
+            'userFacingError.ts', 'videoConversionRules.ts', 'visualStyles.ts', 'seedancePrompt.ts',
           ].some((file) => normalized.endsWith(`/src/${file}`))) return 'prompt-foundation';
           if (
             normalized.endsWith('/src/sequenceReferencePrompt.ts')

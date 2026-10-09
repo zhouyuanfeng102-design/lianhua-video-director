@@ -381,6 +381,10 @@ export const prepareVideoTailCharacterDraft = (
     return owners.map((owner) => owner.name).join('、') || asset.name;
   });
   const identityBinding = videoH3BindingForPrompt(project, draft);
+  if (draft.source?.promptFormat === 'seedance') return {
+    draft: { ...draft, references, referenceSlotRoles: options.preserveSlots ? draft.referenceSlotRoles : undefined },
+    characterLabels: labels, notices,
+  };
   if (identityBinding) {
     // Only the final transport mapping knows whether Picture numbers follow
     // physical nodes or a dense array. Defer pure serialization until the

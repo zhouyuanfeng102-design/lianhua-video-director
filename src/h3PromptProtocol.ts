@@ -2,6 +2,7 @@ import { AUDIO_EXISTING_SCOPE_RULE, AUDIO_TRANSLATION_SCOPE_RULE, DIALOGUE_DELIV
 import { getH3IdentityBindingIssues, h3IdentityBindingRetentionIssue, H3_IDENTITY_BINDINGS_RULE, readH3DeliveryEnvelope, type H3IdentityCharacter } from './h3IdentityBindings';
 import { CHARACTER_PARTICIPATION_RULE, characterParticipationCoverageIssues, characterParticipationIssues } from './characterParticipation';
 import type { H3IdentityBindings, PromptCharacterParticipation } from './types';
+import { VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE } from './videoActionChoreographyRules';
 
 /** Final H3 uses one clock: seconds since this submitted clip began. */
 export const H3_CLIP_TIME_RULE = [
@@ -316,6 +317,7 @@ export const repairH3PromptProtocolWithAi = async ({
       H3_DIALOGUE_FORMAT_RULE,
       H3_CLIP_TIME_RULE,
       H3_FINAL_BODY_FORMAT_RULE,
+      VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE,
       h3DescriptionLanguageRule(language),
       language === '英文' ? AUDIO_TRANSLATION_SCOPE_RULE : AUDIO_EXISTING_SCOPE_RULE,
       '本次仅修复协议序列化与本次格式转换造成的遗漏。对白以sourceContext的当前段原稿/已确认sourcePrompt为准，不能把具体原话压成“催促声/交谈声”等声音概述，也不能将未定台词交给视频模型自由编词；不利用旧格式基准恢复已在AI复核中去掉的配乐。源稿的无对白区间、原有非语言声与非说话动作按原范围保留；明确要求的不可辨人声仅在不与无对白要求冲突的区间保留，不把视觉姓名/资料/参考职责变成发声内容，不新增剧情、声源或台词。',

@@ -10,6 +10,7 @@ import {
   VIDEO_CONVERSION_EXAMPLE, VIDEO_LOCAL_TIME_RULE,
   LEGACY_DEFAULT_VIDEO_CONVERSION_OUTPUT_V1_4_0, LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_3_0,
   LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_4_0, VIDEO_DIALOGUE_STAGING_RULE,
+  LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_7_0,
   VIDEO_SPATIAL_CONTINUITY_RULE, VIDEO_STAGING_REVIEW_RULE, VIDEO_PROMPT_FOCUS_RULE,
   VIDEO_CAUSALITY_OUTPUT_RULE,
 } from '../src/videoConversionRules';
@@ -28,7 +29,7 @@ const timeline = defaultRuleSets.find((rule) => rule.id === 'timeline_director_c
 const converter = defaultConverterPresets.find((preset) => preset.id === UNIFIED_VIDEO_CONVERTER_ID)!;
 assert.equal(createInitialState().schemaVersion, CURRENT_SCHEMA_VERSION, 'rule fixtures use the current application schema');
 assert.equal(timeline.version, '1.5.0');
-assert.equal(converter.version, '1.7.0');
+assert.equal(converter.version, '1.8.0');
 assert.equal(converter.systemPrompt, DEFAULT_VIDEO_CONVERSION_SYSTEM);
 assert.equal(converter.outputRules, DEFAULT_VIDEO_CONVERSION_OUTPUT);
 assert.ok(
@@ -71,7 +72,7 @@ const legacyTimelineV140 = {
 };
 const legacyConverterV160 = {
   ...clone(converter),
-  systemPrompt: converter.systemPrompt
+  systemPrompt: LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_7_0
     .replace(AUDIO_PROMPT_RULE, legacyQuietMusicAudioRule)
     .replace(`\n\n${STORY_CAUSALITY_RULE}`, '')
     .replace(`\n\n${DIALOGUE_DELIVERY_RULE}`, ''),
@@ -104,7 +105,7 @@ assert.equal(
 );
 assert.equal(
   legacyConverterV150.systemPrompt,
-  DEFAULT_VIDEO_CONVERSION_SYSTEM
+  LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_7_0
     .replace(AUDIO_PROMPT_RULE, LEGACY_AUDIO_PROMPT_RULE_V0_6_3)
     .replace(`\n\n${STORY_CAUSALITY_RULE}`, '')
     .replace(`\n\n${DIALOGUE_DELIVERY_RULE}`, ''),
@@ -151,7 +152,7 @@ for (const oldRule of migrationRules) {
 for (const oldConverter of migrationConverters) {
   const migrated = normalizeState({ ...clone(initial), converterPresets: [clone(oldConverter)] });
   assert.equal(migrated.schemaVersion, CURRENT_SCHEMA_VERSION, 'converter content migration does not introduce another schema');
-  assert.equal(migrated.converterPresets[0].version, '1.7.0');
+  assert.equal(migrated.converterPresets[0].version, converter.version);
   assert.equal(migrated.converterPresets[0].systemPrompt, converter.systemPrompt);
   assert.equal(migrated.converterPresets[0].outputRules, converter.outputRules);
   assert.deepEqual(migrated.project, projectBefore);
@@ -188,7 +189,7 @@ const migratedV130 = normalizeState({
   converterPresets: [clone(legacyConverterV130)],
   storyExpansionPresets: [clone(legacyStoryPreparationV130)],
 });
-assert.equal(migratedV130.converterPresets[0].version, '1.7.0');
+assert.equal(migratedV130.converterPresets[0].version, converter.version);
 assert.equal(migratedV130.converterPresets[0].systemPrompt, converter.systemPrompt);
 assert.equal(migratedV130.storyExpansionPresets[0].version, '1.4.4');
 assert.equal(migratedV130.storyExpansionPresets[0].systemPrompt, storyPreparation.systemPrompt);
@@ -291,8 +292,27 @@ const timestampOnlyRecent = normalizeState({
   converterPresets: [{ ...clone(legacyConverterV160), updatedAt: 124 }],
 });
 assert.equal(timestampOnlyRecent.ruleSets[0].version, '1.5.0', 'bookkeeping timestamps do not prevent an exact factory migration');
-assert.equal(timestampOnlyRecent.converterPresets[0].version, '1.7.0');
+assert.equal(timestampOnlyRecent.converterPresets[0].version, converter.version);
 assert.deepEqual(normalizeState(timestampOnlyRecent), timestampOnlyRecent, 'new no-BGM factory migration remains idempotent after timestamp changes');
+// The action update applies at the request boundary; it has no migration
+// authority over a previously saved v1.7.0 converter or user additions.
+const previouslySavedV170 = {
+  ...clone(converter),
+  systemPrompt: LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_7_0,
+  version: '1.7.0',
+  updatedAt: 321,
+};
+for (const savedConverter of [
+  previouslySavedV170,
+  { ...clone(previouslySavedV170), systemPrompt: `${previouslySavedV170.systemPrompt}\n用户自定动作节奏。` },
+]) {
+  const preserved = normalizeState({ ...clone(initial), converterPresets: [savedConverter] });
+  assert.deepEqual(preserved.converterPresets, [savedConverter],
+    'the action update preserves saved v1.7.0 converters including custom content');
+  assert.deepEqual(preserved.project, projectBefore, 'preserving saved converters does not rewrite confirmed project prompts');
+  assert.deepEqual(preserved.settings, settingsBefore, 'the action update keeps user parameters and selections');
+  assert.deepEqual(normalizeState(preserved), preserved, 'saved v1.7.0 preservation remains idempotent');
+}
 const deleted = normalizeState({
   ...clone(initial),
   ruleSets: [],

@@ -3081,7 +3081,7 @@ export const buildImagePrompt = (
       throw new Error('私密五视图只能使用私密全身外貌资料。');
     }
     if (variant === 'private-four-in-one' && nsfwPrivatePart !== 'full-body') {
-      throw new Error('私密四合一只能从私密全身外貌资料入口生成。');
+      throw new Error('私密三/四合一只能从私密全身外貌资料入口生成。');
     }
     if (variant === 'private-close-up' && nsfwPrivatePart === 'full-body') {
       throw new Error('私密部位特写必须指定一个具体部位。');
@@ -3091,29 +3091,40 @@ export const buildImagePrompt = (
       breasts: { formKey: 'nsfwBreasts', label: '胸部' },
       vulva: { formKey: 'nsfwVulva', label: '外阴' },
       anus: { formKey: 'nsfwAnus', label: '后庭' },
-      penis: { formKey: 'nsfwPenis', label: '阴茎' },
+      penis: { formKey: 'nsfwPenis', label: '男性外生殖器' },
       scrotum: { formKey: 'nsfwScrotum', label: '阴囊' },
+    };
+    const privateProfileText = (part: NsfwPrivatePart): string => {
+      if (part !== 'penis') return sanitizePrivateImageFact(fields[privateFields[part].formKey]);
+      return [...new Set([
+        sanitizePrivateImageFact(fields.nsfwPenis),
+        sanitizePrivateImageFact(fields.nsfwScrotum),
+      ].filter(Boolean))].join('；');
     };
     const gender = sanitizePrivateImageFact(fields.gender);
     const female = /(?:女|雌|\bfemale\b)/iu.test(gender);
     const male = /(?:男|雄|\bmale\b)/iu.test(gender);
     const privateFourInOneParts = (): NsfwPrivatePart[] => {
       if (female && !male) return ['full-body', 'breasts', 'vulva', 'anus'];
-      if (male && !female) return ['full-body', 'penis', 'scrotum', 'anus'];
-      const filled = (['breasts', 'vulva', 'anus', 'penis', 'scrotum'] as NsfwPrivatePart[])
-        .filter((part) => sanitizePrivateImageFact(fields[privateFields[part].formKey]));
+      if (male && !female) return ['full-body', 'penis', 'anus'];
+      const filled = (['breasts', 'vulva', 'anus', 'penis'] as NsfwPrivatePart[])
+        .filter((part) => privateProfileText(part));
       return ['full-body', ...filled.slice(0, 3)];
     };
     if (variant === 'private-four-in-one') {
       const parts = privateFourInOneParts();
-      if (parts.length < 4) {
-        throw new Error('私密四合一至少需要“私密全身”以及三个私密部位外貌资料。');
+      const sheetLabel = parts.length === 3 ? '私密三合一' : '私密四合一';
+      const auxiliaryCount = parts.length - 1;
+      const regionCountText = parts.length === 3 ? '三个' : '四个';
+      const auxiliaryCountText = auxiliaryCount === 2 ? '两个' : '三个';
+      if (parts.length < 3) {
+        throw new Error(`${sheetLabel}至少需要“私密全身”以及${auxiliaryCountText}私密部位外貌资料。`);
       }
       const missing = parts
-        .filter((part) => !sanitizePrivateImageFact(fields[privateFields[part].formKey]))
+        .filter((part) => !privateProfileText(part))
         .map((part) => `“${privateFields[part].label}外貌”`);
       if (missing.length) {
-        throw new Error(`缺少${missing.join('、')}资料，不能生成私密四合一资料图。`);
+        throw new Error(`缺少${missing.join('、')}资料，不能生成${sheetLabel}资料图。`);
       }
       const identity = [
         `名称：${fields.name || '当前角色'}`,
@@ -3129,15 +3140,15 @@ export const buildImagePrompt = (
         .map((part, index) => {
           const label = privateFields[part].label;
           const slot = index === 0 ? '主画面' : ['辅助窗一', '辅助窗二', '辅助窗三'][index - 1] || `辅助窗${index}`;
-          return `${slot}${label}：${sanitizePrivateImageFact(fields[privateFields[part].formKey])}`;
+          return `${slot}${label}：${privateProfileText(part)}`;
         })
         .join('；');
       return appendDirection(
-        `角色私密外貌四合一资料图；${identity}；固定槽位资料：${panelFacts}；私密全身为主画面且只使用私密全身资料，全身主体只出现一次，三个私密部位仅作为较小辅助窗，辅助窗一、辅助窗二、辅助窗三只使用各自绑定的部位资料，三个辅助部位辅助窗各出现一次且互不重复；每个槽位只绘制一次，四个槽位属于同一人物、同一身体锚点、同一体表与体型结构，静态资料姿态符合其物种，背景简洁，焦点清晰。`,
+        `角色${sheetLabel}资料图；${identity}；固定${regionCountText}区域槽位资料：${panelFacts}；私密全身为主画面且只使用私密全身资料，全身主体只出现一次，${auxiliaryCountText}私密部位仅作为较小辅助窗，辅助窗按顺序只使用各自绑定的部位资料，各辅助部位辅助窗各出现一次且互不重复；男性外生殖器作为一个合并槽位，阴茎与阴囊资料共同归入同一个辅助窗；每个槽位只绘制一次，所有槽位属于同一人物、同一身体锚点、同一体表与体型结构，静态资料姿态符合其物种，背景简洁，焦点清晰。`,
       );
     }
     const selected = privateFields[nsfwPrivatePart];
-    const selectedProfile = sanitizePrivateImageFact(fields[selected.formKey]);
+    const selectedProfile = privateProfileText(nsfwPrivatePart);
     if (!selectedProfile) {
       throw new Error(`缺少“${selected.label}外貌”资料，不能生成对应私密资料图。`);
     }

@@ -2,6 +2,19 @@ import type { ReferenceRole } from './types';
 
 /** A cloud nodeInfoList field, not a local ComfyUI `inputs` path. */
 export interface RunningHubVideoInputBinding { nodeId: string; inputName: string }
+/** Local generation-panel positions; these do not create cloud workflow nodes. */
+export interface RunningHubLoraSlot {
+  model: RunningHubVideoInputBinding;
+  strength?: RunningHubVideoInputBinding;
+  clipStrength?: RunningHubVideoInputBinding;
+  label?: string;
+}
+/** Display metadata only. Selected fields retain their real request names and values. */
+export interface RunningHubGenerationExtras {
+  loraSlots?: RunningHubLoraSlot[];
+  otherFields?: RunningHubVideoInputBinding[];
+  hiddenLoras?: RunningHubVideoInputBinding[];
+}
 /** Display metadata only; wire values retain the request template's original type. */
 export interface RunningHubVideoFieldControl {
   kind: 'number' | 'select' | 'text';
@@ -41,6 +54,7 @@ export interface RunningHubVideoWorkflow {
   nodeCatalog?: RunningHubVideoNodeCatalogEntry[];
   /** Explicit per-field UI overrides, keyed by JSON.stringify([nodeId, fieldName]). */
   fieldControls?: Record<string, RunningHubVideoFieldControl>;
+  generationExtras?: RunningHubGenerationExtras;
   mapping: RunningHubVideoMapping;
   outputNodeId?: string;
   createdAt: number;

@@ -1,5 +1,7 @@
 import type { AppSettings, Project, ReferenceAsset, ReferenceRole, Storyboard, StoryboardImageFrameMetadata, VideoGenerationTask } from './types';
-import type { VideoGenerationDraft, VideoGenerationRuntime, VideoImageReference } from './videoGenerationTypes';
+import type { VideoGenerationDraft, VideoGenerationRuntime, VideoImageReference, VideoPromptFormat } from './videoGenerationTypes';
+import { sourceContentHash } from './sourceIntegrity';
+import { hasCurrentSeedancePrompt } from './seedanceSource';
 import { addVideoReference, moveVideoReference, removeVideoReference, videoReferenceSelection } from './videoReferenceSlots';
 import { hasCurrentOfficialH3EnglishPrompt, hasCurrentOfficialH3Prompt, isOfficialH3TargetId, officialH3MissingReferenceNotice } from './officialPrompt';
 import { officialH3ContextForStoryboard } from './officialH3Context';
@@ -16,6 +18,7 @@ export interface VideoDirectorLaunchRequest {
   chapterId?: string;
   storyboardId?: string;
   language?: 'zh' | 'en';
+  promptFormat?: VideoPromptFormat;
   assetIds?: string[];
   /** Workbench frame roles apply to this launch only, never mutate the image asset. */
   referenceRoleOverrides?: Record<string, ReferenceRole>;
@@ -45,6 +48,8 @@ export interface VideoDirectorBatchDraft {
   parameterDrafts: Array<[string, string]>;
   selectedKeys: string[];
   languages: Record<string, 'zh' | 'en'>;
+  promptFormat?: VideoPromptFormat;
+  promptFormats?: Record<string, VideoPromptFormat>;
   referenceOverrides: Record<string, VideoImageReference[]>;
   referenceRoleOverrides: Record<string, ReferenceRole[]>;
   automaticTails: Record<string, AutomaticVideoTailConfiguration>;
@@ -102,7 +107,16 @@ export interface VideoPromptChoice {
   segmentIndex?: number;
   version: string;
   chapterId?: string;
+  promptFormat?: VideoPromptFormat;
+  sourceFingerprint?: string;
 }
+
+export const videoPromptFormatLabel = (format?: VideoPromptFormat): string => format === 'seedance' ? 'Seedance' : format === 'h3' ? 'H3' : format === 'ordinary' ? '普通稿' : '历史稿';
+
+export const defaultVideoPromptFormat = (project: Project, storyboardId?: string): VideoPromptFormat => {
+  const board = project.storyboards.find((item) => item.id === storyboardId) || project.storyboards.find((item) => !item.sourceStale);
+  return isOfficialH3TargetId(board?.targetModelId) ? 'h3' : board?.targetModelId?.startsWith('seedance') ? 'seedance' : 'ordinary';
+};
 
 const isVideoDirectorVisualAsset = (asset: ReferenceAsset): boolean => (
   asset.mediaType !== 'video' && asset.mediaType !== 'audio'
@@ -121,13 +135,14 @@ export const videoImageRole = (asset: ReferenceAsset): ReferenceRole => {
   return 'general';
 };
 
-export const videoPromptChoices = (project: Project, chapterId?: string): VideoPromptChoice[] => (
+export const videoPromptChoices = (project: Project, chapterId?: string, promptFormat?: VideoPromptFormat): VideoPromptChoice[] => (
   [...(chapterId ? chapterBoards(project, chapterId) : project.storyboards)]
   .filter((board) => !board.sourceStale && !project.sequencePlans.find((plan) => plan.id === board.sequencePlanId)?.sourceStale)
   .sort((left, right) => right.updatedAt - left.updatedAt).flatMap((board) => {
     const label = board.sourceStoryTitle || project.scenes.find((scene) => scene.id === board.sceneId)?.title || '未命名剧情';
     const revision = board.revisions?.find((item) => item.id === board.activeRevisionId);
-    const h3 = isOfficialH3TargetId(board.targetModelId);
+    const h3 = promptFormat === 'h3' || !promptFormat && isOfficialH3TargetId(board.targetModelId);
+    const seedance = promptFormat === 'seedance';
     const context = officialH3ContextForStoryboard(project, board);
     const currentH3 = h3 && hasCurrentOfficialH3Prompt(board, context);
     // An H3 board is only selectable when its saved official delivery is
@@ -135,16 +150,20 @@ export const videoPromptChoices = (project: Project, chapterId?: string): VideoP
     // six-field/canonical source text through an H3 workflow, where it is not
     // a valid H3 artifact.  Manual text entry and historical task snapshots
     // do not use this picker and remain untouched.
-    const zh = h3 ? currentH3 ? board.officialPromptZh : undefined : board.officialPromptZh || board.finalPrompt;
+    const zh = seedance ? hasCurrentSeedancePrompt(project, board) ? board.seedance25Output?.promptZh : undefined
+      : h3 ? currentH3 ? board.officialPromptZh : undefined
+        : promptFormat === 'ordinary' ? board.finalPrompt : board.officialPromptZh || board.finalPrompt;
     const matchesSource = (source: string | undefined, candidate: string | undefined, fingerprint?: string): candidate is string => Boolean(
       source?.trim() && candidate?.trim() && (!fingerprint || fingerprint === source),
     );
-    const en = h3 ? hasCurrentOfficialH3EnglishPrompt(board, context) ? board.officialPromptEn : undefined
+    const en = seedance ? hasCurrentSeedancePrompt(project, board, 'en') ? board.seedance25Output?.promptEn : undefined
+      : h3 ? hasCurrentOfficialH3EnglishPrompt(board, context) ? board.officialPromptEn : undefined
+      : promptFormat === 'ordinary' ? matchesSource(board.finalPrompt, board.englishPrompt, board.englishPromptSource) ? board.englishPrompt : undefined
       : matchesSource(board.officialPromptZh, board.officialPromptEn, board.officialPromptEnSource) ? board.officialPromptEn
         : matchesSource(board.finalPrompt, board.englishPrompt, board.englishPromptSource) && matchesSource(zh, board.englishPrompt) ? board.englishPrompt : undefined;
     const version = `${revision?.label || (revision?.revision ? `版本 ${revision.revision}` : '当前版本')}${h3 && !currentH3 ? ' · 结构化原稿（H3 交付稿需更新）' : ''}`;
     return ([['zh', zh], ['en', en]] as const).filter(([, prompt]) => Boolean(prompt?.trim())).map(([language, prompt]) => ({
-      id: `${board.id}:${language}`,
+      id: promptFormat ? `${board.id}:${promptFormat}:${language}` : `${board.id}:${language}`,
       storyboardId: board.id,
       label,
       language,
@@ -154,6 +173,7 @@ export const videoPromptChoices = (project: Project, chapterId?: string): VideoP
       segmentIndex: board.segmentIndex,
       version,
       chapterId: chapterIdForStoryboard(project, board),
+      ...(promptFormat ? { promptFormat, sourceFingerprint: seedance ? board.seedance25Output?.sourceFingerprint : sourceContentHash(prompt!) } : {}),
     }));
   })
 );
@@ -164,17 +184,18 @@ export interface VideoPromptReferencePreview extends VideoPromptChoice {
 
 /** Separate from selectable choices so a preserved original never becomes a
  * batch candidate or paid request merely because it can still be read. */
-export const videoPromptReferencePreviews = (project: Project, chapterId?: string): VideoPromptReferencePreview[] => (
-  (chapterId ? chapterBoards(project, chapterId) : project.storyboards).flatMap((board) => {
+export const videoPromptReferencePreviews = (project: Project, chapterId?: string, promptFormat?: VideoPromptFormat): VideoPromptReferencePreview[] => (
+  (promptFormat && promptFormat !== 'h3' ? [] : chapterId ? chapterBoards(project, chapterId) : project.storyboards).flatMap((board) => {
     if (board.sourceStale || project.sequencePlans.find((plan) => plan.id === board.sequencePlanId)?.sourceStale) return [];
     const referenceNotice = officialH3MissingReferenceNotice(board, officialH3ContextForStoryboard(project, board));
     if (!referenceNotice) return [];
     const label = board.sourceStoryTitle || project.scenes.find((scene) => scene.id === board.sceneId)?.title || '未命名剧情';
     const prompts = [['zh', board.officialPromptZh], ['en', hasCurrentOfficialH3EnglishPrompt(board) ? board.officialPromptEn : undefined]] as const;
     return prompts.flatMap(([language, prompt]) => prompt?.trim() ? [{
-      id: `${board.id}:${language}`, storyboardId: board.id, label, language, prompt,
+      id: promptFormat ? `${board.id}:${promptFormat}:${language}` : `${board.id}:${language}`, storyboardId: board.id, label, language, prompt,
       durationSec: board.durationSec, updatedAt: board.updatedAt, segmentIndex: board.segmentIndex,
       version: '已保存原稿 · 参考图待更新', chapterId: chapterIdForStoryboard(project, board), referenceNotice,
+      ...(promptFormat ? { promptFormat } : {}),
     }] : []);
   })
 );
@@ -269,11 +290,13 @@ export const applyVideoPromptChoice = (
   if (!board) return draft;
   const label = `${choice.label}${choice.segmentIndex ? ` · 第 ${choice.segmentIndex} 段` : ''}`;
   const next: VideoGenerationDraft = {
-    ...draft, name: label, prompt: choice.prompt, reuseTaskId: undefined, h3ReferenceBinding: undefined,
+    ...draft, name: label, prompt: choice.prompt, reuseTaskId: undefined, h3ReferenceBinding: undefined, seedanceReferenceBinding: undefined,
     source: {
       chapterId: chapterIdForStoryboard(project, board),
       storyboardId: board.id, sequencePlanId: board.sequencePlanId, segmentId: board.segmentId,
       segmentIndex: board.segmentIndex, language: choice.language,
+      ...(choice.promptFormat ? { promptFormat: choice.promptFormat,
+        promptFingerprint: sourceContentHash(choice.prompt), sourceFingerprint: choice.sourceFingerprint || sourceContentHash(choice.prompt) } : {}),
       promptVersion: board.activeRevisionId || board.updatedAt, label,
     },
   };
@@ -285,7 +308,9 @@ export const applyVideoPromptChoice = (
     ...(board.lastFrameAssetId ? [board.lastFrameAssetId] : []),
   ]);
   const automaticCustomImageIds = automaticCustomStoryboardImageIds(board, project);
-  const referenceIds = [
+  const referenceIds = choice.promptFormat === 'seedance'
+    ? (board.seedance25Output?.referenceManifest || []).flatMap((entry) => typeof entry.id === 'string' ? [entry.id] : [])
+    : [
     ...(board.globalReferenceAssetIds || []), ...(board.promptPlan?.referenceAssetIds || []),
     ...(board.promptTrace?.referenceAssetIds || []),
     ...board.shots.flatMap((shot) => shot.referenceAssetIds || []),
@@ -352,6 +377,7 @@ export const draftFromVideoTask = (task: VideoGenerationTask): VideoGenerationDr
     ...draft, reuseTaskId: task.id, source: draft.source ? { ...draft.source } : undefined,
     references: structuredClone(draft.references),
     h3ReferenceBinding: draft.h3ReferenceBinding ? structuredClone(draft.h3ReferenceBinding) : undefined,
+    seedanceReferenceBinding: draft.seedanceReferenceBinding ? structuredClone(draft.seedanceReferenceBinding) : undefined,
     parameters: JSON.parse(JSON.stringify(draft.parameters)) as Record<string, unknown>,
   };
 };

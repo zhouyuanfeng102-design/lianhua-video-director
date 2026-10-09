@@ -25,6 +25,7 @@ import {
   type CSSProperties,
   type AriaRole,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   AlertTriangle,
   BookOpen,
@@ -118,6 +119,7 @@ import type {
   Workflow,
 } from "./types";
 import { chapterIdForVideoLaunch } from "./videoDirectorDraft";
+import { buildSelectedSequencePromptText } from "./sequencePromptExport";
 import { VideoDirectorView, VideoTaskCard, type VideoDirectorLaunchRequest } from "./components/VideoDirectorView";
 import { StoryPreparationReviewDialog } from "./components/StoryPreparationReviewDialog";
 import { ImageOutputSizeControls } from "./components/ImageOutputSizeControls";
@@ -153,7 +155,7 @@ import { matchesVideoSelection, selectVideoAsset, type VideoAssetSelection } fro
 import { findVideoAssetSourceTask, frozenVideoReferenceAsset, relatedVideoAssets, removeVideoTaskKeepingProvenance } from "./videoProvenance";
 import { inspectVideoBatchDeletion, removeVideoBatchKeepingProvenance } from "./videoBatchDeletion";
 import { resolveVideoPromptNavigation } from "./videoPromptNavigation";
-import type { VideoBatchContinuationPlan, VideoPromptSource } from "./videoGenerationTypes";
+import type { VideoBatchContinuationPlan, VideoPromptFormat, VideoPromptSource } from "./videoGenerationTypes";
 import { videoTaskBatchStatus, type VideoTaskBatchStatus } from "./videoTaskBatchStatus";
 import {
   analyzeTextLocally,
@@ -176,18 +178,17 @@ import {
 } from "./promptEngine";
 import { compileTargetPrompt } from "./promptAdapters";
 import {
-  compileOfficialSeedancePrompt,
+  generateSeedanceBilingualOutput,
   getOfficialSeedanceSourceFingerprint,
-  isSeedanceOutputSaveIdentityCurrent,
+  isSeedanceOutputSaveRequestCurrent,
   translateSeedancePromptToEnglish,
   type SeedanceOutputSaveIdentity,
 } from "./seedancePrompt";
+import { buildOfficialSeedanceInput, hasCurrentSeedancePrompt } from "./seedanceSource";
 import { getVideoPromptInstructionLeak } from "./videoPromptInstructionLeak";
 import {
   OFFICIAL_H3_TARGET_ID,
   applyOfficialH3Prompt,
-  buildOfficialH3References,
-  buildOfficialH3SubjectDefinitions,
   buildOfficialH3SourceFingerprint,
   hasCurrentOfficialH3Prompt,
   hasCurrentOfficialH3EnglishPrompt,
@@ -454,7 +455,6 @@ import {
   buildStoryAnalysisCompletionNotice,
   buildStoryAnalysisRequestIdentity,
   buildSequencePromptManifest,
-  buildSequencePromptText,
   buildLocalReferenceAsset,
   canImportPresetPayload,
   canUseFinalPromptConverter,
@@ -474,7 +474,6 @@ import {
   isCurrentOperationIdentity,
   isCurrentProjectOperation,
   isCurrentSequenceOperation,
-  isCurrentStoryboardOperation,
   mergeReferenceAssetIds,
   resolveGridDirectorAssetIds,
   isSequencePlanningRequestStale,
@@ -1501,9 +1500,19 @@ const PRIVATE_CHARACTER_FIELD_SPECS: ReadonlyArray<{
   { part: "breasts", formKey: "nsfwBreasts", label: "胸部外貌" },
   { part: "vulva", formKey: "nsfwVulva", label: "外阴外貌" },
   { part: "anus", formKey: "nsfwAnus", label: "后庭外貌" },
-  { part: "penis", formKey: "nsfwPenis", label: "阴茎外貌" },
+  { part: "penis", formKey: "nsfwPenis", label: "男性外生殖器外貌" },
   { part: "scrotum", formKey: "nsfwScrotum", label: "阴囊外貌" },
 ];
+
+const privateCharacterFieldValue = (
+  form: Readonly<Record<string, string>>,
+  field: { part: NsfwPrivatePart; formKey: string },
+): string => {
+  if (field.part !== "penis") return (form[field.formKey] || "").trim();
+  return [...new Set([form.nsfwPenis, form.nsfwScrotum]
+    .map((value) => (value || "").trim())
+    .filter(Boolean))].join("；");
+};
 
 const privateCharacterFieldsForGender = (gender: string): typeof PRIVATE_CHARACTER_FIELD_SPECS => {
   const normalized = gender.trim();
@@ -1516,10 +1525,10 @@ const privateCharacterFieldsForGender = (gender: string): typeof PRIVATE_CHARACT
   }
   if (male && !female) {
     return PRIVATE_CHARACTER_FIELD_SPECS.filter((item) => (
-      ["full-body", "penis", "scrotum", "anus"] as NsfwPrivatePart[]
+      ["full-body", "penis", "anus"] as NsfwPrivatePart[]
     ).includes(item.part));
   }
-  return PRIVATE_CHARACTER_FIELD_SPECS;
+  return PRIVATE_CHARACTER_FIELD_SPECS.filter((item) => item.part !== "scrotum");
 };
 
 const privateCharacterFourInOneFieldsForGender = (
@@ -1532,18 +1541,24 @@ const privateCharacterFourInOneFieldsForGender = (
   const parts: NsfwPrivatePart[] = female && !male
     ? ["full-body", "breasts", "vulva", "anus"]
     : male && !female
-      ? ["full-body", "penis", "scrotum", "anus"]
+      ? ["full-body", "penis", "anus"]
       : [
           "full-body",
-          ...(["breasts", "vulva", "anus", "penis", "scrotum"] as NsfwPrivatePart[])
-            .filter((part) => Boolean((form[PRIVATE_CHARACTER_FIELD_SPECS.find((item) => item.part === part)?.formKey || ""] || "").trim()))
+          ...(["breasts", "vulva", "anus", "penis"] as NsfwPrivatePart[])
+            .filter((part) => {
+              const field = PRIVATE_CHARACTER_FIELD_SPECS.find((item) => item.part === part);
+              return field ? Boolean(privateCharacterFieldValue(form, field)) : false;
+            })
             .slice(0, 3),
         ];
-  const resolved = parts.length >= 4
+  const resolved = parts.length >= 3
     ? parts
     : ["full-body", "breasts", "vulva", "anus"] as NsfwPrivatePart[];
   return PRIVATE_CHARACTER_FIELD_SPECS.filter((item) => resolved.includes(item.part));
 };
+
+const privateCompositeSheetLabel = (fields: readonly { part: NsfwPrivatePart }[]): string =>
+  fields.length === 3 ? "私密三合一" : "私密四合一";
 
 const isMatchingNsfwPrivateWorkbenchReference = (
   asset: ReferenceAsset | undefined,
@@ -8713,16 +8728,18 @@ export default function App() {
     }
   };
 
-  const exportSequencePromptsAsText = (plan: VideoSequencePlan) => {
-    const content = buildSequencePromptText(
-      plan,
-      stateRef.current.project.storyboards,
-    );
+  const exportSequencePromptsAsText = (plan: VideoSequencePlan, format: VideoPromptFormat, language: "zh" | "en") => {
+    const project = stateRef.current.project;
+    const currentPlan = project.sequencePlans.find((item) => item.id === plan.id);
+    if (!currentPlan) { notify("分段计划已不存在，请重新选择。", "error"); return; }
+    const exported = buildSelectedSequencePromptText(project, currentPlan, { promptFormat: format, language });
+    const formatLabel = format === "seedance" ? "Seedance" : format === "ordinary" ? "普通稿" : "H3";
+    const languageLabel = language === "en" ? "English" : "中文";
     downloadText(
-      `${safeFileName(plan.title || plan.sourceStoryTitle, "全片分段提示词")}.txt`,
-      content,
+      `${safeFileName(currentPlan.title || currentPlan.sourceStoryTitle, "全片分段提示词")}-${formatLabel}-${languageLabel}.txt`,
+      exported.text,
     );
-    notify("已按视频段顺序导出全部提示词；待生成段也保留在清单中。");
+    notify(`已导出${formatLabel} ${languageLabel}全片提示词：${exported.readyCount} 段可用${exported.pendingCount ? `，${exported.pendingCount} 段待生成或更新，已在文件中标明` : ""}${exported.warningCount ? `，${exported.warningCount} 段附参考图提醒` : ""}。`);
   };
 
   const exportSequencePromptsAsJson = (plan: VideoSequencePlan) => {
@@ -8853,7 +8870,7 @@ export default function App() {
   const [videoLaunchRequest, setVideoLaunchRequest] = useState<VideoDirectorLaunchRequest>();
   const [assetLibrarySection, setAssetLibrarySection] = useState<"image" | "video" | "audio">("image");
   const [videoAssetStoryboardFilter, setVideoAssetStoryboardFilter] = useState("");
-  const [promptSourceRequest, setPromptSourceRequest] = useState<{ id: string; storyboardId: string; language: "zh" | "en" }>();
+  const [promptSourceRequest, setPromptSourceRequest] = useState<{ id: string; storyboardId: string; language: "zh" | "en"; promptFormat?: VideoPromptFormat }>();
   const [openVideoSettings, setOpenVideoSettings] = useState(false);
   useEffect(() => { setVideoLaunchRequest(undefined); setAssetLibrarySection("image"); setVideoAssetStoryboardFilter(""); setPromptSourceRequest(undefined); }, [state.project.id]);
   const videoController = useVideoGenerationController({ state, setState: setBackgroundState, getCurrentProjectId, getCurrentState, ready: desktopStateReady, notify });
@@ -8957,7 +8974,7 @@ export default function App() {
     }
     setSequenceStage("direct");
     setSequenceSettingsOpen(false);
-    setPromptSourceRequest({ id: createId("prompt_source"), storyboardId, language: destination.language });
+    setPromptSourceRequest({ id: createId("prompt_source"), storyboardId, language: destination.language, promptFormat: source?.promptFormat });
     setView("director");
   };
   const openRelatedVideos = (storyboardId: string) => {
@@ -10132,7 +10149,7 @@ type BackgroundStateDispatch = (
 interface AppContext {
   openPromptSource: (storyboardId: string, source?: VideoPromptSource) => void;
   openRelatedVideos: (storyboardId: string) => void;
-  promptSourceRequest?: { id: string; storyboardId: string; language: "zh" | "en" };
+  promptSourceRequest?: { id: string; storyboardId: string; language: "zh" | "en"; promptFormat?: VideoPromptFormat };
   videoAssetStoryboardFilter: string;
   setVideoAssetStoryboardFilter: React.Dispatch<React.SetStateAction<string>>;
   videoController: ReturnType<typeof useVideoGenerationController>;
@@ -10273,7 +10290,7 @@ interface AppContext {
   repairStoryboardDialogue: (boardId: string) => Promise<void>;
   refreshStoryboardCharacterDossier: (boardId: string) => Promise<void>;
   repairSequencePromptContinuity: (plan: VideoSequencePlan) => Promise<void>;
-  exportSequencePromptsAsText: (plan: VideoSequencePlan) => void;
+  exportSequencePromptsAsText: (plan: VideoSequencePlan, format: VideoPromptFormat, language: "zh" | "en") => void;
   exportSequencePromptsAsJson: (plan: VideoSequencePlan) => void;
   planningBusy: PlanningBusyState;
   sequenceMasterGenerationIssue: string;
@@ -12282,6 +12299,104 @@ function reserveStoryboardImagePreparationTasks(input: {
   });
 }
 
+function DirectorPromptMoreMenu({ actions }: {
+  actions: { label: string; icon: ReactNode; title?: string; disabled?: boolean; onClick: () => void }[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [position, setPosition] = useState<{ left: number; top: number }>();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const menuId = useId();
+  const closeMenu = (restoreFocus = false) => {
+    setOpen(false);
+    if (restoreFocus) triggerRef.current?.focus();
+  };
+  useLayoutEffect(() => {
+    if (!open) return;
+    const updatePosition = () => {
+      const trigger = triggerRef.current?.getBoundingClientRect();
+      const menu = menuRef.current;
+      if (!trigger || !menu) return;
+      const left = Math.max(8, Math.min(trigger.right - menu.offsetWidth, window.innerWidth - menu.offsetWidth - 8));
+      const top = trigger.bottom + menu.offsetHeight + 6 <= window.innerHeight - 8
+        ? trigger.bottom + 6 : Math.max(8, trigger.top - menu.offsetHeight - 6);
+      setPosition({ left, top });
+    };
+    updatePosition();
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (!menuRef.current?.contains(target) && !triggerRef.current?.contains(target)) setOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    };
+    const onFocusIn = (event: FocusEvent) => {
+      const target = event.target as Node;
+      if (!menuRef.current?.contains(target) && !triggerRef.current?.contains(target)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    document.addEventListener("focusin", onFocusIn);
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+      document.removeEventListener("focusin", onFocusIn);
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+    };
+  }, [open]);
+  const positioned = Boolean(position);
+  useLayoutEffect(() => {
+    if (!open || !positioned) return;
+    const firstItem = menuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)');
+    (firstItem || menuRef.current)?.focus();
+  }, [open, positioned]);
+  return <>
+    <button ref={triggerRef} type="button" className="btn small ghost" aria-haspopup="menu"
+      aria-expanded={open} aria-controls={open ? menuId : undefined}
+      onClick={() => { setPosition(undefined); setOpen(!open); }}
+      onKeyDown={(event) => {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          if (!open) {
+            setPosition(undefined);
+            setOpen(true);
+          } else {
+            menuRef.current?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus();
+          }
+        }
+      }}>
+      更多 <ChevronDown size={13} />
+    </button>
+    {open && createPortal(<div ref={menuRef} id={menuId} className="director-prompt-more-menu"
+      role="menu" aria-label="提示词更多操作" tabIndex={-1}
+      style={position ? position : { visibility: "hidden" }}
+      onKeyDown={(event) => {
+        if (event.key === "Tab") { closeMenu(true); return; }
+        if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+        event.preventDefault();
+        const items = Array.from(menuRef.current?.querySelectorAll<HTMLButtonElement>('button:not(:disabled)') || []);
+        if (!items.length) return;
+        const current = items.indexOf(document.activeElement as HTMLButtonElement);
+        const index = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1
+          : event.key === "ArrowDown" ? (current + 1) % items.length : (current - 1 + items.length) % items.length;
+        items[index]?.focus();
+      }}>
+      {actions.map((action) => <button key={action.label} type="button" role="menuitem"
+        disabled={action.disabled} title={action.title}
+        onClick={() => { closeMenu(true); action.onClick(); }}>
+        {action.icon}<span>{action.label}</span>
+      </button>)}
+    </div>, document.body)}
+  </>;
+}
+
 function DirectorView(ctx: AppContext) {
   const {
     state,
@@ -12293,7 +12408,6 @@ function DirectorView(ctx: AppContext) {
     activeScene,
     setView,
     getCurrentProjectId,
-    getCurrentProjectImageContext,
     getCurrentState,
     directorWorkflow,
     selectedDirectorSceneIds,
@@ -12331,7 +12445,6 @@ function DirectorView(ctx: AppContext) {
     generateCurrentSequenceSegment,
     generateAllSequenceSegments,
     exportSequencePromptsAsText,
-    exportSequencePromptsAsJson,
     confirmSequencePlan,
     shotMode,
     setShotMode,
@@ -12539,40 +12652,15 @@ function DirectorView(ctx: AppContext) {
     && hasCurrentOfficialH3EnglishPrompt(directorResultStoryboard, officialPromptContext)
       ? directorResultStoryboard.officialPromptEn || ""
       : "";
-  const [directorPromptFormat, setDirectorPromptFormat] = useState<"h3" | "seedance">("h3");
+  const [directorPromptFormat, setDirectorPromptFormat] = useState<VideoPromptFormat>("h3");
+  const validOrdinaryEnglishPrompt = directorResultStoryboard?.englishPromptSource === directorResultStoryboard?.finalPrompt
+    && !getVideoPromptInstructionLeak(directorResultStoryboard?.englishPrompt || "")
+    ? directorResultStoryboard?.englishPrompt || "" : "";
   const [seedancePromptBusy, setSeedancePromptBusy] = useState(false);
   const [seedancePromptError, setSeedancePromptError] = useState("");
-  const seedancePromptInput = useMemo(() => {
-    if (!directorResultStoryboard || !officialPromptContext) return undefined;
-    const references = buildOfficialH3References(
-      directorResultStoryboard,
-      officialPromptContext.assets,
-      officialPromptContext.characters,
-    );
-    const subjectDefinitions = buildOfficialH3SubjectDefinitions(
-      directorResultStoryboard,
-      officialPromptContext,
-      references,
-    );
-    return {
-      canonicalPrompt: directorResultStoryboard.promptPlan?.canonicalPrompt || directorResultStoryboard.finalPrompt,
-      durationSec: directorResultStoryboard.promptPlan?.durationSec || directorResultStoryboard.durationSec,
-      aspectRatio: directorResultStoryboard.promptPlan?.aspectRatio || directorResultStoryboard.aspectRatio,
-      resolution: directorResultStoryboard.promptPlan?.resolution || directorResultStoryboard.resolution,
-      audioMode: directorResultStoryboard.promptPlan?.audioMode || directorResultStoryboard.audioMode,
-      references,
-      subjectDefinitions,
-      detailMode: "director",
-      targetId: "seedance-2.5",
-      constraints: directorResultStoryboard.promptPlan?.constraints || [
-        directorResultStoryboard.globalLock,
-        directorResultStoryboard.extraRequirement ? `制作要求：${directorResultStoryboard.extraRequirement}` : "",
-      ].filter(Boolean),
-    };
-  }, [directorResultStoryboard, officialPromptContext]);
-  const seedancePromptFingerprint = seedancePromptInput
-    ? getOfficialSeedanceSourceFingerprint(seedancePromptInput)
-    : "";
+  const seedancePromptInput = useMemo(() => directorResultStoryboard
+    ? buildOfficialSeedanceInput(state.project, directorResultStoryboard) : undefined,
+  [directorResultStoryboard, state.project]);
   const seedanceOutput = directorResultStoryboard?.seedance25Output;
   const seedanceChineseIssue = seedanceOutput
     ? getVideoPromptInstructionLeak(seedanceOutput.promptZh)
@@ -12580,110 +12668,83 @@ function DirectorView(ctx: AppContext) {
   const seedanceEnglishIssue = seedanceOutput?.promptEn
     ? getVideoPromptInstructionLeak(seedanceOutput.promptEn)
     : undefined;
-  const seedanceOutputFresh = Boolean(
-    seedanceOutput
-    && seedancePromptFingerprint
-    && seedanceOutput.sourceFingerprint === seedancePromptFingerprint
-    && !seedanceChineseIssue,
-  );
-  const seedanceEnglishPromptValid = Boolean(seedanceOutputFresh && seedanceOutput?.promptEn && !seedanceEnglishIssue);
-  const translateSeedancePrompt = async (sourcePrompt: string): Promise<string> => {
+  const seedanceOutputFresh = Boolean(directorResultStoryboard && hasCurrentSeedancePrompt(state.project, directorResultStoryboard));
+  const seedanceEnglishPromptValid = Boolean(directorResultStoryboard && hasCurrentSeedancePrompt(state.project, directorResultStoryboard, "en"));
+  const translateSeedancePrompt = async (sourcePrompt: string, isCurrent: () => boolean): Promise<string> => {
     const textApi = state.settings.textApi;
     return translateSeedancePromptToEnglish({
       sourcePrompt,
+      isCurrent,
       request: (system, user) => requestTextModel(textApi, system, user, undefined, { disableThinking: true }),
     });
   };
   const seedanceSaveStaleMessage = "当前项目、章节或分镜已变化，Seedance 提示词未保存，请在当前分镜重新生成。";
+  const seedanceLiveSaveIdentity = (board: Storyboard): SeedanceOutputSaveIdentity => ({
+    ...getCurrentWorkspaceIdentity(),
+    chapterId: board.chapterId || getCurrentWorkspaceIdentity().chapterId,
+    storyboardId: board.id,
+    storyboardUpdatedAt: board.updatedAt ?? 0,
+  });
+  const isSeedanceSaveCurrent = (identity: SeedanceOutputSaveIdentity, sourceFingerprint: string): boolean => {
+    const liveState = getCurrentState();
+    const board = liveState.project.storyboards.find((item) => item.id === identity.storyboardId);
+    return Boolean(board && !board.sourceStale && isSeedanceOutputSaveRequestCurrent(identity, seedanceLiveSaveIdentity(board),
+      sourceFingerprint, getOfficialSeedanceSourceFingerprint(buildOfficialSeedanceInput(liveState.project, board))));
+  };
   const saveSeedanceOutput = (
     identity: SeedanceOutputSaveIdentity,
     output: Seedance25Output,
-    expectedSource?: { canonicalPrompt: string; durationSec: number },
-  ): boolean => {
-    const liveState = getCurrentState();
-    const liveBoard = liveState.project.storyboards.find((board) => board.id === identity.storyboardId);
-    if (!liveBoard) return false;
-    const liveIdentity: SeedanceOutputSaveIdentity = {
-      ...getCurrentWorkspaceIdentity(),
-      storyboardId: liveBoard.id,
-      storyboardUpdatedAt: liveBoard.updatedAt ?? 0,
-    };
-    if (!isSeedanceOutputSaveIdentityCurrent(identity, liveIdentity)) return false;
-    if (expectedSource) {
-      const liveCanonicalPrompt = liveBoard.promptPlan?.canonicalPrompt || liveBoard.finalPrompt;
-      const liveDurationSec = liveBoard.promptPlan?.durationSec || liveBoard.durationSec;
-      if (liveCanonicalPrompt !== expectedSource.canonicalPrompt || liveDurationSec !== expectedSource.durationSec) return false;
-    }
+    preservePrevious = false,
+  ): SeedanceOutputSaveIdentity | undefined => {
+    if (!isSeedanceSaveCurrent(identity, output.sourceFingerprint)) return undefined;
+    let savedIdentity: SeedanceOutputSaveIdentity | undefined;
     setState((current) => {
       const liveBoard = current.project.storyboards.find((board) => board.id === identity.storyboardId);
       if (!liveBoard) return current;
-      const currentIdentity: SeedanceOutputSaveIdentity = {
-        ...getCurrentWorkspaceIdentity(),
-        chapterId: liveBoard.chapterId || activeChapter(current.project)?.id || "",
-        storyboardId: liveBoard.id,
-        storyboardUpdatedAt: liveBoard.updatedAt ?? 0,
-      };
-      if (!isSeedanceOutputSaveIdentityCurrent(identity, currentIdentity)) return current;
-      if (expectedSource) {
-        const liveCanonicalPrompt = liveBoard.promptPlan?.canonicalPrompt || liveBoard.finalPrompt;
-        const liveDurationSec = liveBoard.promptPlan?.durationSec || liveBoard.durationSec;
-        if (liveCanonicalPrompt !== expectedSource.canonicalPrompt || liveDurationSec !== expectedSource.durationSec) return current;
+      if (!isSeedanceOutputSaveRequestCurrent(identity, seedanceLiveSaveIdentity(liveBoard), output.sourceFingerprint,
+        getOfficialSeedanceSourceFingerprint(buildOfficialSeedanceInput(current.project, liveBoard)))) return current;
+      const now = Date.now();
+      let updatedBoard = { ...liveBoard, seedance25Output: output, updatedAt: now };
+      if (preservePrevious && liveBoard.seedance25Output) {
+        const history = liveBoard.revisions || [];
+        const before = createStoryboardRevision(liveBoard, history, { reason: "pre-seedance-regenerate", label: "Seedance 重新生成前", createdAt: now });
+        updatedBoard = { ...updatedBoard, revisions: [...history, before] };
       }
+      savedIdentity = seedanceLiveSaveIdentity(updatedBoard);
       return {
         ...current,
         project: {
           ...current.project,
-          storyboards: current.project.storyboards.map((board) => board.id === identity.storyboardId
-            ? { ...board, seedance25Output: output, updatedAt: Date.now() }
-            : board),
-          updatedAt: Date.now(),
+          storyboards: current.project.storyboards.map((board) => board.id === identity.storyboardId ? updatedBoard : board),
+          updatedAt: now,
         },
       };
     });
-    return true;
+    return savedIdentity;
   };
   const generateSeedanceOfficialPrompt = async (): Promise<void> => {
-    if (!directorResultStoryboard || !seedancePromptInput || !validOfficialPrompt || seedancePromptBusy) return;
-    const requestIdentity: SeedanceOutputSaveIdentity = {
-      ...getCurrentWorkspaceIdentity(),
-      chapterId: directorResultStoryboard.chapterId || getCurrentWorkspaceIdentity().chapterId,
-      storyboardId: directorResultStoryboard.id,
-      storyboardUpdatedAt: getCurrentState().project.storyboards.find((board) => board.id === directorResultStoryboard.id)?.updatedAt ?? 0,
-    };
+    if (!directorResultStoryboard || !seedancePromptInput?.canonicalPrompt.trim() || seedancePromptBusy) return;
+    const requestInput = structuredClone(seedancePromptInput);
+    let requestIdentity = seedanceLiveSaveIdentity(getCurrentState().project.storyboards.find((board) => board.id === directorResultStoryboard.id) || directorResultStoryboard);
+    const requestFingerprint = getOfficialSeedanceSourceFingerprint(requestInput);
+    const isCurrent = () => isSeedanceSaveCurrent(requestIdentity, requestFingerprint);
+    const textApi = state.settings.textApi;
     setSeedancePromptBusy(true);
     setSeedancePromptError("");
     try {
-      const compiled = compileOfficialSeedancePrompt(seedancePromptInput);
-      let promptEn = "";
-      let englishError = "";
-      try {
-        promptEn = await translateSeedancePrompt(compiled.promptZh);
-      } catch (error) {
-        englishError = error instanceof Error ? error.message : "英文版 Seedance 提示词生成失败。";
-      }
-      const output: Seedance25Output = {
-        targetId: "seedance-2.5",
-        promptZh: compiled.promptZh,
-        ...(promptEn ? { promptEn } : {}),
-        durationSec: compiled.durationSec,
-        sourceFingerprint: compiled.sourceFingerprint,
-        referenceManifest: compiled.referenceManifest.assets.map((asset) => ({ ...asset })),
-        warnings: compiled.warnings,
-        generatedAt: Date.now(),
-        englishSourceFingerprint: promptEn ? compiled.sourceFingerprint : undefined,
-        englishError,
-      };
-      const saved = saveSeedanceOutput(requestIdentity, output, {
-        canonicalPrompt: seedancePromptInput.canonicalPrompt,
-        durationSec: seedancePromptInput.durationSec,
+      const output = await generateSeedanceBilingualOutput({
+        input: requestInput, isCurrent,
+        request: (system, user) => requestTextModel(textApi, system, user, undefined, { disableThinking: true }),
+        onChinese: (chinese) => {
+          const checkpointIdentity = saveSeedanceOutput(requestIdentity, chinese, true);
+          if (!checkpointIdentity) return false;
+          requestIdentity = checkpointIdentity;
+          return true;
+        },
+        onEnglish: (complete) => Boolean(saveSeedanceOutput(requestIdentity, complete)),
       });
-      if (!saved) {
-        setSeedancePromptError(seedanceSaveStaleMessage);
-        notify(seedanceSaveStaleMessage, "error");
-        return;
-      }
-      setSeedancePromptError(englishError);
-      notify(englishError ? "Seedance 中文稿已生成，英文版待重试。" : "Seedance 2.5 中英文官方提示词已生成。", englishError ? "error" : undefined);
+      setSeedancePromptError(output.englishError || "");
+      notify(output.englishError ? "Seedance 中文稿已保存，英文版待重试。" : "Seedance 2.5 中英文官方提示词已生成。", output.englishError ? "error" : undefined);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Seedance 2.5 官方提示词生成失败。";
       setSeedancePromptError(message);
@@ -12703,17 +12764,15 @@ function DirectorView(ctx: AppContext) {
     setSeedancePromptBusy(true);
     setSeedancePromptError("");
     try {
-      const promptEn = await translateSeedancePrompt(seedanceOutput.promptZh);
+      const promptEn = await translateSeedancePrompt(seedanceOutput.promptZh,
+        () => isSeedanceSaveCurrent(requestIdentity, seedanceOutput.sourceFingerprint));
       const saved = saveSeedanceOutput(requestIdentity, {
         ...seedanceOutput,
         promptEn,
         englishSourceFingerprint: seedanceOutput.sourceFingerprint,
         englishError: "",
         generatedAt: Date.now(),
-      }, seedancePromptInput ? {
-        canonicalPrompt: seedancePromptInput.canonicalPrompt,
-        durationSec: seedancePromptInput.durationSec,
-      } : undefined);
+      });
       if (!saved) {
         setSeedancePromptError(seedanceSaveStaleMessage);
         notify(seedanceSaveStaleMessage, "error");
@@ -12733,13 +12792,19 @@ function DirectorView(ctx: AppContext) {
     setSeedancePromptError("");
   }, [directorResultStoryboard?.id]);
   useEffect(() => {
-    if (!validEnglishPrompt) setPromptLanguage("zh");
-  }, [directorResultStoryboard?.id, validEnglishPrompt]);
+    const englishAvailable = directorPromptFormat === "seedance" ? seedanceEnglishPromptValid
+      : directorPromptFormat === "ordinary" ? validOrdinaryEnglishPrompt : validEnglishPrompt;
+    if (!englishAvailable) setPromptLanguage("zh");
+  }, [directorResultStoryboard?.id, directorPromptFormat, validEnglishPrompt, validOrdinaryEnglishPrompt, seedanceEnglishPromptValid]);
   useEffect(() => {
     if (!ctx.promptSourceRequest || ctx.promptSourceRequest.storyboardId !== directorResultStoryboard?.id) return;
     setDirectorPane("result");
-    setPromptLanguage(ctx.promptSourceRequest?.language === "en" && validEnglishPrompt ? "en" : "zh");
-  }, [ctx.promptSourceRequest?.id, directorResultStoryboard?.id, validEnglishPrompt]);
+    const format = ctx.promptSourceRequest.promptFormat || "h3";
+    setDirectorPromptFormat(format);
+    const englishAvailable = format === "seedance" ? seedanceEnglishPromptValid
+      : format === "ordinary" ? validOrdinaryEnglishPrompt : validEnglishPrompt;
+    setPromptLanguage(ctx.promptSourceRequest.language === "en" && englishAvailable ? "en" : "zh");
+  }, [ctx.promptSourceRequest?.id, directorResultStoryboard?.id]);
   const converter =
     state.converterPresets.find(
       (item: ConverterPreset) =>
@@ -14573,22 +14638,6 @@ function DirectorView(ctx: AppContext) {
                       >
                         仅修复上下段衔接
                       </Button>
-                      <Button
-                        small
-                        variant="ghost"
-                        icon={<Download size={14} />}
-                        onClick={() => exportSequencePromptsAsText(activeSequencePlan)}
-                      >
-                        导出全部分段提示词
-                      </Button>
-                      <Button
-                        small
-                        variant="ghost"
-                        icon={<FileJson size={14} />}
-                        onClick={() => exportSequencePromptsAsJson(activeSequencePlan)}
-                      >
-                        导出分段 JSON
-                      </Button>
                     </>
                   )}
                 </div>
@@ -14599,16 +14648,26 @@ function DirectorView(ctx: AppContext) {
                 <div className="card-title" style={{ marginBottom: 0 }}>
                   <div><h2>{directorPane === "result" ? "生成结果" : "参考图"}</h2></div>
                 </div>
-                {directorPane === "result" && directorPromptFormat === "h3" && directorResultStoryboard && validOfficialPrompt && (
+                {(productionMode === "sequence" && activeSequencePlan || directorPane === "result" && directorResultStoryboard && (directorPromptFormat === "h3" ? validOfficialPrompt
+                  : directorPromptFormat === "ordinary" ? directorResultStoryboard.finalPrompt : seedanceOutputFresh)) && (
                   <div className="director-result-bridge">
-                    <span title="仅此操作会调用 AI 修复当前段对白和排时，保留段长与原台词，自动保存旧版本；不生成视频。">
-                      <Button small variant="ghost" icon={<RefreshCw size={13} />}
-                        disabled={busy || sequenceBatchRunning || Boolean(activeSequenceSegment?.locked && productionMode === "sequence")}
-                        onClick={() => void ctx.repairStoryboardDialogue(directorResultStoryboard.id)}>
-                        修复对白与排时
-                      </Button>
-                    </span>
-                    <Button small icon={<Film size={14} />} onClick={() => ctx.openVideoDirector({ storyboardId: directorResultStoryboard.id, language: promptLanguage })}>送到视频导演台</Button>
+                    {(productionMode === "sequence" && activeSequencePlan || directorPane === "result" && directorResultStoryboard && directorPromptFormat === "h3" && validOfficialPrompt) &&
+                      <DirectorPromptMoreMenu key={`${state.project.id}:${activeSequencePlan?.id || ""}:${directorResultStoryboard?.id || ""}:${directorPane}:${directorPromptFormat}:${promptLanguage}`}
+                        actions={[
+                          ...(directorPane === "result" && directorResultStoryboard && directorPromptFormat === "h3" && validOfficialPrompt ? [{
+                            label: "修复对白与排时", icon: <RefreshCw size={14} />,
+                            title: "仅此操作会调用 AI 修复当前段对白和排时，保留段长与原台词，自动保存旧版本；不生成视频。",
+                            disabled: busy || sequenceBatchRunning || Boolean(activeSequenceSegment?.locked && productionMode === "sequence"),
+                            onClick: () => void ctx.repairStoryboardDialogue(directorResultStoryboard.id),
+                          }] : []),
+                          ...(productionMode === "sequence" && activeSequencePlan ? [{
+                            label: "导出全部分段提示词", icon: <Download size={14} />,
+                            onClick: () => exportSequencePromptsAsText(activeSequencePlan, directorPromptFormat, promptLanguage),
+                          }] : []),
+                        ]} />}
+                    {directorPane === "result" && directorResultStoryboard && (directorPromptFormat === "h3" ? validOfficialPrompt
+                      : directorPromptFormat === "ordinary" ? directorResultStoryboard.finalPrompt : seedanceOutputFresh) &&
+                      <Button small icon={<Film size={14} />} onClick={() => ctx.openVideoDirector({ storyboardId: directorResultStoryboard.id, language: promptLanguage, promptFormat: directorPromptFormat })}>送到视频导演台</Button>}
                   </div>
                 )}
               </div>
@@ -14624,10 +14683,10 @@ function DirectorView(ctx: AppContext) {
                 <StoryboardDirectImageTools ctx={ctx} storyboard={directorResultStoryboard} />
               ) : <Empty title="暂无可用分镜" description="先生成分镜内容，再选择参考图；生图仍使用提示词结果下方原来的按钮。" />)}
               {directorPane === "result" &&
-                (directorResultStoryboard && validOfficialPrompt ? (
+                (directorResultStoryboard && (validOfficialPrompt || seedancePromptInput?.canonicalPrompt.trim()) ? (
                   <div className="director-result-pane">
                     {directorResultStoryboard.workflow === "grid" && <div className="sequence-result-status legacy-grid-notice" role="status">历史九宫格稿已保留；新创作使用智能导演，旧稿不会自动改写。可在分镜图片数量填写9生成独立画面。</div>}
-                    {productionMode !== "sequence" && !validEnglishPrompt && (
+                    {directorPromptFormat === "h3" && productionMode !== "sequence" && !validEnglishPrompt && (
                       <div className="sequence-result-status" role="status">
                         <span>英文描述未就绪或对应来源已变化；中文与分镜保持可用。</span>
                         <Button small variant="ghost" icon={<RefreshCw size={13} />} disabled={busy}
@@ -14674,7 +14733,7 @@ function DirectorView(ctx: AppContext) {
                     )}
                     <div className="card-title director-result-head" style={{ marginTop: 2 }}>
                       <div>
-                        <h2>{directorPromptFormat === "seedance" ? "Seedance 2.5 官方格式" : "MiniMax H3 官方格式"}</h2>
+                        <h2>{directorPromptFormat === "seedance" ? "Seedance 2.5 官方格式" : directorPromptFormat === "ordinary" ? "普通原稿" : "MiniMax H3 官方格式"}</h2>
                         <p>
                         {directorResultStoryboard.durationSec} 秒 ·{" "}
                           {directorResultStoryboard.shots.length} 镜 ·{" "}
@@ -14689,6 +14748,7 @@ function DirectorView(ctx: AppContext) {
                         <div className="segmented" role="group" aria-label="官方提示词格式">
                           <button type="button" aria-pressed={directorPromptFormat === "h3"} className={`segment ${directorPromptFormat === "h3" ? "active" : ""}`} onClick={() => { setDirectorPromptFormat("h3"); if (!validEnglishPrompt) setPromptLanguage("zh"); }}>MiniMax H3</button>
                           <button type="button" aria-pressed={directorPromptFormat === "seedance"} className={`segment ${directorPromptFormat === "seedance" ? "active violet" : ""}`} onClick={() => { setDirectorPromptFormat("seedance"); if (!seedanceEnglishPromptValid) setPromptLanguage("zh"); }}>Seedance 2.5</button>
+                          <button type="button" aria-pressed={directorPromptFormat === "ordinary"} className={`segment ${directorPromptFormat === "ordinary" ? "active" : ""}`} onClick={() => { setDirectorPromptFormat("ordinary"); if (!validOrdinaryEnglishPrompt) setPromptLanguage("zh"); }}>普通原稿</button>
                         </div>
                         {directorPromptFormat === "h3" && <div
                           className="result-language-switch"
@@ -14738,6 +14798,10 @@ function DirectorView(ctx: AppContext) {
                             English
                           </button>
                         </div>}
+                        {directorPromptFormat === "ordinary" && <div className="result-language-switch" role="group" aria-label="普通原稿语言">
+                          <button type="button" aria-pressed={promptLanguage === "zh"} className={`result-language-card zh ${promptLanguage === "zh" ? "active" : ""}`} onClick={() => setPromptLanguage("zh")}>中文</button>
+                          <button type="button" aria-pressed={promptLanguage === "en"} className={`result-language-card en ${promptLanguage === "en" ? "active" : ""}`} disabled={!validOrdinaryEnglishPrompt} onClick={() => setPromptLanguage("en")}>English</button>
+                        </div>}
                         <Button
                           small
                           icon={<Copy size={14} />}
@@ -14748,12 +14812,17 @@ function DirectorView(ctx: AppContext) {
                                 ? promptLanguage === "en" && seedanceEnglishPromptValid && seedanceOutput?.promptEn
                                   ? seedanceOutput.promptEn
                                   : seedanceOutput?.promptZh || ""
-                                : promptLanguage === "en" && validEnglishPrompt ? validEnglishPrompt : validOfficialPrompt,
+                                : directorPromptFormat === "ordinary"
+                                  ? promptLanguage === "en" && validOrdinaryEnglishPrompt ? validOrdinaryEnglishPrompt : directorResultStoryboard.finalPrompt
+                                  : promptLanguage === "en" && validEnglishPrompt ? validEnglishPrompt : validOfficialPrompt,
                             )
                           }
                         >
                           复制
                         </Button>
+                        {directorPromptFormat === "seedance" && seedanceOutputFresh && <Button small
+                          icon={<RefreshCw size={14} />} disabled={seedancePromptBusy}
+                          onClick={() => void generateSeedanceOfficialPrompt()}>{seedancePromptBusy ? "生成中…" : "重新生成 Seedance"}</Button>}
                       </div>
                     </div>
                     {directorPromptFormat === "h3" && savedOfficialH3Warnings.length > 0 && (
@@ -14762,7 +14831,7 @@ function DirectorView(ctx: AppContext) {
                         {savedOfficialH3Warnings.map((warning) => <div key={warning}>{warning}</div>)}
                       </details>
                     )}
-                    {directorPromptFormat === "h3" ? <div className="faint small-text director-result-language-note" title="English只改变画面等描述语言；对白保留剧情原语言，只有剧情明确要求时才使用英文对白。">English翻译画面描述，对白保留剧情指定语言。</div> : (
+                    {directorPromptFormat !== "seedance" ? <div className="faint small-text director-result-language-note" title="English只改变画面等描述语言；对白保留剧情原语言，只有剧情明确要求时才使用英文对白。">English翻译画面描述，对白保留剧情指定语言。</div> : (
                       <div className="faint small-text director-result-language-note" title="Seedance 中文和英文稿独立保存；英文只翻译画面、动作和声音描述，对白保留剧情原语言；时长沿用导演台设置，无有效值时按30秒。">Seedance 中英文稿独立保存；英文只翻译描述，对白保留剧情原语言；时长沿用导演台设置，无有效值时按30秒。</div>
                     )}
                     {directorPromptFormat === "seedance" && seedanceOutputFresh && (seedanceOutput?.englishError || seedanceEnglishIssue) && (
@@ -14780,18 +14849,20 @@ function DirectorView(ctx: AppContext) {
                       {directorPromptFormat === "h3" ? <H3PromptDisplay
                         language={promptLanguage === "en" && validEnglishPrompt ? "en" : "zh"}
                         prompt={promptLanguage === "en" && validEnglishPrompt ? validEnglishPrompt : validOfficialPrompt}
-                      /> : seedanceOutputFresh && seedanceOutput ? (
+                      /> : directorPromptFormat === "ordinary" ? (
+                        <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{promptLanguage === "en" && validOrdinaryEnglishPrompt ? validOrdinaryEnglishPrompt : directorResultStoryboard.finalPrompt}</pre>
+                      ) : seedanceOutputFresh && seedanceOutput ? (
                         <pre style={{ whiteSpace: "pre-wrap", margin: 0 }}>{promptLanguage === "en" && seedanceEnglishPromptValid && seedanceOutput.promptEn ? seedanceOutput.promptEn : seedanceOutput.promptZh}</pre>
                       ) : (
                         <div className="prompt-validation" style={{ margin: 0 }}>
                           <strong>{seedanceChineseIssue ? "Seedance 原保存稿含转换规则" : seedanceOutput ? "Seedance 官方稿已过期" : "Seedance 2.5 官方稿尚未生成"}</strong>
-                          <div style={{ marginTop: 6 }}>{seedanceChineseIssue ? "原保存稿混入了转换器要求，请重新生成 Seedance 官方稿；沿用当前剧情、分镜和对白，原保存稿可在下方查看。" : seedanceOutput ? "剧情、分镜、参考素材或时长已变化，请重新生成中英文稿。" : "点击后生成中文和英文两版；不会重复生成默认的 MiniMax H3。"}</div>
+                          <div style={{ marginTop: 6 }}>{seedanceChineseIssue ? "原保存稿混入了转换器要求，请重新生成 Seedance 官方稿；沿用当前剧情、分镜和对白，原保存稿可在下方查看。" : seedanceOutput ? "当前剧情、分镜、参考素材或 Seedance 生成策略已变化；旧稿保留，主动重新生成可应用新策略。" : "调用文本 AI 编写 Seedance 中文，先保存中文再翻译英文，沿用已确认剧情、分镜和时间轴。"}</div>
                           {seedancePromptError && <div className="sequence-segment-error-text" style={{ marginTop: 6 }}>{formatUserFacingError(seedancePromptError)}</div>}
                           <Button small variant="primary" disabled={seedancePromptBusy} onClick={() => void generateSeedanceOfficialPrompt()}>{seedancePromptBusy ? "生成中…" : "生成 Seedance 2.5 官方稿"}</Button>
                         </div>
                       )}
                     </div>
-                    {directorPromptFormat === "seedance" && seedanceOutput && (seedanceChineseIssue || seedanceEnglishIssue) && (
+                    {directorPromptFormat === "seedance" && seedanceOutput && (!seedanceOutputFresh || seedanceChineseIssue || seedanceEnglishIssue) && (
                       <details className="sequence-result-status" style={{ display: "block" }}>
                         <summary>查看原保存稿</summary>
                         <div>原中文稿</div>
@@ -16552,7 +16623,6 @@ function ImageWorkbenchView(ctx: AppContext) {
     visualStyle,
     getCurrentProjectId,
     getCurrentState,
-    getCurrentProjectImageContext,
     setActiveStoryboardId,
     activeStoryboard,
     storyboardImageBatchLifecycle,
@@ -16957,6 +17027,8 @@ function ImageWorkbenchView(ctx: AppContext) {
   const activePrivateCharacterField = PRIVATE_CHARACTER_FIELD_SPECS.find(
     (item) => item.part === nsfwPrivatePart,
   );
+  const privateCompositeFields = privateCharacterFourInOneFieldsForGender(assetForm.gender || "", assetForm);
+  const privateCompositeLabel = privateCompositeSheetLabel(privateCompositeFields);
   const privateProfileHasAnyValue = PRIVATE_CHARACTER_FIELD_SPECS.some(
     (item) => Boolean((assetForm[item.formKey] || "").trim()),
   );
@@ -17469,8 +17541,8 @@ function ImageWorkbenchView(ctx: AppContext) {
       && Boolean((assetForm.name || "").trim());
     const privateRequestedFields = privateAutofillRelevant
       ? availablePrivateCharacterFields
+          .filter((item) => !privateCharacterFieldValue(assetForm, item))
           .map((item) => item.formKey)
-          .filter((field) => !(assetForm[field] || "").trim())
       : [];
     const requestedFields = Array.from(new Set([
       ...ordinaryRequestedFields,
@@ -18206,10 +18278,10 @@ function ImageWorkbenchView(ctx: AppContext) {
         ? privateCharacterFourInOneFieldsForGender(requestedAssetForm.gender || "", requestedAssetForm)
         : [requestedPrivateField];
       const missingPrivateFields = requestedPrivateFields.filter(
-        (field) => !(requestedAssetForm[field.formKey] || "").trim(),
+        (field) => !privateCharacterFieldValue(requestedAssetForm, field),
       );
       if (missingPrivateFields.length) {
-        notify(`请先填写${missingPrivateFields.map((field) => `“${field.label}”`).join("、")}，再生成${requestedImageVariant === "private-four-in-one" ? "私密四合一" : "对应私密资料图"}。`, "error");
+        notify(`请先填写${missingPrivateFields.map((field) => `“${field.label}”`).join("、")}，再生成${requestedImageVariant === "private-four-in-one" ? privateCompositeSheetLabel(requestedPrivateFields) : "对应私密资料图"}。`, "error");
         return;
       }
     }
@@ -18227,7 +18299,7 @@ function ImageWorkbenchView(ctx: AppContext) {
       : requestedImageVariant === "private-turnaround"
       ? "私密四视图"
       : requestedImageVariant === "private-four-in-one"
-        ? "私密四合一"
+        ? privateCompositeSheetLabel(privateCharacterFourInOneFieldsForGender(requestedAssetForm.gender || "", requestedAssetForm))
         : requestedPrivateField?.label.replace(/外貌$/u, "") || "";
     const name = requestedPrivateField
       ? `${persistedBaseName} · ${requestedPrivateOutputLabel}资料图`
@@ -19469,8 +19541,13 @@ function ImageWorkbenchView(ctx: AppContext) {
                       {availablePrivateCharacterFields.map((item) => (
                         <Field key={item.part} label={item.label}>
                           <input
-                            value={assetForm[item.formKey] || ""}
-                            onChange={(event) => updateField(item.formKey, event.target.value)}
+                            value={privateCharacterFieldValue(assetForm, item)}
+                            onChange={(event) => {
+                              updateField(item.formKey, event.target.value);
+                              if (item.part === "penis" && (assetForm.nsfwScrotum || "").trim()) {
+                                updateField("nsfwScrotum", "");
+                              }
+                            }}
                             aria-label={item.label}
                             placeholder="填写稳定形状、比例、颜色、纹理等可复用外貌"
                             disabled={busy || autofillBusy}
@@ -19831,12 +19908,12 @@ function ImageWorkbenchView(ctx: AppContext) {
                       disabled={busy || autofillBusy}
                       onClick={() => activatePrivateImageGeneration("full-body", "private-four-in-one")}
                     >
-                      四合一
+                      {privateCompositeLabel.replace(/^私密/u, "")}
                     </button>
                   </div>
                   <div className="image-private-generation-note" role="note">
                     使用已保存人物资料 · {imageVariant === "private-four-in-one"
-                      ? "私密四合一"
+                      ? privateCompositeLabel
                       : imageVariant === "private-five-view"
                         ? "私密五视图：左侧正面/侧面头像，右侧正面/侧面/背面全身"
                       : imageVariant === "private-turnaround"
@@ -19901,7 +19978,7 @@ function ImageWorkbenchView(ctx: AppContext) {
                       : imageWorkbenchApi.enabled
                         ? imageGenerationMode === "private"
                           ? `生成${imageVariant === "private-four-in-one"
-                            ? "私密四合一"
+                            ? privateCompositeLabel
                             : imageVariant === "private-five-view"
                               ? "私密五视图"
                             : imageVariant === "private-turnaround"

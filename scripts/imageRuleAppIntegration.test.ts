@@ -459,8 +459,8 @@ assert.doesNotMatch(
 
 assert.match(
   imageWorkbench,
-  /const privateRequestedFields = privateAutofillRelevant\s*\?\s*availablePrivateCharacterFields\s*\.map\(\(item\) => item\.formKey\)\s*\.filter\(\(field\) => !\(assetForm\[field\] \|\| ""\)\.trim\(\)\)\s*:\s*\[\]/u,
-  'private dossier completion must derive its requested keys from the gender-applicable availablePrivateCharacterFields list',
+  /const privateRequestedFields = privateAutofillRelevant\s*\?\s*availablePrivateCharacterFields\s*\.filter\(\(item\) => !privateCharacterFieldValue\(assetForm, item\)\)\s*\.map\(\(item\) => item\.formKey\)\s*:\s*\[\]/u,
+  'private dossier completion must derive requested keys from gender-applicable fields after merged legacy values are considered',
 );
 assert.match(
   imageWorkbench,

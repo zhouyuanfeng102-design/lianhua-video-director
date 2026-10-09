@@ -182,7 +182,7 @@ async function openManager() {
   await page.getByRole('tab', { name: 'RunningHub 云端', exact: true }).click();
   await page.getByRole('button', { name: '管理云端工作流', exact: true }).click();
   await page.getByRole('dialog', { name: 'RunningHub 云端视频工作流管理', exact: true }).waitFor();
-  await page.getByRole('tab', { name: '时长、比例与分辨率', exact: true }).click();
+  await page.getByRole('tab', { name: '生成参数', exact: true }).click();
 }
 
 async function selectResolution(prefix, label) {
@@ -195,8 +195,7 @@ async function selectResolution(prefix, label) {
 
 async function editManagerWorkflow(name) {
   await page.getByRole('button', { name: `编辑云端工作流 ${name}`, exact: true }).click();
-  await page.getByRole('tab', { name: '时长、比例与分辨率', exact: true }).click();
-  await page.getByRole('tab', { name: '时长、比例与像素 / 分辨率', exact: true }).click();
+  await page.getByRole('tab', { name: '生成参数', exact: true }).click();
 }
 
 async function assertMpOnlyFields(prefix) {
@@ -216,7 +215,7 @@ try {
   assert.equal(historicalTask?.videoJob?.snapshot?.draft.parameters.resolution, 0.98, 'legacy non-preset task survives fixture loading');
   const initialHistory = JSON.stringify(historicalTask);
   await openManager();
-  assert.equal(await page.getByLabel('时长分辨率字段范围', { exact: true }).inputValue(), 'common');
+  assert.equal(await page.getByLabel('生成参数字段范围', { exact: true }).inputValue(), 'common');
   const binding = page.getByLabel('RunningHub 分辨率节点字段', { exact: true });
   assert.ok((await binding.locator('option').allTextContents()).some((text) => text.includes('252.megapixels')), 'catalog-only megapixels is suggested without switching to advanced');
   assert.equal((await savedWorkflow()).mapping.parameters.resolution, undefined, 'suggestion alone must not bind');
@@ -276,11 +275,22 @@ try {
   assert.deepEqual(JSON.parse(legacyAfterSave.requestTemplate), JSON.parse(legacyBeforeEdit.requestTemplate), 'saving corrected MP binding preserves request node values');
   await checkLayout(page.locator('.rhv-output-fields'), 'manager-legacy-width-as-mp-1120x720');
   stages.push('legacy-width-megapixels-is-one-MP-control-and-explicit-save-corrects-binding');
+  const dimensionsBeforeView = await savedWorkflow('qa-dimensions-workflow');
   await editManagerWorkflow('真实宽高工作流');
-  await page.getByRole('tab', { name: '高级：指定宽高', exact: true }).click();
-  assert.equal(await page.getByLabel('RunningHub 像素宽度节点字段', { exact: true }).inputValue(), JSON.stringify(['310', 'width']));
-  assert.equal(await page.getByLabel('RunningHub 像素高度节点字段', { exact: true }).inputValue(), JSON.stringify(['310', 'height']));
-  await checkLayout(page.locator('.rhv-output-fields'), 'manager-real-dimensions-1120x720');
+  const manager = page.getByRole('dialog', { name: 'RunningHub 云端视频工作流管理', exact: true });
+  assert.equal(await manager.getByRole('tab', { name: '高级：指定宽高', exact: true }).count(), 0);
+  assert.equal(await manager.getByLabel('RunningHub 像素宽度节点字段', { exact: true }).count(), 0);
+  assert.equal(await manager.getByLabel('RunningHub 像素高度节点字段', { exact: true }).count(), 0);
+  await checkLayout(manager.locator('.rhv-output-fields'), 'manager-generation-parameters-without-dimensions-1120x720');
+  await manager.getByRole('tab', { name: '节点参数', exact: true }).click();
+  await manager.getByLabel('云端参数字段范围', { exact: true }).selectOption('all');
+  for (const [fieldName, defaultValue] of [['width', '960'], ['height', '544']]) {
+    await manager.getByLabel('搜索云端节点字段', { exact: true }).fill(`310.${fieldName}`);
+    assert.equal(await manager.getByLabel(`云端字段 310.${fieldName} 参数名`, { exact: true }).inputValue(), fieldName);
+    assert.equal(await manager.getByLabel(`云端字段 310.${fieldName} 默认值`, { exact: true }).inputValue(), defaultValue);
+  }
+  assert.deepEqual(await savedWorkflow('qa-dimensions-workflow'), dimensionsBeforeView, 'viewing the simplified parameter page preserves existing width/height mappings and defaults');
+  stages.push('manager-hides-advanced-dimensions-and-node-parameters-retain-original-mappings-and-defaults');
   await page.getByRole('button', { name: '关闭 RunningHub 工作流管理', exact: true }).click();
   await page.locator('.sidebar').getByRole('button', { name: '视频导演台', exact: true }).click();
   await page.getByRole('tab', { name: '单段生成', exact: true }).click();

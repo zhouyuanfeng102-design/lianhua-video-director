@@ -710,7 +710,7 @@ export const imagePromptOutputSpecificationRule = (
         : variant === 'turnaround' || variant === 'private-turnaround'
           ? '本次仍是同一人物的历史四视图参考板，四个全身视角及其顺序保持。'
           : variant === 'private-four-in-one'
-            ? '本次仍是四个固定槽位：左侧约70%为一个全身主画面，右侧约30%为三个辅助部位窗；每个槽位只绘制一次指定内容。'
+            ? '本次仍是私密组合资料板：若当前提示词写明私密三合一，则恰好三个固定槽位，左侧约70%为一个全身主画面，右侧约30%为两个辅助部位窗；若当前提示词写明私密四合一，则恰好四个固定槽位，左侧约70%为一个全身主画面，右侧约30%为三个辅助部位窗；每个槽位只绘制一次指定内容。'
             : variant === 'grid'
               ? '本次仍是一张当前实际画幅的3×3九宫格母版，九格数量、阅读顺序与逐格时刻保持；九格在当前画布内等大分配，不要求每个画格为方形。'
               : '本次人物或物件数量、选定时刻、机位、景别、裁切和主体相对画面占比保持当前目标。';
@@ -784,13 +784,14 @@ export const PRIVATE_FIVE_VIEW_LAYOUT_RULE = [
 ].join('；') + '。';
 
 export const PRIVATE_FOUR_IN_ONE_LAYOUT_RULE = [
-  '这是严格私密四合一资料板，横向3:2画布固定为恰好四个区域：左侧约70%是唯一私密全身主画面，右侧约30%从上到下是三个辅助部位窗（辅助窗一、辅助窗二、辅助窗三）',
-  '左侧主画面从头到脚完整入画且只出现一次；右侧三个辅助窗各只表现当前提示词指定的一个不同私密部位，按槽位顺序各出现一次',
-  '四个槽位属于同一人物和同一身体锚点，主画面与辅助窗按槽位一一对应；全身内容只归入主画面，部位内容各归入自己的辅助窗，总区域保持四块，单个辅助窗保持单一部位边界',
+  '这是严格私密组合资料板，横向3:2画布按当前提示词锁定区域数量：私密三合一固定为恰好三个区域，私密四合一固定为恰好四个区域',
+  '左侧约70%是唯一私密全身主画面，从头到脚完整入画且只出现一次；右侧约30%只放当前提示词列出的辅助部位窗，三合一为两个辅助部位窗，四合一为三个辅助部位窗',
+  '男性外生殖器是一个合并部位槽位，阴茎与阴囊资料共同归入同一个辅助窗，区域数量仍按当前三合一或四合一目标锁定',
+  '所有槽位属于同一人物和同一身体锚点，主画面与辅助窗按槽位一一对应；全身内容只归入主画面，部位内容各归入自己的辅助窗，总区域数量严格等于当前三合一或四合一目标',
   '所有区域使用统一中性背景、统一光线和稳定比例，主画面保持完整身体比例，辅助窗保持对应部位的局部比例与清晰边界',
 ].join('；') + '。';
 
-export const PRIVATE_FOUR_IN_ONE_NEGATIVE_PROMPT = 'extra fifth panel, extra inset, extra anatomical window, duplicate inset, repeated body part, duplicate body part, repeated full body, duplicate full body, extra full body, multiple full bodies, mixed anatomy, swapped anatomy, merged body parts, overlapping panels, split screen, random collage, contact sheet, unrequested view, text, logo, watermark';
+export const PRIVATE_FOUR_IN_ONE_NEGATIVE_PROMPT = 'extra unrequested panel, extra fifth panel, extra inset, extra anatomical window, separate scrotum panel, separate testicle inset, duplicate inset, repeated body part, duplicate body part, repeated full body, duplicate full body, extra full body, multiple full bodies, mixed anatomy, swapped anatomy, overlapping panels, split screen, random collage, contact sheet, unrequested view, text, logo, watermark';
 
 /** Request-time layout adaptation only. Preserve the stored preset and all
  * non-layout restrictions; intentional portraits/multiple depictions are not
@@ -848,8 +849,8 @@ const IMAGE_VARIANT_SPECS: Readonly<Record<ImageVariant, ImageVariantGenerationS
   },
   'private-four-in-one': {
     id: 'private-four-in-one',
-    label: '私密四合一',
-    direction: `私密资料四合一设定板。${PRIVATE_FOUR_IN_ONE_LAYOUT_RULE}${BODY_PROPORTION_STABILITY_RULE}纯净中性灰无缝背景，均匀柔和棚拍光，无文字、无编号、无Logo、无水印。`,
+    label: '私密三/四合一',
+    direction: `私密资料组合设定板，三合一或四合一按当前提示词锁定。${PRIVATE_FOUR_IN_ONE_LAYOUT_RULE}${BODY_PROPORTION_STABILITY_RULE}纯净中性灰无缝背景，均匀柔和棚拍光，无文字、无编号、无Logo、无水印。`,
     canvas: FOUR_VIEW_CANVAS,
   },
   'five-view': {
@@ -991,35 +992,35 @@ export const ordinaryImageVariantNegativePrompt = (variant: ImageVariant): strin
 );
 
 export const privateFourInOnePromptProblem = (value: string): string => {
-  if (!value.trim()) return '私密四合一提示词为空';
+  if (!value.trim()) return '私密三/四合一提示词为空';
   if (/(?:四视图|五视图|5[-\s]?views?|five[-\s]?views?|turnaround|正面[^。；;\n]{0,32}(?:侧面|左侧面)[^。；;\n]{0,32}背面|front[^.;\n]{0,32}side[^.;\n]{0,32}back)/iu.test(value)) {
-    return '私密四合一被写成四视图或五视图';
+    return '私密三/四合一被写成四视图或五视图';
   }
   if (/(?:第五(?:个)?(?:视图|图块|窗|面板)|第\s*5\s*(?:个)?(?:view|panel|inset)|(?:extra|additional)\s+(?:view|panel|inset))/iu.test(value)) {
-    return '私密四合一出现额外第五视图或第五面板';
+    return '私密三/四合一出现额外第五视图或第五面板';
   }
   const duplicateCheckText = value.replace(/互不重复|各自?出现一次|只出现一次|仅出现一次/giu, '');
-  if (/(?:多个|重复|两个|两张|两幅|四个全身|四张全身|four\s+full[-\s]?body)[^。；;\n]{0,12}(?:全身|full[-\s]?body)|(?:全身|full[-\s]?body)[^。；;\n]{0,12}(?:多个|重复|两个|两张|两幅|four)/iu.test(duplicateCheckText)) {
-    return '私密四合一重复出现全身主体';
+  if (/(?:多个|重复|两个|两张|两幅|四个全身|四张全身|four\s+full[-\s]?body)[^。；;\n]{0,12}(?:全身|full[-\s]?body)|(?:全身|full[-\s]?body)[^。；;\n]{0,12}(?:多个|重复|两张|两幅|four)/iu.test(duplicateCheckText)) {
+    return '私密三/四合一重复出现全身主体';
   }
-  if (/(?:重复|两个|两张|多个)[^。；;\n]{0,12}(?:辅助窗|部位窗|局部窗|inset|detail\s+panel)|(?:辅助窗|部位窗|局部窗|inset|detail\s+panel)[^。；;\n]{0,12}(?:重复|两个|两张|多个)/iu.test(duplicateCheckText)) {
-    return '私密四合一重复出现辅助部位窗';
+  if (/(?:重复|两张|多个)[^。；;\n]{0,12}(?:辅助窗|部位窗|局部窗|inset|detail\s+panel)|(?:辅助窗|部位窗|局部窗|inset|detail\s+panel)[^。；;\n]{0,12}(?:重复|两张|多个)/iu.test(duplicateCheckText)) {
+    return '私密三/四合一重复出现辅助部位窗';
   }
   if (/四格平均|平均四格|均分|随机拼贴|多人物|剧情场景|single\s+(?:portrait|full[-\s]?body\s*(?:image|portrait)?\s*$)/iu.test(value)) {
-    return '未保持私密四合一资料板结构';
+    return '未保持私密三/四合一资料板结构';
   }
   const requiredPatterns: Array<[RegExp, string]> = [
-    [/(?:四合一|四个(?:区域|图块|窗格|面板)|4\s*(?:panels?|tiles?|regions?)|辅助窗|部位窗|inset|detail\s+panel|detail\s+windows?)/iu, '缺少四合一辅助窗结构'],
+    [/(?:三合一|四合一|[三四](?:个)?(?:区域|图块|窗格|面板|槽位)|[34]\s*(?:panels?|tiles?|regions?)|辅助窗|部位窗|inset|detail\s+panel|detail\s+windows?)/iu, '缺少三/四合一辅助窗结构'],
     [/(?:主画面|主体画面|主要画面|占据(?:画布)?大部分|最大主画面|dominant|main\s+panel|primary\s+panel)/iu, '缺少私密全身主画面约束'],
     [/(?:全身|full[-\s]?body)/iu, '缺少私密全身主图'],
-    [/(?:胸部|乳房|外阴|后庭|阴茎|阴囊|breasts?|vulva|anus|penis|scrotum)/iu, '缺少私密部位格'],
+    [/(?:胸部|乳房|外阴|后庭|男性外生殖器|外生殖器|生殖器|阴茎|阴囊|breasts?|vulva|anus|penis|scrotum|genital)/iu, '缺少私密部位格'],
     [/(?:同一人物|同一主体|同一身体锚点|same\s+(?:character|subject)|consistent\s+(?:identity|body))/iu, '缺少同一人物约束'],
   ];
   return requiredPatterns.find(([pattern]) => !pattern.test(value))?.[1] || '';
 };
 
 const PRIVATE_EXTRA_LAYOUT_PATTERN =
-  /(?:四视图|三视图|五视图|多视图|多角度|四合一|分格|窗格|面板|辅助窗|局部窗|头像窗|特写窗|资料板|设定板|reference\s+sheet|character\s+sheet|turnaround|multi[-\s]?view|multiple\s+views?|insets?|panels?|tiles?|detail\s+windows?)/iu;
+  /(?:四视图|三视图|五视图|多视图|多角度|三合一|四合一|分格|窗格|面板|辅助窗|局部窗|头像窗|特写窗|资料板|设定板|reference\s+sheet|character\s+sheet|turnaround|multi[-\s]?view|multiple\s+views?|insets?|panels?|tiles?|detail\s+windows?)/iu;
 
 const PRIVATE_FULL_BODY_DUPLICATE_PATTERN =
   /(?:多个|重复|两个|两张|两幅)[^。；;\n]{0,16}(?:全身|主体|人物)|(?:full[-\s]?body|subject|character)[^.;\n]{0,24}(?:duplicate|two|multiple|extra)/iu;
@@ -1028,7 +1029,7 @@ const PRIVATE_PART_PATTERNS: Readonly<Record<Exclude<NsfwPrivatePart, 'full-body
   breasts: /(?:胸部|乳房|乳头|breasts?|nipples?|chest)/iu,
   vulva: /(?:外阴|阴唇|vulva|labia)/iu,
   anus: /(?:后庭|肛门|anus|anal)/iu,
-  penis: /(?:阴茎|龟头|penis|glans)/iu,
+  penis: /(?:男性外生殖器|外生殖器|生殖器|阴茎|龟头|阴囊|睾丸|penis|glans|scrotum|testicles?|genital)/iu,
   scrotum: /(?:阴囊|睾丸|scrotum|testicles?|balls)/iu,
 };
 
@@ -1037,7 +1038,7 @@ const PRIVATE_PART_LABELS: Readonly<Record<NsfwPrivatePart, string>> = {
   breasts: '胸部',
   vulva: '外阴',
   anus: '后庭',
-  penis: '阴茎',
+  penis: '男性外生殖器',
   scrotum: '阴囊',
 };
 
@@ -1063,7 +1064,7 @@ export const privateImageVariantConverterRule = (
     return withOutputSpecification(`当前目标是私密四视图参考板：横向 3:2 画布，恰好四个同身份、同裸体身体锚点、同尺寸、同基线的完整全身视图；依次表现正面、严格 90 度左侧面、背面、45 度前三分之四视图；正交或低透视，中性灰无缝背景。\n${BODY_PROPORTION_STABILITY_RULE}`);
   }
   if (variant === 'private-four-in-one') {
-    return withOutputSpecification(`当前目标是严格私密四合一参考板。${PRIVATE_FOUR_IN_ONE_LAYOUT_RULE}\n${BODY_PROPORTION_STABILITY_RULE}`);
+    return withOutputSpecification(`当前目标是严格私密三/四合一参考板，实际槽位数量以输入提示词中的私密三合一或私密四合一为准。${PRIVATE_FOUR_IN_ONE_LAYOUT_RULE}\n${BODY_PROPORTION_STABILITY_RULE}`);
   }
   return '';
 };
@@ -1144,8 +1145,15 @@ export const privateCloseUpPromptProblem = (
   if (currentPattern && !currentPattern.test(normalizedValue)) {
     return `私密部位特写缺少当前指定部位：${PRIVATE_PART_LABELS[selectedPart]}`;
   }
+  const equivalentParts = new Set<Exclude<NsfwPrivatePart, 'full-body'>>(
+    selectedPart === 'penis'
+      ? ['penis', 'scrotum']
+      : selectedPart === 'scrotum'
+        ? ['scrotum', 'penis']
+        : [selectedPart],
+  );
   const otherPart = (Object.keys(PRIVATE_PART_PATTERNS) as Array<Exclude<NsfwPrivatePart, 'full-body'>>)
-    .find((part) => part !== selectedPart && PRIVATE_PART_PATTERNS[part].test(normalizedValue));
+    .find((part) => !equivalentParts.has(part) && PRIVATE_PART_PATTERNS[part].test(normalizedValue));
   return otherPart ? `私密部位特写混入其它部位：${PRIVATE_PART_LABELS[otherPart]}` : '';
 };
 

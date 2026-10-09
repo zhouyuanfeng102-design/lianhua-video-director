@@ -29,7 +29,7 @@ const valueAt = (body: Record<string, unknown>, nodeId: string, fieldName: strin
 // Both preflight and actual upload binding build the same contract with the
 // actual selected count. The original body is not rewritten or duplicated.
 for (const count of [1, 6]) {
-  const prompt = `subject_definitions: 测试角色 reference <Picture ${count}>\nintegrated_multimodal_description: [Shot 1] 看向木门。声音 <d>[Chinese] 只说一次原话。</d> [Shot 9] 延续原动作，人物 <Subject 12>；同一图片内的多视图面板不增加图片。`;
+  const prompt = `subject_definitions: 测试角色 reference <Picture ${count}>\nintegrated_multimodal_description: [Shot 1] 甲向乙腹部直拳，乙侧移格开前臂，甲随格挡回收右拳并保持前进，乙从侧移后的脚位反击。声音 <d>[Chinese] 只说一次原话。</d> [Shot 9] 延续原动作，人物 <Subject 12>；同一图片内的多视图面板不增加图片。`;
   const draft: VideoGenerationDraft = { backend: 'api', name: '合成输入合同', prompt, parameters: {},
     references: Array.from({ length: count }, (_, index) => ({ assetId: `asset-${index + 1}`, role: index ? 'character' : 'first-frame' })) };
   const before = structuredClone(draft); const apiBefore = structuredClone(api);
@@ -44,6 +44,8 @@ for (const count of [1, 6]) {
   assert.match(submitted, /已经完成的 H3 正文.*不再重新规划或扩写/u);
   assert.match(submitted, /人物\/Subject 编号、分镜\/Shot 编号和镜头数量都不是新增图片/u);
   assert.match(submitted, /逐字保留原主体身份、完整对白及其语言和说话人、镜头结构、时码切点/u);
+  assert.match(submitted, /连续攻防、追逐和多人交互须完整保留行动者、具名目标、轨迹、挡闪、接触或落空、受力位移、动作承接及结果/u);
+  assert.match(submitted, /原稿明确的静止、停顿和慢动作保持原意/u);
   assert.deepEqual([...runningHubWholePromptPictureNumbers(submitted)].sort(), Array.from({ length: count }, (_, index) => String(index + 1)).sort());
   assert.equal(valueAt(submission, '827', 'value'), String(count));
   assert.equal(valueAt(submission, '824', 'value'), 'false', 'the ZIP switch is not a guessed native rewrite bypass');

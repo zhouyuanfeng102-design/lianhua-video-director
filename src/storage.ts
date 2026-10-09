@@ -44,6 +44,7 @@ import {
   LEGACY_DEFAULT_VIDEO_CONVERSION_OUTPUT_V1_4_0,
   LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_3_0,
   LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_4_0,
+  LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_7_0,
   VIDEO_CONVERSION_EXAMPLE,
   VIDEO_CONVERSION_FORMAT_RULE,
   VIDEO_CONVERSION_STORY_RULE,
@@ -652,7 +653,7 @@ const LEGACY_TIMELINE_RULE_SET_V1_3_0: RuleSet = {
 };
 const LEGACY_UNIFIED_VIDEO_CONVERTER_V1_5_0: ConverterPreset = {
   ...legacyFactoryUnifiedVideoConverter,
-  systemPrompt: DEFAULT_VIDEO_CONVERSION_SYSTEM
+  systemPrompt: LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_7_0
     .replace(AUDIO_PROMPT_RULE, LEGACY_STORY_DRIVEN_AUDIO_PROMPT_RULE)
     .replace(`\n\n${STORY_CAUSALITY_RULE}`, '')
     .replace(`\n\n${DIALOGUE_DELIVERY_RULE}`, ''),
@@ -711,7 +712,7 @@ export const defaultConverterPresets: ConverterPreset[] = legacyFactoryConverter
     ...preset,
     systemPrompt: DEFAULT_VIDEO_CONVERSION_SYSTEM,
     outputRules: DEFAULT_VIDEO_CONVERSION_OUTPUT,
-    version: '1.7.0',
+    version: '1.8.0',
     updatedAt: now(),
   } : preset
 ));

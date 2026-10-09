@@ -343,7 +343,7 @@ const measure = (label) => page.evaluate(({ label, outerContainerSelector }) => 
   ] : [
     ['result heading', '.director-result-head h2'], ['result panel heading', '.director-reference-head h2'],
     ['Chinese language', '.result-language-card.zh'], ['English language', '.result-language-card.en'],
-    ['copy prompt', '.result-language-tools > button'], ['send to video director', '.director-result-bridge > button'],
+    ['copy prompt', '.result-language-tools > button'], ['send to video director', '.director-result-bridge > button:not([aria-haspopup])'],
     ['left parameter heading', '.director-setup-head'],
   ];
   const requiredControls = requiredControlSelectors.map(([name, selector]) => ({ name, selector, rect: rect(document.querySelector(selector)), ...visibility(document.querySelector(selector)) }));
@@ -522,31 +522,35 @@ const run = async () => {
         for (const viewport of [{ width: 1120, height: 720 }, viewports[0], viewports[2]]) {
           await page.setViewportSize(viewport); await settle();
           const label = `${scenario}-repair-font${fontScale}-${viewport.width}x${viewport.height}`;
-          const repair = page.getByRole('button', { name: '修复对白与排时', exact: true, includeHidden: true });
+          const more = page.getByRole('button', { name: '更多', exact: true });
           const send = page.getByRole('button', { name: '送到视频导演台', exact: true });
-          assert.equal(await repair.count(), 1);
-          await verifyVisible(repair, `${label}: repair`); await verifyVisible(send, `${label}: send`);
-          const [repairBox, sendBox] = await Promise.all([repair.boundingBox(), send.boundingBox()]);
-          assert.ok(repairBox.x + repairBox.width <= sendBox.x + 1, `${label}: repair and send overlap`);
-          assert.ok(Math.abs(repairBox.y - sendBox.y) < 1, `${label}: new controls must stay on one row`);
-          const withRepair = await measure(label);
+          assert.equal(await more.count(), 1);
+          await verifyVisible(more, `${label}: More`); await verifyVisible(send, `${label}: send`);
+          const [moreBox, sendBox] = await Promise.all([more.boundingBox(), send.boundingBox()]);
+          assert.ok(moreBox.x + moreBox.width <= sendBox.x + 1, `${label}: More and send overlap`);
+          assert.ok(Math.abs(moreBox.y - sendBox.y) < 1, `${label}: controls must stay on one row`);
+          const withMore = await measure(label);
+          await more.click();
+          const repair = page.getByRole('menuitem', { name: '修复对白与排时', exact: true });
+          await verifyVisible(repair, `${label}: repair in More`);
+          await page.keyboard.press('Escape');
           // Compare the exact same page without the new control. This focused
           // test does not weaken the full legacy layout audit above/below.
-          await repair.evaluate((element) => { element.parentElement.style.display = 'none'; });
+          await more.evaluate((element) => { element.style.display = 'none'; });
           await settle();
           const withoutRepair = await measure(`${label}-without-new-control`);
-          await repair.evaluate((element) => { element.parentElement.style.display = ''; });
+          await more.evaluate((element) => { element.style.display = ''; });
           await settle();
-          assert.ok(Math.abs(withRepair.prompt.height - withoutRepair.prompt.height) < 1,
-            `${label}: adding the repair button must not consume prompt reading height`);
-          assert.deepEqual(withRepair.overlaps, withoutRepair.overlaps);
-          records.push({ label, viewport, fontScale, repairBox, sendBox,
-            promptHeight: withRepair.prompt.height, withoutNewControlHeight: withoutRepair.prompt.height });
+          assert.ok(Math.abs(withMore.prompt.height - withoutRepair.prompt.height) < 1,
+            `${label}: adding More must not consume prompt reading height`);
+          assert.deepEqual(withMore.overlaps, withoutRepair.overlaps);
+          records.push({ label, viewport, fontScale, moreBox, sendBox,
+            promptHeight: withMore.prompt.height, withoutNewControlHeight: withoutRepair.prompt.height });
           await capture(label);
         }
       }
     }
-    steps.push('single/sequence at 1120/1280/1600px and 100%/130% fonts: repair/send both visible and single-row; new repair control leaves prompt height unchanged; no model/media request');
+    steps.push('single/sequence at 1120/1280/1600px and 100%/130% fonts: More/send both visible and single-row; repair remains in More; the control leaves prompt height unchanged; no model/media request');
     await verifyCompletion(); return;
   }
   if (focus === 'sequence-states') {

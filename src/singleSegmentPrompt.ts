@@ -35,6 +35,7 @@ import {
   videoCreativeDirectionForBoard,
 } from './videoCreativeDirection';
 import { VIDEO_ACTING_CAMERA_RULES, VIDEO_ACTING_CAMERA_TRANSLATION_RULE } from './videoActingCameraRules';
+import { VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE, withVideoActionChoreographyScope } from './videoActionChoreographyRules';
 import { STORY_CAUSALITY_RULE, STORY_CAUSALITY_TRANSLATION_RULE, STORY_UNDERSTANDING_CONTEXT_RULE } from './storyCausalityRules';
 import { CHARACTER_PARTICIPATION_RULE, characterParticipationAliases, resolvePromptCharacterParticipation, stampCharacterParticipation } from './characterParticipation';
 import type { ConverterPreset, H3IdentityBindings, RuleSet, Storyboard } from './types';
@@ -257,6 +258,13 @@ export async function generateSingleSegmentPrompt(
       if (stage !== 'convert' && !allowances[stage]) {
         allowances[stage] = createH3OutputAllowance(input.maxOutputTokens, stage === 'review' && synchronizeCanonical && !formatOnly);
       }
+      // Final request scope wins over a normal-generation rule embedded in a
+      // converter. A converter's own structural repair already carries the
+      // preservation contract and must not regain choreography permission here.
+      scopedSystem = withVideoActionChoreographyScope(scopedSystem, stage === 'translate' ? 'translation'
+        : formatOnly || serializationRepair || system.includes(VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE) ? 'format-only'
+          : (!input.purpose || input.purpose === 'initial') && !input.skipConversion && !input.masterSource ? 'generation'
+            : 'existing');
       for (;;) {
         const allowance = stage === 'convert' ? undefined : allowances[stage];
         try {

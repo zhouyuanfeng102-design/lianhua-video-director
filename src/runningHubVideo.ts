@@ -8,6 +8,7 @@ import { normalizeRunningHubVideoFieldControls, normalizeRunningHubVideoNodeCata
 import { assertVideoReferenceSlots, videoReferenceSlotIndex } from './videoReferenceSlots';
 import { resolveRunningHubVideoImageProtocol } from './runningHubImageProtocol';
 import { assertRunningHubPromptPictureSlots, isRunningHubH3AutoPromptInput, runningHubH3AutoPromptInput } from './runningHubPromptPictures';
+import { normalizeRunningHubGenerationExtras } from './runningHubGenerationExtras';
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const own = (value: object, key: string): boolean => Object.prototype.hasOwnProperty.call(value, key);
@@ -170,6 +171,7 @@ const normalizeWorkflow = (raw: unknown): RunningHubVideoWorkflow | undefined =>
     requestTemplate, mapping: normalizeMapping(raw.mapping),
     ...(Array.isArray(raw.nodeCatalog) ? { nodeCatalog: normalizeRunningHubVideoNodeCatalog(raw.nodeCatalog) } : {}),
     ...(isRecord(raw.fieldControls) ? { fieldControls: normalizeRunningHubVideoFieldControls(raw.fieldControls) } : {}),
+    ...(isRecord(raw.generationExtras) ? { generationExtras: normalizeRunningHubGenerationExtras(raw.generationExtras) } : {}),
     ...(typeof raw.outputNodeId === 'string' && raw.outputNodeId.trim() ? { outputNodeId: raw.outputNodeId.trim() } : {}),
     createdAt: typeof raw.createdAt === 'number' && Number.isFinite(raw.createdAt) ? raw.createdAt : fresh.createdAt,
     updatedAt: typeof raw.updatedAt === 'number' && Number.isFinite(raw.updatedAt) ? raw.updatedAt : fresh.updatedAt,
@@ -328,7 +330,8 @@ export const saveRunningHubVideoWorkflow = (config: RunningHubVideoConfig, workf
   if (clean.warnings.length) throw new Error('请求 JSON 含有内嵌密钥；请删除，并仅填写在连接密钥栏。');
   const saved = { ...clone(workflow), requestTemplate: normalizeRequestOptions(workflow.requestTemplate),
     ...(workflow.nodeCatalog !== undefined ? { nodeCatalog: normalizeRunningHubVideoNodeCatalog(workflow.nodeCatalog) } : {}),
-    ...(workflow.fieldControls !== undefined ? { fieldControls: normalizeRunningHubVideoFieldControls(workflow.fieldControls) } : {}), updatedAt: Date.now() };
+    ...(workflow.fieldControls !== undefined ? { fieldControls: normalizeRunningHubVideoFieldControls(workflow.fieldControls) } : {}),
+    ...(workflow.generationExtras !== undefined ? { generationExtras: normalizeRunningHubGenerationExtras(workflow.generationExtras) } : {}), updatedAt: Date.now() };
   if (config.activeWorkflowId === workflow.id && !isRunningHubVideoWorkflowReady(saved)) throw new Error('当前正在使用的工作流不能保存为无效配置；请先修正映射，或复制为未启用草稿。');
   const exists = config.workflows.some((item) => item.id === workflow.id);
   return { ...config, workflows: exists ? config.workflows.map((item) => item.id === workflow.id ? saved : item) : [...config.workflows, saved] };

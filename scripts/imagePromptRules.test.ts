@@ -2436,7 +2436,7 @@ test('every private output target and repair retains its fixed framing under K s
     const fourView = buildImagePrompt('character', fields, 'private-turnaround', 'full-body', sheetSpec);
     assert.match(fourView, /历史四视图参考板.*四个全身视角/u);
     const fourInOne = buildImagePrompt('character', fields, 'private-four-in-one', 'full-body', sheetSpec);
-    assert.match(fourInOne, /左侧约70%为一个全身主画面，右侧约30%为三个辅助部位窗/u);
+    assert.match(fourInOne, /私密组合资料板[\s\S]*三合一[\s\S]*两个辅助部位窗[\s\S]*四合一[\s\S]*三个辅助部位窗/u);
     assert.match(fourInOne, /每个槽位只绘制一次指定内容/u);
   }
 });

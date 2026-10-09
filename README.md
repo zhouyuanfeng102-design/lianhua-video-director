@@ -4,13 +4,13 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的 Windows 桌面工作台。
 
-当前版本：**1.6.2** · 2026-10-09 · Windows 64 位 · 便携运行
+当前版本：**1.6.8** · 2026-10-09 · Windows 64 位 · 便携运行
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows 便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-1.6.2.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-1.6.8.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
 1. 下载上面的 EXE，放在可写入的文件夹里，双击运行，无需安装 Node.js。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
@@ -30,7 +30,13 @@
 
 章节独立的文生视频 / 图生视频入口支持逐张上传与完整 AI 识图、人工修订、一图多人、跨图同人及“我”的身份设置，完整参考资料参与扩写、画面转化和解析。普通、私密、分镜和首尾帧统一使用1K／2K／4K生图分辨率。1.5.9将模型能力与推荐比例改为提醒，GPT选择4K自动使用横向3840×2160或竖向2160×3840，自定义尺寸保留输入值，规则随实际画幅调整。详见[版本说明](docs/releases/发布说明-1.5.9.md)。
 
-1.6.2 压缩剧情参考图区域，给原文编辑更多空间；删除包含未结束视频任务的项目时，在一次确认中说明影响并允许继续。删除本地项目不会取消服务器任务，远端任务可能仍继续计费。详见[本版更新说明](docs/releases/发布说明-1.6.2.md)。
+1.6.4 为Seedance增加专属中文AI成稿：连续动作先概括，再交代关键挡闪、接触与位移，保留剧情、对白和已确认时间。视频导演台明确选择H3、Seedance或普通稿，单段与批量按所选正文提交；中文先保存，英文失败可单独重试。旧Seedance稿保留查看，需主动重新生成以应用新策略。详见[Seedance版本说明](docs/releases/发布说明-1.6.4.md)。
+
+1.6.5 补齐RunningHub采样步数设置，工作流管理按“时长／比例、分辨率／采样步数”两行两列自适应显示；单段与批量生成均可覆盖采样步数，留空保留工作流默认值。详见[采样步数版本说明](docs/releases/发布说明-1.6.5.md)。
+
+1.6.7 将男性私密资料中的阴茎与阴囊合并为一个男性外生殖器槽位，男性组合资料图改为三合一；旧项目字段继续兼容，女性四合一保持原有结构。详见[私密资料版本说明](docs/releases/发布说明-1.6.7.md)。
+
+1.6.8 将RunningHub工作流的生成参数分为“常用参数／LoRA／其它”：自动识别已暴露的LoRA槽位，可手动指定模型和强度字段；其它分区可添加主模型、开关及自定义节点参数。保存后用于后续新生成，旧任务保持原请求。详见[本版更新说明](docs/releases/发布说明-1.6.8.md)。
 
 ## 从源码运行
 

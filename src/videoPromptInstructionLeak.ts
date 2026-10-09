@@ -32,7 +32,8 @@ export const getVideoPromptInstructionLeak = (value: string): string | undefined
   const factoryOutputContract = /(?:输出逐镜正文|每镜保留输入时间标题)/u.test(prose)
     && /主体\s*[、，,]\s*空间\s*[、，,]\s*光影\s*[、，,]\s*镜头\s*[、，,]\s*台词\s*[、，,]\s*音效六字段/u.test(prose)
     && /不要输出规则解释/u.test(prose);
-  if (labels.length >= 2 || labels.length && signals || bareOutputContract || englishOutputContract || factoryOutputContract
+  const actionRuleEcho = /\b(?:VIDEO_ACTION_CHOREOGRAPHY(?:_PRESERVE|_TRANSLATE)?_V1|VIDEO_ACTION_CAUSALITY_V1|SEEDANCE_CONTINUOUS_ACTION_V2)\s*[：:]/u.test(prose);
+  if (labels.length >= 2 || labels.length && signals || bareOutputContract || englishOutputContract || factoryOutputContract || actionRuleEcho
     || /\brequiredDialogues\b/u.test(prose) && signals >= 2) {
     return '返回内容包含提示词生成规则或转换器输出要求，不能作为视频正文保存；请重新生成对应提示词，原稿已保留。';
   }

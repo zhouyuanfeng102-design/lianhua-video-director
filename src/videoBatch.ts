@@ -26,6 +26,7 @@ import type {
   VideoBatchItemInput,
   VideoBatchTailPlacement,
   VideoBatchStartInput,
+  VideoPromptFormat,
 } from './videoGenerationTypes';
 
 export type VideoPromptChoiceKey = `${string}:zh` | `${string}:en`;
@@ -67,6 +68,9 @@ export interface VideoBatchRow {
 }
 
 export interface VideoBatchBuildOptions {
+  promptFormat?: VideoPromptFormat;
+  /** Segment-specific format selection, independent of language/connection. */
+  promptFormats?: Readonly<Record<string, VideoPromptFormat>>;
   includeStoryboardReferences?: boolean;
   backend?: VideoGenerationDraft['backend'];
   apiProfileId?: string;
@@ -329,12 +333,13 @@ const snapshotReferenceManifest = (
 export const videoPromptChoiceKey = (
   storyboardId: string,
   language: 'zh' | 'en',
-): VideoPromptChoiceKey => `${storyboardId}:${language}`;
+  promptFormat?: VideoPromptFormat,
+): VideoPromptChoiceKey => promptFormat ? `${storyboardId}:${promptFormat}:${language}` : `${storyboardId}:${language}`;
 
 export const videoBatchPromptFingerprint = (
-  choice: Pick<VideoPromptChoice, 'storyboardId' | 'language' | 'prompt'>,
+  choice: Pick<VideoPromptChoice, 'storyboardId' | 'language' | 'prompt' | 'promptFormat'>,
 ): string => fingerprint('video-prompt', {
-  key: videoPromptChoiceKey(choice.storyboardId, choice.language),
+  key: videoPromptChoiceKey(choice.storyboardId, choice.language, choice.promptFormat),
   language: choice.language,
   prompt: choice.prompt,
 });
@@ -380,7 +385,7 @@ export const videoBatchRequestFingerprint = (
   referenceOffset = 0,
 ): string => fingerprint('video-request', {
   sourceKey: draft.source?.storyboardId
-    ? videoPromptChoiceKey(draft.source.storyboardId, draft.source.language || 'zh')
+    ? videoPromptChoiceKey(draft.source.storyboardId, draft.source.language || 'zh', draft.source.promptFormat)
     : undefined,
   language: draft.source?.language || 'zh',
   prompt: draft.prompt,
@@ -412,7 +417,7 @@ const referenceUsageForConnection = (
 
 const snapshotRequestFingerprint = (snapshot: VideoGenerationSnapshot): string => fingerprint('video-request', {
   sourceKey: snapshot.draft.source?.storyboardId
-    ? videoPromptChoiceKey(snapshot.draft.source.storyboardId, snapshot.draft.source.language || 'zh')
+    ? videoPromptChoiceKey(snapshot.draft.source.storyboardId, snapshot.draft.source.language || 'zh', snapshot.draft.source.promptFormat)
     : undefined,
   language: snapshot.draft.source?.language || 'zh',
   prompt: snapshot.draft.prompt,
@@ -621,7 +626,7 @@ const buildChoiceCandidate = (
     name: `${draft.name || choice.label} · ${choice.language === 'zh' ? '中文' : 'English'}`,
   };
   const override = options.referenceOverrides?.[
-    videoPromptChoiceKey(choice.storyboardId, choice.language)
+    videoPromptChoiceKey(choice.storyboardId, choice.language, choice.promptFormat)
   ];
   if (override) {
     const seen = new Set<string>();
@@ -646,7 +651,7 @@ const buildChoiceCandidate = (
     videoBatchConnectionIdentity(settings, draft),
   );
   return {
-    key: videoPromptChoiceKey(choice.storyboardId, choice.language),
+    key: videoPromptChoiceKey(choice.storyboardId, choice.language, choice.promptFormat),
     storyboardId: choice.storyboardId,
     sequencePlanId: plan.id,
     segmentId: segment.id,
@@ -670,9 +675,10 @@ export const buildVideoBatchRows = (
   settings: AppSettings,
   options: VideoBatchBuildOptions = {},
 ): VideoBatchRow[] => {
-  const choices = videoPromptChoices(project);
+  const selectedFormats = new Set<VideoPromptFormat | undefined>([options.promptFormat, ...Object.values(options.promptFormats || {})]);
+  const choices = [...selectedFormats].flatMap((format) => videoPromptChoices(project, undefined, format));
   const choicesByKey = new Map(choices.map((choice) => [
-    videoPromptChoiceKey(choice.storyboardId, choice.language),
+    videoPromptChoiceKey(choice.storyboardId, choice.language, choice.promptFormat),
     choice,
   ]));
   const storyboardsById = new Map(project.storyboards.map((board) => [board.id, board]));
@@ -691,10 +697,10 @@ export const buildVideoBatchRows = (
         ? storyboard
         : undefined;
       const zhChoice = validStoryboard
-        ? choicesByKey.get(videoPromptChoiceKey(validStoryboard.id, 'zh'))
+        ? choicesByKey.get(videoPromptChoiceKey(validStoryboard.id, 'zh', options.promptFormats?.[segment.id] || options.promptFormat))
         : undefined;
       const enChoice = validStoryboard
-        ? choicesByKey.get(videoPromptChoiceKey(validStoryboard.id, 'en'))
+        ? choicesByKey.get(videoPromptChoiceKey(validStoryboard.id, 'en', options.promptFormats?.[segment.id] || options.promptFormat))
         : undefined;
       return {
         id: segment.id,

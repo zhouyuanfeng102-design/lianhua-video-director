@@ -2,9 +2,10 @@ import assert from 'node:assert/strict';
 import { convertStoryboardDraftToFinal, hasCurrentTextApiConversion } from '../src/appEffects';
 import { h3OutputRetryDecision } from '../src/h3OutputRecovery';
 import { VideoPromptInstructionLeakError } from '../src/videoPromptInstructionLeak';
+import { VIDEO_ACTION_CHOREOGRAPHY_RULE, VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE, VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE } from '../src/videoActionChoreographyRules';
 import type { ConverterPreset, Storyboard, VideoShot } from '../src/types';
 
-const speech = '转换器输出这个标题是我的课程内容，不要输出规则解释，requiredDialogues 是屏幕上的字。';
+const speech = '转换器输出这个标题是我的课程内容，不要输出规则解释，requiredDialogues 是屏幕上的字。VIDEO_ACTION_CHOREOGRAPHY_V1：是今天要讲的标题。';
 const canonical = `【0s-5s】 主体：@讲师（平静）[朝向：观众] 正在 [指向黑板]（演示课堂内容）；空间：前景-讲台 中景-讲师 背景-黑板；光影：窗边自然光；镜头：稳定中景；台词：第1s @讲师：“${speech}”；音效：环境层-[教室轻响] 动作层-[指示棒接触声] 情绪层-[无配乐]`;
 const converter: ConverterPreset = { id: 'instruction-boundary-converter', name: '合成转换测试', workflow: 'all', inputMode: 'all',
   scope: 'video', enabled: true, version: 'test', systemPrompt: '根据完整剧情组织动作，requiredDialogues 逐句保留原话与说话人。',
@@ -29,6 +30,15 @@ const terminalLeak = (error: unknown): boolean => {
   assert.equal(error.message.includes(speech), false, 'errors do not echo private story or the rejected response');
   return true;
 };
+
+// Reserved first-party action instructions are not authored video content.
+// Quoted course dialogue below remains legitimate and must survive unchanged.
+for (const echoedRule of [VIDEO_ACTION_CHOREOGRAPHY_RULE, VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE, VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE]) {
+  const draft = makeDraft(); const before = structuredClone(draft); let calls = 0;
+  await assert.rejects(() => convertStoryboardDraftToFinal({ draft, converter, acceptAiAuthoredContent: true, clean: (value) => value,
+    request: async () => { calls += 1; return `${canonical}\n${echoedRule}`; } }), terminalLeak);
+  assert.equal(calls, 1); assert.deepEqual(draft, before);
+}
 
 // A success-looking echo must fail before both strict structural repair and
 // the permissive intermediate-candidate path can save canonical/finalPrompt.

@@ -14,8 +14,11 @@ import { applyH3MetadataRepair, H3_METADATA_REPAIR_RULE, planH3MetadataRepair } 
 import { H3IdentityMetadataError } from './h3DeliverySchema';
 import type { H3IdentityBindings } from './types';
 import { VIDEO_ACTING_CAMERA_TRANSLATION_RULE } from './videoActingCameraRules';
+import { VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE, withVideoActionChoreographyScope } from './videoActionChoreographyRules';
 
 export interface TranslateVideoPromptToEnglishOptions {
+  /** Target-specific format scope; historical callers retain the H3/ordinary contract. */
+  promptFormat?: 'seedance';
   /** Keep AI-authored content; optional metadata must not veto the translation. */
   acceptAiAuthoredContent?: boolean;
   onDeliveryWarnings?: (warnings: string[]) => void;
@@ -42,6 +45,7 @@ const VIDEO_PROMPT_ENGLISH_TRANSLATION_RULES = [
   '逐镜保留人物位置、面向、世界与画面运动方向、机位所在轴线一侧、入镜/镜尾状态，以及每句对白的声音身份、声源方位、画内或画外状态、口型和非说话人聆听安排。不要把后续镜头的空间说明合并到第1镜，不把上山译成下山、接近译成远离，也不为说话把背对人物改成回头。',
   VIDEO_WARDROBE_SCOPE_RULE,
   VIDEO_ACTING_CAMERA_TRANSLATION_RULE,
+  VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE,
   '以上衣着规则在翻译阶段只用于忠实保持 sourcePrompt 已确认的穿着、遮挡、可见范围和有剧情依据的变化；stagingContext 与人物资料是理解上下文的证据，不是新增画面内容。普通亲吻、拥抱或隔衣触碰不能在译文中变成脱衣；原文明示的换装也不能被人物资料的旧 outfit 覆盖。',
   '声音只忠实翻译现有事件，不把“无”、N/A、安静背景或声音间隙扩写成连续底噪、room tone、hiss或持续风声/水声；不得自行补配乐。原文明确要求的背景音乐必须保留，并忠实保留低音量、让位于对白和动作声的混音要求。',
   '以下共享声音规则只用于保持源稿已有声源、时序和混音意图，不授权翻译阶段新增原稿没有的动作或声音。',
@@ -188,6 +192,7 @@ const restoreValues = (source: string, values: readonly ProtectedValue[]): strin
 );
 
 export const translateVideoPromptToEnglish = async ({
+  promptFormat,
   sourcePrompt,
   request,
   clean,
@@ -244,6 +249,17 @@ export const translateVideoPromptToEnglish = async ({
         const languageRule = h3DescriptionLanguageRule('英文');
         if (!scopedSystem.includes(languageRule)) scopedSystem += `\n\n${languageRule}`;
       }
+      if (promptFormat === 'seedance') {
+        scopedSystem = scopedSystem.split(H3_DIALOGUE_FORMAT_RULE).join('')
+          .split(VIDEO_PROMPT_ENGLISH_TRANSLATION_RULES[2]).join('')
+          .split(VIDEO_ACTING_CAMERA_TRANSLATION_RULE).join(VIDEO_ACTING_CAMERA_TRANSLATION_RULE
+            .replace('已确认中文H3', '已确认中文sourcePrompt')
+            .replace('不改变H3 section、参考标签、[Shot N]和At切点', '不改变 Seedance 自然语言章节、实际参考标记和已确认时间轴'))
+          .split(AUDIO_TRANSLATION_SCOPE_RULE).join(AUDIO_TRANSLATION_SCOPE_RULE
+            .replace('不把镜内声音提升或重复到overall_soundscape', '不把镜内声音提升为整段或重复铺设')
+            .replace('H3字段、切点和原语言对白保持不变。', 'Seedance 章节、已确认起止时间和原语言对白保持不变。'));
+      }
+      scopedSystem = withVideoActionChoreographyScope(scopedSystem, 'translation', promptFormat);
       const response = await request(scopedSystem, user,
         (includesStagingContext && stagingContext) || serializationRepair ? {
           ...(includesStagingContext && stagingContext ? { includesStagingContext: true as const } : {}),

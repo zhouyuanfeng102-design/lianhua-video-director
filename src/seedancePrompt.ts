@@ -8,6 +8,14 @@ import type {
 import { translateVideoPromptToEnglish, type TranslateVideoPromptToEnglishOptions } from './promptTranslation';
 import { STORY_CAUSALITY_TRANSLATION_RULE } from './storyCausalityRules';
 import { assertVideoPromptHasNoInstructionLeak, isInternalVideoPromptConstraint } from './videoPromptInstructionLeak';
+import { SEEDANCE_CHINESE_WRITER_RULE, SEEDANCE_PROMPT_STRATEGY_VERSION } from './seedancePromptRules';
+import type { Seedance25Output } from './types';
+import { maskVideoPictureReferenceLiterals } from './videoPictureReferences';
+
+export interface OfficialSeedancePromptInput extends PromptAdapterInput {
+  /** Complete read-only story/shot evidence used by this exact generation. */
+  sourceEvidence?: Readonly<Record<string, unknown>>;
+}
 
 export interface Seedance25PromptCompilation {
   targetId: 'seedance-2.5';
@@ -44,6 +52,15 @@ export const isSeedanceOutputSaveIdentityCurrent = (
   && request.storyboardId === current.storyboardId
   && request.storyboardUpdatedAt === current.storyboardUpdatedAt;
 
+/** Timestamp protects edits; the fingerprint also protects shared media/story facts. */
+export const isSeedanceOutputSaveRequestCurrent = (
+  request: SeedanceOutputSaveIdentity,
+  current: SeedanceOutputSaveIdentity,
+  requestFingerprint: string,
+  currentFingerprint: string,
+): boolean => isSeedanceOutputSaveIdentityCurrent(request, current)
+  && Boolean(requestFingerprint) && requestFingerprint === currentFingerprint;
+
 const clean = (value: unknown): string => typeof value === 'string' ? value.trim() : '';
 
 /** Seedance prose can precede the first timeline row; the H3 cleaner would discard it. */
@@ -60,10 +77,12 @@ export const SEEDANCE_ENGLISH_TRANSLATION_RULE = [
   '保持 Seedance 自然语言格式，不引入 MiniMax H3 专用section、[Shot N]、<Subject N>、<Picture N>、<d>或<sound>标签；声音和对白说明仍用自然语言。',
 ].join('\n');
 
-export const translateSeedancePromptToEnglish = async ({ sourcePrompt, request }: Pick<TranslateVideoPromptToEnglishOptions, 'sourcePrompt' | 'request'>): Promise<string> => {
+export const translateSeedancePromptToEnglish = async ({ sourcePrompt, request, isCurrent }: Pick<TranslateVideoPromptToEnglishOptions, 'sourcePrompt' | 'request' | 'isCurrent'>): Promise<string> => {
   assertVideoPromptHasNoInstructionLeak(sourcePrompt, 'Seedance 中文源稿');
   const translated = await translateVideoPromptToEnglish({
     sourcePrompt,
+    promptFormat: 'seedance',
+    isCurrent,
     request: (system, user, transport) => request(`${system}\n\n${SEEDANCE_ENGLISH_TRANSLATION_RULE}`, user, transport),
     clean: cleanSeedancePrompt,
     reviewWithAi: false,
@@ -223,17 +242,28 @@ export const buildOfficialSeedanceReferences = (
 const visibleSeedanceConstraints = (constraints: PromptAdapterInput['constraints']): string[] => (constraints || [])
   .map(clean).filter((value) => value && !isInternalVideoPromptConstraint(value));
 
-export const getOfficialSeedanceSourceFingerprint = (input: PromptAdapterInput): string => stableHash(JSON.stringify({
+const stableEvidenceValue = (value: unknown): unknown => {
+  if (Array.isArray(value)) return value.map(stableEvidenceValue);
+  if (!value || typeof value !== 'object') return value;
+  return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined && item !== '')
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([key, item]) => [key, stableEvidenceValue(item)]));
+};
+
+export const getOfficialSeedanceSourceFingerprint = (input: OfficialSeedancePromptInput): string => stableHash(JSON.stringify(stableEvidenceValue({
   targetId: 'seedance-2.5',
+  strategyVersion: SEEDANCE_PROMPT_STRATEGY_VERSION,
   canonicalPrompt: input.canonicalPrompt,
   durationSec: finiteDuration(input.durationSec),
   aspectRatio: input.aspectRatio,
   resolution: input.resolution,
   audioMode: input.audioMode,
-  references: input.references || [],
+  references: (input.references || []).map((reference) => ({ ...reference, targetBindings: reference.targetBindings || [], tags: reference.tags || [] })),
   subjectDefinitions: input.subjectDefinitions || [],
+  shotPrivateDetails: input.shotPrivateDetails || [],
   constraints: input.constraints || [],
-}));
+  sourceEvidence: input.sourceEvidence,
+})));
 
 export const compileOfficialSeedancePrompt = (
   input: PromptAdapterInput,
@@ -272,4 +302,92 @@ export const compileOfficialSeedancePrompt = (
   };
 };
 
-export type OfficialSeedancePromptInput = PromptAdapterInput;
+const seedanceHeadings = ['视频规格', '参考素材与职责', '主体连续性', '一句话概述', '连续时间轴', '全局约束'];
+const seedanceReferenceTokens = (prompt: string): string[] => prompt.match(/@(?:Image|Video|Audio|Clay Render)\s+\d+/gu) || [];
+
+/** Delivery checks only; motion/story quality remains the writer's responsibility. */
+export const assertSeedanceWriterDelivery = (prompt: string, manifest: ReferenceManifest): void => {
+  assertVideoPromptHasNoInstructionLeak(prompt, 'Seedance 中文结果');
+  let previous = -1;
+  for (const heading of seedanceHeadings) {
+    const expression = new RegExp(`^(?:#{1,3}\\s*)?${heading}(?:[（(][^\\r\\n]*?[）)])?\\s*(?:[：:]|$)`, 'mu');
+    const position = prompt.search(expression);
+    if (position <= previous) throw new Error('Seedance 中文返回缺少完整的六个自然语言章节，原保存稿已保留，请重新生成。');
+    previous = position;
+  }
+  // The shared masker also hides entire H3 dialogue payloads. Mark delimiters
+  // first so actual quoted screen text stays literal while unquoted H3 tags fail.
+  const prose = maskVideoPictureReferenceLiterals(prompt.replace(/<\/?(?:d|sound)>/giu, 'LH_H3_DELIVERY_TAG'));
+  if (/^(?:subject_definitions|summary|retention_analysis|detailed_description|integrated_multimodal_description|overall_soundscape|non_diegetic_music)\s*:|\[Shot\s+\d+\]|^\s*At\s+\d{2}:\d{2}\.\d{3}|<(?:Subject|Picture|Video|Audio)\s+\d+>|LH_H3_DELIVERY_TAG/gmu.test(prose)) {
+    throw new Error('Seedance 中文返回使用了 H3 专用结构，原保存稿已保留，请重新生成。');
+  }
+  const allowed = new Set(manifest.assets.map((asset) => asset.token));
+  const used = new Set(seedanceReferenceTokens(prompt));
+  if ([...used].some((token) => !allowed.has(token)) || [...allowed].some((token) => !used.has(token))) {
+    throw new Error('Seedance 中文返回改变或遗漏了真实参考素材编号，原保存稿已保留，请重新生成。');
+  }
+};
+
+export interface GenerateOfficialSeedancePromptOptions {
+  input: OfficialSeedancePromptInput;
+  request: TranslateVideoPromptToEnglishOptions['request'];
+  isCurrent?: () => boolean;
+}
+
+const assertSeedanceRequestCurrent = (isCurrent?: () => boolean): void => {
+  if (isCurrent && !isCurrent()) {
+    const error = new Error('当前项目、章节、分镜或参考素材已变化，Seedance 提示词未保存，请在当前分镜重新生成。');
+    error.name = 'AbortError';
+    throw error;
+  }
+};
+
+/** One Chinese text-model call. The compiler supplies metadata, never the delivered body. */
+export const generateOfficialSeedancePrompt = async ({ input, request, isCurrent }: GenerateOfficialSeedancePromptOptions): Promise<Seedance25PromptCompilation> => {
+  assertSeedanceRequestCurrent(isCurrent);
+  const metadata = compileOfficialSeedancePrompt(input);
+  const evidence = {
+    canonicalPrompt: input.canonicalPrompt,
+    sourceEvidence: input.sourceEvidence,
+    specification: { durationSec: metadata.durationSec, aspectRatio: input.aspectRatio, resolution: input.resolution, audioMode: input.audioMode },
+    subjectDefinitions: input.subjectDefinitions || [],
+    references: input.references || [],
+    referenceManifest: metadata.referenceManifest.assets,
+    shotPrivateDetails: input.shotPrivateDetails || [],
+    constraints: visibleSeedanceConstraints(input.constraints),
+  };
+  const response = await request(SEEDANCE_CHINESE_WRITER_RULE,
+    `<seedance_source_data>\n${JSON.stringify(evidence, null, 2).replace(/</gu, '\\u003c').replace(/>/gu, '\\u003e')}\n</seedance_source_data>\n依据以上当前证据返回完整 Seedance 中文成稿。`);
+  assertSeedanceRequestCurrent(isCurrent);
+  const promptZh = cleanSeedancePrompt(response);
+  assertSeedanceWriterDelivery(promptZh, metadata.referenceManifest);
+  return { ...metadata, prompt: promptZh, promptZh, sourceFingerprint: getOfficialSeedanceSourceFingerprint(input) };
+};
+
+export interface GenerateSeedanceBilingualOutputOptions extends GenerateOfficialSeedancePromptOptions {
+  /** Save the qualified Chinese immediately and advance only this own checkpoint identity. */
+  onChinese: (output: Seedance25Output) => boolean;
+  onEnglish: (output: Seedance25Output) => boolean;
+}
+
+export const generateSeedanceBilingualOutput = async ({ input, request, isCurrent, onChinese, onEnglish }: GenerateSeedanceBilingualOutputOptions): Promise<Seedance25Output> => {
+  const compiled = await generateOfficialSeedancePrompt({ input, request, isCurrent });
+  const chinese: Seedance25Output = {
+    targetId: 'seedance-2.5', promptZh: compiled.promptZh, durationSec: compiled.durationSec,
+    sourceFingerprint: compiled.sourceFingerprint, referenceManifest: compiled.referenceManifest.assets.map((asset) => ({ ...asset })),
+    warnings: compiled.warnings, generatedAt: Date.now(), englishError: '',
+  };
+  if (!onChinese(chinese)) assertSeedanceRequestCurrent(() => false);
+  assertSeedanceRequestCurrent(isCurrent);
+  let output: Seedance25Output;
+  try {
+    const promptEn = await translateSeedancePromptToEnglish({ sourcePrompt: chinese.promptZh, request, isCurrent });
+    output = { ...chinese, promptEn, englishSourceFingerprint: chinese.sourceFingerprint };
+  } catch (error) {
+    assertSeedanceRequestCurrent(isCurrent);
+    if (error instanceof Error && error.name === 'AbortError') throw error;
+    output = { ...chinese, englishError: error instanceof Error ? error.message : '英文版 Seedance 提示词生成失败。' };
+  }
+  if (!onEnglish(output)) assertSeedanceRequestCurrent(() => false);
+  return output;
+};

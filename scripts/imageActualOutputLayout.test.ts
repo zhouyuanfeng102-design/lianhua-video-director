@@ -26,7 +26,7 @@ const layouts: Array<{ variant: ImageVariant; count: RegExp }> = [
   { variant: 'private-close-up', count: /指定部位只出现一次.*不拉远补全身/u },
   { variant: 'private-five-view', count: /五区域参考板.*左侧上下两头肩特写，右侧三个指定角度全身/u },
   { variant: 'private-turnaround', count: /四视图参考板.*四个全身视角/u },
-  { variant: 'private-four-in-one', count: /四个固定槽位.*左侧约70%.*右侧约30%.*三个辅助部位窗/u },
+  { variant: 'private-four-in-one', count: /私密组合资料板.*私密三合一.*恰好三个固定槽位.*两个辅助部位窗.*私密四合一.*恰好四个固定槽位.*三个辅助部位窗/u },
   { variant: 'grid', count: /当前实际画幅的3×3九宫格母版.*九格数量、阅读顺序/u },
 ];
 for (const output of [

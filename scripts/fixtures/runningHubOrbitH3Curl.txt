@@ -1,0 +1,202 @@
+curl --location --request POST 'https://www.runninghub.ai/openapi/v2/run/ai-app/2092524412225826817' \
+--header "Content-Type: application/json" \
+--header "Authorization: Bearer ${RUNNINGHUB_API_KEY}" \
+--data-raw '{
+  "nodeInfoList": [
+    {
+      "nodeId": "166",
+      "fieldName": "image",
+      "fieldValue": "87503d7b9201d980a4ca6594917342713d77ecdc7ac83aaf37dd317fbc9b425b.png",
+      "description": null
+    },
+    {
+      "nodeId": "142",
+      "fieldName": "image",
+      "fieldValue": "1d5b5f919d99bcdcc7a412e9f60341815d0169e515ef30c87a522129b7db5b65.png",
+      "description": null
+    },
+    {
+      "nodeId": "143",
+      "fieldName": "image",
+      "fieldValue": "fd3de003d26b036732785710b76703f9881dd703c0a40ba58cdece74d3c8b10a.png",
+      "description": null
+    },
+    {
+      "nodeId": "161",
+      "fieldName": "image",
+      "fieldValue": "None",
+      "description": null
+    },
+    {
+      "nodeId": "200",
+      "fieldName": "image",
+      "fieldValue": "None",
+      "description": null
+    },
+    {
+      "nodeId": "201",
+      "fieldName": "image",
+      "fieldValue": "None",
+      "description": null
+    },
+    {
+      "nodeId": "205",
+      "fieldName": "value",
+      "fieldValue": "false",
+      "description": null
+    },
+    {
+      "nodeId": "144",
+      "fieldName": "audio",
+      "fieldValue": "None",
+      "description": null
+    },
+    {
+      "nodeId": "160",
+      "fieldName": "audio",
+      "fieldValue": "None",
+      "description": null
+    },
+    {
+      "nodeId": "228",
+      "fieldName": "audio",
+      "fieldValue": "None",
+      "description": null
+    },
+    {
+      "nodeId": "163",
+      "fieldName": "value",
+      "fieldValue": "false",
+      "description": null
+    },
+    {
+      "nodeId": "164",
+      "fieldName": "video",
+      "fieldValue": "c989919266c6103699a0aad7e207b45e3955db203ecc270d4e812fbef27d1ce9.mp4",
+      "description": null
+    },
+    {
+      "nodeId": "197",
+      "fieldName": "value",
+      "fieldValue": "false",
+      "description": null
+    },
+    {
+      "nodeId": "192",
+      "fieldName": "text",
+      "fieldValue": "10秒，图1人物与图2人物正在图3场景下打斗，动作参考视频1，音频1完整保留。中文对话。\n\n留存分析：\n图片1、2、3: 完整保留\n视频1: 特征迁移，仅参考打斗动作\n音频1: 完全复制原声音\n\n（以下部分仅作为说明，记得删掉）\n如果加入了视频或音频参考，留存分析部分最好填写，不然模型推出来的不够准确。无音频或视频参考可以不填，填了更准确。\n\n留存分析等级：\n## 视觉 4 个等级\n1. `fully_preserved` 完整保留：外观、服装、场景、特征一丝不改\n2. `partially_preserved` 部分保留：主体还在，但某些特征被修改或只保留一部分\n3. `attribute_transfer` 特征迁移：参考特征被转移到另一个可识别的目标主体上\n4. `weak_reference` 弱参考：只保留风格、类别、构图、氛围的广泛相似性\n\n## 音频 4 个等级（音频参考用）\n1. `fully_copy`：完全复制原声音\n2. `partially_copy`：部分复制音频\n3. `reference`：只参考音色，重新生成台词\n4. `weak_reference`：仅参考曲风氛围",
+      "description": null
+    },
+    {
+      "nodeId": "213",
+      "fieldName": "value",
+      "fieldValue": "true",
+      "description": null
+    },
+    {
+      "nodeId": "115",
+      "fieldName": "aspect_ratio",
+      "fieldData": "[\"COMBO\", {\"default\": \"1:1 (Square)\", \"options\": [\"1:1 (Square)\", \"2:3 (Portrait Photo)\", \"3:2 (Photo)\", \"3:4 (Portrait Standard)\", \"4:3 (Standard)\", \"9:16 (Portrait Widescreen)\", \"16:9 (Widescreen)\", \"21:9 (Ultrawide)\"], \"tooltip\": \"The aspect ratio for the output dimensions.\", \"multiselect\": false}]",
+      "fieldValue": "16:9 (Widescreen)",
+      "description": null
+    },
+    {
+      "nodeId": "147",
+      "fieldName": "value",
+      "fieldValue": "0.4",
+      "description": null
+    },
+    {
+      "nodeId": "179",
+      "fieldName": "value",
+      "fieldValue": "10",
+      "description": null
+    },
+    {
+      "nodeId": "124",
+      "fieldName": "steps",
+      "fieldValue": "10",
+      "description": null
+    },
+    {
+      "nodeId": "159",
+      "fieldName": "lora_name",
+      "fieldValue": "MysticXXX_MMH3-V1.safetensors",
+      "description": null
+    },
+    {
+      "nodeId": "159",
+      "fieldName": "strength_model",
+      "fieldValue": "0.5000000000000001",
+      "description": null
+    },
+    {
+      "nodeId": "158",
+      "fieldName": "value",
+      "fieldValue": "true",
+      "description": null
+    },
+    {
+      "nodeId": "232",
+      "fieldName": "text",
+      "fieldValue": "以下为高级设置，不懂的保持默认。没有额外的需求，下面的就不用管了。\nThe following are advanced settings. If you don'\''t understand them, leave them as default.￼￼￼￼￼￼￼￼￼￼￼￼",
+      "description": null
+    },
+    {
+      "nodeId": "199",
+      "fieldName": "lora_name",
+      "fieldValue": "电影镜头_000019000.safetensors",
+      "description": null
+    },
+    {
+      "nodeId": "199",
+      "fieldName": "strength_model",
+      "fieldValue": "0",
+      "description": null
+    },
+    {
+      "nodeId": "224",
+      "fieldName": "lora_name",
+      "fieldValue": "zhnehisgan_c1-st900.safetensors",
+      "description": null
+    },
+    {
+      "nodeId": "224",
+      "fieldName": "strength_model",
+      "fieldValue": "0",
+      "description": null
+    },
+    {
+      "nodeId": "165",
+      "fieldName": "unet_name",
+      "fieldValue": "minimax_h3_hybrid_fl2va_ref2va_b25-49-int8.safetensors",
+      "description": null
+    },
+    {
+      "nodeId": "153",
+      "fieldName": "lora_name",
+      "fieldValue": "minimax_h3_turbo_v4_step600_ema_pruned_comfyui.safetensors",
+      "description": null
+    },
+    {
+      "nodeId": "153",
+      "fieldName": "strength_model",
+      "fieldValue": "1.0000000000000002",
+      "description": null
+    },
+    {
+      "nodeId": "171",
+      "fieldName": "value",
+      "fieldValue": "false",
+      "description": null
+    },
+    {
+      "nodeId": "173",
+      "fieldName": "value",
+      "fieldValue": "36",
+      "description": null
+    }
+  ],
+  "instanceType": "default",
+  "usePersonalQueue": "false"
+}'

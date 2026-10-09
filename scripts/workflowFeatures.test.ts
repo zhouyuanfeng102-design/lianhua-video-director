@@ -1512,7 +1512,9 @@ assert.match(
   'the director result must be derived from the current sequence segment',
 );
 assert.match(appSource, /导出全部分段提示词/u);
-assert.match(appSource, /导出分段 JSON/u);
+assert.doesNotMatch(directorViewSource, /导出分段 JSON/u, 'the retired sequence JSON export must not remain in the director UI');
+assert.match(directorViewSource, /<DirectorPromptMoreMenu[\s\S]*?label:\s*"修复对白与排时"[\s\S]*?label:\s*"导出全部分段提示词"/u,
+  'low-frequency repair and whole-plan TXT export must remain reachable through More');
 assert.match(appSource, /未关联分段分镜/u, 'orphaned sequence storyboards must remain browsable');
 assert.match(appSource, /全局.*本段/u, 'sequence storyboard navigation must show global and local duration context');
 

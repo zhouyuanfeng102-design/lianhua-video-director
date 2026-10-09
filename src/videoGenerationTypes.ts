@@ -55,6 +55,8 @@ export interface VideoGenerationDesktop {
 export type VideoGenerationBackend = 'api' | 'comfyui';
 /** UI source; cloud workflows reuse the authenticated API task transport. */
 export type VideoGenerationSource = VideoGenerationBackend | 'runninghub';
+/** Authored delivery format, independent of the configured video connection. */
+export type VideoPromptFormat = 'h3' | 'seedance' | 'ordinary';
 export interface VideoPromptSource {
   chapterId?: string;
   storyboardId?: string;
@@ -63,6 +65,11 @@ export interface VideoPromptSource {
   segmentIndex?: number;
   promptVersion?: number | string;
   language?: 'zh' | 'en';
+  promptFormat?: VideoPromptFormat;
+  /** Exact submitted body after image-slot serialization. */
+  promptFingerprint?: string;
+  /** Generation input/strategy identity of the saved delivery. */
+  sourceFingerprint?: string;
   label?: string;
 }
 export interface VideoImageReference {
@@ -79,6 +86,8 @@ export interface VideoGenerationDraft {
   prompt: string;
   /** Exact authored identity anchors used only to serialize image bindings. */
   h3ReferenceBinding?: import('./videoH3ReferenceBinding').VideoH3ReferenceBinding;
+  /** Original Seedance token-to-asset mapping for exact image-slot serialization. */
+  seedanceReferenceBinding?: import('./videoSeedanceReferenceBinding').VideoSeedanceReferenceBinding;
   /** Informational reference warnings only; never a submission gate. */
   h3ReferenceWarnings?: string[];
   backend: VideoGenerationBackend;

@@ -4,11 +4,12 @@ import { isRunningHubMegapixelsField, listRunningHubVideoNodes, normalizeRunning
 import { selectRunningHubVideoFieldChoices } from './runningHubVideoFieldChoices';
 import { resolveRunningHubVideoImageProtocol } from './runningHubImageProtocol';
 
-export type RunningHubVideoOutputKey = 'duration' | 'aspect_ratio' | 'resolution' | 'width' | 'height';
+export type RunningHubVideoOutputKey = 'duration' | 'aspect_ratio' | 'resolution' | 'steps' | 'width' | 'height';
 export const runningHubVideoOutputFields: ReadonlyArray<{ key: RunningHubVideoOutputKey; label: string; hint: string }> = [
   { key: 'duration', label: '视频时长', hint: '单位秒，不是帧数或实例保留时间。' },
   { key: 'aspect_ratio', label: '画面比例', hint: '按云端字段的完整选项值提交，例如 9:16 (Portrait Widescreen)。' },
   { key: 'resolution', label: '分辨率', hint: '按云端原格式填写，如 720P / 1080P；megapixels 使用百万像素（MP），不自动换算宽高。' },
+  { key: 'steps', label: '采样步数', hint: '绑定实际采样步数字段；生成时留空使用工作流默认值，不自动改动其他采样参数。' },
   { key: 'width', label: '像素宽度', hint: '像素宽度，不自动计算宽高比。' },
   { key: 'height', label: '像素高度', hint: '像素高度；采用档位时可不绑定。' },
 ];
@@ -18,6 +19,7 @@ const names: Record<RunningHubVideoOutputKey, RegExp> = {
   duration: /^(?:duration|durationsec|durationseconds|videoduration|seconds|时长|视频时长|秒数)$/u,
   aspect_ratio: /^(?:aspectratio|ratio|画面比例|宽高比|纵横比)$/u,
   resolution: /^(?:resolution|imageresolution|videoresolution|outputresolution|megapixels?|百万像素|分辨率|清晰度)$/u,
+  steps: /^(?:steps|samplingsteps|samplersteps|numsteps|numinferencesteps|inferencesteps|采样步数|采样次数|步数)$/u,
   width: /^(?:(?:image|video|output|target|frame)?width|宽度|像素宽度|画面宽度)$/u,
   height: /^(?:(?:image|video|output|target|frame)?height|高度|像素高度|画面高度)$/u,
 };
@@ -25,6 +27,7 @@ const descriptions: Record<RunningHubVideoOutputKey, RegExp> = {
   duration: /duration|seconds|时长|秒数/u,
   aspect_ratio: /aspect.?ratio|ratio|画面比例|宽高比|纵横比/u,
   resolution: /resolution|megapixels?|百万像素|分辨率|清晰度/u,
+  steps: /sampling.?steps|sampler.?steps|inference.?steps|采样步数|采样次数|步数/u,
   width: /width|宽度|像素宽/u,
   height: /height|高度|像素高/u,
 };
@@ -61,7 +64,15 @@ export const runningHubVideoOutputDraft = (workflow: RunningHubVideoWorkflow): {
 
 export const runningHubVideoOutputControl = (workflow: RunningHubVideoWorkflow, key: RunningHubVideoOutputKey) => {
   const binding = workflow.mapping.parameters?.[key];
-  return binding ? resolveRunningHubVideoFieldControl(workflow, binding) : undefined;
+  if (!binding) return undefined;
+  const resolved = resolveRunningHubVideoFieldControl(workflow, binding);
+  if (key !== 'steps' || !resolved) return resolved;
+  const node = listRunningHubVideoNodes(workflow.requestTemplate, workflow.nodeCatalog)
+    .find((entry) => entry.nodeId === binding.nodeId && entry.fieldName === binding.inputName);
+  // A count can use a numeric editor even when the request serializes it as text.
+  // Keep cloud/user controls and the original request value; infer no bounds.
+  return node?.control || workflow.fieldControls?.[JSON.stringify([binding.nodeId, binding.inputName])]
+    ? resolved : { ...resolved, control: { kind: 'number' as const } };
 };
 
 /** Editing a display control never changes the node default, mapping or request. */
@@ -118,7 +129,7 @@ export const bindRunningHubVideoOutput = (workflow: RunningHubVideoWorkflow, key
   const conflict = runningHubVideoOutputConflict(workflow, key, binding);
   if (conflict) throw new Error(`${binding.nodeId}.${binding.inputName} 已绑定为${conflict}，请先在原位置解除绑定；不会覆盖或重命名已有映射。`);
   const node = listRunningHubVideoNodes(workflow.requestTemplate, workflow.nodeCatalog).find((entry) => entry.nodeId === binding.nodeId && entry.fieldName === binding.inputName);
-  if (!node || !['string', 'number'].includes(typeof node.fieldValue)) throw new Error('请选择真实的文本或数值节点字段；布尔值、数组和连线不能作为时长或分辨率输入。');
+  if (!node || !['string', 'number'].includes(typeof node.fieldValue)) throw new Error('请选择真实的文本或数值节点字段；布尔值、数组和连线不能作为生成参数输入。');
   if ((key === 'width' || key === 'height') && isRunningHubVideoMegapixelsBinding(workflow, binding)) throw new Error('MP 是总像素档位，请绑定到分辨率（像素 MP），不能作为像素宽度或高度。');
   const requestTemplate = ensureRunningHubVideoRequestNode(workflow.requestTemplate, node);
   parameters[key] = { ...binding };

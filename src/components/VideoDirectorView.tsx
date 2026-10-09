@@ -16,13 +16,14 @@ import { VideoOutputParameters } from './VideoOutputParameters';
 import { VideoExecutionControls, type VideoExecutionPreferences } from './VideoExecutionControls';
 import { useVideoTaskRuntime, type VideoRuntimeStore } from '../videoRuntimeStore';
 import type { AppSettings, Project, ReferenceAsset, ReferenceRole, VideoGenerationTask } from '../types';
-import type { ComfyVideoWorkflowPreset, VideoBatchStartInput, VideoGenerationController, VideoGenerationDraft, VideoGenerationRuntime, VideoGenerationStage, VideoImageReference, VideoPromptSource } from '../videoGenerationTypes';
+import type { ComfyVideoWorkflowPreset, VideoBatchStartInput, VideoGenerationController, VideoGenerationDraft, VideoGenerationRuntime, VideoGenerationStage, VideoImageReference, VideoPromptSource, VideoPromptFormat } from '../videoGenerationTypes';
 import { findReusableVideoTask, frozenVideoReferenceAsset } from '../videoProvenance';
 import { useCurrentVideoDraftImages, videoDraftReferenceAsset } from '../videoDirectorReferences';
 import {
   addVideoDraftAssets, applyVideoPromptChoice, applyVideoReferenceRoleOverrides, draftFromVideoTask, emptyVideoDraft,
   formatVideoElapsed, isVideoDirectorImage, videoExecutionElapsedMs, videoPromptChoices, videoPromptReferencePreviews,
   chapterIdForVideoLaunch, readVideoDirectorChapterDraft, videoDirectorChapterKey,
+  defaultVideoPromptFormat, videoPromptFormatLabel,
   type VideoDirectorLaunchRequest, type VideoDirectorChapterDraft, type VideoDirectorBatchDraft, type VideoPromptReferencePreview, videoImageRole,
 } from '../videoDirectorDraft';
 import {
@@ -65,7 +66,12 @@ export interface VideoDirectorViewProps {
 
 function RunningHubAutoPromptNotice({ api }: { api?: AppSettings['videoTaskApi'] | Omit<AppSettings['videoTaskApi'], 'apiKey'> }) {
   if (!api || !isRunningHubH3AutoPromptInput(api)) return null;
-  return <p className="vd-notice" role="status">当前云端应用会再次自动转换提示词。提交时会声明本次实际图片编号并要求保留原H3稿；云端仍可能改写并产生越界编号。如再次报“Picture未连接”，需作者修复转换环节，或使用可直传H3正文的工作流。此提醒不阻止生成。</p>;
+  return <p className="vd-notice" role="status">当前云端应用会再次自动转换提示词。提交时会声明实际图片编号，并要求保留原H3稿、连续攻防和动作承接；云端仍可能简化动作或产生越界编号。如问题持续，需作者修复转换环节，或使用可直传H3正文的工作流。此提醒不阻止生成。</p>;
+}
+
+function H3ActionNotice({ prompts }: { prompts: readonly string[] }) {
+  if (!prompts.some((prompt) => /(?:^|\r?\n)[ \t]*(?:subject_definitions|integrated_multimodal_description)[ \t]*:/u.test(prompt))) return null;
+  return <p className="field-hint" role="status" aria-label="H3动作生成建议">H3连续攻防建议先检查逐镜攻击、挡闪、接触反馈和动作承接。复杂近身交互可先用4–8秒片段对比效果，再按剧情衔接；这是可选建议，原时长照常提交，不自动拆段或增加任务。旧稿需主动重新生成提示词才会应用新版动作编排。</p>;
 }
 
 function SavedReferencePromptPreview({ preview, onOpenPrompt }: {
@@ -98,7 +104,7 @@ function VideoH3ReferenceNotices({ project, draft, warnings = [], onRepair, onRe
   const issues = [...new Set(warnings)].filter((message) => !isVideoH3ReferenceInfo(message));
   const information = [...new Set(warnings)].filter(isVideoH3ReferenceInfo);
   const storyboardId = draft.source?.storyboardId;
-  const canRepair = Boolean(onRepair && storyboardId && !draft.reuseTaskId
+  const canRepair = Boolean(onRepair && storyboardId && !draft.reuseTaskId && (!draft.source?.promptFormat || draft.source.promptFormat === 'h3')
     && project.storyboards.some((board) => board.id === storyboardId));
   const repair = async () => {
     if (!canRepair || !onRepair || !storyboardId || inFlight.current) return;
@@ -319,7 +325,7 @@ export function VideoTaskCard({ task, assets, runtime: fallbackRuntime, runtimeS
       {onCancel && (!isTerminal || task.status === 'unknown' || tailPresentation.canCancel || continuePreparation) && !cancelledBeforePost && <button type="button" className="btn small" disabled={Boolean(busy)} onClick={() => { void act('cancel', onCancel); }}>{busy === 'cancel' ? '处理中…' : tailPresentation.canCancel || continuePreparation ? '取消尚未提交任务' : task.status === 'unknown' ? '停止本地追踪' : '停止 / 取消本任务'}</button>}
       {asset?.relativePath && <button type="button" className="btn small" onClick={() => { void window.lianhuaDesktop?.revealAsset?.(asset.relativePath!).catch((cause: unknown) => setActionError(cause)); }}>打开文件位置</button>}
     </div>
-    {snapshot && <details className="vd-details"><summary>查看本次生成快照</summary>{task.videoJob?.legacyMetadataIncomplete && <p className="vd-notice">旧任务历史参数不完整，仅恢复查询 / 下载，不能保证按原设置重新生成。</p>}<div className="vd-task-meta"><span>{snapshot.draft.source?.label || '手动提示词'}</span><span>{snapshot.draft.source?.language === 'en' ? '已有英文描述，未翻译对白' : '中文 / 手动提示词'}</span><span>参考图片 {snapshot.images.length} 张</span></div><pre className="vd-prompt-preview">{snapshot.draft.prompt}</pre><div className="vd-task-meta">{snapshot.images.map((reference, index) => <span key={`${reference.assetId}-${index}`}>{index + 1}. {reference.name}（{imageRoleLabel(reference.role)}）</span>)}</div><pre className="vd-code">{JSON.stringify(snapshot.draft.parameters, null, 2)}</pre></details>}
+    {snapshot && <details className="vd-details"><summary>查看本次生成快照</summary>{task.videoJob?.legacyMetadataIncomplete && <p className="vd-notice">旧任务历史参数不完整，仅恢复查询 / 下载，不能保证按原设置重新生成。</p>}<div className="vd-task-meta"><span>{snapshot.draft.source?.label || '手动提示词'} · {videoPromptFormatLabel(snapshot.draft.source?.promptFormat)}</span><span>{snapshot.draft.source?.language === 'en' ? '已有英文描述，未翻译对白' : '中文 / 手动提示词'}</span><span>参考图片 {snapshot.images.length} 张</span></div><pre className="vd-prompt-preview">{snapshot.draft.prompt}</pre><div className="vd-task-meta">{snapshot.images.map((reference, index) => <span key={`${reference.assetId}-${index}`}>{index + 1}. {reference.name}（{imageRoleLabel(reference.role)}）</span>)}</div><pre className="vd-code">{JSON.stringify(snapshot.draft.parameters, null, 2)}</pre></details>}
   </article>;
 }
 
@@ -594,7 +600,7 @@ const videoBatchRetryEntries = (
     const language = source?.language === 'en' || task.batchItemKey?.endsWith(':en') ? 'en' : 'zh';
     return [{
       task, draft, planId, segmentId, storyboardId, language,
-      key: videoPromptChoiceKey(storyboardId, language),
+      key: videoPromptChoiceKey(storyboardId, language, source?.promptFormat),
     }];
   });
 };
@@ -735,6 +741,10 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
   const [query, setQuery] = useState(initialBatch?.query || '');
   const [selectedKeys, setSelectedKeys] = useState<Set<VideoPromptChoiceKey>>(() => new Set((initialBatch?.selectedKeys as VideoPromptChoiceKey[] | undefined) || retryEntries.map((entry) => entry.key)));
   const [languages, setLanguages] = useState<Record<string, 'zh' | 'en'>>(() => initialBatch?.languages || Object.fromEntries(retryEntries.map((entry) => [entry.segmentId, entry.language])));
+  const [promptFormat, setPromptFormat] = useState<VideoPromptFormat>(() => retryPrimary?.draft.source?.promptFormat || initialBatch?.promptFormat || initialDraft.source?.promptFormat || defaultVideoPromptFormat(project, initialDraft.source?.storyboardId));
+  const [promptFormats, setPromptFormats] = useState<Record<string, VideoPromptFormat>>(initialBatch?.promptFormats || {});
+  const [reviewFrozenFormats, setReviewFrozenFormats] = useState(Boolean(retryPrimary));
+  const [reviewLegacyDraft, setReviewLegacyDraft] = useState(Boolean(initialBatch && !initialBatch.promptFormat));
   const [referenceOverrides, setReferenceOverrides] = useState<Record<string, VideoImageReference[]>>(initialBatch?.referenceOverrides || {});
   const [referenceRoleOverrides, setReferenceRoleOverrides] = useState<Record<string, ReferenceRole[]>>(initialBatch?.referenceRoleOverrides || {});
   const [automaticTails, setAutomaticTails] = useState<Record<string, AutomaticVideoTailConfiguration>>(initialBatch?.automaticTails || {});
@@ -760,10 +770,11 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
   useEffect(() => {
     batchDraftChangeRef.current({ planId, backend, workflowId, apiProfileId, runningHubWorkflowId, parameterText,
       parameterDrafts: [...parameterDrafts.current], selectedKeys: [...selectedKeys], languages,
+      promptFormat: reviewLegacyDraft ? undefined : promptFormat, promptFormats: reviewLegacyDraft ? undefined : promptFormats,
       referenceOverrides, referenceRoleOverrides, automaticTails, tailCharacterModes,
       previewSegmentId, previewPane, settingsCollapsed, query });
-  }, [planId, backend, workflowId, apiProfileId, runningHubWorkflowId, parameterText, selectedKeys, languages,
-    referenceOverrides, referenceRoleOverrides, automaticTails, tailCharacterModes, previewSegmentId, previewPane, settingsCollapsed, query]);
+  }, [planId, backend, workflowId, apiProfileId, runningHubWorkflowId, parameterText, selectedKeys, languages, promptFormat, promptFormats,
+    referenceOverrides, referenceRoleOverrides, automaticTails, tailCharacterModes, previewSegmentId, previewPane, settingsCollapsed, query, reviewLegacyDraft]);
   const submittingRef = useRef(false);
   const mountedRef = useRef(true);
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
@@ -819,10 +830,10 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
     const result: Partial<Record<VideoPromptChoiceKey, VideoImageReference[]>> = {};
     plan?.segments.forEach((segment) => {
       const references = referenceOverrides[segment.id];
-      if (references && segment.storyboardId) for (const language of ['zh', 'en'] as const) result[videoPromptChoiceKey(segment.storyboardId, language)] = references;
+      if (references && segment.storyboardId) for (const language of ['zh', 'en'] as const) result[videoPromptChoiceKey(segment.storyboardId, language, reviewLegacyDraft ? undefined : promptFormats[segment.id] || promptFormat)] = references;
     });
     return result;
-  }, [plan, referenceOverrides]);
+  }, [plan, referenceOverrides, promptFormat, promptFormats, reviewLegacyDraft]);
   const retryEntriesBySegment = useMemo(() => new Map(retryEntries
     .filter((entry) => entry.planId === planId)
     .map((entry) => [entry.segmentId, entry])), [retryEntries, planId]);
@@ -830,6 +841,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
     if (!plan) return [];
     const built = buildVideoBatchRows(project, plan, settings, {
       backend, workflowId: workflowId || undefined, apiProfileId, runningHubWorkflowId, parameters: parameters.value, referenceOverrides: overridesByChoice,
+      promptFormat: reviewLegacyDraft ? undefined : promptFormat, promptFormats: reviewLegacyDraft ? undefined : promptFormats,
     });
     return built.map((row): VideoBatchRow => {
       const roles = referenceRoleOverrides[row.segmentId];
@@ -837,7 +849,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
         zh: row.zh && { ...row.zh, draft: { ...row.zh.draft, referenceSlotRoles: [...roles] } },
         en: row.en && { ...row.en, draft: { ...row.en.draft, referenceSlotRoles: [...roles] } },
       };
-      const retry = retryEntriesBySegment.get(row.segmentId);
+      const retry = reviewFrozenFormats ? retryEntriesBySegment.get(row.segmentId) : undefined;
       if (!retry) return row;
       const useFrozenSnapshot = retry.draft.backend === backend
         && retry.draft.runningHubWorkflowId === runningHubWorkflowId
@@ -878,6 +890,8 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
         updatedAt: retry.task.createdAt,
         segmentIndex: row.segmentIndex,
         version: '失败任务原始快照',
+        promptFormat: retry.draft.source?.promptFormat,
+        sourceFingerprint: retry.draft.source?.sourceFingerprint,
       };
       const storedFingerprint = videoTaskRequestFingerprint(retry.task);
       const snapshotStillExact = useFrozenSnapshot
@@ -904,7 +918,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
         ? { ...row, durationSec: choice.durationSec, zh: candidate }
         : { ...row, durationSec: choice.durationSec, en: candidate };
     });
-  }, [plan, project, settings, backend, workflowId, apiProfileId, runningHubWorkflowId, parameters.value, parameterText, retryParameterBaselineText, overridesByChoice, referenceOverrides, referenceRoleOverrides, retryEntriesBySegment]);
+  }, [plan, project, settings, backend, workflowId, apiProfileId, runningHubWorkflowId, parameters.value, parameterText, retryParameterBaselineText, overridesByChoice, referenceOverrides, referenceRoleOverrides, retryEntriesBySegment, promptFormat, promptFormats, reviewFrozenFormats, reviewLegacyDraft]);
   // Automatic defaults are only for untouched rows. An explicitly empty
   // selection is intentional too; never restore deselected identity images.
   const hasEditedTailReferences = (segmentId: string): boolean => Boolean(tailCharacterModes[segmentId]?.editedReferences)
@@ -966,9 +980,21 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
       return { ...row, zh: decorate(row.zh), en: decorate(row.en) };
     }), [baseRows, automaticTails, tailCharacterModes, characterDrafts, project.assets, referenceUsageContext, retryConnection, settings]);
   const referencePreviews = useMemo(() => videoPromptReferencePreviews(project, chapterId), [project, chapterId]);
-  const rowReferencePreview = (row: VideoBatchRow, language: 'zh' | 'en') => referencePreviews.find((entry) => entry.storyboardId === row.storyboardId && entry.language === language);
+  const rowReferencePreview = (row: VideoBatchRow, language: 'zh' | 'en') => (reviewLegacyDraft || (promptFormats[row.segmentId] || promptFormat) === 'h3')
+    ? referencePreviews.find((entry) => entry.storyboardId === row.storyboardId && entry.language === language) : undefined;
   const rowLanguage = (row: VideoBatchRow): 'zh' | 'en' => languages[row.segmentId] || (row.zh || rowReferencePreview(row, 'zh') ? 'zh' : 'en');
   const rowChoice = (row: VideoBatchRow): VideoBatchChoiceCandidate | undefined => row[rowLanguage(row)];
+  const changePromptFormat = (format: VideoPromptFormat, segmentId?: string) => {
+    setReviewFrozenFormats(false); setReviewLegacyDraft(false); setConfirmation(undefined);
+    setSelectedKeys(new Set());
+    if (segmentId) {
+      setPromptFormats((current) => ({ ...current, [segmentId]: format }));
+      setReferenceOverrides((current) => { const next = { ...current }; delete next[segmentId]; return next; });
+      setReferenceRoleOverrides((current) => { const next = { ...current }; delete next[segmentId]; return next; });
+    } else { setPromptFormat(format); setPromptFormats({}); setReferenceOverrides({}); setReferenceRoleOverrides({}); }
+    setAutomaticTails({}); setTailCharacterModes({});
+    setNotice(`已选择${videoPromptFormatLabel(format)}稿件，请核对正文、重新选择生成段与参考图；尚未提交视频。`);
+  };
   const visibleRows = rows.filter((row) => `${row.title} 第${row.segmentIndex}段 第 ${row.segmentIndex} 段`.toLocaleLowerCase('zh-CN').includes(query.trim().toLocaleLowerCase('zh-CN')));
   const selected = rows.flatMap((row) => [row.zh, row.en].filter((candidate): candidate is VideoBatchChoiceCandidate => Boolean(candidate && selectedKeys.has(candidate.key))));
   const shouldRegenerate = (candidate: VideoBatchChoiceCandidate): boolean => (
@@ -1284,18 +1310,21 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
       {settingsCollapsed && <div className="vd-batch-settings-summary" aria-label="当前批量设置摘要">
         <span>计划：{plan ? `${plan.title || plan.sourceStoryTitle} · ${plan.segments.length} 段` : '尚无已分段计划'}</span>
         <span>{connectionLabel}</span>
-        <span className={parameters.issue ? 'vd-batch-settings-wide vd-batch-settings-warning' : 'vd-batch-settings-wide'}>{parameters.issue ? '公共参数 JSON 有误，请展开设置修正；原文本已保留。' : retryEntriesBySegment.size > 0 && parameterText === retryParameterBaselineText ? '失败重试项保留各段原参数；时长与分辨率请在确认清单逐段核对。' : videoOutputParameterSummary(parameters.value, presentationApi) || '时长与分辨率：保留接口 / 工作流原值'}</span>
+        <span className={parameters.issue ? 'vd-batch-settings-wide vd-batch-settings-warning' : 'vd-batch-settings-wide'}>{parameters.issue ? '公共参数 JSON 有误，请展开设置修正；原文本已保留。' : retryEntriesBySegment.size > 0 && parameterText === retryParameterBaselineText ? '失败重试项保留各段原参数；生成参数请在确认清单逐段核对。' : videoOutputParameterSummary(parameters.value, presentationApi) || '生成参数：保留接口 / 工作流原值'}</span>
         {query.trim() && <span className="vd-batch-settings-wide">筛选：“{query.trim()}” · 显示 {visibleRows.length} / {rows.length} 段，已有选择保留</span>}
         {regenerateSucceeded && <span className="vd-batch-settings-wide vd-batch-settings-warning">已开启重新生成已成功项（保留原视频，可能再次收费）</span>}
       </div>}
     </div>
     <div id="vd-batch-settings-content" className="vd-batch-controls" hidden={settingsCollapsed}>
+      <label className="field"><span>批量提示词格式</span><select aria-label="批量提示词格式" value={promptFormat} disabled={interactionLocked} onChange={(event) => changePromptFormat(event.target.value as VideoPromptFormat)}><option value="h3">H3</option><option value="seedance">Seedance</option><option value="ordinary">普通稿</option></select></label>
+      <p className="field-hint">格式决定本次提交的正文，可在每段单独选择；接口模型继续使用下方连接设置。{reviewFrozenFormats ? '当前复核失败任务的原始快照；切换格式后需重新选段。' : reviewLegacyDraft ? '当前保留旧草稿来源；切换格式后需重新选段。' : ''}</p>
       <div className="vd-batch-configuration">
         <label className="field"><span>全片计划</span><select aria-label="批量全片计划" value={planId} disabled={submitting} onChange={(event) => changePlan(event.target.value)}>{!plans.length && <option value="">尚无已分段计划</option>}{plans.map((item) => <option key={item.id} value={item.id}>{item.title || item.sourceStoryTitle} · {item.segments.length} 段</option>)}</select></label>
         <label className="field"><span>生成方式</span><select aria-label="批量生成方式" value={sourceKind} disabled={submitting} onChange={(event) => { const source = event.target.value as 'api' | 'comfyui' | 'runninghub'; switchParameterConnection({ backend: source === 'comfyui' ? 'comfyui' : 'api', runningHubWorkflowId: source === 'runninghub' ? settings.runningHubVideo?.activeWorkflowId || '__runninghub_unselected__' : undefined, apiProfileId: source === 'runninghub' ? '' : apiProfileId }); }}><option value="api">视频 API</option><option value="comfyui">ComfyUI</option><option value="runninghub">RunningHub 云端</option></select></label>
         <label className="field"><span>{sourceKind === 'runninghub' ? '云端工作流' : backend === 'comfyui' ? '视频工作流' : '视频 API 配置'}</span>{sourceKind === 'runninghub' ? <select aria-label="批量 RunningHub 云端工作流" value={runningHubWorkflowId || '__runninghub_unselected__'} disabled={submitting} onChange={(event) => switchParameterConnection({ runningHubWorkflowId: event.target.value })}>{retryConnection?.api ? <option value={runningHubWorkflowId}>原失败批次云端快照 · {retryConnection.api.model}</option> : <option value="__runninghub_unselected__" disabled>请选择云端工作流</option>}{settings.runningHubVideo?.workflows.filter((item) => !(retryConnection?.api && item.id === runningHubWorkflowId)).map((item) => <option key={item.id} value={item.id} disabled={!isRunningHubVideoWorkflowReady(item)}>{item.name}</option>)}</select> : backend === 'comfyui' ? <select aria-label="批量视频工作流" value={workflowId} disabled={submitting} onChange={(event) => switchParameterConnection({ workflowId: event.target.value })}>{retryConnection?.backend === 'comfyui' && retryConnection.workflow ? <option value={workflowId}>原失败批次快照 · {retryConnection.workflow.name}</option> : <option value="" disabled>请选择工作流</option>}{settings.comfyuiVideo?.workflows.filter((item) => !(retryConnection?.backend === 'comfyui' && item.id === workflowId)).map((item) => <option key={item.id} value={item.id}>{item.name} · {item.mapping.images.length} 个图片槽</option>)}</select> : <select aria-label="批量视频 API 配置" value={apiProfileId} disabled={submitting} onChange={(event) => switchParameterConnection({ apiProfileId: event.target.value })}>{retryConnection?.backend === 'api' && retryConnection.api ? <option value={apiProfileId}>原失败批次 API 快照 · {retryConnection.api.model || '未记录模型'}</option> : <option value="">当前视频 API 配置</option>}{settings.videoApiProfiles?.filter((item) => !(retryConnection?.backend === 'api' && item.id === apiProfileId)).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>}</label>
       </div>
       <RunningHubAutoPromptNotice api={api} />
+      <H3ActionNotice prompts={selected.map((candidate) => candidate.draft.prompt)} />
       <div className="vd-batch-toolbar">
         <input type="search" aria-label="搜索批量视频段" placeholder="搜索段标题或段号" value={query} onChange={(event) => setQuery(event.target.value)} />
         <button className="btn small" disabled={submitting || !rows.length} onClick={() => selectAll('zh')}>全选中文</button>
@@ -1307,7 +1336,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
         <label className="check-row vd-batch-regenerate-success"><input type="checkbox" aria-label="重新生成已成功项" checked={regenerateSucceeded} disabled={submitting} onChange={(event) => setRegeneration(event.target.checked)} />重新生成已成功项（保留原视频，可能再次收费）</label>
       </div>
       <VideoOutputParameters scope="batch" source={sourceKind} parameterText={parameterText} availableKeys={parameterKeys} {...videoOutputParameterPresentation(presentationApi, parameters.value)} requiresMapping={sourceKind !== 'api' || api?.provider === 'runninghub'} disabled={interactionLocked} onChange={updateParameter} onOpenSettings={onOpenSettings} />
-      <details className="vd-batch-advanced"><summary>高级公共参数 JSON · 不填写则保持接口 / 工作流原值</summary><div><p>覆盖值用于本批次全部所选段；不会自动改动时长、种子或采样。每段参考图独立，不继承单段草稿选图。</p><textarea aria-label="批量公共参数 JSON" className="vd-code" rows={3} value={parameterText} disabled={submitting} onChange={(event) => setParameterText(event.target.value)} /></div></details>
+      <details className="vd-batch-advanced"><summary>高级公共参数 JSON · 不填写则保持接口 / 工作流原值</summary><div><p>显式填写的覆盖值用于本批次全部所选段；未填写的时长、种子与采样参数保持原值。每段参考图独立，不继承单段草稿选图。</p><textarea aria-label="批量公共参数 JSON" className="vd-code" rows={3} value={parameterText} disabled={submitting} onChange={(event) => setParameterText(event.target.value)} /></div></details>
     </div>
     <div className="vd-batch-responsive-tabs" role="tablist" aria-label="批量工作区域"><button role="tab" aria-selected={compactPane === 'list'} className={`btn small ${compactPane === 'list' ? 'primary' : ''}`} onClick={() => setCompactPane('list')}>分段清单</button><button role="tab" aria-selected={compactPane === 'preview'} className={`btn small ${compactPane === 'preview' ? 'primary' : ''}`} onClick={() => setCompactPane('preview')}>当前段预览</button></div>
     <div className="vd-batch-columns" data-pane={compactPane}>
@@ -1323,6 +1352,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
             <label className="vd-batch-check"><input type="checkbox" aria-label={`选择第 ${row.segmentIndex} 段`} checked={selectedRow} disabled={!candidate || submitting} onChange={() => { if (!candidate) return; setSelectedKeys((current) => { const next = new Set(current); const other = row[candidate.language === 'zh' ? 'en' : 'zh']; if (other) next.delete(other.key); return toggleVideoBatchChoice(next, candidate.key); }); }} /></label>
             <div className="vd-batch-row-main"><strong title={row.title}>第 {row.segmentIndex} 段 · {row.title}</strong><span>原分段计划 {plan?.segments.find((segment) => segment.id === row.segmentId)?.durationSec ?? row.durationSec} 秒 · {automatic ? '等待上段衔接帧后生成' : candidate?.duplicate && hasAutomaticSelection && selectedRow && !shouldRegenerate(candidate) ? '存在相同任务，待整链核对' : candidate?.duplicate?.kind === 'in-flight' ? '已在队列，将跳过' : candidate?.duplicate?.kind === 'succeeded' ? regenerateSucceeded ? '已生成，将重新生成' : '已生成，将跳过' : candidate?.draft.reuseTaskId ? '失败任务快照，待复核' : '尚未生成'} · {automatic ? '最终参考图' : '参考图'} {candidate ? intendedReferenceCount(candidate) : 0} 张{backend === 'comfyui' ? ` / ${workflow?.mapping.images.length || 0} 个槽` : ''}</span>{candidate && outputSummaryForDraft(candidate.draft) && <small className="vop-request-summary">{outputSummaryForDraft(candidate.draft)}</small>}{automatic && <small className="vd-auto-tail-badge">自动衔接：第 {automatic.predecessorSegmentIndex} 段 → {automatic.selectionMode === 'ai-assisted' ? 'AI 辅助选帧 → ' : '本地末帧 → '}图片槽 {automatic.placement.index + 1} · {automatic.placement.semantics === 'first-frame' ? '首帧输入' : '普通衔接参考（不保证严格首帧）'}</small>}{issue && <small className="vd-error">{issue}</small>}</div>
             <div className="vd-batch-row-tools">
+              <label className="field"><span>提示词格式</span><select aria-label={`第 ${row.segmentIndex} 段提示词格式`} value={candidate && !candidate.choice.promptFormat ? 'legacy' : candidate?.choice.promptFormat || promptFormats[row.segmentId] || promptFormat} disabled={interactionLocked} onChange={(event) => changePromptFormat(event.target.value as VideoPromptFormat, row.segmentId)}>{candidate && !candidate.choice.promptFormat && <option value="legacy" disabled>历史稿（保留正文）</option>}<option value="h3">H3</option><option value="seedance">Seedance</option><option value="ordinary">普通稿</option></select></label>
               <div className="vd-batch-language" role="group" aria-label={`第 ${row.segmentIndex} 段稿件语言`}>{(['zh', 'en'] as const).map((language) => <button type="button" key={language} className={`btn small ${rowLanguage(row) === language ? 'primary' : ''}`} title={row[language] ? '只切换已保存的稿件，不翻译或重新生成提示词' : rowReferencePreview(row, language) ? '查看保存的原稿；参考图待更新，尚不能提交' : '尚无此语言的已保存稿件，不会自动生成'} aria-pressed={rowLanguage(row) === language} disabled={(!row[language] && !rowReferencePreview(row, language)) || interactionLocked} onClick={() => selectLanguage(row, language)}>{language === 'zh' ? '中文' : '英文'}</button>)}</div>
               <button type="button" className="btn small" title="查看已有提示词和本次图片，不重新生成提示词" onClick={() => { setPreviewSegmentId(row.segmentId); setCompactPane('preview'); }}>预览</button>
               <button type="button" className="btn small" aria-label={`第 ${row.segmentIndex} 段选择参考图`} title={savedPreview ? '回提示词导演台更新原稿的参考图引用' : '只选择本段图片和槽位用途，不重新生成提示词'} disabled={(!candidate && !(savedPreview && onOpenPrompt)) || interactionLocked} onClick={() => { if (savedPreview) onOpenPrompt?.(savedPreview.storyboardId, { storyboardId: savedPreview.storyboardId, language: savedPreview.language }); else setImageSegmentId(row.segmentId); }}>{savedPreview ? '更新参考图' : '选择参考图'}</button>
@@ -1338,7 +1368,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
       </div>
       <aside className="vd-batch-preview" aria-label="所选段预览">
         <div className="vd-batch-preview-head"><strong>{previewRow ? `第 ${previewRow.segmentIndex} 段 · ${previewRow.title}` : '分段预览'}</strong><div className="vd-mode-tabs" role="tablist" aria-label="批量段预览内容"><button role="tab" aria-selected={previewPane === 'prompt'} className={`btn small ${previewPane === 'prompt' ? 'primary' : ''}`} onClick={() => setPreviewPane('prompt')}>完整提示词</button><button role="tab" aria-selected={previewPane === 'references'} className={`btn small ${previewPane === 'references' ? 'primary' : ''}`} onClick={() => setPreviewPane('references')}>参考图与用途</button></div></div>
-        <div className="vd-batch-preview-body">{previewChoice ? previewPane === 'prompt' ? <><p className="field-hint">{previewChoice.language === 'zh' ? '已有中文稿' : '已有英文描述，对白语言不变'} · {previewChoice.choice.version}{tailCharacterModes[previewChoice.segmentId] ? ' · 本次图片编号已同步，原稿未改动' : ''}</p><pre className="vd-prompt-preview">{previewChoice.draft.prompt}</pre></> : <div className="vd-batch-reference-preview">
+        <div className="vd-batch-preview-body">{previewChoice ? previewPane === 'prompt' ? <><p className="field-hint">{videoPromptFormatLabel(previewChoice.draft.source?.promptFormat)} · {previewChoice.language === 'zh' ? '已有中文稿' : '已有英文描述，对白语言不变'} · {previewChoice.choice.version}{tailCharacterModes[previewChoice.segmentId] ? ' · 本次图片编号已同步，原稿未改动' : ''}</p><pre className="vd-prompt-preview">{previewChoice.draft.prompt}</pre></> : <div className="vd-batch-reference-preview">
           {automaticTails[previewChoice.segmentId] && <p className="vd-notice">待生成衔接帧：等待第 {automaticTails[previewChoice.segmentId].predecessorSegmentIndex} 段保存后，{automaticTails[previewChoice.segmentId].selectionMode === 'ai-assisted' ? '由 AI 从末尾候选画面选择；AI 失败时保留待处理，不改用原尾帧。较早帧可能动作回退，原视频不自动裁剪。' : '本地直接提取真实最后一帧，不调用视觉 API。'}{automaticTails[previewChoice.segmentId].placement.label}。{automaticTails[previewChoice.segmentId].placement.warning || ''}</p>}
           {automaticTails[previewChoice.segmentId]?.placement.mode === 'prepend' && <div className="vd-tail-will-replace" aria-label="图片槽1等待本地真实末帧"><span>1. 等待上一段本地真实末帧<small>画面、构图与动作衔接；人物身份参考后续图片</small></span></div>}
           {tailCharacterModes[previewChoice.segmentId] && <p className="vd-notice">末帧用于开场画面衔接，其它图片按本段用途作为人物、场景或其它参考；类型不匹配仅提示。人物图只固定身份，服装按当前剧情和逐镜状态；原稿未改动。{characterDrafts.get(previewChoice.key)?.notices?.join('')}{tailCharacterModes[previewChoice.segmentId].kind === 'static' ? getVideoTailCharacterPlacement({ ...usageContextForDraft(previewChoice.draft), references: characterDrafts.get(previewChoice.key)?.draft.references || [] }).placement?.warning : ''}</p>}
@@ -1373,7 +1403,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
         const predecessor = dependency && confirmation.candidates.find((item) => item.key === dependency.predecessorItemKey);
         const original = dependency?.placement.replacedAssetId ? referenceAssets(candidate).find((asset) => asset.id === dependency.placement.replacedAssetId) : undefined;
         const semantics = automaticTails[candidate.segmentId]?.placement;
-        return <div key={candidate.key}><strong>第 {candidate.segmentIndex} 段 · {candidate.choice.label}</strong><span>{candidate.language === 'zh' ? '中文' : '英文描述'} · 原分段计划 {plan?.segments.find((segment) => segment.id === candidate.segmentId)?.durationSec ?? candidate.choice.durationSec} 秒 · {intendedReferenceCount(candidate)} 张图 · {videoBatchConfirmationItemStatus(candidate, inputItem, hasAutomaticSelection)}</span>
+        return <div key={candidate.key}><strong>第 {candidate.segmentIndex} 段 · {candidate.choice.label}</strong><span>{videoPromptFormatLabel(candidate.draft.source?.promptFormat)} · {candidate.language === 'zh' ? '中文' : '英文描述'} · 原分段计划 {plan?.segments.find((segment) => segment.id === candidate.segmentId)?.durationSec ?? candidate.choice.durationSec} 秒 · {intendedReferenceCount(candidate)} 张图 · {videoBatchConfirmationItemStatus(candidate, inputItem, hasAutomaticSelection)}</span>
           <span className="vop-request-summary">{outputSummaryForDraft(inputItem?.draft || candidate.draft) || '请求时长与分辨率：保留工作流 / 接口原值'}</span>
           {dependency && <><span className="vd-auto-tail-badge">第 {predecessor?.segmentIndex} 段（{predecessor?.language === 'en' ? '英文稿' : '中文稿'}）完成并保存 → {dependency.selectionMode === 'ai-assisted' ? 'AI 辅助选帧' : '本地提取真实末帧'} → 本段图片槽 {dependency.placement.index + 1}</span><span>{dependency.placement.mode === 'prepend' ? '图片1使用衔接帧；已选人物、场景或其它参考图顺延至图片2起，各自用途保留，提示词图片编号同步。原选图和原稿保留。' : dependency.placement.mode === 'replace-all' ? `本段全部 ${dependency.placement.replacedReferences?.length} 张参考图替换为 1 张上段衔接帧；原资产保留。` : dependency.placement.mode === 'replace' ? `将替换：${original?.name || dependency.placement.replacedAssetId || '原参考图'}；原资产保留。` : '追加衔接帧，其他参考图位置不变。'}{semantics?.semantics === 'first-frame' ? '作为首帧输入。' : '仅作普通衔接参考，不保证严格从该帧开始。'}</span></>}
           {!dependency && tailCharacterModes[candidate.segmentId]?.kind === 'static' && <span>图片1：已选本地真实末帧；图片2起：本段已选人物、场景或其它参考图，按各自用途使用。原选图和原稿保留。{getVideoTailCharacterPlacement({ ...usageContextForDraft(candidate.draft), references: characterDrafts.get(candidate.key)?.draft.references || [] }).placement?.warning}</span>}
@@ -1405,6 +1435,7 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
   const [picker, setPicker] = useState<'prompt' | 'images' | undefined>();
   const [promptQuery, setPromptQuery] = useState('');
   const [promptLanguage, setPromptLanguage] = useState<'all' | 'zh' | 'en'>('all');
+  const [promptFormat, setPromptFormat] = useState<VideoPromptFormat>(() => initial?.draft.source?.promptFormat || defaultVideoPromptFormat(project, initial?.draft.source?.storyboardId));
   const [pickedPromptId, setPickedPromptId] = useState('');
   const [includeReferences, setIncludeReferences] = useState(true);
   const [imageQuery, setImageQuery] = useState('');
@@ -1418,9 +1449,10 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
   const projectIdRef = useRef(project.id);
   const mountedRef = useRef(true);
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
-  const choices = useMemo(() => videoPromptChoices(project, chapterId), [project, chapterId]);
-  const referencePreviews = useMemo(() => videoPromptReferencePreviews(project, chapterId), [project, chapterId]);
-  const draftReferencePreview = !draft.reuseTaskId ? referencePreviews.find((entry) => entry.storyboardId === draft.source?.storyboardId && entry.language === (draft.source?.language || 'zh')) : undefined;
+  const choices = useMemo(() => videoPromptChoices(project, chapterId, promptFormat), [project, chapterId, promptFormat]);
+  const referencePreviews = useMemo(() => videoPromptReferencePreviews(project, chapterId, promptFormat), [project, chapterId, promptFormat]);
+  const draftReferencePreview = !draft.reuseTaskId && (!draft.source?.promptFormat || draft.source.promptFormat === 'h3')
+    ? videoPromptReferencePreviews(project, chapterId).find((entry) => entry.storyboardId === draft.source?.storyboardId && entry.language === (draft.source?.language || 'zh')) : undefined;
   const images = useMemo(() => project.assets.filter(isVideoDirectorImage), [project.assets]);
   const reusedSnapshot = draft.reuseTaskId ? findReusableVideoTask(project, draft.reuseTaskId)?.videoJob?.snapshot : undefined;
   const reusedConnection = reusedSnapshot?.connection.backend === draft.backend && reusedSnapshot.draft.runningHubWorkflowId === draft.runningHubWorkflowId ? reusedSnapshot.connection : undefined;
@@ -1501,6 +1533,12 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
   const presentationApi = useMemo(() => videoConfiguredApiState(settings, { ...draft, parameters: parsedParameters.value }, reusedConnection?.api).api || activeApi,
     [settings, draft, parsedParameters.value, reusedConnection, activeApi]);
   const patchDraft = (patch: Partial<VideoGenerationDraft>) => setDraft((current) => ({ ...current, ...patch }));
+  const selectDraftSource = (format: VideoPromptFormat, language: 'zh' | 'en') => {
+    const choice = videoPromptChoices(project, chapterId, format).find((entry) => entry.storyboardId === draft.source?.storyboardId && entry.language === language);
+    if (!choice) { setError(`该段尚无当前${videoPromptFormatLabel(format)}${language === 'zh' ? '中文' : '英文'}稿，请在提示词导演台生成后再选择。现有正文已保留。`); return; }
+    setDraft(applyVideoPromptChoice({ ...draft, references: [], referenceSlotRoles: undefined }, choice, project, true));
+    setPromptFormat(format); setError(''); setNotice(`已带入${videoPromptFormatLabel(format)}${language === 'zh' ? '中文' : '英文'}正文与源稿参考图，请核对后生成视频。`);
+  };
   const switchParameterConnection = (patch: Partial<VideoGenerationDraft>) => {
     const next = { ...draft, ...patch };
     const currentKey = videoParameterConnectionKey(draft);
@@ -1545,11 +1583,13 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
       else { setError('该旧任务没有完整的原始参数快照，不能按原设置复用。已有草稿没有改动；可在任务记录中恢复查询或仅下载。'); return; }
     }
     if (launchRequest.storyboardId) {
-      const choice = choices.find((entry) => entry.storyboardId === launchRequest.storyboardId && entry.language === (launchRequest.language || 'zh'));
+      const launchChoices = videoPromptChoices(project, chapterId, launchRequest.promptFormat);
+      const choice = launchChoices.find((entry) => entry.storyboardId === launchRequest.storyboardId && entry.language === (launchRequest.language || 'zh'));
       if (choice) next = applyVideoPromptChoice({ ...next, reuseTaskId: undefined }, choice, project, true);
       else {
-        const saved = referencePreviews.find((entry) => entry.storyboardId === launchRequest.storyboardId && entry.language === (launchRequest.language || 'zh'));
-        if (saved) { setError(saved.referenceNotice); setPickedPromptId(saved.id); setPicker('prompt'); }
+        const previewFormat = launchRequest.promptFormat || 'h3';
+        const saved = videoPromptReferencePreviews(project, chapterId, previewFormat).find((entry) => entry.storyboardId === launchRequest.storyboardId && entry.language === (launchRequest.language || 'zh'));
+        if (saved) { setPromptFormat(previewFormat); setError(saved.referenceNotice); setPickedPromptId(saved.id); setPicker('prompt'); }
         else setError(launchRequest.language === 'en' ? '所选段还没有可用的当前英文描述。已有草稿没有改动，请在提示词导演台生成当前英文描述后再选择。' : '所选提示词还没有可用稿件，请从提示词导演台生成后再选择。');
         return;
       }
@@ -1557,6 +1597,7 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
     if (launchRequest.assetIds?.length) next = addVideoDraftAssets({ ...next, reuseTaskId: undefined }, launchRequest.assetIds, project.assets);
     next = applyVideoReferenceRoleOverrides(next, launchRequest.referenceRoleOverrides);
     setDraft(next); setParameterText(JSON.stringify(next.parameters, null, 2));
+    setPromptFormat(next.source?.promptFormat || defaultVideoPromptFormat(project, next.source?.storyboardId));
     setNotice('内容已带入本次生成草稿；确认并点击“生成视频”后才会提交任务。');
   }, [launchRequest, project, chapterId, draftScope, choices, referencePreviews, settings]);
   const updateParameter = (key: string, text: string) => {
@@ -1623,10 +1664,11 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
     {onChangeExecution && <VideoExecutionControls settings={settings} onChange={onChangeExecution} />}
     {generationMode === 'batch' && <div id="vd-batch-generation-panel" role="tabpanel" className="vd-batch-host"><VideoBatchPanel key={`${draftScope}:${launchRequest?.batchTaskIds?.length ? launchRequest.id : 'standard-batch'}`} project={project} chapterId={chapterId} savedBatch={batchDraft} onBatchDraftChange={setBatchDraft} settings={settings} controller={controller} tailFrameTools={tailFrameTools} initialDraft={draft} initialParameterText={parameterText} retryTaskIds={launchRequest?.batchTaskIds} onOpenSettings={onOpenSettings} onOpenJobs={onOpenJobs} onOpenPrompt={onOpenPrompt} onSubmittingChange={setBatchSubmitting} onRepairIdentityBindings={onRepairIdentityBindings} /></div>}
     <div id="vd-single-generation-panel" role="tabpanel" className="vd-layout" hidden={generationMode !== 'single'}><div className="vd-stack">
-      <section className="card vd-prompt-card"><div className="card-title"><h2>1. 本次视频提示词</h2><button className="btn small" type="button" onClick={() => { setPicker('prompt'); setPickedPromptId(draft.source?.storyboardId ? `${draft.source.storyboardId}:${draft.source.language || 'zh'}` : ''); }}>从提示词导演台选择</button></div>
+      <section className="card vd-prompt-card"><div className="card-title"><h2>1. 本次视频提示词</h2><button className="btn small" type="button" onClick={() => { setPicker('prompt'); setPickedPromptId(draft.source?.storyboardId ? videoPromptChoiceKey(draft.source.storyboardId, draft.source.language || 'zh', draft.source.promptFormat || promptFormat) : ''); }}>从提示词导演台选择</button></div>
         <label className="field"><span>视频名称</span><input value={draft.name} onChange={(event) => patchDraft({ name: event.target.value })} placeholder="为本次生成的视频命名" /></label>
-        {draft.source ? <div className="vd-source"><span>来源：{draft.source.label || '提示词导演台'} · {draft.source.language === 'en' ? '已有英文描述' : '中文提示词'}</span>{onOpenPrompt && draft.source.storyboardId && <button className="btn small ghost" type="button" onClick={() => onOpenPrompt(draft.source!.storyboardId!, draft.source)}>查看原稿</button>}<button className="btn small ghost" type="button" onClick={() => patchDraft({ source: undefined })}>解除来源关联</button></div> : <p className="field-hint">也可以直接粘贴或手动输入提示词，无需先创建分镜。</p>}
-        <label className="field"><span>本次生成使用的完整提示词</span><textarea aria-label="本次生成使用的完整提示词" className="vd-prompt-editor" value={delivery.draft.prompt} onChange={(event) => patchDraft({ prompt: event.target.value, h3ReferenceBinding: undefined })} placeholder="选择已有中文 / 英文描述，或在这里填写完整提示词。不会重新扩写、翻译对白或裁剪字数。" /></label>
+        {draft.source ? <div className="vd-source"><span>来源：{draft.source.label || '提示词导演台'} · {videoPromptFormatLabel(draft.source.promptFormat)} · {draft.source.language === 'en' ? '已有英文描述' : '中文提示词'}</span>{onOpenPrompt && draft.source.storyboardId && <button className="btn small ghost" type="button" onClick={() => onOpenPrompt(draft.source!.storyboardId!, draft.source)}>查看原稿</button>}<button className="btn small ghost" type="button" onClick={() => patchDraft({ source: undefined, h3ReferenceBinding: undefined, seedanceReferenceBinding: undefined })}>解除来源关联</button></div> : <p className="field-hint">也可以直接粘贴或手动输入提示词，无需先创建分镜。</p>}
+        {draft.source?.storyboardId && <div className="vd-toolbar"><label className="field"><span>本次提示词格式</span><select aria-label="本次提示词格式" value={draft.source.promptFormat || 'legacy'} disabled={submitting || batchSubmitting} onChange={(event) => selectDraftSource(event.target.value as VideoPromptFormat, draft.source?.language || 'zh')}>{!draft.source.promptFormat && <option value="legacy" disabled>历史稿（保留正文）</option>}<option value="h3">H3</option><option value="seedance">Seedance</option><option value="ordinary">普通稿</option></select></label><label className="field"><span>本次稿件语言</span><select aria-label="本次稿件语言" value={draft.source.language || 'zh'} disabled={submitting || batchSubmitting || !draft.source.promptFormat} onChange={(event) => selectDraftSource(draft.source?.promptFormat || defaultVideoPromptFormat(project, draft.source?.storyboardId), event.target.value as 'zh' | 'en')}><option value="zh">中文</option><option value="en">英文描述</option></select></label></div>}
+        <label className="field"><span>本次生成使用的完整提示词</span><textarea aria-label="本次生成使用的完整提示词" className="vd-prompt-editor" value={delivery.draft.prompt} onChange={(event) => patchDraft({ prompt: event.target.value, h3ReferenceBinding: undefined, seedanceReferenceBinding: undefined })} placeholder="选择已有中文 / 英文描述，或在这里填写完整提示词。不会重新扩写、翻译对白或裁剪字数。" /></label>
         <button className="btn small" type="button" onClick={() => { void navigator.clipboard.writeText(delivery.draft.prompt).then(() => setNotice('已复制本次实际提交提示词。'), () => setError('复制失败，请选中提示词手动复制。')); }}>复制本次提示词</button>
         <VideoH3ReferenceNotices key={`${project.id}:${draft.source?.storyboardId}:${draft.source?.language}`} project={project} draft={delivery.draft} warnings={delivery.warnings} onRepair={repairSingleIdentityBindings} onRepairingChange={setIdentityRepairing} disabled={submitting || batchSubmitting || identityRepairing} />
         <p className="field-hint">长剧情一次选择一个视频段；选择英文仅带入已有英文描述，不自动把中文对白翻译为英文。</p>
@@ -1651,6 +1693,7 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
         {sourceKind === 'runninghub' ? <><label className="field"><span>RunningHub 云端工作流</span><select aria-label="RunningHub 云端工作流" value={draft.runningHubWorkflowId || '__runninghub_unselected__'} onChange={(event) => switchParameterConnection({ runningHubWorkflowId: event.target.value, reuseTaskId: undefined })}>{reusedConnection?.api ? <option value={draft.runningHubWorkflowId}>原任务云端快照 · {reusedConnection.api.model}</option> : <option value="__runninghub_unselected__" disabled>请选择已保存的云端工作流</option>}{settings.runningHubVideo?.workflows.filter((item) => !(reusedConnection?.api && item.id === draft.runningHubWorkflowId)).map((item) => <option key={item.id} value={item.id} disabled={!isRunningHubVideoWorkflowReady(item)}>{item.name}</option>)}</select></label><p className="field-hint">{activeApi?.model || '尚未选择工作流'} · {activeApi?.runningHubImageRoles?.length || 0} 个图片槽；仅替换已绑定的提示词、图片和明确参数。</p>{!activeApi?.enabled && <p className="vd-notice">请在独立 RunningHub 设置中启用连接并选择工作流。</p>}{apiState.issue && <p className="vd-error">{apiState.issue}</p>}</> : draft.backend === 'api' ? <><label className="field"><span>视频 API 配置</span><select aria-label="视频 API 配置" value={reusedConnection?.api ? '__saved' : draft.apiProfileId || ''} onChange={(event) => { if (event.target.value !== '__saved') switchParameterConnection({ apiProfileId: event.target.value || undefined, reuseTaskId: undefined }); }}>{reusedConnection?.api && <option value="__saved">原任务视频 API 快照</option>}<option value="">当前视频 API 配置</option>{settings.videoApiProfiles?.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label><p className="field-hint">模型：{activeApi?.model || '未填写'} · {activeApi?.provider === 'minimax' ? 'MiniMax 官方协议' : '通用视频 API'}</p>{!activeApi?.enabled && <p className="vd-notice">请在视频连接设置启用此接口。</p>}{activeApi?.provider === 'minimax' && <p className="vd-notice">官方模式仅接收首帧 / 尾帧用途，不能用它代替多人物参考图。参考图不会被偷偷丢弃或改为首帧。</p>}</> : <><label className="field"><span>ComfyUI 视频工作流</span><select aria-label="ComfyUI 视频工作流" value={reusedConnection?.workflow ? '__saved' : activeWorkflow?.id || ''} onChange={(event) => { if (event.target.value !== '__saved') switchParameterConnection({ workflowId: event.target.value, reuseTaskId: undefined }); }}>{reusedConnection?.workflow && <option value="__saved">{reusedConnection.workflow.name} · 原任务工作流快照</option>}<option value="" disabled>请选择已导入的视频工作流</option>{settings.comfyuiVideo?.workflows.map((workflow) => <option key={workflow.id} value={workflow.id}>{workflow.name}</option>)}</select></label><p className="field-hint">{reusedConnection?.comfyui?.baseUrl || settings.comfyuiVideo?.baseUrl || '尚未设置连接'}<br />已绑定 {activeWorkflow?.mapping.images.length || 0} 个图片输入 · 最终输出节点 {activeWorkflow?.mapping.outputNodeId || '未绑定'}</p>{slotMismatch && <p className="vd-error">已选 {draft.references.length} 张图，但工作流只有 {activeWorkflow.mapping.images.length} 个图片槽。请调整选图或映射；不会丢掉多选的图。</p>}</>}
         {reusedConnection && <p className="vd-notice">使用原任务保存的连接与工作流快照，当前设置的修改不会影响它。主动切换上方配置后才使用新设置。</p>}
         <RunningHubAutoPromptNotice api={activeApi} />
+        <H3ActionNotice prompts={[draft.prompt]} />
         <VideoOutputParameters scope="single" source={sourceKind} parameterText={parameterText} availableKeys={parameterKeys} {...videoOutputParameterPresentation(presentationApi, parsedParameters.value)} requiresMapping={sourceKind !== 'api' || activeApi?.provider === 'runninghub'} disabled={submitting || batchSubmitting} onChange={updateParameter} onOpenSettings={onOpenSettings} />
         <details className="vd-details"><summary>可选参数覆盖（不填保持原值）</summary><div className="vd-stack"><p className="field-hint">高级参数：默认不覆盖种子、采样、尺寸和音频连接。只填写你要改变的值；留空恢复工作流 / 接口默认值。</p><div className="vd-parameter-grid">{parameterKeys.filter((key) => !isVideoOutputParameterKey(key)).map((key) => <label className="field" key={key}><span>{{ seed: '种子', steps: '采样步数', cfg: 'CFG', fps: '帧率' }[key] || key}</span><input value={videoParameterInputText(parsedParameters.value[key])} disabled={Boolean(parsedParameters.issue)} placeholder="保留原值" onChange={(event) => updateParameter(key, event.target.value)} /></label>)}</div><label className="field"><span>额外参数 JSON（仅显式覆盖字段）</span><textarea aria-label="本次额外参数 JSON" className="vd-code" rows={5} value={parameterText} onChange={(event) => setParameterText(event.target.value)} onBlur={() => { const parsed = readVideoParameterText(parameterText); if (!parsed.issue) patchDraft({ parameters: parsed.value }); }} /></label><button type="button" className="btn small" onClick={() => { patchDraft({ parameters: {} }); setParameterText('{}'); }}>清除本次参数覆盖</button></div></details>
         <details className="vd-tracking-note"><summary>任务追踪说明</summary><p>不设置等待超时。界面只显示后端提供的真实进度和已耗时，切换页面仍继续追踪。</p></details>
@@ -1660,6 +1703,7 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
     </div></div>
     {picker === 'prompt' && <VideoPickerDialog title="从提示词导演台选择提示词" className="vd-prompt-selection-dialog" onClose={() => setPicker(undefined)}>
       <div className="vd-prompt-selection-toolbar">
+        <label className="field"><span>提示词格式</span><select aria-label="选择提示词格式" value={promptFormat} onChange={(event) => { setPromptFormat(event.target.value as VideoPromptFormat); setPickedPromptId(''); }}><option value="h3">H3</option><option value="seedance">Seedance</option><option value="ordinary">普通稿</option></select></label>
         <div className="vd-toolbar"><span className="field-hint">当前为单段选择；多个视频段请进入批量清单。</span><button type="button" className="btn small" onClick={() => { setPicker(undefined); setGenerationMode('batch'); }}>长剧情批量</button></div>
         <div className="vd-toolbar"><label className="field vd-grow"><span>搜索剧情、场景或段号</span><input type="search" value={promptQuery} onChange={(event) => setPromptQuery(event.target.value)} placeholder="名称、段号、提示词内容" /></label><label className="field"><span>描述语言</span><select aria-label="描述语言" value={promptLanguage} onChange={(event) => setPromptLanguage(event.target.value as 'all' | 'zh' | 'en')}><option value="all">全部已有稿件</option><option value="zh">中文</option><option value="en">英文描述</option></select></label></div>
       </div>

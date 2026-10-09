@@ -7,6 +7,7 @@ import { officialH3ContextForStoryboard } from './officialH3Context';
 import { characterParticipationAliases, resolvePromptCharacterParticipation, resolveStoryboardCharacterParticipation } from './characterParticipation';
 import { assetReferenceCharacterOwners } from './assetCharacterBinding';
 import { maskVideoPictureReferenceLiterals as maskReferenceLiterals, videoPictureReferencePattern as pictureReferencePattern } from './videoPictureReferences';
+import { prepareVideoSeedanceReferenceDraft } from './videoSeedanceReferenceBinding';
 export { collectVideoPictureReferenceNumbers } from './videoPictureReferences';
 
 /** This is an editing provenance record, not a second prompt or an AI review.
@@ -141,6 +142,7 @@ export const videoReferenceSceneReplacement = (
 export const videoH3BindingForPrompt = (
   project: Project, draft: VideoGenerationDraft,
 ): VideoH3ReferenceBinding | undefined => {
+  if (draft.source?.promptFormat && draft.source.promptFormat !== 'h3') return undefined;
   const existing = draft.h3ReferenceBinding;
   const normalizedIdentities = existing && normalizeH3IdentityBindings(existing.identities);
   const existingPictures = normalizedSourcePictures(existing?.sourcePictures);
@@ -326,6 +328,7 @@ const participationReferenceEdit = (
 export const prepareVideoH3ReferenceDraft = (
   project: Project, draft: VideoGenerationDraft, context: VideoH3ReferenceContext,
 ): PreparedVideoH3ReferenceDraft => {
+  if (draft.source?.promptFormat === 'seedance') return prepareVideoSeedanceReferenceDraft(project, draft, videoH3PictureNumbers(draft.references, context));
   const referenceProject = videoH3ReferenceProject(project, draft);
   const binding = videoH3BindingForPrompt(project, draft);
   const basePrompt = binding?.basePrompt || draft.prompt;

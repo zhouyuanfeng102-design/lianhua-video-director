@@ -1978,6 +1978,20 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
   min-height: 25px; padding: 3px 5px; gap: 4px;
   font-size: clamp(9px, 1.9cqi, calc(11px * var(--ui-font-scale, 1)));
 }
+.director-prompt-more-menu {
+  position: fixed; z-index: 40; width: 224px; max-width: calc(100vw - 16px);
+  display: grid; gap: 3px; padding: 5px; border: 1px solid var(--line-strong);
+  border-radius: 9px; background: var(--panel); box-shadow: 0 8px 24px rgba(40,34,48,.18);
+  color: var(--text); font-size: 12px;
+}
+.director-prompt-more-menu > button {
+  display: flex; align-items: center; gap: 7px; width: 100%; min-height: 32px;
+  padding: 6px 8px; border: 0; border-radius: 5px; background: transparent;
+  color: inherit; text-align: left;
+}
+.director-prompt-more-menu > button > svg { flex: 0 0 auto; width: 14px; height: 14px; }
+.director-prompt-more-menu > button:hover:not(:disabled),
+.director-prompt-more-menu > button:focus-visible { background: var(--panel-2); color: var(--pink); }
 .director-side-panel:has(.director-result-copy) .director-reference-head { align-items: center; flex-wrap: nowrap; gap: 5px; }
 .director-side-panel:has(.director-result-copy) .director-reference-head > .card-title { flex-basis: auto; }
 .director-result-pane .btn,

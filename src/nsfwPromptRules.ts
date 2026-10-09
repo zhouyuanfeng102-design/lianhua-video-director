@@ -91,7 +91,7 @@ export const MOSE_JIANGHU_NSFW_DIRECTOR_LOOK_RULE = `NSFW 导演与视觉分析�
 export const MOSE_JIANGHU_PRIVATE_PROFILE_RULES = `私密档案采用同一人物的一套稳定身体锚点。
 - 私密全身字段是从头到脚的全身视图，记录完整体态比例、肤色、体毛、永久标记与各局部之间的整体关系。
 - 各私密局部字段是对应部位视图，记录尺寸或比例、形态、轮廓、颜色、纹理与稳定辨识特征。
-- 女性人物完整填写 fullBody、breasts、vulva、anus；男性人物完整填写 fullBody、penis、scrotum、anus；其他身体设定由 gender 与剧情事实选择对应字段。
+- 女性人物完整填写 fullBody、breasts、vulva、anus；男性人物完整填写 fullBody、penis、anus，其中 penis 字段作为男性外生殖器合并字段，覆盖阴茎与阴囊的同一套局部锚点；scrotum 仅作为旧数据兼容字段保留，新补齐使用 penis 合并字段；其他身体设定由 gender 与剧情事实选择对应字段。
 - 全身视图与局部视图交叉复用已经确定的精确特征，在尺寸、比例、颜色、形态与长期痕迹上保持一致。
 - 每个字段采用稳定常态、角色设定真值与长期生理事实，形成可跨镜头复用的静态外貌资料。
 - 字段内容使用具体、清楚、可见、可直接用于生图与视频连续性的中文描述。`;

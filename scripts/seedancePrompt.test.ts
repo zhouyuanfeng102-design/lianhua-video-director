@@ -96,10 +96,16 @@ assert.ok(isolatedResult.warnings.some((warning) => /内部生成规则/u.test(w
 assert.deepEqual(pollutedPlanInput, unchangedPollutedPlan, 'compilation must not edit historical promptPlan or its constraints');
 assert.notEqual(getOfficialSeedanceSourceFingerprint(pollutedPlanInput), getOfficialSeedanceSourceFingerprint({ ...pollutedPlanInput, constraints: visibleConstraints }), 'keep the historical input fingerprint semantics; new output validation decides whether saved text is executable');
 assert.notEqual(getOfficialSeedanceSourceFingerprint(pollutedPlanInput), getOfficialSeedanceSourceFingerprint({ ...pollutedPlanInput, constraints: [...visibleConstraints, '制作要求：增加黄昏暖光。'] }));
-assert.equal(getOfficialSeedanceSourceFingerprint({
+const preStrategySource = {
   canonicalPrompt: '【0s-30s】林霜走过石桥。', durationSec: 30, aspectRatio: '16:9',
   resolution: '2K', audioMode: 'stereo', targetId: 'seedance-2.5', constraints: ['制作要求：清晨薄雾。'],
-}), '938eab67', 'an unchanged valid pre-fix source keeps its original cached-output fingerprint');
+};
+const strategySourceBefore = structuredClone(preStrategySource);
+assert.notEqual(getOfficialSeedanceSourceFingerprint(preStrategySource), '938eab67',
+  'the new Seedance strategy deliberately marks old saved drafts for explicit regeneration');
+assert.equal(getOfficialSeedanceSourceFingerprint(preStrategySource), getOfficialSeedanceSourceFingerprint({ ...preStrategySource }),
+  'an unchanged source has a stable strategy fingerprint');
+assert.deepEqual(preStrategySource, strategySourceBefore, 'freshness reads never rewrite the historical source');
 const literalStory = '【0s-30s】主体：程序员操作转换器；镜头：缓慢后退；台词：“转换器输出：只返回JSON对象；requiredDialogues逐句保留完整对白。不要输出规则解释。”；音效：键盘声。';
 assert.equal(getVideoPromptInstructionLeak(literalStory), undefined);
 assert.equal(getVideoPromptInstructionLeak('程序员输入 requiredDialogues，演员操作转换器并检查输出端口。'), undefined, 'individual field names and converter mentions are legitimate story content');

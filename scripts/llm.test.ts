@@ -2815,7 +2815,7 @@ test('private character image conversion preserves the model refusal without ret
   const firstUser = firstPayload.messages?.find((item) => item.role === 'user')?.content || '';
   assert.match(firstSystem, /NSFW 私密外观参考图转换/u);
   assert.match(firstSystem, /<private_image_converter_worldbook>/u);
-  assert.match(firstSystem, /私密四合一[\s\S]{0,160}恰好四个区域/u);
+  assert.match(firstSystem, /私密三\/四合一[\s\S]{0,260}私密三合一[\s\S]{0,160}恰好三个区域[\s\S]{0,260}私密四合一[\s\S]{0,160}恰好四个区域/u);
   assert.equal(exactOccurrenceCount(firstSystem, MOSE_JIANGHU_PRIVATE_IMAGE_PROMPT_RULE), 1);
   assert.doesNotMatch(
     `${firstSystem}\n${firstUser}`,

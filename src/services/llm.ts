@@ -45,6 +45,7 @@ import {
   type VideoCreativeDirectionInput,
 } from '../videoCreativeDirection';
 import { VIDEO_ACTING_CAMERA_RULES } from '../videoActingCameraRules';
+import { VIDEO_ACTION_CHOREOGRAPHY_RULE, VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE } from '../videoActionChoreographyRules';
 import { DIRECTED_ACTION_RELATION_RULE, SPATIAL_COORDINATE_RULE, SPATIAL_CONTINUITY_REVIEW_RULE, STORYBOARD_SPATIAL_FRAME_RULE } from '../spatialContinuityRules';
 import { normalizeStoryPreparationResult, type StoryPreparationResult } from '../storyPreparationReview';
 import { STORY_CAUSALITY_RULE, STORY_UNDERSTANDING_CONTEXT_RULE } from '../storyCausalityRules';
@@ -3749,6 +3750,7 @@ export const requestShotRecommendation = async (
       STORY_PACING_RULE,
       VIDEO_CREATIVE_DIRECTION_DATA_RULE,
       VIDEO_ACTING_CAMERA_RULES,
+      VIDEO_ACTION_CHOREOGRAPHY_RULE,
       VIDEO_DIALOGUE_STAGING_RULE,
       VIDEO_SPATIAL_CONTINUITY_RULE,
       VIDEO_WARDROBE_SCOPE_RULE,
@@ -3830,6 +3832,7 @@ export const requestShotRecommendation = async (
           STORYBOARD_SPEECH_FIRST_PLANNING_RULE,
           VIDEO_CREATIVE_DIRECTION_DATA_RULE,
           VIDEO_ACTING_CAMERA_RULES,
+          VIDEO_ACTION_CHOREOGRAPHY_RULE,
           STORYBOARD_STABLE_SUBJECT_CONTRACT,
           VIDEO_DIALOGUE_STAGING_RULE,
           VIDEO_SPATIAL_CONTINUITY_RULE,
@@ -3936,6 +3939,7 @@ export const requestShotRecommendation = async (
     const repairSystemPrompt = fieldRepair ? [STORYBOARD_FIELD_REPAIR_RULE,
       ...(semanticContext ? [STORYBOARD_SEMANTIC_SOURCE_RULE] : []), VIDEO_CREATIVE_DIRECTION_DATA_RULE,
       VIDEO_ACTING_CAMERA_RULES,
+      VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE,
     ].join('\n') : [
           '你是视频分镜 JSON 修复器。原方案由文本模型生成，不得改成本地分镜，也不得重新依赖本地镜数。',
           'validationError 仅说明本地无法读取的 JSON、必需字段或时间轴结构，不是本地对剧情的裁决。保留 originalStoryboardResponse 的有效分镜，把完整 sourceStory 与原方案一并阅读，自行修正后返回完整可读取方案。',
@@ -3953,6 +3957,7 @@ export const requestShotRecommendation = async (
           STORYBOARD_SPEECH_FIRST_PLANNING_RULE,
           VIDEO_CREATIVE_DIRECTION_DATA_RULE,
           VIDEO_ACTING_CAMERA_RULES,
+          VIDEO_ACTION_CHOREOGRAPHY_RULE,
           STORYBOARD_STABLE_SUBJECT_CONTRACT,
           VIDEO_DIALOGUE_STAGING_RULE,
           VIDEO_SPATIAL_CONTINUITY_RULE,
@@ -4444,7 +4449,7 @@ const requestStoryAnalysisChunk = async (
     ? MOSE_JIANGHU_NSFW_DETAIL_RULES
     : '';
   const nsfwProfileSchema = storyHasNsfw
-    ? ',"nsfwProfile":{"fullBody":"稳定裸体全身外貌与比例","breasts":"女性胸部稳定外观（适用时）","vulva":"女性外阴稳定外观（适用时）","anus":"后庭稳定外观（适用时）","penis":"男性阴茎稳定外观（适用时）","scrotum":"男性阴囊稳定外观（适用时）"}'
+    ? ',"nsfwProfile":{"fullBody":"稳定裸体全身外貌与比例","breasts":"女性胸部稳定外观（适用时）","vulva":"女性外阴稳定外观（适用时）","anus":"后庭稳定外观（适用时）","penis":"男性外生殖器稳定外观，阴茎与阴囊作为同一局部锚点（适用时）"}'
     : '';
   const systemPrompt = [
     '你是中文小说的视频前期分析助手。先通读提供的完整剧情，由你自己全局识别人物、地点、道具和场景关系，再一次性返回完整严格 JSON；不要 Markdown、解释或代码围栏。',
@@ -4672,7 +4677,7 @@ export const requestStoryBibleEnrichment = async (
     return context.slice(0, maxChars);
   };
   const characterNsfwSchema = nsfwCharacterNames.size
-    ? ',"nsfwProfile":{"fullBody":"稳定裸体全身外貌与比例","breasts":"女性胸部稳定外观（适用时）","vulva":"女性外阴稳定外观（适用时）","anus":"后庭稳定外观（适用时）","penis":"男性阴茎稳定外观（适用时）","scrotum":"男性阴囊稳定外观（适用时）"}'
+    ? ',"nsfwProfile":{"fullBody":"稳定裸体全身外貌与比例","breasts":"女性胸部稳定外观（适用时）","vulva":"女性外阴稳定外观（适用时）","anus":"后庭稳定外观（适用时）","penis":"男性外生殖器稳定外观，阴茎与阴囊作为同一局部锚点（适用时）"}'
     : '';
   const specs: Array<{
     key: 'characters' | 'locations' | 'props';
@@ -4821,7 +4826,7 @@ export const requestStoryBibleEnrichment = async (
         const female = /(?:女|雌)/u.test(gender) && !/(?:男|雄)/u.test(gender);
         const male = /(?:男|雄)/u.test(gender) && !/(?:女|雌)/u.test(gender);
         if (female) return ['fullBody', 'breasts', 'vulva', 'anus'];
-        if (male) return ['fullBody', 'penis', 'scrotum', 'anus'];
+        if (male) return ['fullBody', 'penis', 'anus'];
         return ['fullBody'];
       };
       const hasAllFields = (item: Record<string, unknown> | undefined): item is Record<string, unknown> => Boolean(item && (
@@ -5294,7 +5299,7 @@ const PRIVATE_PROFILE_FIELD_LABELS: Readonly<Record<CharacterPrivateProfileFormF
   nsfwBreasts: '稳定常态的胸部形态、比例、乳晕与乳头外观',
   nsfwVulva: '稳定常态的外阴解剖外观、轮廓与色泽',
   nsfwAnus: '稳定常态的后庭解剖外观、轮廓与色泽',
-  nsfwPenis: '稳定常态的阴茎解剖外观、比例与色泽',
+  nsfwPenis: '稳定常态的男性外生殖器解剖外观、比例与色泽，阴茎与阴囊作为同一局部锚点',
   nsfwScrotum: '稳定常态的阴囊解剖外观、比例与色泽',
 };
 
@@ -5317,9 +5322,10 @@ const privateProfileFieldAppliesToGender = (
   gender: PrivateProfileGenderClass,
 ): boolean => {
   if (field === 'nsfwFullBody' || field === 'nsfwAnus') return true;
+  if (field === 'nsfwScrotum') return false;
   if (gender === 'mixed') return true;
   if (gender === 'female') return field === 'nsfwBreasts' || field === 'nsfwVulva';
-  if (gender === 'male') return field === 'nsfwPenis' || field === 'nsfwScrotum';
+  if (gender === 'male') return field === 'nsfwPenis';
   return false;
 };
 

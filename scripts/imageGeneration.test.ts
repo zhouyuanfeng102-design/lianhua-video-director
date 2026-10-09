@@ -101,7 +101,7 @@ assert.deepEqual(privateTurnaround.canvas, { width: 1536, height: 1024 });
 assert.match(privateTurnaround.direction, /私密全身外貌四视图/u);
 assert.match(privateTurnaround.direction, /正面.*严格90度左侧面.*背面.*45度前侧三分之四视图/u);
 const privateFourInOne = getImageVariantGenerationSpec('private-four-in-one');
-assert.equal(privateFourInOne.label, '私密四合一');
+assert.equal(privateFourInOne.label, '私密三/四合一');
 assert.deepEqual(privateFourInOne.canvas, { width: 1536, height: 1024 });
 assert.match(privateFourInOne.direction, /私密全身.*主画面/u);
 assert.match(privateFourInOne.direction, /辅助部位窗/u);
@@ -896,6 +896,26 @@ assert.match(privateFourInOnePrompt, /身高\/高度比例：约170cm/u);
 assert.doesNotMatch(privateFourInOnePrompt, /玄黑色长袍|黑鞘细剑|玄色长袍身份锚点/u);
 assert.doesNotMatch(privateFourInOnePrompt, /25\s*岁|三百六十五岁|年龄|成年|未成年|禁止|不得|不要|严禁|负面/u);
 assert.equal(privateFourInOnePromptProblem(privateFourInOnePrompt), '');
+const malePrivateThreeInOnePrompt = buildImagePrompt(
+  'character',
+  {
+    ...privatePromptForm,
+    gender: '男',
+    nsfwBreasts: '',
+    nsfwVulva: '',
+    nsfwPenis: '稳定男性外生殖器资料',
+    nsfwScrotum: '旧版阴囊资料应并入同一槽位',
+    nsfwAnus: '稳定后庭资料',
+  },
+  'private-four-in-one',
+  'full-body',
+);
+assert.match(malePrivateThreeInOnePrompt, /私密三合一/u);
+assert.match(malePrivateThreeInOnePrompt, /固定三个区域槽位/u);
+assert.match(malePrivateThreeInOnePrompt, /辅助窗一男性外生殖器：稳定男性外生殖器资料；旧版阴囊资料应并入同一槽位/u);
+assert.match(malePrivateThreeInOnePrompt, /辅助窗二后庭/u);
+assert.doesNotMatch(malePrivateThreeInOnePrompt, /辅助窗三阴囊|辅助窗三男性外生殖器/u);
+assert.equal(privateFourInOnePromptProblem(malePrivateThreeInOnePrompt), '');
 assert.match(
   privateFourInOnePromptProblem('私密四视图资料板：正面、左侧面、背面、三分之四全身视图，另有胸部辅助窗。'),
   /四视图/u,

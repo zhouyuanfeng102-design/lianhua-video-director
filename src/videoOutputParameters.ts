@@ -2,7 +2,7 @@ import type { VideoTaskApiConfig } from './types';
 import type { ComfyVideoWorkflowPreset, VideoGenerationSource } from './videoGenerationTypes';
 import type { RunningHubVideoFieldControl } from './runningHubVideoTypes';
 
-export const videoOutputParameterKeys = ['duration', 'aspect_ratio', 'resolution', 'width', 'height'] as const;
+export const videoOutputParameterKeys = ['duration', 'aspect_ratio', 'resolution', 'steps', 'width', 'height'] as const;
 export type VideoOutputParameterKey = typeof videoOutputParameterKeys[number];
 
 export const isVideoOutputParameterKey = (key: string): key is VideoOutputParameterKey =>
@@ -25,7 +25,7 @@ export const availableVideoParameterKeys = (
     const found = new Set<string>();
     const visit = (value: unknown) => {
       if (typeof value === 'string') {
-        for (const match of value.matchAll(/\{\{(duration|aspect_ratio|resolution|width|height|seed)\}\}/gu)) found.add(match[1]);
+        for (const match of value.matchAll(/\{\{(duration|aspect_ratio|resolution|steps|width|height|seed)\}\}/gu)) found.add(match[1]);
       } else if (Array.isArray(value)) value.forEach(visit);
       else if (value && typeof value === 'object') Object.values(value).forEach(visit);
     };
@@ -102,6 +102,7 @@ export const videoOutputParameterSummary = (
   .map((key) => {
     const value = videoParameterInputText(parameters[key]);
     if (key === 'duration') return `请求时长 ${value} 秒`;
+    if (key === 'steps') return `请求采样步数 ${value} 步`;
     const control = controls[key];
     if (control?.unit === 'MP') {
       const option = control.options?.find((entry) => entry === value || value.trim() !== '' && Number(entry) === Number(value)) ?? value;

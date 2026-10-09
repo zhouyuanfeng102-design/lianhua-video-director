@@ -46,9 +46,9 @@ const mapped = (): RunningHubVideoWorkflow => {
 };
 const config = (workflow: RunningHubVideoWorkflow): RunningHubVideoConfig => ({ enabled: false, baseUrl: 'https://www.runninghub.ai', apiKey: 'isolated-test-key', workflows: [workflow], activeWorkflowId: workflow.id });
 
-check('five output definitions include a selectable aspect ratio beside seconds, resolution and pixel dimensions', () => {
-  assert.deepEqual(runningHubVideoOutputFields.map((entry) => entry.key), ['duration', 'aspect_ratio', 'resolution', 'width', 'height']);
-  assert.equal(new Set(runningHubVideoOutputFields.map((entry) => entry.label)).size, 5);
+check('six output definitions include sampling steps beside seconds, aspect ratio, resolution and pixel dimensions', () => {
+  assert.deepEqual(runningHubVideoOutputFields.map((entry) => entry.key), ['duration', 'aspect_ratio', 'resolution', 'steps', 'width', 'height']);
+  assert.equal(new Set(runningHubVideoOutputFields.map((entry) => entry.label)).size, 6);
   assert.match(runningHubVideoOutputFields.find((entry) => entry.key === 'duration')!.hint, /秒.*不是帧数.*保留/u);
   assert.match(runningHubVideoOutputFields.find((entry) => entry.key === 'aspect_ratio')!.hint, /完整选项值/u);
   assert.match(runningHubVideoOutputFields.find((entry) => entry.key === 'resolution')!.hint, /720P.*1080P/u);
