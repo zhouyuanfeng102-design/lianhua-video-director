@@ -12,6 +12,11 @@
 .story-review-pending > span { min-width: 0; overflow-wrap: anywhere; }
 .story-review-pending > .btn { flex: 0 0 auto; }
 
+.sr-review-reference-source { flex: 0 0 auto; min-width: 0; border: 1px solid var(--line); border-radius: 7px; padding: 7px 9px; font-size: calc(11px * var(--ui-font-scale, 1)); }
+.sr-review-reference-source > summary { cursor: pointer; }
+.sr-review-reference-content { max-height: 25vh; overflow-y: auto; overflow-wrap: anywhere; }
+.sr-review-reference-content > article { padding: 9px 0; border-bottom: 1px solid var(--line); }
+
 .sr-review-dialog {
   display: flex;
   flex-direction: column;

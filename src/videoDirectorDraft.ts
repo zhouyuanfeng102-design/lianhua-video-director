@@ -195,7 +195,8 @@ export const addVideoDraftAssets = (
     const asset = assets.find((candidate) => candidate.id === assetId);
     if (asset && isVideoDirectorImage(asset)) selection = addVideoReference(selection, { assetId, role: videoImageRole(asset) });
   }
-  return { ...draft, ...selection };
+  return { ...draft, ...selection,
+    ...(selection.references.length !== draft.references.length ? { reuseTaskId: undefined } : {}) };
 };
 
 export const applyVideoReferenceRoleOverrides = (
@@ -268,7 +269,7 @@ export const applyVideoPromptChoice = (
   if (!board) return draft;
   const label = `${choice.label}${choice.segmentIndex ? ` · 第 ${choice.segmentIndex} 段` : ''}`;
   const next: VideoGenerationDraft = {
-    ...draft, name: label, prompt: choice.prompt, h3ReferenceBinding: undefined,
+    ...draft, name: label, prompt: choice.prompt, reuseTaskId: undefined, h3ReferenceBinding: undefined,
     source: {
       chapterId: chapterIdForStoryboard(project, board),
       storyboardId: board.id, sequencePlanId: board.sequencePlanId, segmentId: board.segmentId,
@@ -318,6 +319,20 @@ export const applyVideoPromptChoice = (
     reference.assetId === board.firstFrameAssetId ? { ...reference, role: 'first-frame' }
       : reference.assetId === board.lastFrameAssetId ? { ...reference, role: 'last-frame' } : reference
   ));
+  // Chapter uploads can be general/composite pictures containing several
+  // characters. Freeze their explicit subject mapping into this copied draft
+  // so the existing H3 slot mapper sees those people without changing the
+  // image's purpose, reordering pictures, or borrowing later library edits.
+  withReferences.references = withReferences.references.map((reference) => {
+    if (reference.characterIds !== undefined) return reference;
+    const frozen = board.storyReferenceContext?.references.filter((entry) => entry.assetId === reference.assetId);
+    if (!frozen?.length) return reference;
+    const characterIds = [...new Set(frozen.flatMap((entry) => entry.subjectBindings.filter((binding) => (
+      binding.kind === 'character' && binding.entityId
+      && entry.analysis.characters.some((subject) => subject.id === binding.subjectId)
+    )).map((binding) => binding.entityId!)))];
+    return { ...reference, characterIds };
+  });
   withReferences.referenceSlotRoles = videoReferenceSelection(
     withReferences.references,
     withReferences.referenceSlotRoles,

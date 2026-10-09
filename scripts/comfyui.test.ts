@@ -107,6 +107,8 @@ const apiWorkflow = {
     },
     class_type: 'SamplerCustomAdvanced',
   },
+  6: { inputs: { samples: ['4', 0] }, class_type: 'VAEDecode' },
+  7: { inputs: { images: ['6', 0] }, class_type: 'SaveImage' },
 };
 
 const imported = comfy.importComfyUIApiWorkflow!(JSON.stringify({ prompt: apiWorkflow }));

@@ -6,6 +6,8 @@ import { getH3IdentityBindingIssues, normalizeH3IdentityBindings } from './h3Ide
 import { officialH3ContextForStoryboard } from './officialH3Context';
 import { characterParticipationAliases, resolvePromptCharacterParticipation, resolveStoryboardCharacterParticipation } from './characterParticipation';
 import { assetReferenceCharacterOwners } from './assetCharacterBinding';
+import { maskVideoPictureReferenceLiterals as maskReferenceLiterals, videoPictureReferencePattern as pictureReferencePattern } from './videoPictureReferences';
+export { collectVideoPictureReferenceNumbers } from './videoPictureReferences';
 
 /** This is an editing provenance record, not a second prompt or an AI review.
  * Rendering always starts from the same authored text, so repeated selections
@@ -16,8 +18,12 @@ export interface VideoH3ReferenceBinding {
   basePrompt: string;
   identities: H3IdentityBindings;
   renderedPrompt: string;
+  /** Exact authored language, recorded only with this source provenance. */
+  sourceLanguage?: 'zh' | 'en';
   /** Original persisted manifest, never reconstructed from current slot order. */
   sourcePictures?: Array<{ number: number; assetId: string }>;
+  /** Picture provenance can remain valid when legacy identity metadata is damaged. */
+  identityBindingWarning?: string;
   /** Actual result of rendering this exact request, retained by frozen retries. */
   characterStates?: VideoH3CharacterReferenceState[];
 }
@@ -35,6 +41,9 @@ export interface PreparedVideoH3ReferenceDraft {
   draft: VideoGenerationDraft;
   warnings: string[];
   characterStates: VideoH3CharacterReferenceState[];
+  /** Proven source pictures were partly remapped but an unresolved old number
+   * could now alias a different image. The caller must not submit this draft. */
+  issue?: string;
 }
 
 export type VideoH3ReferenceContext = Omit<VideoReferenceUsageContext, 'api'> & {
@@ -48,6 +57,17 @@ export const isVideoH3ReferenceInfo = (message: string): boolean => message === 
 const normalizedSourcePictures = (value: unknown): Array<{ number: number; assetId: string }> => Array.isArray(value)
   ? value.flatMap((entry) => entry && typeof entry === 'object' && Number.isSafeInteger(entry.number) && entry.number > 0
     && typeof entry.assetId === 'string' && entry.assetId.trim() && entry.assetId.length <= 512 ? [{ number: entry.number, assetId: entry.assetId }] : []) : [];
+const manifestSourcePictures = (value: unknown): Array<{ number: number; assetId: string }> => Array.isArray(value)
+  ? value.flatMap((entry) => {
+    if (!entry || typeof entry !== 'object' || typeof entry.token !== 'string') return [];
+    const token = entry.token.trim().match(new RegExp(`^(?:${pictureReferencePattern().source})$`, 'iu'));
+    const number = token ? Number(token[1] ?? token[2] ?? token[3]) : 0;
+    const assetId = typeof entry.id === 'string' && entry.id.trim() ? entry.id
+      : typeof entry.assetId === 'string' ? entry.assetId : '';
+    if (!Number.isSafeInteger(number) || number < 1 || !assetId.trim() || assetId.length > 512
+      || typeof entry.id === 'string' && entry.id.trim() && typeof entry.assetId === 'string' && entry.assetId.trim() && entry.id !== entry.assetId) return [];
+    return [{ number, assetId }];
+  }) : [];
 const isH3 = (text: string): boolean => /(?:^|\n)(?:integrated_multimodal_description|subject_definitions):/u.test(text);
 const imageAsset = (asset: ReferenceAsset): boolean => !['video', 'audio'].includes(asset.type)
   && !['video', 'audio'].includes(asset.mediaType || '') && !/^(?:video|audio)\//u.test(asset.mimeType || '');
@@ -123,26 +143,32 @@ export const videoH3BindingForPrompt = (
 ): VideoH3ReferenceBinding | undefined => {
   const existing = draft.h3ReferenceBinding;
   const normalizedIdentities = existing && normalizeH3IdentityBindings(existing.identities);
+  const existingPictures = normalizedSourcePictures(existing?.sourcePictures);
   if (existing?.version === 1 && existing.projectId === project.id
-    && normalizedIdentities && typeof existing.basePrompt === 'string' && typeof existing.renderedPrompt === 'string'
+    && (normalizedIdentities || existingPictures.length) && typeof existing.basePrompt === 'string' && typeof existing.renderedPrompt === 'string'
     && (draft.prompt === existing.renderedPrompt || draft.prompt === existing.basePrompt)) return { ...existing,
-      identities: normalizedIdentities, sourcePictures: normalizedSourcePictures(existing.sourcePictures) };
+      identities: normalizedIdentities || { version: 1, characters: [] }, sourcePictures: existingPictures,
+      ...(!normalizedIdentities ? { identityBindingWarning: '原 H3 人物锚点资料损坏，仅按已保存的原图片清单同步编号；未猜测人物或改写剧情。' } : {}) };
   // A manual edit invalidates the exact anchors; do not silently reattach by
   // scanning names. A frozen task also must not borrow a later board revision.
   if (existing || draft.reuseTaskId || !draft.source?.storyboardId) return undefined;
   const matches = project.storyboards.filter((board) => board.id === draft.source!.storyboardId);
   if (matches.length !== 1) return undefined;
   const board = matches[0];
-  const english = draft.source.language === 'en';
+  const english = draft.source.language === 'en' || draft.source.language === undefined
+    && draft.prompt === board.officialPromptEn && draft.prompt !== board.officialPromptZh;
   const basePrompt = english ? board.officialPromptEn : board.officialPromptZh;
   const savedIdentities = english ? board.h3IdentityBindingsEn : board.h3IdentityBindings;
   const identities = savedIdentities === undefined ? { version: 1 as const, characters: [] } : normalizeH3IdentityBindings(savedIdentities);
-  if (!basePrompt || draft.prompt !== basePrompt || !identities) return undefined;
-  const sourcePictures = (board.targetOutput?.referenceManifest || []).flatMap((entry) => {
-    const token = typeof entry.token === 'string' ? entry.token.match(/^<Picture ([1-9]\d*)>$/u) : undefined;
-    return token && typeof entry.id === 'string' && entry.id ? [{ number: Number(token[1]), assetId: entry.id }] : [];
-  });
-  return { version: 1, projectId: project.id, basePrompt, identities: structuredClone(identities), renderedPrompt: basePrompt, sourcePictures };
+  if (!basePrompt || draft.prompt !== basePrompt) return undefined;
+  // A translated official derivative can use its saved Chinese compiler
+  // manifest only when its source link proves that exact original delivery.
+  const manifestPromptMatches = board.targetOutput?.prompt === basePrompt || board.targetOutput?.prompt === board.officialPromptZh
+    && (!english || board.officialPromptEnSource === board.officialPromptZh);
+  const sourcePictures = manifestPromptMatches ? manifestSourcePictures(board.targetOutput?.referenceManifest) : [];
+  if (!identities && !sourcePictures.length) return undefined;
+  return { version: 1, projectId: project.id, basePrompt, identities: structuredClone(identities || { version: 1, characters: [] }), renderedPrompt: basePrompt, sourcePictures, sourceLanguage: english ? 'en' : 'zh',
+    ...(!identities ? { identityBindingWarning: '原 H3 人物锚点资料损坏，仅按已保存的原图片清单同步编号；未猜测人物或改写剧情。' } : {}) };
 };
 
 /** Mirrors input serialization, not the dense upload loop. Picture N refers
@@ -183,32 +209,8 @@ export const videoH3PictureNumbers = (
   return { warning: '此自定义接口未声明 H3 图片引用顺序，已保留正文；图片仍按现有模板提交，不阻止生成。' };
 };
 
-/** Literal dialogue, sound payloads and quoted on-screen text are not asset
- * references. Keep UTF-16 offsets so edits apply to the untouched source. */
-const maskReferenceLiterals = (value: string): string => {
-  const ranges = [...value.matchAll(/<(d|sound)>[\s\S]*?(?:<\/\1>|$)/giu)].map((match) => ({ start: match.index!, end: match.index! + match[0].length }));
-  const pairs: Record<string, string> = { '"': '"', "'": "'", '“': '”', '‘': '’', '「': '」', '『': '』' };
-  for (let index = 0; index < value.length; index += 1) {
-    const protectedRange = ranges.find((range) => range.start <= index && index < range.end);
-    if (protectedRange) { index = protectedRange.end - 1; continue; }
-    const opening = value[index]; const closing = pairs[opening];
-    if (!closing || opening === "'" && /[\p{L}\p{N}_]/u.test(value[index - 1] || '')) continue;
-    let end = index + 1; let escaped = false;
-    for (; end < value.length; end += 1) {
-      if ((opening === '"' || opening === "'") && value[end] === '\\' && !escaped) { escaped = true; continue; }
-      if (value[end] === closing && !escaped) break;
-      escaped = false;
-    }
-    if (end < value.length) { ranges.push({ start: index, end: end + 1 }); index = end; }
-  }
-  let masked = value;
-  for (const range of ranges) masked = masked.slice(0, range.start) + masked.slice(range.start, range.end).replace(/[^\r\n]/gu, (character) => ' '.repeat(character.length)) + masked.slice(range.end);
-  return masked;
-};
-
 export interface VideoPictureReferenceEdit { start: number; end: number; text: string }
-const pictureReferencePattern = (): RegExp => /<Picture\s+(\d+)>|\[(?:Pic|Picture)\s*(\d+)\]/giu;
-const pictureReferenceToken = String.raw`(?:<Picture\s+\d+>|\[(?:Pic|Picture)\s*\d+\])`;
+const pictureReferenceToken = `(?:${pictureReferencePattern().source})`;
 const pictureReferenceList = `${pictureReferenceToken}(?:(?:[ \\t]*[、,，][ \\t]*|[ \\t]+(?:and[ \\t]+)?|(?=<|\\[))${pictureReferenceToken})*`;
 
 /** Edit image-reference syntax only. Removing an unsafe binding must not leave
@@ -221,9 +223,9 @@ export const videoPictureReferenceEdits = (
   const envelopes = new RegExp(`\\b(referenced from|reference)([ \\t]+)(${pictureReferenceList})`, 'giu');
   for (const envelope of masked.matchAll(envelopes)) {
     const tokens = [...envelope[3].matchAll(pictureReferencePattern())];
-    if (!tokens.some((token) => numbers.get(Number(token[1] ?? token[2])) === null)) continue;
+    if (!tokens.some((token) => numbers.get(Number(token[1] ?? token[2] ?? token[3])) === null)) continue;
     const rendered = tokens.flatMap((token) => {
-      const mapped = numbers.get(Number(token[1] ?? token[2]));
+      const mapped = numbers.get(Number(token[1] ?? token[2] ?? token[3]));
       return mapped === null ? [] : mapped === undefined ? [token[0]] : mapped.map((number) => token[0].replace(/\d+/u, String(number)));
     });
     const separator = tokens.length > 1 ? envelope[3].slice(tokens[0].index! + tokens[0][0].length, tokens[1].index) : ', ';
@@ -234,7 +236,7 @@ export const videoPictureReferenceEdits = (
   for (const token of masked.matchAll(pictureReferencePattern())) {
     const start = token.index!;
     if (edits.some((edit) => edit.start <= start && start < edit.end)) continue;
-    const mapped = numbers.get(Number(token[1] ?? token[2]));
+    const mapped = numbers.get(Number(token[1] ?? token[2] ?? token[3]));
     if (mapped === undefined) continue;
     edits.push({ start, end: start + token[0].length,
       text: mapped === null ? '' : mapped.map((number) => token[0].replace(/\d+/u, String(number))).join(', ') });
@@ -329,7 +331,10 @@ export const prepareVideoH3ReferenceDraft = (
   const basePrompt = binding?.basePrompt || draft.prompt;
   const sourceBoard = referenceProject.storyboards.filter((board) => board.id === draft.source?.storyboardId);
   const participation = isH3(basePrompt) ? sourceBoard.length === 1
-    ? resolveStoryboardCharacterParticipation(sourceBoard[0], referenceProject.characters, basePrompt)
+    ? resolveStoryboardCharacterParticipation({ ...sourceBoard[0],
+      h3IdentityBindings: normalizeH3IdentityBindings(sourceBoard[0].h3IdentityBindings),
+      h3IdentityBindingsEn: normalizeH3IdentityBindings(sourceBoard[0].h3IdentityBindingsEn),
+    }, referenceProject.characters, basePrompt)
     : resolvePromptCharacterParticipation(basePrompt, referenceProject.characters, { identityBindings: binding?.identities })
     : { characters: [], ambiguousNames: [], usedFallback: true };
   const plan = videoH3PictureNumbers(draft.references, context.api?.provider === 'rhtv_web'
@@ -380,7 +385,7 @@ export const prepareVideoH3ReferenceDraft = (
   }
   if (!binding) return unchanged(draft.references.length
     ? ['这份 H3 稿没有可信的可定位人物绑定，已保留原文；未猜测参考图是谁，不阻止生成。需要补齐时请明确修复本段提示词。'] : []);
-  const warnings: string[] = [...referenceWarnings];
+  const warnings: string[] = [...referenceWarnings, ...(binding.identityBindingWarning ? [binding.identityBindingWarning] : [])];
   // Match the frozen public identities used to author this segment. Same-ID
   // live asset associations and this submission's explicit characterIds are
   // still authoritative for pictures, while later display-name edits are not.
@@ -410,11 +415,15 @@ export const prepareVideoH3ReferenceDraft = (
   // A six-field prompt may already cite pictures in definitions/retention or
   // shot prose. All such tokens must have an unambiguous saved manifest; do
   // not append a second contradictory mapping and leave the old ones behind.
-  const pictureTokens = [...maskReferenceLiterals(binding.basePrompt).matchAll(/<Picture ([1-9]\d*)>/gu)];
+  const pictureSourceIssues: string[] = [];
+  const unresolvedPictureNumbers = new Set<number>();
+  const pictureTokens = [...maskReferenceLiterals(binding.basePrompt).matchAll(pictureReferencePattern())];
   for (const token of pictureTokens) {
-    const source = binding.sourcePictures?.filter((entry) => entry.number === Number(token[1]));
+    const originalNumber = Number(token[1] ?? token[2] ?? token[3]);
+    if (pictureNumbers.has(originalNumber)) continue;
+    const source = binding.sourcePictures?.filter((entry) => entry.number === originalNumber);
     const assetId = source?.length === 1 ? source[0].assetId : undefined;
-    const selected = assetId ? draft.references.findIndex((reference) => reference.assetId === assetId) : -1;
+    const selected = assetId ? draft.references.flatMap((reference, index) => reference.assetId === assetId ? [index] : []) : [];
     const sourceAssets = assetId ? project.assets.filter((asset) => asset.id === assetId) : [];
     const sourceAsset = sourceAssets.length === 1 ? sourceAssets[0] : undefined;
     if (sourceAsset && sourceAsset.characterReferenceId !== undefined) {
@@ -422,11 +431,11 @@ export const prepareVideoH3ReferenceDraft = (
       // this image. Rebuild only this request's picture syntax from the current
       // explicit binding and valid identity anchors, even if the old source ID
       // happens to equal the newly chosen character.
-      pictureNumbers.set(Number(token[1]), null);
+      pictureNumbers.set(originalNumber, null);
       warnings.push(`原 H3 的 ${token[0]} 已按本次明确人物绑定重建图片引用；原稿、人物和剧情保持不变，不阻止生成。`);
       continue;
     }
-    let numbers = selected >= 0 && plan.numbers?.[selected] ? [plan.numbers[selected]] : [];
+    let numbers = selected.flatMap((index) => plan.numbers?.[index] ? [plan.numbers[index]] : []);
     if (!numbers.length && assetId) {
       const originalAssets = project.assets.filter((asset) => asset.id === assetId);
       const owners = originalAssets.length === 1 ? videoReferenceCharacterOwners(referenceProject, originalAssets[0]) : [];
@@ -436,7 +445,7 @@ export const prepareVideoH3ReferenceDraft = (
         if (replacement.referenceIndex !== undefined && plan.numbers?.[replacement.referenceIndex]) {
           numbers = [plan.numbers[replacement.referenceIndex]];
         } else if (replacement.scene && replacement.preventTailFallback) {
-          pictureNumbers.set(Number(token[1]), null);
+          pictureNumbers.set(originalNumber, null);
           warnings.push(`原 H3 的 ${token[0]} 场景图没有唯一可证明的本次对应图片，已仅移除这条图片引用；未改剧情或绑定到本地末帧，不阻止生成。`);
           continue;
         } else if (replacement.scene) {
@@ -450,17 +459,23 @@ export const prepareVideoH3ReferenceDraft = (
         // The original asset is proven, but it was deliberately left out of
         // this submission. Keeping its old ordinal would bind some other
         // selected image; remove only the obsolete picture syntax instead.
-        pictureNumbers.set(Number(token[1]), null);
+        pictureNumbers.set(originalNumber, null);
         warnings.push(`原 H3 的 ${token[0]} 对应图片未在本次选择中且没有可证明的替图，已仅移除这条图片引用；人物、剧情和对白保留，不阻止生成。`);
         continue;
       }
-      return unchanged(unique([...warnings,
-        `原 H3 的 ${token[0]} 缺少可证明的原资产与本次图片对应，已保留当前完整稿；未附加冲突引用，不阻止生成。`]));
+      const sourceIssue = `原 H3 的 ${token[0]} 缺少可证明的原资产与本次图片对应，已保留该原始标签；未附加冲突引用。请恢复该图的原图片清单，或明确重新选择参考图并更新本段引用。`;
+      pictureSourceIssues.push(sourceIssue);
+      unresolvedPictureNumbers.add(originalNumber);
+      warnings.push(sourceIssue);
+      continue;
     }
-    pictureNumbers.set(Number(token[1]), numbers);
+    pictureNumbers.set(originalNumber, unique(numbers));
   }
   const edits = videoPictureReferenceEdits(binding.basePrompt, pictureNumbers);
-  for (const identity of identities) {
+  // Known source pictures are still synchronized when a different old token
+  // lacks provenance. Never add a second identity association to that partial
+  // result, and never silently delete or reinterpret the unresolved token.
+  for (const identity of pictureSourceIssues.length ? [] : identities) {
     const numbers = characterPictures.get(identity.characterId) || [];
     if (!numbers.length) continue;
     const issues = identityIssues.filter((issue) => issue.characterId === identity.characterId);
@@ -474,7 +489,7 @@ export const prepareVideoH3ReferenceDraft = (
       text: ` Visual identity reference for ${identity.name}${identity.subjectToken ? ` ${identity.subjectToken}` : ''}${identity.speakerToken ? ` ${identity.speakerToken}` : ''}: ${numbers.map((number) => `<Picture ${number}>`).join(', ')}.` });
     markBound(identity.characterId, numbers);
   }
-  for (const id of characterPictures.keys()) if (!identities.some((identity) => identity.characterId === id)) {
+  for (const id of pictureSourceIssues.length ? [] : characterPictures.keys()) if (!identities.some((identity) => identity.characterId === id)) {
     const character = referenceProject.characters.find((entry) => entry.id === id);
     const visible = participation.characters.find((entry) => entry.characterId === id && entry.presence === 'visible');
     const edit = character && visible ? participationReferenceEdit(binding.basePrompt, character, referenceProject.characters, visible.visibleShotIndexes, characterPictures.get(id)!) : undefined;
@@ -487,5 +502,15 @@ export const prepareVideoH3ReferenceDraft = (
   }
   let prompt = binding.basePrompt;
   for (const edit of edits.sort((a, b) => b.start - a.start)) prompt = prompt.slice(0, edit.start) + edit.text + prompt.slice(edit.end);
-  return { draft: { ...draft, prompt, h3ReferenceBinding: { ...binding, renderedPrompt: prompt, characterStates: structuredClone(characterStates) }, h3ReferenceWarnings: unique(warnings) }, warnings: unique(warnings), characterStates };
+  const changedKnownMapping = [...pictureNumbers].some(([number, mapped]) => mapped !== null && (mapped.length !== 1 || mapped[0] !== number));
+  const issue = pictureSourceIssues.length && changedKnownMapping
+    ? `旧 H3 图片清单仅能证明部分引用，本次已同步已知图片编号，但剩余 ${[...unresolvedPictureNumbers].map((number) => `<Picture ${number}>`).join('、')} 的来源尚未证明；不能将这份混合编号稿提交。请恢复原图片清单或明确更新本段参考图引用后重试。`
+    : undefined;
+  return { draft: { ...draft, prompt,
+    ...(!draft.reuseTaskId && !draft.h3ReferenceBinding && draft.source && draft.source.language === undefined
+      && binding.sourceLanguage === 'en' && sourceBoard.length === 1
+      && binding.basePrompt === sourceBoard[0].officialPromptEn
+      && sourceBoard[0].officialPromptEnSource === sourceBoard[0].officialPromptZh
+      ? { source: { ...draft.source, language: 'en' as const } } : {}),
+    h3ReferenceBinding: { ...binding, renderedPrompt: prompt, characterStates: structuredClone(characterStates) }, h3ReferenceWarnings: unique(warnings) }, warnings: unique(warnings), characterStates, ...(issue ? { issue } : {}) };
 };

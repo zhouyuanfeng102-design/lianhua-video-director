@@ -6,6 +6,8 @@ import {
   privateImageVariantNegativePrompt,
 } from './imageGeneration';
 import { normalizePrivateFullBodyOutputSize } from './imageOutputSize';
+import { IMAGE_RESOLUTION_TECHNICAL_MAX_SIDE, normalizeImageResolutionPlan } from './imageResolution';
+import type { ImageResolutionPlan } from './imageResolution';
 import { normalizeImageAssetRegenerationSnapshot, withDirectImageRegenerationSnapshot } from './imageAssetRegenerationSnapshot';
 import { assertValidFinalImagePrompt } from './imagePromptRules';
 import { buildImagePromptIdentityContext } from './imagePromptIdentityContext';
@@ -101,12 +103,18 @@ const savedImageRequestSize = (asset: ReferenceAsset): ReferenceAsset['imageRequ
   const request: unknown = asset.imageRequestSize;
   if (!request || typeof request !== 'object' || Array.isArray(request)) return undefined;
   const values = request as Record<string, unknown>;
-  if (![values.width, values.height].every((value) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 64 && value <= 4096)
+  if (![values.width, values.height].every((value) => typeof value === 'number' && Number.isSafeInteger(value) && value >= 64 && value <= IMAGE_RESOLUTION_TECHNICAL_MAX_SIDE)
     || values.sizeOverride !== undefined && typeof values.sizeOverride !== 'boolean') return undefined;
+  const resolutionPlan = normalizeImageResolutionPlan(values.resolutionPlan);
+  if (values.resolutionPlan !== undefined && (!resolutionPlan
+    || resolutionPlan.expected.width !== values.width || resolutionPlan.expected.height !== values.height)) {
+    throw new Error('原图保存的分辨率执行计划损坏或与请求尺寸不一致，不能自动改用当前分辨率；请重新创建生图任务。');
+  }
   return {
     width: values.width as number,
     height: values.height as number,
     ...(typeof values.sizeOverride === 'boolean' ? { sizeOverride: values.sizeOverride } : {}),
+    ...(resolutionPlan ? { resolutionPlan } : {}),
   };
 };
 
@@ -176,7 +184,7 @@ export const resolveImageAssetRegenerationTask = (
   const requestSize = savedImageRequestSize(asset);
   const savedWidth = requestSize?.width ?? (typeof asset.width === 'number' && asset.width > 0 ? asset.width : canvas.width);
   const savedHeight = requestSize?.height ?? (typeof asset.height === 'number' && asset.height > 0 ? asset.height : canvas.height);
-  const resolvedSize = privateAsset && imageVariant === 'private-full-body'
+  const resolvedSize = !requestSize && privateAsset && imageVariant === 'private-full-body'
     ? normalizePrivateFullBodyOutputSize(savedWidth, savedHeight)
     : { width: savedWidth, height: savedHeight };
   const backend = backendForAsset(asset, imageApi);
@@ -192,6 +200,7 @@ export const resolveImageAssetRegenerationTask = (
     width: resolvedSize.width,
     height: resolvedSize.height,
     ...(typeof requestSize?.sizeOverride === 'boolean' ? { sizeOverride: requestSize.sizeOverride } : {}),
+    ...(requestSize?.resolutionPlan ? { resolutionPlan: requestSize.resolutionPlan } : {}),
     backend, model,
     sourceEntityId: asset.sourceEntityId, sourceStoryboardId: asset.sourceStoryboardId, sourceShotId: asset.sourceShotId,
     imageFrameBatchId: asset.imageFrameBatchId,
@@ -249,7 +258,7 @@ const currentShotRegenerationRequest = (task: ImageGenerationTask, project: Proj
     .find((item) => item.shotId === task.sourceShotId && item.purpose === purpose);
   if (!built) throw new Error('无法读取当前镜头的生图资料；不会复用旧提示词。');
   const request = task.sizeOverride
-    ? applyStoryboardImageOutputSize(built, { width: task.width, height: task.height, sizeOverride: true, issue: '', layoutNote: '' })
+    ? applyStoryboardImageOutputSize(built, { width: task.width, height: task.height, sizeOverride: true, issue: '', layoutNote: '', resolutionPlan: task.resolutionPlan })
     : built;
   return { storyboard, context, request };
 };
@@ -516,6 +525,7 @@ export const resolveImageRegenerationSource = (
         imageWorkbenchEntityToForm('character', entity),
         task.imageVariant,
         privatePart,
+        { width: task.width, height: task.height, aspectRatio: task.resolutionPlan?.logicalAspectRatio, resolution: task.resolutionPlan?.tier },
       ),
       conversionIdentityContext: !dossierUsesStory(entity.dossier) ? '' : buildImagePromptIdentityContext(project, [imageWorkbenchEntityToForm('character', entity).name]),
       converterSystemPrompt: '', referenceAssetIds: [], primaryReferenceAssetIds: [],
@@ -528,7 +538,7 @@ export const resolveImageRegenerationSource = (
     const form = imageWorkbenchEntityToForm(task.assetKind, entity);
     const dossier = task.assetKind === 'character' ? (entity as Project['characters'][number]).dossier : undefined;
     return {
-    conversionSource: buildImagePrompt(task.assetKind, task.assetKind === 'character' ? characterDossierFormForRequest(form, dossier) : form, task.imageVariant),
+    conversionSource: buildImagePrompt(task.assetKind, task.assetKind === 'character' ? characterDossierFormForRequest(form, dossier) : form, task.imageVariant, undefined, { width: task.width, height: task.height, aspectRatio: task.resolutionPlan?.logicalAspectRatio, resolution: task.resolutionPlan?.tier }),
     conversionIdentityContext: !dossierUsesStory(dossier) ? '' : buildImagePromptIdentityContext(project,
       task.assetKind === 'character' ? [imageWorkbenchEntityToForm('character', entity).name] : []),
     converterSystemPrompt: '', referenceAssetIds: [], primaryReferenceAssetIds: [],
@@ -586,7 +596,7 @@ export const buildImageRegenerationTask = (
   if (!canRegenerateImageTask(source, project.generationTasks)) throw new Error('该图像任务或其重新生成队列正在处理，请等待完成后再试。');
   const rootId = imageRegenerationRootId(source);
   const baseName = sourceBaseName(source, project);
-  const requestSize = source.imageVariant === 'private-full-body'
+  const requestSize = !source.resolutionPlan && source.sizeOverride === undefined && source.imageVariant === 'private-full-body'
     ? normalizePrivateFullBodyOutputSize(source.width, source.height)
     : { width: source.width, height: source.height };
   return {
@@ -622,7 +632,7 @@ export const executeImageRegeneration = async <T>(
     referenceImages: string[]; primaryReferenceImageCount: number;
     convertPrompt: () => Promise<string>;
     persistPrompt: (prompt: string) => void | Promise<void>;
-    generateImage: (input: { prompt: string; negativePrompt?: string; width: number; height: number; sizeOverride?: boolean; referenceImages: string[]; primaryReferenceImageCount: number }) => Promise<T>;
+    generateImage: (input: { prompt: string; negativePrompt?: string; width: number; height: number; sizeOverride?: boolean; resolutionPlan?: ImageResolutionPlan; referenceImages: string[]; primaryReferenceImageCount: number }) => Promise<T>;
   },
 ): Promise<{ finalPrompt: string; generated: T }> => {
   const hasSavedPrompt = Boolean(task.prompt.trim()) && !imageTaskNeedsLandscapeScopeRepair(task);
@@ -641,6 +651,7 @@ export const executeImageRegeneration = async <T>(
     const generated = await options.generateImage({
       prompt: task.prompt, negativePrompt, width: task.width, height: task.height,
       ...(typeof task.sizeOverride === 'boolean' ? { sizeOverride: task.sizeOverride } : {}),
+      ...(task.resolutionPlan ? { resolutionPlan: task.resolutionPlan } : {}),
       referenceImages: [...options.referenceImages], primaryReferenceImageCount: options.primaryReferenceImageCount,
     });
     return { finalPrompt: task.prompt, generated };
@@ -654,6 +665,7 @@ export const executeImageRegeneration = async <T>(
   const generated = await options.generateImage({
     prompt: validated, negativePrompt, width: task.width, height: task.height,
     ...(typeof task.sizeOverride === 'boolean' ? { sizeOverride: task.sizeOverride } : {}),
+    ...(task.resolutionPlan ? { resolutionPlan: task.resolutionPlan } : {}),
     referenceImages: [...options.referenceImages], primaryReferenceImageCount: options.primaryReferenceImageCount,
   });
   return { finalPrompt: validated, generated };

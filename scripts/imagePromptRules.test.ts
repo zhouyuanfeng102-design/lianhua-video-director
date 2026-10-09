@@ -9,6 +9,7 @@ import {
   IMAGE_PROMPT_DIRECTED_ACTION_CONTRACT,
   IMAGE_PROMPT_FULL_BODY_LAYOUT_CONTRACT,
   IMAGE_PROMPT_PROPORTION_CONTRACT,
+  IMAGE_PROMPT_RESOLUTION_CONTRACT,
   IMAGE_PROMPT_PROP_SCOPE_CONTRACT,
   NOVELAI_IMAGE_PRESET_IDS,
   buildImagePromptConverterSystemPrompt,
@@ -37,9 +38,12 @@ import {
 } from '../src/nsfwPromptRules';
 import {
   FULL_BODY_LAYOUT_RULE,
+  imagePromptOutputSpecificationRule,
   ordinaryImageVariantConverterRule,
   privateImageVariantConverterRule,
+  privateImageVariantRepairRule,
 } from '../src/imageGeneration';
+import { buildImagePrompt } from '../src/promptEngine';
 
 const tests: Array<{ name: string; run: () => void | Promise<void> }> = [];
 const test = (name: string, run: () => void | Promise<void>): void => {
@@ -896,7 +900,7 @@ test('private character presets reuse the positive-only 墨色江湖 dossier rul
       `${preset.description}\n${preset.systemPrompt}\n${preset.outputRules}`,
       /18\s*岁|年龄|成年|未成年|\badult\b|\bminor\b|\bchild\b|\bteen\b|禁止|不得|不要|严禁|负面|negative/iu,
     );
-    assert.equal(preset.version, '1.6.0');
+    assert.equal(preset.version, '1.7.0');
     assert.match(preset.outputRules, /当前画面规格是唯一版式合同/u,
       `${preset.name} must route by the current private target instead of expanding every layout`);
     assert.match(preset.outputRules, /单画面.*唯一完整主体.*中央轴.*两侧.*同一背景/u);
@@ -1135,7 +1139,7 @@ test('Krea-2 private multi-region requests use the private preset and current la
   });
   assert.equal(resolved.ruleSet.id, 'image-rule-krea-2');
   assert.equal(resolved.preset.id, 'image-preset-character-private');
-  assert.equal(resolved.preset.version, '1.6.0');
+  assert.equal(resolved.preset.version, '1.7.0');
   assert.match(resolved.preset.outputRules, /多区域规格.*槽位顺序.*同一内容只出现一次/u);
   assert.doesNotMatch(resolved.preset.outputRules, /私密全身呈现.*私密四视图呈现.*四合一/u);
 });
@@ -1724,7 +1728,7 @@ test('catalog-v3 built-in private presets migrate to current-target private layo
     .filter((preset) => preset.assetKind === 'character-private')
     .forEach((preset) => {
       const expected = expectedById.get(preset.id)!;
-      assert.equal(preset.version, '1.6.0');
+      assert.equal(preset.version, '1.7.0');
       assert.equal(preset.systemPrompt, expected.systemPrompt);
       assert.equal(preset.outputRules, expected.outputRules);
       assert.match(preset.outputRules, /当前画面规格是唯一版式合同/u);
@@ -1758,7 +1762,7 @@ test('catalog-v7 built-in private presets migrate away from mixed layout wording
   migrated.categoryPresets
     .filter((preset) => preset.assetKind === 'character-private')
     .forEach((preset) => {
-      assert.equal(preset.version, '1.6.0');
+      assert.equal(preset.version, '1.7.0');
       assert.match(preset.outputRules, /当前画面规格是唯一版式合同/u);
       assert.doesNotMatch(preset.outputRules, /私密全身呈现[\s\S]{0,120}私密四视图呈现[\s\S]{0,120}四合一/u);
     });
@@ -1790,7 +1794,7 @@ test('catalog-v8 private presets migrate away from single-image self-trigger wor
   migrated.categoryPresets
     .filter((preset) => preset.assetKind === 'character-private')
     .forEach((preset) => {
-      assert.equal(preset.version, '1.6.0');
+      assert.equal(preset.version, '1.7.0');
       assert.match(preset.outputRules, /当前画面规格是唯一版式合同/u);
       assert.doesNotMatch(preset.outputRules, /未分格|当前目标为资料板/u);
     });
@@ -1830,7 +1834,7 @@ test('catalog-v9 upgrades untouched Krea and private presets to single-subject f
   assert.equal(krea.version, '1.3.0');
   assert.match(krea.systemPrompt, /只有一个实际主体.*连续背景/u);
   migrated.categoryPresets.filter((preset) => preset.assetKind === 'character-private').forEach((preset) => {
-    assert.equal(preset.version, '1.6.0');
+    assert.equal(preset.version, '1.7.0');
     assert.match(preset.outputRules, /唯一完整主体.*中央轴.*两侧.*同一背景/u);
   });
   assert.equal(migrated.categoryPresets.find((preset) => preset.id === 'image-preset-character-private')?.enabled, false);
@@ -2087,7 +2091,8 @@ test('ordinary full-body framing includes an anti-stretch anatomy guard without 
   const contract = `${FULL_BODY_LAYOUT_RULE}\n${IMAGE_PROMPT_FULL_BODY_LAYOUT_CONTRACT}`;
   assert.match(contract, /单幅全身|完整入画/u);
   assert.match(contract, /正常透视/u);
-  assert.match(contract, /横向3:2画布.*连续环境和自然留白/u);
+  assert.match(contract, /画幅服从当前实际生图规格.*横向、竖向或方形画布.*连续环境和自然留白/u);
+  assert.doesNotMatch(contract, /横向3:2画布/u, 'a single full-body image must follow the actual output aspect');
   assert.doesNotMatch(contract, /占据画面主要区域/u);
   assert.match(contract, /比例/u);
   // A canvas can be the correct pixel size while the model still widens the
@@ -2385,6 +2390,99 @@ test('storyboard converter keeps directed action actor, target, and camera axis'
   const characterSystem = buildImagePromptConverterSystemPrompt(characterSelection);
   assert.equal(characterSystem.includes(IMAGE_PROMPT_DIRECTED_ACTION_CONTRACT), false,
     'directed storyboard framing rules must not leak into ordinary character references');
+});
+
+test('ordinary output specifications describe the actual aspect and keep resolution out of visible text', () => {
+  const fields = { name: '测试角色', gender: '男', morphology: 'human', appearance: '固定外观', outfit: '固定衣着' };
+  const square = buildImagePrompt('character', fields, 'full-body', undefined,
+    { width: 1024, height: 1024, aspectRatio: '1:1', resolution: '1K' });
+  assert.match(square, /逻辑画幅1:1，方形画幅.*1024×1024/u);
+  assert.doesNotMatch(square, /横向3:2/u);
+  assert.match(square, /单幅全身图.*完整入画/u);
+  assert.match(square, /不是画面内容、图中文字或质量标签/u);
+  const landscape = buildImagePrompt('location', { name: '测试场景', description: '固定空间' }, 'landscape', undefined,
+    { width: 2048, height: 1152, aspectRatio: '16:9', resolution: '2K' });
+  assert.match(landscape, /逻辑画幅16:9，横向画幅.*2048×1152/u,
+    'the landscape early return must receive the same frozen output metadata');
+  const grid = buildImagePrompt('grid', { story: '九个连续时刻' }, 'grid', undefined,
+    { width: 4096, height: 4096, aspectRatio: '1:1', resolution: '4K' });
+  assert.match(grid, /1:1 方形母版.*3×3/u);
+  assert.match(grid, /九格数量、阅读顺序与逐格时刻保持/u);
+  assert.doesNotMatch(grid, /16:9|2048×1152/u);
+});
+
+test('every private output target and repair retains its fixed framing under K selections', () => {
+  const fields = {
+    name: '测试角色', gender: '女', morphology: 'human', appearance: '固定外观',
+    nsfwFullBody: '稳定身体轮廓', nsfwBreasts: '固定肤色和纹理',
+    nsfwVulva: '固定肤色和纹理', nsfwAnus: '固定肤色和纹理',
+  };
+  for (const resolution of ['1K', '2K', '4K']) {
+    const closeUpSpec = { width: 2048, height: 1536, aspectRatio: '4:3', resolution };
+    const closeUp = buildImagePrompt('character', fields, 'private-close-up', 'breasts', closeUpSpec);
+    assert.match(closeUp, /指定部位只出现一次.*不拉远补全身/u);
+    assert.match(closeUp, /逻辑画幅4:3，横向画幅/u);
+    assert.match(privateImageVariantRepairRule('private-close-up', 'breasts', closeUpSpec),
+      new RegExp(`当前生图规格：${resolution}分辨率档位`, 'u'));
+    const fullBody = buildImagePrompt('character', fields, 'private-full-body', 'full-body',
+      { width: 3392, height: 5056, aspectRatio: '2:3', resolution });
+    assert.match(fullBody, /2:3 竖向|2:3竖向/u);
+    assert.match(fullBody, /逻辑画幅2:3，竖向画幅.*3392×5056/u,
+      'native K dimensions larger than the legacy 4096 cap remain valid metadata');
+    const sheetSpec = { width: 5056, height: 3392, aspectRatio: '3:2', resolution };
+    const fiveView = buildImagePrompt('character', fields, 'private-five-view', 'full-body', sheetSpec);
+    assert.match(fiveView, /严格只有五个固定区域/u);
+    assert.match(fiveView, /左侧上下两头肩特写，右侧三个指定角度全身/u);
+    const fourView = buildImagePrompt('character', fields, 'private-turnaround', 'full-body', sheetSpec);
+    assert.match(fourView, /历史四视图参考板.*四个全身视角/u);
+    const fourInOne = buildImagePrompt('character', fields, 'private-four-in-one', 'full-body', sheetSpec);
+    assert.match(fourInOne, /左侧约70%为一个全身主画面，右侧约30%为三个辅助部位窗/u);
+    assert.match(fourInOne, /每个槽位只绘制一次指定内容/u);
+  }
+});
+
+test('resolution contracts retain natural language, SD and NAI protocols without rewriting user quality tags', () => {
+  for (const backend of ['openai', 'sd-webui', 'comfyui', 'novelai'] as const) {
+    const selection = resolveImagePromptSelection({ backend, assetKind: 'character-private' });
+    const system = buildImagePromptConverterSystemPrompt(selection, '用户画风：highres, 8k', 'private-close-up',
+      { width: 2048, height: 2048, aspectRatio: '1:1', resolution: '2K' });
+    assert.ok(system.includes(IMAGE_PROMPT_RESOLUTION_CONTRACT));
+    assert.ok(system.includes('用户画风：highres, 8k'));
+    assert.match(system, /分辨率档位.*预设里的高清、精细、highres等质量词不决定实际输出像素/u);
+    assert.match(system, /指定部位只出现一次.*不拉远补全身/u);
+    assert.ok(system.includes(`格式：${selection.ruleSet.format}`));
+  }
+  assert.equal(imagePromptOutputSpecificationRule({ width: 0, height: 1024, resolution: '2K' }), '');
+});
+
+test('catalog v19 updates only exact factory private output text and preserves user choices and task snapshots', () => {
+  const legacyOutput = '输入资料末尾的当前画面规格是唯一版式合同，最终提示词只展开该规格已经明确的画幅、主体数量、区域数量、主次关系、取景范围与焦点。当前规格为单画面时，使用正向空间描述锁定唯一完整主体沿中央轴出现、取景边缘完整、主体两侧延续同一背景；多区域规格按当前给出的槽位顺序组织，每个槽位只承担一个清楚内容，同一内容只出现一次，所有区域共享同一人物和身体锚点。只描述当前目标，不解释替代版式。明确类人角色按当前取景所需范围保持肤色、体型和身体锚点；拟人非人角色保持当前取景涉及的人形部位、非人头部、体表或附肢；真实非类人角色保持当前取景涉及的头部或感知结构、躯干、附肢、体表材质与身体锚点。背景简洁，主体结构完整，焦点清晰。';
+  const current = normalizeImagePromptRulesState(undefined);
+  const legacy = { ...current, catalogVersion: 18,
+    categoryPresets: current.categoryPresets.map((preset) => preset.assetKind === 'character-private'
+      ? { ...preset, version: '1.6.0', outputRules: legacyOutput } : preset),
+  };
+  const privatePresets = legacy.categoryPresets.filter((preset) => preset.assetKind === 'character-private');
+  privatePresets[0].enabled = false;
+  privatePresets[1].name = '用户改名';
+  privatePresets[2].outputRules += ' 用户自定义细节';
+  privatePresets[3].systemPrompt += '\n用户自定义规则';
+  const deletedId = privatePresets[4].id;
+  legacy.categoryPresets = legacy.categoryPresets.filter((preset) => preset.id !== deletedId);
+  const retainedEdits = structuredClone(privatePresets.slice(1, 4));
+  const frozenTask = { converterSystemPrompt: '旧转换快照', prompt: '用户旧提示词', width: 3072, height: 2048 };
+  const savedTask = structuredClone(frozenTask);
+  const migrated = migrateImagePromptRulesState({ ...legacy, generationTasks: [frozenTask] });
+  const updated = migrated.categoryPresets.find((preset) => preset.id === privatePresets[0].id)!;
+  assert.equal(updated.enabled, false);
+  assert.equal(updated.version, '1.7.0');
+  assert.match(updated.outputRules, /单画面全身目标.*单画面近景目标/u);
+  assert.match(updated.outputRules, /指定部位只出现一次/u);
+  assert.deepEqual(migrated.categoryPresets.filter((preset) => retainedEdits.some((edit) => edit.id === preset.id)), retainedEdits);
+  assert.equal(migrated.categoryPresets.some((preset) => preset.id === deletedId), false);
+  assert.deepEqual(frozenTask, savedTask);
+  assert.deepEqual(migrated.defaultRuleSetByBackend, legacy.defaultRuleSetByBackend);
+  assert.deepEqual(migrateImagePromptRulesState(migrated), migrated);
 });
 
 let passed = 0;

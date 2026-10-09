@@ -155,7 +155,7 @@ export const buildVideoApiBody = (config: Omit<VideoTaskApiConfig, 'apiKey'>, dr
     try { raw = JSON.parse(config.requestTemplate); } catch { throw new Error('视频 API 请求模板不是有效 JSON。'); }
     if (config.provider === 'runninghub') assertRunningHubTemplateNumbersSafe(config.requestTemplate);
     const result = config.provider === 'runninghub' && config.runningHubMappedFields
-      ? bindRunningHubVideoRequest(config.requestTemplate, config.runningHubMappedFields, draft, images)
+      ? bindRunningHubVideoRequest(config.requestTemplate, config.runningHubMappedFields, draft, images, config)
       : expandTemplate(config.provider === 'runninghub' ? clearUnusedRunningHubTemplateImages(raw, new Set(slots)) : raw, {
       prompt: draft.prompt, model: config.model || '', images,
       // Generic arrays remain dense: never manufacture an empty URL. A

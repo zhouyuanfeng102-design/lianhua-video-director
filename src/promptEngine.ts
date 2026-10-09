@@ -20,7 +20,7 @@ import type {
   Workflow
 } from './types';
 import { createId } from './storage';
-import { getImageVariantGenerationSpec, resolveExplicitImageCharacterMorphology } from './imageGeneration';
+import { getImageVariantGenerationSpec, imagePromptOutputSpecificationRule, resolveExplicitImageCharacterMorphology, type ImagePromptOutputSpecification } from './imageGeneration';
 import { buildLandscapeImageSource, isLandscapeImageRequest } from './imageLocationScope';
 import {
   classifyQuotedSpeechContext,
@@ -1879,11 +1879,6 @@ const promptContext = (params: VideoPromptRenderParams): string[] => {
     params.lightingTerms?.length ? `光影偏好：${params.lightingTerms.map((item) => safeContextClause(item, 60)).filter(Boolean).join('、')}` : '',
     publicExtra && `制作要求：${safeContextClause(publicExtra, 320)}`,
     constraintGlobalLock && `连续性锚点：${safeContextClause(constraintGlobalLock, 600)}`,
-    `规则基础：${safeContextClause(params.ruleSet.baseRules, 420)}`,
-    `连续性规则：${safeContextClause(params.ruleSet.continuityRules, 420)}`,
-    `输出规则：${safeContextClause(params.ruleSet.outputRules, 420)}`,
-    `转换器 ${safeContextClause(params.converter.name, 80)}：${safeContextClause(params.converter.systemPrompt, 420)}`,
-    `转换器输出：${safeContextClause(params.converter.outputRules, 320)}`,
   ];
   return constraints.filter((item): item is string => Boolean(item));
 };
@@ -3053,11 +3048,14 @@ export const buildImagePrompt = (
   fields: Record<string, string>,
   variant?: ImageVariant,
   nsfwPrivatePart?: NsfwPrivatePart,
+  outputSpecification?: ImagePromptOutputSpecification,
 ): string => {
   if (kind === 'character') fields = normalizeFemaleCharacterVocabularyRecord(fields);
   const direction = variant ? getImageVariantGenerationSpec(variant).direction : '';
-  const appendDirection = (prompt: string): string =>
-    direction ? `${prompt} ${direction}` : prompt;
+  const appendDirection = (prompt: string): string => [
+    direction ? `${prompt} ${direction}` : prompt,
+    imagePromptOutputSpecificationRule(outputSpecification, variant),
+  ].filter(Boolean).join('\n');
   const characterMorphology = kind === 'character'
     ? imageCharacterMorphology(fields)
     : undefined;
@@ -3266,11 +3264,11 @@ export const buildImagePrompt = (
     return appendDirection(`单个角色参考图，名称：${fields.name || '未命名角色'}，${fields.gender ? `性别设定：${fields.gender}，` : ''}${fields.age ? `外观年龄（按此绘制）：${fields.age}，` : ''}${fields.height ? `身高/高度（比例锚点）：${fields.height}，` : ''}${fields.race ? `物种/族裔：${fields.race}，` : ''}${morphologyPromptText(fields, morphology).join('；')}，详细外观：${fields.appearance || '根据资料补足符合物种设定的头部、躯干、肢体、表面特征和辨识标记'}，服装：${fields.outfit || '与题材匹配的常驻服装'}，稳定长期装备/辨识物：${fields.props || '无'}，性格气质：${fields.personality || '符合剧情身份'}，动作习惯：${fields.motion || '符合其身体结构的自然静态姿态'}，连续性锚点：${fields.anchor || '保持身份、性别设定、身体结构、外观、服装和稳定长期装备稳定'}。临时购买后食用的食物及容器、短暂借用或交接物、单次动作手持物不应固化为人物参考图身份；按全文中的归属、持续性和叙事功能判断，不按物品类别一刀切，保留真正的长期装备与身份标志；${fields.style || '电影级清晰质感'}，单个主体干净构图，适合作为后续视频参考图。${morphology.anthropomorphic ? '拟人非人角色必须同时保留原文明确的人形躯干/直立部位与非人头部、体表、附肢；禁止把非人头部和体表替换成人类外貌。' : ''}只按外观年龄控制年龄感，按身高/高度稳定身体比例，禁止把其他设定转换成老化外貌，禁止改变既定性别或物种特征，禁止多余文字、Logo、水印和无关人物。`);
   }
   if (kind === 'location') {
-    if (isLandscapeImageRequest(kind, variant)) return buildLandscapeImageSource(fields);
+    if (isLandscapeImageRequest(kind, variant)) return [buildLandscapeImageSource(fields), imagePromptOutputSpecificationRule(outputSpecification, variant)].filter(Boolean).join('\n');
     return appendDirection(`视频场景参考图，${fields.name || '未命名场景'}，空间结构与建筑材质：${fields.description || '根据剧情建立空间布局'}，${fields.weather || '符合剧情的时间和天气'}，主光源：${fields.lighting || '明确主光源'}，${fields.palette || '统一色彩母题'}，固定陈设：${fields.fixedProps || '符合剧情的关键陈设'}，场景锚点：${fields.anchor || '保持空间布局、光向和色彩连续'}，${fields.style?.trim() ? `视觉风格：${fields.style.trim()}，` : ''}空间结构清晰，适合作为视频首帧或场景参考，不加入文字、Logo和水印。`);
   }
   if (kind === 'prop') {
     return appendDirection(`单个剧情道具参考图，${fields.name || '未命名道具'}，类别：${fields.category || '剧情道具'}，材质：${fields.material || '具体材质'}，详细外观：${fields.appearance || '清晰轮廓、颜色、纹理、尺寸和磨损细节'}，剧情作用与效果：${fields.effect || '无'}，状态连续性：${fields.stateRules || '保持形状、磨损和关键细节一致'}，细节清楚，适合作为视频中的关键道具参考，不加入文字、Logo和水印。`);
   }
-  return appendDirection(`九宫格视觉母版提示词：16:9 横向画幅，2048×1152，3×3 等大宽银幕画格，从左到右、从上到下展示同一主体的九个连续关键状态；主体身份、服装、材质、核心道具和色彩贯穿九格，镜位、景别、动作和姿态明显变化；细而整洁的中性分隔线，无多余文字、Logo和水印。故事内容：${fields.story || '根据当前场景生成一条完整的视觉发展线'}。`);
+  return appendDirection(`九宫格视觉母版提示词：1:1 方形母版，3×3 等大画格，从左到右、从上到下展示同一主体的九个连续关键状态；主体身份、服装、材质、核心道具和色彩贯穿九格，镜位、景别、动作和姿态明显变化；细而整洁的中性分隔线，无多余文字、Logo和水印。故事内容：${fields.story || '根据当前场景生成一条完整的视觉发展线'}。`);
 };

@@ -339,6 +339,8 @@ export interface VideoGenerationController {
   resume: (taskId: string) => Promise<void>;
   cancel: (taskId: string) => Promise<void>;
   cancelBatch: (batchId: string) => Promise<VideoBatchCancelResult>;
+  /** Stop observation of removed projects immediately; does not cancel server jobs. */
+  reconcileProjectLibrary?: () => void;
   resumeBatch?: (batchId: string) => Promise<VideoBatchResumeResult>;
   confirmContinueBatch?: (planId: string, signal?: AbortSignal) => Promise<VideoBatchStartResult>;
   /** Stable external store: subscribe only in task cards / the task-list view. */

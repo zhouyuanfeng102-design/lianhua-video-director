@@ -187,12 +187,23 @@ const privateFullBodySourceTask = task({
   imageVariant: 'private-full-body', referenceScope: 'nsfw-private-profile', nsfwPrivatePart: 'full-body',
   width: 3072, height: 2048,
 });
+const unchangedPrivateFullBodySource = structuredClone(privateFullBodySourceTask);
 const privateFullBodyChild = buildImageRegenerationTask(privateFullBodySourceTask, adultPrivateProject, {
-  id: 'private-full-body-portrait-child', timestamp: 23, backend: privateFullBodySourceTask.backend,
+  id: 'private-full-body-preserved-size-child', timestamp: 23, backend: privateFullBodySourceTask.backend,
   model: privateFullBodySourceTask.model, source: rebuiltPrivateFullBody,
 });
-assert.equal(privateFullBodyChild.width, 2048);
-assert.equal(privateFullBodyChild.height, 3072);
+assert.equal(privateFullBodyChild.width, 3072, 'retry must preserve a legal historical width, even for a non-recommended layout');
+assert.equal(privateFullBodyChild.height, 2048, 'retry must preserve a legal historical height instead of forcing a portrait');
+assert.deepEqual(privateFullBodySourceTask, unchangedPrivateFullBodySource, 'building a retry must not rewrite its historical source');
+await executeImageRegeneration(privateFullBodyChild, {
+  referenceImages: [], primaryReferenceImageCount: 0,
+  convertPrompt: async () => 'A cinematic full body portrait in warm window light.',
+  persistPrompt: () => undefined,
+  generateImage: async (input) => {
+    assert.deepEqual([input.width, input.height], [3072, 2048], 'the generation transport must receive the historical pixels unchanged');
+    return 'mock-private-full-body-preserved-size';
+  },
+});
 assert.match(privateFullBodyChild.negativePrompt || '', /second person.*duplicate person.*multiple views/iu);
 assert.doesNotMatch(privateFullBodyChild.negativePrompt || '', /\bage\b|\badult\b|\bminor\b|\bchild\b|\bteen\b|年龄|成年|未成年/iu);
 const rebuiltPrivateWithoutAgeMetadata = resolveImageRegenerationSource(task({

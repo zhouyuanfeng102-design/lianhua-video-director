@@ -7,6 +7,7 @@ import type {
 } from './promptAdapters';
 import { translateVideoPromptToEnglish, type TranslateVideoPromptToEnglishOptions } from './promptTranslation';
 import { STORY_CAUSALITY_TRANSLATION_RULE } from './storyCausalityRules';
+import { assertVideoPromptHasNoInstructionLeak, isInternalVideoPromptConstraint } from './videoPromptInstructionLeak';
 
 export interface Seedance25PromptCompilation {
   targetId: 'seedance-2.5';
@@ -60,12 +61,14 @@ export const SEEDANCE_ENGLISH_TRANSLATION_RULE = [
 ].join('\n');
 
 export const translateSeedancePromptToEnglish = async ({ sourcePrompt, request }: Pick<TranslateVideoPromptToEnglishOptions, 'sourcePrompt' | 'request'>): Promise<string> => {
+  assertVideoPromptHasNoInstructionLeak(sourcePrompt, 'Seedance 中文源稿');
   const translated = await translateVideoPromptToEnglish({
     sourcePrompt,
     request: (system, user, transport) => request(`${system}\n\n${SEEDANCE_ENGLISH_TRANSLATION_RULE}`, user, transport),
     clean: cleanSeedancePrompt,
     reviewWithAi: false,
   });
+  assertVideoPromptHasNoInstructionLeak(translated, 'Seedance 英文结果');
   const referenceTokens = (prompt: string): string[] => (prompt.match(/@(?:Image|Video|Audio|Clay Render)\s+\d+/gu) || []).sort();
   if (JSON.stringify(referenceTokens(sourcePrompt)) !== JSON.stringify(referenceTokens(translated))) {
     throw new Error('Seedance 英文翻译改变了参考素材编号，中文稿已保留，请重试英文。');
@@ -179,7 +182,7 @@ const renderPrompt = (input: PromptAdapterInput, manifest: ReferenceManifest, wa
   // The AI-confirmed canonical timeline owns story causality. This adapter
   // preserves that body; it never chooses an actor from reference metadata.
   const timeline = removeH3OnlySyntax(clean(input.canonicalPrompt), warnings) || '根据当前分镜计划连续呈现主体动作、镜头变化和声音事件。';
-  const constraints = (input.constraints || []).map(clean).filter(Boolean);
+  const constraints = visibleSeedanceConstraints(input.constraints);
   const subjectDefinitions = (input.subjectDefinitions || [])
     .map((subject) => {
       const name = clean(subject.name);
@@ -217,6 +220,9 @@ export const buildOfficialSeedanceReferences = (
   references: readonly PromptReferenceInput[] | undefined,
 ): PromptReferenceInput[] => [...(references || [])];
 
+const visibleSeedanceConstraints = (constraints: PromptAdapterInput['constraints']): string[] => (constraints || [])
+  .map(clean).filter((value) => value && !isInternalVideoPromptConstraint(value));
+
 export const getOfficialSeedanceSourceFingerprint = (input: PromptAdapterInput): string => stableHash(JSON.stringify({
   targetId: 'seedance-2.5',
   canonicalPrompt: input.canonicalPrompt,
@@ -232,6 +238,7 @@ export const getOfficialSeedanceSourceFingerprint = (input: PromptAdapterInput):
 export const compileOfficialSeedancePrompt = (
   input: PromptAdapterInput,
 ): Seedance25PromptCompilation => {
+  assertVideoPromptHasNoInstructionLeak(input.canonicalPrompt, 'Seedance 镜头源稿');
   const warnings: string[] = [];
   const durationSec = finiteDuration(input.durationSec);
   const referenceManifest = buildManifest(input);
@@ -240,8 +247,10 @@ export const compileOfficialSeedancePrompt = (
   if ((input.references || []).some((reference) => !clean(reference.responsibility || reference.visualAnchor || reference.description || reference.role))) {
     warnings.push('部分参考素材缺少明确职责，已使用通用连续性职责。');
   }
+  if ((input.constraints || []).some(isInternalVideoPromptConstraint)) warnings.push('内部生成规则已与画面要求分开，仅将剧情、参考素材职责和画面约束写入 Seedance 正文。');
   const normalizedInput: PromptAdapterInput = { ...input, durationSec };
   const promptZh = renderPrompt(normalizedInput, referenceManifest, warnings);
+  assertVideoPromptHasNoInstructionLeak(promptZh, 'Seedance 中文结果');
   const sourceFingerprint = getOfficialSeedanceSourceFingerprint(normalizedInput);
   return {
     targetId: 'seedance-2.5',

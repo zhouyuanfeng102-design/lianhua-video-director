@@ -1,7 +1,7 @@
 import {
   MOSE_JIANGHU_PRIVATE_IMAGE_PROMPT_RULE,
 } from './nsfwPromptRules';
-import { FULL_BODY_LAYOUT_RULE } from './imageGeneration';
+import { FULL_BODY_LAYOUT_RULE, imagePromptOutputSpecificationRule, type ImagePromptOutputSpecification } from './imageGeneration';
 import type { ImageVariant } from './types';
 import { IMAGE_PROMPT_LANDSCAPE_SCOPE_CONTRACT, isLandscapeImageRequest } from './imageLocationScope';
 import { DIRECTED_ACTION_RELATION_RULE, STORYBOARD_FRAME_VISIBILITY_RULE } from './spatialContinuityRules';
@@ -106,7 +106,7 @@ export interface SanitizedImagePromptSections {
 }
 
 export const IMAGE_PROMPT_RULES_SCHEMA_VERSION = 1;
-export const IMAGE_PROMPT_RULE_CATALOG_VERSION = 18;
+export const IMAGE_PROMPT_RULE_CATALOG_VERSION = 19;
 const GPT_IMAGE_RULE_ID = 'image-rule-openai-gpt-image';
 const KREA_RULE_ID = 'image-rule-krea-2';
 const COMFYUI_RULE_ID = 'image-rule-comfyui';
@@ -127,6 +127,7 @@ const GPT_IMAGE_25_MICRO_NSFW_ROLLBACK_CATALOG_VERSION = 15;
 const GPT_IMAGE_25_MICRO_NSFW_LIGHT_CLOTHING_CATALOG_VERSION = 16;
 const PRIVATE_MULTI_REGION_LAYOUT_CATALOG_VERSION = 17;
 const GOOGLE_GROK_MODEL_CATALOG_VERSION = 18;
+const IMAGE_RESOLUTION_LAYOUT_CATALOG_VERSION = 19;
 const NOVELAI_RULE_ID = 'image-rule-novelai';
 
 export const NOVELAI_IMAGE_PRESET_IDS = {
@@ -230,6 +231,8 @@ const allCategoryBindings = (): Record<ImagePromptAssetKind, string> => ({
 
 const LEGACY_CHARACTER_SHEET_OUTPUT_RULES = '准确表现资料中的性别或雌雄/自定义性别与物种形态；优先横向设定板、正交或低透视、完整主体、统一基线和干净中性背景；不得改变性别或物种结构，不得把非类人主体改成带人类头部的人形怪物，也不得把四视图改成无关姿势拼贴。';
 const CURRENT_CHARACTER_SHEET_OUTPUT_RULES = '准确表现资料中的性别或雌雄/自定义性别与物种形态；画幅、区域数量、各区域位置与视角完全服从输入末尾的当前图片规格。头像区域保持所选头肩特写取景，不补成全身；完整主体、完整手脚和统一站立基线只用于明确指定的全身区域。使用正交或低透视和干净中性背景，所有区域属于同一角色；不得改变性别、身份或物种结构，不得把非类人主体改成人类头部或人形比例，不增加当前规格之外的区域或姿势。';
+const LEGACY_PRIVATE_SINGLE_IMAGE_OUTPUT_RULES = '输入资料末尾的当前画面规格是唯一版式合同，最终提示词只展开该规格已经明确的画幅、主体数量、区域数量、主次关系、取景范围与焦点。当前规格为单画面时，使用正向空间描述锁定唯一完整主体沿中央轴出现、取景边缘完整、主体两侧延续同一背景；多区域规格按当前给出的槽位顺序组织，每个槽位只承担一个清楚内容，同一内容只出现一次，所有区域共享同一人物和身体锚点。只描述当前目标，不解释替代版式。明确类人角色按当前取景所需范围保持肤色、体型和身体锚点；拟人非人角色保持当前取景涉及的人形部位、非人头部、体表或附肢；真实非类人角色保持当前取景涉及的头部或感知结构、躯干、附肢、体表材质与身体锚点。背景简洁，主体结构完整，焦点清晰。';
+const CURRENT_PRIVATE_SINGLE_IMAGE_OUTPUT_RULES = '输入资料末尾的当前画面规格是唯一版式合同，最终提示词只展开该规格已经明确的画幅、主体数量、区域数量、主次关系、取景范围与焦点。当前规格为单画面全身目标时，使用正向空间描述锁定唯一完整主体沿中央轴出现、取景边缘完整、主体两侧延续同一背景；当前规格为单画面近景目标时，只呈现指定部位与临近结构作为方位锚点，指定部位只出现一次，保持近景或微距取景；多区域规格按当前给出的槽位顺序组织，每个槽位只承担一个清楚内容，同一内容只出现一次，所有区域共享同一人物和身体锚点。只描述当前目标，不解释替代版式。明确类人角色按当前取景所需范围保持肤色、体型和身体锚点；拟人非人角色保持当前取景涉及的人形部位、非人头部、体表或附肢；真实非类人角色保持当前取景涉及的头部或感知结构、躯干、附肢、体表材质与身体锚点。背景简洁，当前取景中的主体结构完整，焦点清晰。当前生图分辨率只决定输出像素规模，人数、区域数量、视角、取景和身体锚点沿用当前目标。';
 
 const BASE_IMAGE_PROMPT_CATEGORY_PRESETS: readonly ImagePromptCategoryPreset[] = [
   {
@@ -250,9 +253,9 @@ const BASE_IMAGE_PROMPT_CATEGORY_PRESETS: readonly ImagePromptCategoryPreset[] =
     assetKind: 'character-private',
     description: '生成与普通着装参考图隔离的当前私密资料目标，版式由所选图片规格唯一决定。',
     systemPrompt: MOSE_JIANGHU_PRIVATE_IMAGE_PROMPT_RULE,
-    outputRules: '输入资料末尾的当前画面规格是唯一版式合同，最终提示词只展开该规格已经明确的画幅、主体数量、区域数量、主次关系、取景范围与焦点。当前规格为单画面时，使用正向空间描述锁定唯一完整主体沿中央轴出现、取景边缘完整、主体两侧延续同一背景；多区域规格按当前给出的槽位顺序组织，每个槽位只承担一个清楚内容，同一内容只出现一次，所有区域共享同一人物和身体锚点。只描述当前目标，不解释替代版式。明确类人角色按当前取景所需范围保持肤色、体型和身体锚点；拟人非人角色保持当前取景涉及的人形部位、非人头部、体表或附肢；真实非类人角色保持当前取景涉及的头部或感知结构、躯干、附肢、体表材质与身体锚点。背景简洁，主体结构完整，焦点清晰。',
+    outputRules: CURRENT_PRIVATE_SINGLE_IMAGE_OUTPUT_RULES,
     enabled: true,
-    version: '1.6.0',
+    version: '1.7.0',
     updatedAt: 0,
   },
   {
@@ -1665,6 +1668,27 @@ export const migrateImagePromptRulesState = (value: unknown): ImagePromptRulesSt
     };
   }
 
+  if ((state.catalogVersion || 0) < IMAGE_RESOLUTION_LAYOUT_CATALOG_VERSION) {
+    const currentPrivatePresets = new Map(BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS
+      .filter((preset) => preset.assetKind === 'character-private')
+      .map((preset) => [preset.id, preset]));
+    state = {
+      ...state,
+      catalogVersion: IMAGE_RESOLUTION_LAYOUT_CATALOG_VERSION,
+      categoryPresets: state.categoryPresets.map((preset) => {
+        const current = currentPrivatePresets.get(preset.id);
+        if (!current || preset.updatedAt !== 0 || preset.version !== '1.6.0'
+          || preset.name !== current.name || preset.assetKind !== current.assetKind
+          || preset.description !== current.description || preset.systemPrompt !== current.systemPrompt
+          || preset.outputRules !== LEGACY_PRIVATE_SINGLE_IMAGE_OUTPUT_RULES
+          || preset.negativePrompt !== current.negativePrompt || preset.format !== current.format) return preset;
+        // The old factory text must match exactly. Keep disabled state, user
+        // edits/renames/deletions, defaults and all stored task snapshots.
+        return { ...preset, outputRules: current.outputRules, version: current.version };
+      }),
+    };
+  }
+
   return state;
 };
 
@@ -1943,8 +1967,18 @@ export const stripImagePromptNamedIdentityContracts = (rules: string): string =>
  * full-body figure. Legacy tasks keep their own frozen converter snapshot. */
 export const IMAGE_PROMPT_CURRENT_LAYOUT_CONTRACT = [
   '当前图片规格与当前画面规格是本次唯一版式合同；区域数量、区域位置、视角和每个区域的取景范围以本次规格为准，优先于通用或旧预设中的版式描述。',
+  '画布比例以末尾当前生图规格中的实际请求画幅为准；旧版式或预设中的比例仅作默认推荐，不覆盖本次实际输出。换成横向、竖向或方形画布时，在实际画布内等比适配主体和各区域，保留原有槽位数量、左右上下关系、视角顺序及逐区取景。',
   '一个人物的多视图仍是同一个身份，不是多个人物。若当前规格明确包含头像区和全身区，头像区按其指定取景边缘表现，不能为满足完整主体规则而补成全身；完整主体、手脚完整和统一站立基线只约束全身区。',
   '同一张设定板的各区域是一次图片生成的内部构图，不得拆成多张图片任务或改成互不相关的角色。',
+].join('\n');
+
+/** Resolution is transport metadata. A larger output must keep the selected
+ * scene and internal layout rather than growing the subject population. */
+export const IMAGE_PROMPT_RESOLUTION_CONTRACT = [
+  '生图分辨率以本次当前生图规格及实际请求元数据为准；1K、2K、4K表示输出分辨率档位，预设里的高清、精细、highres等质量词不决定实际输出像素。',
+  '切换分辨率保持当前主体集合、区域数量、角度、顺序、时刻、景别、裁切及身份风格；留白延续同一环境，不增加人物、物件或部位填满画布。五视图、四视图、四合一和九宫格沿用各自指定的固定区域，单画面近景继续只表现当前指定部位，不补成全身。',
+  '接口适配后的实际输出画幅优先于请求前的推荐比例；多视图和九宫格仍在同一张实际画布内完整排布，不能为恢复旧比例删去区域、改成多张图或补入重复身体。',
+  '最终提示词只描述可见画面及其实际画幅，不把分辨率档位、像素数、请求参数或规格说明写成图中文字、额外质量标签或制作说明。',
 ].join('\n');
 
 /** Keep ordinary character renders anatomically proportional without touching
@@ -1992,6 +2026,7 @@ export const buildImagePromptConverterSystemPrompt = (
   selection: ResolvedImagePromptSelection,
   extraRules = '',
   imageVariant?: ImageVariant,
+  outputSpecification?: ImagePromptOutputSpecification,
 ): string => {
   const landscape = isLandscapeImageRequest(selection.assetKind, imageVariant);
   return [
@@ -2010,6 +2045,7 @@ export const buildImagePromptConverterSystemPrompt = (
   selection.preset.outputRules,
   '</image_prompt_category_preset>',
   outputFormatContract(selection.ruleSet.format),
+  IMAGE_PROMPT_RESOLUTION_CONTRACT,
   cleanString(extraRules) ? `<image_prompt_extra_rules>\n${cleanString(extraRules)}\n</image_prompt_extra_rules>` : '',
   // Keep the explicit full-body contract after the selected preset and any
   // caller-provided rules so a broad preset phrase such as “full-body,
@@ -2024,6 +2060,7 @@ export const buildImagePromptConverterSystemPrompt = (
   landscape ? '' : IMAGE_PROMPT_NAMED_IDENTITY_CONTRACT,
   selection.assetKind === 'storyboard' ? STORYBOARD_FRAME_VISIBILITY_RULE : '',
   landscape ? IMAGE_PROMPT_LANDSCAPE_SCOPE_CONTRACT : '',
+  imagePromptOutputSpecificationRule(outputSpecification, imageVariant),
   '只返回最终提示词，不要复述以上规则。',
 ].filter(Boolean).join('\n');
 };

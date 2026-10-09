@@ -403,7 +403,7 @@ try {
   assert.equal(cancelled.getState().project.assets.filter((asset) => asset.source === 'generated').length, 0);
   assert.equal(cancelled.imageTasks().length, 1);
   assert.equal(cancelled.imageTasks()[0].status, 'cancelled');
-  assert.ok(cancelled.notices.some((notice) => notice.message.includes('取消 2')));
+  assert.ok(cancelled.notices.some((notice) => notice.message.includes('取消')));
 
   const unsupported = fixture();
   unsupported.mutate((state) => ({
@@ -437,7 +437,9 @@ try {
   const customOptions: DirectStoryboardImageGenerationOptions = { mode: 'storyboard-shots', count: 5 };
   const customPending = custom.run(customOptions);
   await bounded(planner.started.promise);
-  assert.equal(custom.imageTasks().length, 0, 'no image tasks are submitted while static-frame planning is pending');
+  assert.equal(custom.imageTasks().length, 5, 'all requested tasks are visible while static-frame planning is pending');
+  assert.ok(custom.imageTasks().every((task) => task.status === 'queued' && task.preparationStage === 'frame-plan'));
+  const customTaskIds = custom.imageTasks().map((task) => task.id);
   assert.equal(custom.stores.filter((entry) => entry.fileName?.includes('图生图参考')).length, 2, 'original pixels are frozen before asynchronous planning');
   customOptions.count = 1;
   custom.getState().settings.imageApi.model = 'later-image-model';
@@ -457,6 +459,7 @@ try {
   assert.ok(custom.notices.some((notice) => /已有图片批次/u.test(notice.message)));
   planningGate.resolve();
   await bounded(customPending);
+  assert.deepEqual(custom.imageTasks().map((task) => task.id), customTaskIds, 'planning fills original tasks instead of creating replacement IDs');
   assert.equal(custom.calls.length, 5, 'the frozen custom total is independent of source video shot count or later UI changes');
   assert.equal(planner.calls.length, 1, 'valid custom-frame plans need exactly one source-text call, not per-frame conversion');
   assert.equal(planner.calls[0].api.model, 'frozen-text-model');
@@ -479,8 +482,81 @@ try {
   assert.deepEqual(custom.getState().project.storyboards[0].imageToImage?.referenceAssetIds, ['a'], 'a finished captured batch never reverts later public choices');
   assert.equal(custom.reported.length, 0);
 
-  for (const mutation of ['h3', 'shot', 'source', 'project', 'delete-board', 'history'] as const) {
+  const delayedReferences = fixture();
+  const referenceStarted = deferred();
+  const referenceGate = deferred();
+  const storeReferences = delayedReferences.ctx.storeImage!;
+  delayedReferences.ctx.storeImage = async (payload) => {
+    if (payload.fileName?.includes('图生图参考')) {
+      referenceStarted.resolve();
+      await referenceGate.promise;
+    }
+    return storeReferences(payload);
+  };
+  const delayedPending = delayedReferences.run({ mode: 'boundary-frames' });
+  assert.equal(delayedReferences.imageTasks().length, 2, 'both boundary tasks exist synchronously before the first asynchronous snapshot or reference read');
+  assert.ok(delayedReferences.imageTasks().every((task) => task.status === 'queued' && task.preparationStage === 'reference'));
+  const delayedTaskIds = delayedReferences.imageTasks().map((task) => task.id);
+  await bounded(referenceStarted.promise);
+  assert.equal(delayedReferences.calls.length, 0);
+  delayedReferences.mutate((state) => applyOwnedProjectUpdate(state, delayedReferences.projectId, (project) => ({
+    ...project, assets: [makeImage('unrelated-finished-image'), ...project.assets],
+    storyboards: project.storyboards.map((board) => ({
+      ...board, firstFrameAssetId: 'another-completed-boundary', lastFrameAssetId: 'another-completed-tail', updatedAt: 999,
+      shots: board.shots.map((shot) => ({ ...shot, referenceAssetIds: ['another-output-binding'] })),
+    })),
+  })));
+  delayedReferences.mutate((state) => ({
+    ...state, project: { ...state.project, id: 'another-active-project', name: 'Other project', generationTasks: [], assets: [] },
+    activeProjectId: 'another-active-project',
+    projects: [state.project, ...state.projects.filter((project) => project.id !== state.project.id)],
+  }));
+  delayedReferences.ctx.lifecycle.invalidateBindings();
+  referenceGate.resolve();
+  await bounded(delayedPending);
+  const delayedOwner = delayedReferences.getState().projects.find((project) => project.id === delayedReferences.projectId)!;
+  assert.equal(delayedReferences.calls.length, 2, 'switching projects and unrelated output writes retain the captured background request');
+  assert.deepEqual(delayedOwner.generationTasks.map((task) => task.id), delayedTaskIds);
+  assert.ok(delayedOwner.generationTasks.every((task) => task.status === 'succeeded'));
+  assert.equal(delayedReferences.getState().project.generationTasks.length, 0, 'results belong to the originating project');
+  assert.equal(delayedReferences.getState().project.assets.length, 0);
+
+  const partialPreparationCancellation = fixture();
+  const partialGate = deferred();
+  const partialPlanner = prepareCustomPlanner(partialPreparationCancellation, 5, partialGate.promise);
+  const partialPending = partialPreparationCancellation.run({ mode: 'storyboard-shots', count: 5 });
+  await bounded(partialPlanner.started.promise);
+  const partialTasks = partialPreparationCancellation.imageTasks();
+  const remainingTaskIds = partialTasks.slice(2).map((task) => task.id);
+  assert.equal(revokeQueuedGenerationTask(partialPreparationCancellation.projectId, partialTasks[0]), true);
+  assert.equal(revokeQueuedGenerationTask(partialPreparationCancellation.projectId, partialTasks[1]), true);
+  partialPreparationCancellation.mutate((state) => applyOwnedProjectUpdate(state, partialPreparationCancellation.projectId, (project) => ({
+    ...project,
+    generationTasks: removeGenerationTask(cancelQueuedGenerationTask(project.generationTasks, partialTasks[0].id).tasks, partialTasks[1].id).tasks,
+  })));
+  partialGate.resolve();
+  await bounded(partialPending);
+  assert.equal(partialPreparationCancellation.calls.length, 3, 'cancelled or deleted preparation tasks make no image request, while the remaining tasks still run');
+  assert.equal(partialPreparationCancellation.imageTasks().length, 4, 'deleted preparation tasks never reappear');
+  assert.equal(partialPreparationCancellation.imageTasks().find((task) => task.id === partialTasks[0].id)?.status, 'cancelled');
+  assert.deepEqual(partialPreparationCancellation.imageTasks().filter((task) => task.status === 'succeeded').map((task) => task.id), remainingTaskIds);
+
+  const referenceFailure = fixture();
+  referenceFailure.ctx.storeImage = async () => { throw new Error('fixture reference snapshot disk failure'); };
+  await bounded(referenceFailure.run({ mode: 'boundary-frames' }));
+  assert.equal(referenceFailure.calls.length, 0);
+  assert.equal(referenceFailure.imageTasks().length, 2, 'an asynchronous reference failure preserves both registered boundary tasks');
+  assert.ok(referenceFailure.imageTasks().every((task) => task.status === 'failed' && !task.preparationStage
+    && task.error?.includes('reference snapshot disk failure')));
+  assert.equal(referenceFailure.reportDetails[0]?.stage, 'image-reference-load');
+
+  for (const mutation of ['h3', 'shot', 'source', 'delete-board', 'history'] as const) {
     const stale = fixture();
+    if (mutation === 'source') stale.mutate((state) => ({ ...state, project: {
+      ...state.project,
+      sourceDocuments: [{ id: 'own-source', name: '原剧情', content: '原剧情内容', createdAt: 1, updatedAt: 1 }],
+      storyboards: state.project.storyboards.map((board) => ({ ...board, chapterId: 'own-source' })),
+    } }));
     const staleGate = deferred();
     const stalePlanner = prepareCustomPlanner(stale, 5, staleGate.promise);
     const stalePending = stale.run({ mode: 'storyboard-shots', count: 5 });
@@ -490,17 +566,17 @@ try {
       switch (mutation) {
         case 'h3': project.storyboards = project.storyboards.map((board) => ({ ...board, officialPromptZh: `${board.officialPromptZh}\n新的 H3 画面` })); break;
         case 'shot': project.storyboards = project.storyboards.map((board) => ({ ...board, shots: board.shots.map((shot) => ({ ...shot, action: '已编辑的新动作' })) })); break;
-        case 'source': project.sourceDocuments = [{ id: 'new-source', name: '已修改剧情', content: '新的原剧情内容', createdAt: 1, updatedAt: 2 }]; break;
-        case 'project': project.id = 'another-project'; break;
+        case 'source': project.sourceDocuments = [{ id: 'own-source', name: '已修改剧情', content: '新的原剧情内容', createdAt: 1, updatedAt: 2 }]; break;
         case 'delete-board': project.storyboards = []; break;
-        case 'history': stale.ctx.lifecycle.invalidateBindings(); break;
+        case 'history': stale.ctx.lifecycle.invalidateBindings(); project.storyboards = project.storyboards.map((board) => ({ ...board, finalPrompt: '撤销到不同的源提示词' })); break;
       }
       return { ...state, project };
     });
     staleGate.resolve();
     await bounded(stalePending);
     assert.equal(stale.calls.length, 0, `${mutation} invalidates stale custom planning before billable image requests`);
-    assert.equal(stale.imageTasks().length, 0, `${mutation} cannot queue stale planned images`);
+    assert.equal(stale.imageTasks().length, 5, `${mutation} preserves the original task records`);
+    assert.ok(stale.imageTasks().every((task) => task.status === 'cancelled' && !task.preparationStage && task.error), `${mutation} leaves an explicit cancellation reason`);
     assert.equal(stalePlanner.calls.length, 1);
     assert.equal(stale.reported.length, 0, 'cancelled source ownership is not an upstream failure');
   }
@@ -547,7 +623,10 @@ try {
       await bounded(pending);
       assert.equal(textCalls, filterAt, 'content_filter must stop immediately, including a JSON repair response');
       assert.equal(filtered.calls.length, 0, 'a filtered text plan submits zero image API requests');
-      assert.equal(filtered.imageTasks().length, 0);
+      const filteredOwner = filtered.getState().project.id === filtered.projectId
+        ? filtered.getState().project : filtered.getState().projects.find((project) => project.id === filtered.projectId)!;
+      assert.equal(filteredOwner.generationTasks.length, 5);
+      assert.ok(filteredOwner.generationTasks.every((task) => task.status === 'failed' && task.error?.includes('content_filter')));
       assert.deepEqual(filtered.reported, [terminal], 'typed errors and their content_filter code must not be wrapped or replaced');
       assert.deepEqual(filtered.reportDetails, [{ stage: 'image-frame-plan', context: {
         ...capturedProject, provider: capturedApi.provider, model: capturedApi.model, endpoint: capturedApi.baseUrl,
@@ -616,7 +695,8 @@ try {
     await bounded(echoed.run({ mode: 'selected-shots', shotIds: ['shot-2'] }));
     assert.equal(echoedCalls, 1, 'diagnostic sanitization does not add retries or model calls');
     assert.equal(echoed.calls.length, 0);
-    assert.equal(echoed.imageTasks().length, 0, 'the error is safe even before any task can supply redaction context');
+    assert.equal(echoed.imageTasks().length, 1, 'conversion failures retain the original queued task');
+    assert.equal(echoed.imageTasks()[0].status, 'failed');
     assert.equal(echoed.reported.length, 1);
     const diagnostic = getSafeErrorDiagnostics(echoed.reported[0]);
     assert.equal(diagnostic.status, 502);
@@ -624,7 +704,7 @@ try {
     assert.equal(diagnostic.stage, 'response-read');
     assert.equal(diagnostic.route, 'direct');
     assert.match(diagnostic.message, /服务暂时不可用/u);
-    const visibleErrors = JSON.stringify({ notices: echoed.notices, reported: echoed.reported });
+    const visibleErrors = JSON.stringify({ notices: echoed.notices, reported: echoed.reported, errors: echoed.imageTasks().map((task) => task.error) });
     for (const sensitive of exposedInputs) {
       assert.ok(!visibleErrors.includes(sensitive) && !visibleErrors.includes(JSON.stringify(sensitive).slice(1, -1))
         && !visibleErrors.includes(encodeURIComponent(sensitive)), `${echoFormat} converter errors do not expose frozen input data`);

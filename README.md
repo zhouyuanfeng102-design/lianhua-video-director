@@ -4,13 +4,13 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的 Windows 桌面工作台。
 
-当前版本：**1.5.4** · 2026-10-09 · Windows 64 位 · 便携运行
+当前版本：**1.6.2** · 2026-10-09 · Windows 64 位 · 便携运行
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows 便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-1.5.4.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-1.6.2.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
 1. 下载上面的 EXE，放在可写入的文件夹里，双击运行，无需安装 Node.js。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
@@ -28,7 +28,9 @@
 - **图像与视频任务**：配置对应服务后提交任务，管理参考图、首尾帧、批量任务与结果，查看图片任务实际使用的生图规则与分类预设。
 - **项目与资产管理**：管理图片、视频和音频，保存项目包、备份资料并导出提示词。
 
-1.5.4 为普通生图增加 Google 香蕉 / Nano Banana 和 Grok Imagine 两套自然语言规则，各含 9 个分类预设，使用现有下拉框选择。参考官方提示策略与国内兼容平台资料整理，沿用当前图片规格及人物视线、动作和取景约束。详见[版本说明](docs/releases/发布说明-1.5.4.md)。
+章节独立的文生视频 / 图生视频入口支持逐张上传与完整 AI 识图、人工修订、一图多人、跨图同人及“我”的身份设置，完整参考资料参与扩写、画面转化和解析。普通、私密、分镜和首尾帧统一使用1K／2K／4K生图分辨率。1.5.9将模型能力与推荐比例改为提醒，GPT选择4K自动使用横向3840×2160或竖向2160×3840，自定义尺寸保留输入值，规则随实际画幅调整。详见[版本说明](docs/releases/发布说明-1.5.9.md)。
+
+1.6.2 压缩剧情参考图区域，给原文编辑更多空间；删除包含未结束视频任务的项目时，在一次确认中说明影响并允许继续。删除本地项目不会取消服务器任务，远端任务可能仍继续计费。详见[本版更新说明](docs/releases/发布说明-1.6.2.md)。
 
 ## 从源码运行
 

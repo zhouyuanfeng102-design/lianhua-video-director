@@ -1340,6 +1340,7 @@ export class VideoGenerationEngine {
     // must fail before segment 1 can create a billable remote task.
     const validationImages = assets.map((asset, assetIndex) => asset ? `image-validation-${assetIndex}-${asset.fileName || asset.name}` : 'future-tail-validation.png');
     const boundValidation = prepareVideoH3ReferenceDraft(project, validationDraft, { backend: draft.backend, workflow, api: config });
+    if (boundValidation.issue) throw new Error(boundValidation.issue);
     Object.assign(validationDraft, boundValidation.draft);
     // Pending-tail drafts keep their pre-insertion image array for dependency
     // placement, but display/fingerprint the exact eventual submission text.
@@ -1425,8 +1426,10 @@ export class VideoGenerationEngine {
         ...(requestedTail.requireAiSelection ? { requireAiSelection: true as const, aiMaxAttempts: 4 } : {}),
       };
     }
-      draft.references = videoReferenceUsage(draft.references, { backend: draft.backend, workflow: prepared.workflow, api: prepared.config, slotRoles: draft.referenceSlotRoles });
-    Object.assign(draft, prepareVideoH3ReferenceDraft(project, draft, { backend: draft.backend, workflow: prepared.workflow, api: prepared.config }).draft);
+    draft.references = videoReferenceUsage(draft.references, { backend: draft.backend, workflow: prepared.workflow, api: prepared.config, slotRoles: draft.referenceSlotRoles });
+    const boundDraft = prepareVideoH3ReferenceDraft(project, draft, { backend: draft.backend, workflow: prepared.workflow, api: prepared.config });
+    if (boundDraft.issue) throw new Error(boundDraft.issue);
+    Object.assign(draft, boundDraft.draft);
     const { apiKey: _comfyKey, workflows: _workflows, ...safeComfy } = prepared.comfy;
     const snapshot: VideoGenerationSnapshot = {
       projectId: project.id,
@@ -1762,7 +1765,9 @@ export class VideoGenerationEngine {
     const comfy = reuse?.connection.comfyui ? { ...reuse.connection.comfyui, apiKey: await this.key(reusedTask!), workflows: reuse.connection.workflow ? [reuse.connection.workflow] : [] } : state.settings.comfyuiVideo || defaultComfyVideoConfig;
     const workflow = reuse?.connection.workflow || comfy.workflows.find((item) => item.id === (draft.workflowId || comfy.activeWorkflowId));
     draft.references = videoReferenceUsage(draft.references, { backend: draft.backend, workflow, api: config, slotRoles: draft.referenceSlotRoles });
-    Object.assign(draft, prepareVideoH3ReferenceDraft(project, draft, { backend: draft.backend, workflow, api: config }).draft);
+    const boundDraft = prepareVideoH3ReferenceDraft(project, draft, { backend: draft.backend, workflow, api: config });
+    if (boundDraft.issue) throw new Error(boundDraft.issue);
+    Object.assign(draft, boundDraft.draft);
     const apiEndpoint = config ? videoApiSubmitEndpoint(config) : '';
     if (draft.backend === 'api' && (!config?.enabled || !apiEndpoint)) {
       throw new Error(config?.provider === 'runninghub' ? '请先启用 RunningHub，并选择已填写云端 ID 的工作流。' : '请先启用并设置视频 API 提交端点。');
@@ -2499,9 +2504,12 @@ export class VideoGenerationEngine {
     const projects = allProjects(this.options.getState());
     const liveIds = new Set(projects.flatMap((project) => project.generationTasks.filter((task) => task.kind === 'video' || task.kind == null).map((task) => task.id)));
     const retainedIds = new Set([...liveIds, ...projects.flatMap((project) => project.assets.flatMap((asset) => asset.videoSourceTask?.videoJob?.snapshot.projectId === project.id ? [asset.videoSourceTask.id] : []))]);
-    const trackedIds = new Set([...this.timers.keys(), ...this.acknowledgementTimers.keys(), ...this.watches.keys(), ...this.busy, ...this.downloading, ...this.tailPreparations, ...this.requestIds.keys(), ...this.runtimes.keys(), ...this.credentialIdsByTask.keys(), ...this.remoteCancellations.keys()]);
+    const trackedIds = new Set([...this.timers.keys(), ...this.acknowledgementTimers.keys(), ...this.watches.keys(), ...this.busy, ...this.downloading, ...this.tailPreparations, ...this.requestIds.keys(), ...this.runtimes.keys(), ...this.credentialIdsByTask.keys(), ...this.remoteCancellations.keys(), ...this.generationClaims.keys()]);
     for (const taskId of trackedIds) if (!liveIds.has(taskId)) {
       this.stopping.add(taskId);
+      // Removed projects must release local admission even when their old
+      // upload/POST never settles. Late results remain guarded by liveTask.
+      this.generationClaims.delete(taskId);
       this.pollLeases.delete(taskId);
       this.tailSelectionControllers.get(taskId)?.abort();
       const extractionJobId = this.tailExtractionJobs.get(taskId);

@@ -5,6 +5,9 @@ import ts from 'typescript';
 import * as output from '../src/videoOutputParameters';
 import * as source from '../src/videoGenerationSource';
 import * as runningHub from '../src/runningHubVideo';
+import * as runningHubPromptPictures from '../src/runningHubPromptPictures';
+import * as chapters from '../src/chapters';
+import * as segmentCharacters from '../src/videoSegmentCharacters';
 import * as provenance from '../src/videoProvenance';
 import * as references from '../src/videoDirectorReferences';
 import * as drafts from '../src/videoDirectorDraft';
@@ -218,28 +221,32 @@ const sameDeps = (left?: readonly unknown[], right?: readonly unknown[]) => Bool
 // Run the real director/batch callbacks with isolated hooks and a recording-only controller.
 function harness(kind: 'single' | 'batch', initial = fixture(), extras: Props = {}) {
   let props: Props = { ...initial, ...extras }; let cursor = 0; let rerender = true; let effects: Array<() => void> = []; const slots: Slot[] = [];
+  let mountedKey: React.Key | null | undefined;
+  let mountGeneration = 0;
   const starts: VideoGenerationDraft[] = []; const batches: VideoBatchStartInput[] = [];
   const controller = { start: async (draft: VideoGenerationDraft) => { starts.push(structuredClone(draft)); return 'task'; }, startBatch: async (value: VideoBatchStartInput) => { batches.push(structuredClone(value)); return { batchId: 'batch', taskIds: ['1', '2'], skipped: [] }; } };
   const hooks = {
-    useState: (initialValue: unknown) => { const index = cursor++; if (!slots[index]) slots[index] = { value: typeof initialValue === 'function' ? initialValue() : initialValue }; return [slots[index].value, (next: any) => { const value = typeof next === 'function' ? next(slots[index].value) : next; if (!Object.is(value, slots[index].value)) { slots[index].value = value; rerender = true; } }]; },
+    useState: (initialValue: unknown) => { const index = cursor++; if (!slots[index]) slots[index] = { value: typeof initialValue === 'function' ? initialValue() : initialValue }; const slot = slots[index]; const generation = mountGeneration; return [slot.value, (next: any) => { if (generation !== mountGeneration) return; const value = typeof next === 'function' ? next(slot.value) : next; if (!Object.is(value, slot.value)) { slot.value = value; rerender = true; } }]; },
     useRef: (value: unknown) => { const index = cursor++; if (!slots[index]) slots[index] = { value: { current: value } }; return slots[index].value; },
     useMemo: (fn: () => unknown, deps?: readonly unknown[]) => { const index = cursor++; if (!slots[index] || !sameDeps(slots[index].deps, deps)) slots[index] = { value: fn(), deps }; return slots[index].value; },
     useEffect: (fn: () => (() => void) | void, deps?: readonly unknown[]) => { const index = cursor++; if (!slots[index] || !sameDeps(slots[index].deps, deps)) { const previous = slots[index]; slots[index] = { ...previous, deps }; effects.push(() => { previous?.cleanup?.(); slots[index].cleanup = fn() || undefined; }); } },
   };
   const modules: Record<string, unknown> = {
+    '../chapters': chapters,
+    '../videoSegmentCharacters': segmentCharacters,
     '../videoH3ReferenceBinding': h3ReferenceBinding,
     react: { ...React, ...hooks }, '../media': { assetPreviewUrl: () => '' }, '../userFacingError': { formatUserFacingError: String },
     '../errorDiagnostics': errorDiagnostics, '../videoTaskErrorDiagnostics': videoTaskErrorDiagnostics,
     './TaskErrorDetails': { TaskErrorDetails: () => null },
     './ReferenceImageName': { ReferenceImageName: ({ name }: { name: string }) => React.createElement('strong', null, name) },
     './VideoExecutionControls': { VideoExecutionControls: () => null },
-    '../videoResultRecovery': {}, '../comfyuiVideo': {}, '../videoGenerationSource': source, '../runningHubVideo': runningHub,
+    '../videoResultRecovery': {}, '../comfyuiVideo': {}, '../videoGenerationSource': source, '../runningHubVideo': runningHub, '../runningHubPromptPictures': runningHubPromptPictures,
     '../videoOutputParameters': output, './VideoOutputParameters': { VideoOutputParameters: Output }, '../videoRuntimeStore': {},
     '../videoProvenance': provenance, '../videoDirectorReferences': references, '../videoDirectorDraft': drafts,
     '../videoBatch': batch, '../videoBatchSelection': selection, './PreviousVideoTailDialog': { PreviousVideoTailDialog: () => null }, '../videoTailReference': tails, '../videoTailCharacters': tailCharacters, '../videoReferenceUsage': referenceUsage, '../videoReferenceSlots': referenceSlots,
   };
   const module = { exports: {} as Record<string, any> };
-  new Function('require', 'module', 'exports', 'React', `${compile('VideoDirectorView')}\nmodule.exports.VideoBatchPanel = VideoBatchPanel;`)((name: string) => {
+  new Function('require', 'module', 'exports', 'React', `${compile('VideoDirectorView')}\nmodule.exports.VideoBatchPanel = VideoBatchPanel; module.exports.VideoDirectorWrapper = module.exports.VideoDirectorView; module.exports.VideoDirectorView = ChapterVideoDirectorView;`)((name: string) => {
     if (name.endsWith('.css')) return {}; if (name in modules) return modules[name]; throw new Error(`Unexpected director import ${name}`);
   }, module, module.exports, React);
   let tree: React.ReactElement;
@@ -248,9 +255,20 @@ function harness(kind: 'single' | 'batch', initial = fixture(), extras: Props = 
     let attempts = 0;
     do {
       assert.ok(attempts++ < 20, 'hooks settle'); cursor = 0; rerender = false;
-      tree = module.exports[kind === 'single' ? 'VideoDirectorView' : 'VideoBatchPanel']({
-        controller, initialDraft: drafts.emptyVideoDraft(props.settings), initialParameterText: '{}', onSubmittingChange: noChange, ...props,
-      });
+      let componentProps: Props = {
+        controller, initialDraft: drafts.emptyVideoDraft(props.settings), initialParameterText: '{}', onSubmittingChange: noChange, onBatchDraftChange: noChange, ...props,
+      };
+      if (kind === 'single') {
+        const child = module.exports.VideoDirectorWrapper(componentProps) as React.ReactElement<Props>;
+        if (child.key !== mountedKey) {
+          slots.forEach((slot) => slot.cleanup?.()); slots.length = 0; effects = [];
+          mountGeneration += 1; mountedKey = child.key;
+        }
+        // Follow the production wrapper's key and resolved chapter props while
+        // evaluating the real child with this harness's isolated hook slots.
+        componentProps = child.props;
+      }
+      tree = module.exports[kind === 'single' ? 'VideoDirectorView' : 'VideoBatchPanel'](componentProps);
       const pending = effects; effects = []; pending.forEach((effect) => effect());
     } while (rerender);
   };
@@ -406,11 +424,20 @@ test('真实工作流 A→B→A 切换分别保留覆盖，不把分辨率档位
   h.change('select', 'RunningHub 云端工作流', b.id);
   assert.deepEqual(JSON.parse(h.required('textarea', '本次额外参数 JSON').props.value), { width: 1920 }); assert.equal(h.starts.length, 0); h.dispose();
 });
-test('单段真实组件：项目切换保持各自覆盖草稿，不串写', () => {
+test('单段真实组件：项目与章节切换按真实key重新挂载，保持各自覆盖草稿', () => {
   const a = fixture(); const b = fixture(); const h = harness('single', a);
   h.change('input', '本次视频时长（秒）', '8'); h.update(b);
   assert.equal(h.required('input', '本次视频时长（秒）').props.value, ''); h.change('input', '本次视频时长（秒）', '6');
-  h.update(a); assert.equal(h.required('input', '本次视频时长（秒）').props.value, '8'); h.dispose();
+  h.update(a); assert.equal(h.required('input', '本次视频时长（秒）').props.value, '8');
+  const firstChapterId = chapters.activeChapter(a.project)!.id;
+  const secondChapterId = `${firstChapterId}-second`;
+  const twoChapters = { ...a.project, sourceDocuments: [...a.project.sourceDocuments,
+    { ...a.project.sourceDocuments[0], id: secondChapterId, name: '第2章' }], activeChapterId: secondChapterId };
+  h.update({ project: twoChapters }); assert.equal(h.required('input', '本次视频时长（秒）').props.value, '');
+  h.change('input', '本次视频时长（秒）', '5');
+  h.update({ project: { ...twoChapters, activeChapterId: firstChapterId } });
+  assert.equal(h.required('input', '本次视频时长（秒）').props.value, '8');
+  h.update({ project: twoChapters }); assert.equal(h.required('input', '本次视频时长（秒）').props.value, '5'); h.dispose();
 });
 test('单段冻结云端重试使用原映射能力，不受当前工作流解绑影响', () => {
   const initial = cloudFixture(); const config = initial.settings.runningHubVideo!;

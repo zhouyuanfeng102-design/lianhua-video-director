@@ -18,6 +18,9 @@ export const assetReferenceCharacterOwners = (project: Project, asset: Reference
     return typeof asset.characterReferenceId === 'string' && asset.characterReferenceId.trim()
       ? exactCharacters([asset.characterReferenceId]) : [];
   }
+  if (asset.storyReferenceSubjects?.length) {
+    return exactCharacters(asset.storyReferenceSubjects.filter((subject) => subject.kind === 'character').map((subject) => subject.entityId));
+  }
   if (asset.sourceEntityId || asset.sourceEntityKind) {
     if (!asset.sourceEntityId || asset.sourceEntityKind && asset.sourceEntityKind !== 'character' || ['location', 'prop'].includes(asset.type)) return [];
     if (project.locations.some((entity) => entity.id === asset.sourceEntityId) || project.props.some((entity) => entity.id === asset.sourceEntityId)) return [];

@@ -14,6 +14,7 @@ import type {
 import type { MorphologyKind } from './characterMorphology';
 import type { VideoWorkbenchDraft, VideoWorkbenchState } from './videoWorkbench';
 import type { ImageOutputSizePreferences } from './imageOutputSize';
+import type { ImageResolutionPlan } from './imageResolution';
 import type { StoryboardImageOutputSizePreference } from './storyboardImageOutputSize';
 import type { SequenceDurationEstimateSnapshot } from './storyPacingEstimate';
 import type { VideoCreativeDirection } from './videoCreativeDirection';
@@ -386,6 +387,8 @@ export interface Seedance25Output {
 }
 
 export interface ReferenceAsset extends StoryboardImageFrameMetadata {
+  /** Explicit per-subject links discovered in chapter reference images. */
+  storyReferenceSubjects?: Array<{ chapterId: string; referenceId: string; subjectId: string; kind: StoryReferenceEntityKind; entityId: string; label: string; analysisRevision?: number }>;
   id: string;
   /** Ordinary reference association copy; the original asset keeps its immutable provenance. */
   linkedFromAssetId?: string;
@@ -448,7 +451,7 @@ export interface ReferenceAsset extends StoryboardImageFrameMetadata {
   /** Safe original-image/API locators retained when a completed task is deleted. */
   imageRegenerationSnapshot?: ImageAssetRegenerationSnapshot;
   /** Frozen requested pixels, separate from actual asset width/height; survives deleting the task. */
-  imageRequestSize?: { width: number; height: number; sizeOverride?: boolean };
+  imageRequestSize?: { width: number; height: number; sizeOverride?: boolean; resolutionPlan?: ImageResolutionPlan };
   gridStates?: GridVisualState[];
   /** 0.4 multimodal reference metadata. */
   mediaType?: ReferenceMediaType;
@@ -472,6 +475,7 @@ export interface ReferenceAsset extends StoryboardImageFrameMetadata {
 }
 
 export interface StoryAnalysisCharacter {
+  storyReferenceBindings?: StoryReferenceEntityLink[];
   name?: string;
   existingEntityId?: string;
   aliases?: string[];
@@ -501,6 +505,7 @@ export interface StoryAnalysisCharacter {
 }
 
 export interface StoryAnalysisLocation {
+  storyReferenceBindings?: StoryReferenceEntityLink[];
   name?: string;
   existingEntityId?: string;
   aliases?: string[];
@@ -513,6 +518,7 @@ export interface StoryAnalysisLocation {
 }
 
 export interface StoryAnalysisProp {
+  storyReferenceBindings?: StoryReferenceEntityLink[];
   name?: string;
   existingEntityId?: string;
   aliases?: string[];
@@ -674,6 +680,8 @@ export interface SemanticEventCausality {
 
 /** An adopted visual description retains its actual pre-conversion source. */
 export interface StoryVisualConversionSnapshot {
+  storyReferenceContext?: StoryReferenceContext;
+  referenceFingerprint?: string;
   id: string;
   chapterId: string;
   sourceName: string;
@@ -744,6 +752,8 @@ export interface VideoSegment {
 }
 
 export interface VideoSequencePlan {
+  storyReferenceContext?: StoryReferenceContext;
+  storyReferenceFingerprint?: string;
   id: string;
   chapterId?: string;
   sourceStale?: boolean;
@@ -817,6 +827,8 @@ export interface StoryboardImageToImageSettings {
 }
 
 export interface Storyboard {
+  storyReferenceContext?: StoryReferenceContext;
+  storyReferenceFingerprint?: string;
   id: string;
   chapterId?: string;
   sourceStale?: boolean;
@@ -914,6 +926,9 @@ export interface Storyboard {
 }
 
 export interface Scene {
+  storyReferenceContext?: StoryReferenceContext;
+  storyReferenceFingerprint?: string;
+  storyReferenceAssetIds?: string[];
   id: string;
   chapterId?: string;
   sourceStale?: boolean;
@@ -940,8 +955,100 @@ export interface StoryDraft {
   updatedAt: number;
 }
 
+export type StoryInputMode = 'text' | 'image';
+export type StoryReferenceEntityKind = 'character' | 'location' | 'prop';
+
+export interface StoryReferenceSubject {
+  id: string;
+  label: string;
+  description: string;
+  fields: Record<string, string>;
+}
+
+/** Complete visual evidence; structuredData retains unknown nested details. */
+export interface StoryReferenceAnalysis {
+  description: string;
+  characters: StoryReferenceSubject[];
+  locations: StoryReferenceSubject[];
+  props: StoryReferenceSubject[];
+  events: string[];
+  relationships: string[];
+  readableText: string[];
+  uncertainties: string[];
+  style: string;
+  composition: string;
+  lighting: string;
+  colors: string;
+  model: string;
+  analyzedAt: number;
+  revision: number;
+  rawResponse?: string;
+  structuredData?: Record<string, unknown>;
+}
+
+export interface StoryReferenceSubjectBinding {
+  subjectId: string;
+  kind: StoryReferenceEntityKind;
+  entityId?: string;
+  name?: string;
+  isNarrator?: boolean;
+}
+
+export interface StoryReferenceEntityLink {
+  referenceId: string;
+  subjectId: string;
+}
+
+export interface StoryNarrator {
+  entityId?: string;
+  name?: string;
+  description?: string;
+}
+
+export interface StoryReference {
+  id: string;
+  /** Permanent chapter-local label, independent of display order. */
+  number: number;
+  assetId: string;
+  assetChecksum?: string;
+  enabled: boolean;
+  status: 'unrecognized' | 'recognizing' | 'ready' | 'failed';
+  analysis?: StoryReferenceAnalysis;
+  analysisHistory?: StoryReferenceAnalysis[];
+  fullDescription?: string;
+  notes?: string;
+  subjectBindings: StoryReferenceSubjectBinding[];
+  requestId?: string;
+  error?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface StoryReferenceContext {
+  mode: 'image';
+  chapterId: string;
+  references: Array<{
+    referenceId: string;
+    number: number;
+    assetId: string;
+    assetChecksum?: string;
+    analysis: StoryReferenceAnalysis;
+    fullDescription?: string;
+    notes?: string;
+    subjectBindings: StoryReferenceSubjectBinding[];
+  }>;
+  narrator?: StoryNarrator;
+  fingerprint: string;
+  /** Complete context without truncating image evidence. */
+  text: string;
+}
+
 /** Chapter-owned editor state; shared dossiers, media and jobs stay on Project. */
 export interface ChapterWorkspace {
+  storyInputMode?: StoryInputMode;
+  storyReferences?: StoryReference[];
+  nextStoryReferenceNumber?: number;
+  storyNarrator?: StoryNarrator;
   storyDraft?: StoryDraft;
   directorControls?: Record<string, unknown>;
   videoDirector?: unknown;
@@ -1067,12 +1174,16 @@ export interface ImageGenerationTask extends StoryboardImageFrameMetadata {
   referenceScope?: 'general' | 'nsfw-private-profile';
   nsfwPrivatePart?: NsfwPrivatePart;
   status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+  /** Local preparation remains visible before a billable image request enters the worker queue. */
+  preparationStage?: 'identity' | 'reference' | 'frame-plan' | 'prompt-convert';
   prompt: string;
   negativePrompt?: string;
   width: number;
   height: number;
   /** An explicit workbench size choice; frozen so a retry cannot silently use a workflow default. */
   sizeOverride?: boolean;
+  /** Frozen native request encoding; contains no connection details or credentials. */
+  resolutionPlan?: ImageResolutionPlan;
   backend: ImageApiConfig['backend'];
   model: string;
   /** Frozen execution parameters; credentials are resolved only from the same saved API connection. */
@@ -1165,6 +1276,11 @@ export interface ImageApiConfig {
   baseUrl: string;
   apiKey: string;
   model: string;
+  /** Explicit transport selection for providers exposed through the image API entry. */
+  imageProtocol?: 'openai-compatible' | 'openai-images' | 'gemini' | 'xai';
+  imageResolutionProfile?: 'auto' | 'pixel-long-edge' | 'gpt-image-legacy' | 'gpt-image-modern' | 'gemini-k' | 'gemini-1k' | 'grok-k';
+  imageSupportedResolutions?: Array<'1K' | '2K' | '4K'>;
+  imagePixelStep?: number;
   /** Legacy/current mirror of the selected ComfyUI workflow. */
   workflowJson?: string;
   comfyuiPathMode?: 'preset' | 'custom';

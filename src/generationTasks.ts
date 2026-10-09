@@ -23,6 +23,7 @@ type NewImageGenerationTask = Omit<
 export type ImageGenerationTaskPatch = Partial<Pick<
   ImageGenerationTask,
   | 'status'
+  | 'preparationStage'
   | 'prompt'
   | 'resultUrl'
   | 'resultAssetId'
@@ -168,6 +169,7 @@ export const patchImageGenerationTask = (
     ? {
         ...task,
         ...patch,
+        ...(['succeeded', 'failed', 'cancelled'].includes(patch.status || '') ? { preparationStage: undefined } : {}),
         id: task.id,
         kind: 'image',
         createdAt: task.createdAt,
@@ -192,6 +194,7 @@ export const settleImageGenerationTask = (
   const settledTask: ImageGenerationTask = {
     ...originalTask,
     ...patch,
+    preparationStage: undefined,
     id: originalTask.id,
     kind: 'image',
     createdAt: originalTask.createdAt,
@@ -205,6 +208,7 @@ export const settleImageGenerationTask = (
     return {
       ...task,
       ...settledTask,
+      preparationStage: undefined,
       createdAt: task.createdAt,
     };
   });
@@ -237,6 +241,7 @@ export const cancelQueuedGenerationTask = (
   return {
     tasks: tasks.map((task) => task === target ? {
       ...target, status: 'cancelled', error: undefined, bindingWarning: undefined, updatedAt: timestamp,
+      ...(isImageGenerationTask(target) ? { preparationStage: undefined } : {}),
     } : task),
     cancelled: true,
     blocked: false,

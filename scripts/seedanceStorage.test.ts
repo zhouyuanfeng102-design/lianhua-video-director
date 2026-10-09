@@ -76,4 +76,29 @@ const chineseOnly = makeState([
 assert.equal(chineseOnly.seedance25Output.promptEn, undefined);
 assert.equal(chineseOnly.seedance25Output.promptZh, validSeedanceOutput.promptZh);
 
+// Historical artifacts remain literal evidence. This fix changes new
+// compilation/validation, not loading or rewriting previously saved text.
+const historicalRuleEcho = {
+  ...validSeedanceOutput,
+  promptZh: '历史中文稿\n转换器 智能导演：requiredDialogues逐句保留完整对白。\n转换器输出：不要输出规则解释。',
+  promptEn: 'Historical English source; preserve this saved original.',
+};
+const unchangedHistoricalRuleEcho = structuredClone(historicalRuleEcho);
+const historicalPromptPlan = {
+  canonicalPrompt: '镜头从左向右移动。', durationSec: 45, aspectRatio: '16:9', resolution: '2K', audioMode: 'stereo',
+  workflow: 'all', inputMode: 'text', shotIds: [], referenceAssetIds: [],
+  constraints: ['制作要求：保留晨光。', '转换器 智能导演：requiredDialogues逐句保留完整对白。', '转换器输出：不要输出规则解释。'],
+  trace: { ruleSetId: 'historical-rules', converterId: 'historical-converter' },
+};
+const historicalState = makeState([{
+  ...boardFrom(historicalRuleEcho, [{ id: 'historical-rule-echo', seedance25Output: historicalRuleEcho }]),
+  promptPlan: historicalPromptPlan,
+}]);
+const historicalReload = normalizeState(JSON.parse(serializeStateForStorage(historicalState).serialized)).project.storyboards[0];
+assert.deepEqual(historicalReload.seedance25Output, unchangedHistoricalRuleEcho, 'loading must not silently delete or rewrite an old Seedance source');
+assert.deepEqual(historicalReload.revisions?.[0].seedance25Output, unchangedHistoricalRuleEcho, 'saved revisions preserve the original evidence too');
+assert.deepEqual(historicalRuleEcho, unchangedHistoricalRuleEcho);
+assert.equal(historicalReload.promptPlan?.canonicalPrompt, historicalPromptPlan.canonicalPrompt);
+assert.deepEqual(historicalReload.promptPlan?.constraints, historicalPromptPlan.constraints, 'loading does not silently rewrite the historical source plan either');
+
 console.log('seedance storage normalization tests passed');

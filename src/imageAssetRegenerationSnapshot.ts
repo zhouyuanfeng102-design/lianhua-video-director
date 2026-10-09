@@ -47,7 +47,7 @@ export const withDirectImageRegenerationSnapshot = (asset: ReferenceAsset, task:
     imagePromptPresetId: task.imagePromptPresetId, imagePromptPresetVersion: task.imagePromptPresetVersion,
     imagePromptPresetName: task.imagePromptPresetName,
     imagePromptFormat: task.imagePromptFormat, imageVariant: task.imageVariant,
-    imageRequestSize: { width: task.width, height: task.height, ...(task.sizeOverride === undefined ? {} : { sizeOverride: task.sizeOverride }) },
+    imageRequestSize: { width: task.width, height: task.height, ...(task.sizeOverride === undefined ? {} : { sizeOverride: task.sizeOverride }), ...(task.resolutionPlan ? { resolutionPlan: task.resolutionPlan } : {}) },
     sourceStoryboardId: task.sourceStoryboardId, sourceShotId: task.sourceShotId,
     imageFrameBatchId: task.imageFrameBatchId, imageFrameIndex: task.imageFrameIndex,
     imageFrameCount: task.imageFrameCount, imageFrameDescription: task.imageFrameDescription, imageFrameTimeSec: task.imageFrameTimeSec,

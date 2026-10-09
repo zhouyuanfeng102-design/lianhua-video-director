@@ -317,7 +317,7 @@ export function ComfyUISettings({
             </label>
 
             <div className="hint-box">
-              导入 API JSON 时会立即识别并替换正负提示词与尺寸；直接粘贴原始 API JSON 时，生成前也会自动转换。采样参数和 Seed 默认保留 Workflow 原值，只有明确写入下列占位符时才替换：
+              导入 API JSON 时会识别正负提示词，仅为唯一生成画布及匹配的尺寸条件绑定宽高；缩放、裁剪、参考图预处理与其他阶段尺寸保留原值。明确尺寸标记优先，不会同时扩大前面的画布。直接粘贴原始 API JSON 时，生成前也会按此规则转换。采样参数和 Seed 默认保留 Workflow 原值，只有明确写入下列占位符时才替换：
               <code>__PROMPT__</code> 正面提示词、
               <code>__NEGATIVE_PROMPT__</code> 负面提示词、
               <code>__WIDTH__</code> 宽度、
@@ -333,6 +333,7 @@ export function ComfyUISettings({
               <code>__SEED__</code> 随机种子、
               <code>__SMEA__</code> SMEA、
               <code>__SMEA_DYN__</code> SMEA Dynamic。
+              尺寸标记只说明可以传入宽高，不证明当前模型具有原生 2K / 4K 能力；请在生图 API 设置中明确确认支持档位。旧模板若把多个阶段全部改成尺寸占位符，请重新导入原始 API JSON，不能凭空恢复丢失的原尺寸。
               勾选参考图时会先上传真实图片到 ComfyUI，再注入连接到输出的标准 <code>LoadImage</code> 节点；自定义加载节点可使用
               <code>__REFERENCE_IMAGE_1__</code>、<code>__REFERENCE_IMAGE_2__</code> 等占位符。工作流没有有效参考链时会停止并明确报错。
             </div>

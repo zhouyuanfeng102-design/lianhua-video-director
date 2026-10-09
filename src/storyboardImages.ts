@@ -34,6 +34,7 @@ import { DEFAULT_FIRST_PERSON_SUBJECT } from './semanticEvents';
 import { buildStoryboardImageBaseName, createStoryboardImageNameAllocator } from './storyboardImageNames';
 import type { StoryboardImageFramePlan } from './storyboardImagePlan';
 import type { ResolvedImageOutputSize } from './imageOutputSize';
+import type { ImageResolutionPlan } from './imageResolution';
 import {
   hasExplicitClothingStateChange,
   resolveNsfwShotContinuityBoundaries,
@@ -74,6 +75,7 @@ export interface StoryboardImageRequest extends StoryboardImageFrameMetadata {
   height: number;
   /** Explicit per-batch pixel selection; absent on legacy requests. */
   sizeOverride?: boolean;
+  resolutionPlan?: ImageResolutionPlan;
 }
 
 /** Apply only image-output parameters, never the video storyboard or its H3.
@@ -86,7 +88,7 @@ export const applyStoryboardImageOutputSize = <T extends StoryboardImageRequest>
   if (size.issue) throw new Error(`分镜图片分辨率无效：${size.issue}`);
   let conversionSource = request.conversionSource;
   if (size.sizeOverride) {
-    const specification = `画面规格：${size.width}×${size.height} 像素，宽高比 ${size.width}:${size.height}，单幅画面；本次图片像素独立于视频输出分辨率。`;
+    const specification = `画面规格：${size.resolutionPlan ? `${size.resolutionPlan.tier}，` : ''}${size.width}×${size.height} 像素，构图宽高比 ${size.resolutionPlan?.logicalAspectRatio || `${size.width}:${size.height}`}，单幅镜头画面，保留镜头原有主体数量与取景；分辨率只规定输出规格，不得增添重复人物或拼接画面。本次图片分辨率独立于视频输出分辨率。`;
     const lines = conversionSource.split('\n');
     let specIndex = lines.length - 1;
     while (specIndex >= 0 && !lines[specIndex].startsWith('画面规格：')) specIndex -= 1;
@@ -94,7 +96,7 @@ export const applyStoryboardImageOutputSize = <T extends StoryboardImageRequest>
     else lines.push(specification);
     conversionSource = lines.join('\n');
   }
-  return { ...request, width: size.width, height: size.height, sizeOverride: size.sizeOverride, conversionSource };
+  return { ...request, width: size.width, height: size.height, sizeOverride: size.sizeOverride, resolutionPlan: size.resolutionPlan, conversionSource };
 };
 
 /** Immutable converter identity attached before a storyboard image enters the queue. */
@@ -1859,6 +1861,7 @@ export interface ExecuteStoryboardImageGenerationInput<T> {
     width: number;
     height: number;
     sizeOverride?: boolean;
+    resolutionPlan?: ImageResolutionPlan;
   }) => Promise<T>;
 }
 
@@ -1901,6 +1904,7 @@ export const executeStoryboardImageGeneration = async <T>(
     width: input.request.width,
     height: input.request.height,
     ...(typeof input.request.sizeOverride === 'boolean' ? { sizeOverride: input.request.sizeOverride } : {}),
+    ...(input.request.resolutionPlan ? { resolutionPlan: input.request.resolutionPlan } : {}),
   });
   return { finalPrompt, generated };
 };

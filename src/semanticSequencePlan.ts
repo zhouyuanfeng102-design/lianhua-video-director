@@ -1,3 +1,4 @@
+import { normalizeStoryReferenceContext } from './storyReferences';
 import { MAX_PLANNED_SEQUENCE_SEGMENT_DURATION_SEC, requestedSegmentDurationWindows } from './sequenceDurationContract';
 import { sourceContentHash } from './sourceContentHash';
 import type { StoryPacingContext } from './storyPacing';
@@ -138,7 +139,9 @@ export const normalizeStoryVisualConversionSnapshot = (value: unknown): StoryVis
     || typeof value.resultText !== 'string' || !value.resultText.trim()
     || typeof value.createdAt !== 'number' || !Number.isFinite(value.createdAt)) return undefined;
   return { id: value.id, chapterId: value.chapterId, sourceName: value.sourceName,
-    sourceText: value.sourceText, resultText: value.resultText, createdAt: value.createdAt };
+    sourceText: value.sourceText, resultText: value.resultText, createdAt: value.createdAt,
+    ...(normalizeStoryReferenceContext(value.storyReferenceContext) ? { storyReferenceContext: normalizeStoryReferenceContext(value.storyReferenceContext) } : {}),
+    ...(typeof value.referenceFingerprint === 'string' ? { referenceFingerprint: value.referenceFingerprint } : {}) };
 };
 
 const segmentDurationIssues = (value: unknown): string[] => (

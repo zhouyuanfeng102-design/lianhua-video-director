@@ -1308,7 +1308,8 @@ const plan = buildPromptPlan({
 assert.match(plan.canonicalPrompt, /^【0s-/u);
 assert.doesNotMatch(plan.canonicalPrompt, /固定人物：|固定场景：|智能导演 · 关系与叙事节奏/u);
 assert.ok(plan.constraints.some((item) => item.includes('固定人物：李云外观与服装保持连续')));
-assert.ok(plan.constraints.some((item) => item.includes(converter.name)));
+assert.equal(plan.trace.converterId, converter.id);
+assert.doesNotMatch(plan.constraints.join('\n'), /^(?:规则基础|连续性规则|输出规则|转换器输出|转换器\s+[^：]+)：/mu);
 assert.ok(plan.constraints.some((item) => item.includes('画幅9:16')));
 
 const continuityIn = '承接上一段：怪兽前爪压在裂石上，头部朝向洞口';

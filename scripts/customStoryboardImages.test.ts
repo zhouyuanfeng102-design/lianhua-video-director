@@ -6,6 +6,8 @@ import * as imageHelpers from '../src/storyboardImages';
 import * as imageRules from '../src/imagePromptRules';
 import { buildImagePromptIdentityContext } from '../src/imagePromptIdentityContext';
 import * as taskHelpers from '../src/generationTasks';
+import * as preparationHelpers from '../src/imageTaskPreparation';
+import { buildStoryboardImagePromptWithReferences } from '../src/storyboardImageReferences';
 import * as storyboardSizes from '../src/storyboardImageOutputSize';
 import { imageReturnedSizeWarning } from '../src/imageOutputSize';
 import { readGeneratedImageDimensions } from '../src/imageDimensions';
@@ -20,7 +22,7 @@ import { refreshOfficialH3PromptAfterSourceUpdate } from '../src/officialPrompt'
 import { createInitialState, normalizeState, safeFileName } from '../src/storage';
 import { requestStoryboardImageFramePlan, validateStoryboardImagePlanCount } from '../src/storyboardImagePlan';
 import { appendRegeneratedImageResult, buildImageRegenerationTask, executeImageRegeneration, resolveImageAssetRegenerationTask, resolveImageRegenerationSource } from '../src/imageRegeneration';
-import type { AppState, ImageGenerationTask, Storyboard, VideoShot } from '../src/types';
+import type { AppState, ImageGenerationTask, ReferenceAsset, Storyboard, VideoShot } from '../src/types';
 
 // Evaluate the production event handler with an isolated in-memory store and
 // mocked API boundaries. No user profile, browser registration or paid API is used.
@@ -33,12 +35,19 @@ const declaration = (name: string): string => {
     && node.declarationList.declarations.some((item) => ts.isIdentifier(item.name) && item.name.text === name));
   assert.ok(statement, `production ${name}`); return statement.getText(ast);
 };
+const preparationJavascript = ts.transpileModule(['imagePreparationProject', 'imagePreparationContext', 'reserveStoryboardImagePreparationTasks']
+  .map((name) => {
+    const helper = ast.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === name);
+    assert.ok(helper, `production ${name}`); return helper.getText(ast);
+  }).join('\n'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText;
 const evaluate = (name: string, bindings: Record<string, unknown>) => new Function('dependencies', `with (dependencies) {
+  ${preparationJavascript}
   ${ts.transpileModule(declaration(name), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText}
   return ${name};
 }`)(bindings);
 const fixtureTextApiKey = 'batch-fixture-frozen-text-credential';
 const fixtureImageApiKey = 'batch-fixture-frozen-image-credential';
+const requestSizeFacts = (size: ReferenceAsset['imageRequestSize']) => ({ width: size?.width, height: size?.height, sizeOverride: size?.sizeOverride });
 
 const shot = (index: number): VideoShot => ({
   id: `shot-${index}`, index, startSec: (index - 1) * 5, endSec: index * 5,
@@ -73,6 +82,7 @@ const harness = (count?: number, enriched = false, size?: storyboardSizes.Storyb
   const imageInputs: ImageGenerationOptions[] = [];
   let onImage: (() => void) | undefined;
   let onConversion: ((identityContext?: string) => void) | undefined;
+  let onIdentity: (() => void | Promise<void>) | undefined;
   const errors: unknown[] = []; const notices: string[] = [];
   const errorReports: Array<{ stage: string; error: unknown; context?: { provider?: string; model?: string; endpoint?: string; projectId?: string } }> = [];
   const storyboard = initial.project.storyboards[0];
@@ -83,12 +93,14 @@ const harness = (count?: number, enriched = false, size?: storyboardSizes.Storyb
     generationTaskNames: current.project.generationTasks.filter(taskHelpers.isImageGenerationTask).map((task) => task.name) });
   const commit = (update: AppState | ((state: AppState) => AppState)) => {
     const next = typeof update === 'function' ? update(current) : update;
-    current = { ...next, projects: [next.project], activeProjectId: next.project.id };
+    const projects = new Map(next.projects.map((project) => [project.id, project]));
+    projects.set(next.project.id, next.project);
+    current = { ...next, projects: [...projects.values()], activeProjectId: next.project.id };
   };
   let onPlan: (() => void) | undefined;
   const bindings: Record<string, unknown> = {
-    ...imageHelpers, ...imageRules, ...taskHelpers, ...storyboardSizes, imageBatchTaskIsActive, buildImagePromptIdentityContext,
-    runtimeErrorStageLabel, getSafeErrorDiagnostics,
+    ...imageHelpers, ...imageRules, ...taskHelpers, ...preparationHelpers, ...storyboardSizes, imageBatchTaskIsActive, buildImagePromptIdentityContext,
+    runtimeErrorStageLabel, getSafeErrorDiagnostics, buildStoryboardImagePromptWithReferences,
     imageReturnedSizeWarning, readGeneratedImageDimensions, getComfyImageSizeOverrideSupport,
     state: initial, activeStoryboard: storyboard, customStoryboardImageCount: count,
     getCurrentStoryboardOperationIdentity: () => ({ ...identity }), // deliberately remains one render behind
@@ -103,12 +115,12 @@ const harness = (count?: number, enriched = false, size?: storyboardSizes.Storyb
     setView: () => {}, setDirectorPane: () => {},
     imagePromptBackendForApi: (backend: string) => backend, checkNovelAIReferenceImagePreflight,
     validateStoryboardImagePlanCount, requestStoryboardImageFramePlan,
-    prepareStoryboardImageIdentityContext: async () => ({ enriched,
+    prepareStoryboardImageIdentityContext: async () => { await onIdentity?.(); return { enriched,
       context: { ...context(), characters: enriched
         ? [{ ...createInitialState().project.characters[0], id: 'identity-qa', name: '女子', appearance: 'AI补齐的黑发青衣外貌', assetIds: [] }]
         : context().characters },
       plan: { targets: enriched ? [{ name: '女子', shotIds: ['shot-1', 'shot-2'], reason: 'missing-character', missingFields: ['appearance'] }] : [] },
-    }),
+    }; },
     refreshOfficialH3PromptAfterSourceUpdate,
     requestTextModel: async (_api: unknown, _system: string, user: string) => {
       planCalls += 1; sourceDuringPlan = user; onPlan?.();
@@ -144,6 +156,7 @@ const harness = (count?: number, enriched = false, size?: storyboardSizes.Storyb
     },
     onPlan: (callback: () => void) => { onPlan = callback; },
     onConversion: (callback: (identityContext?: string) => void) => { onConversion = callback; },
+    onIdentity: (callback: () => void | Promise<void>) => { onIdentity = callback; },
     onImage: (callback: () => void) => { onImage = callback; }, imageInputs,
     conversionCalls: () => conversionCalls,
     calls: () => ({ imageCalls, planCalls }), preparation: () => preparation, sourceDuringPlan: () => sourceDuringPlan,
@@ -287,12 +300,13 @@ test('planning provider refusal stops before images and logs the captured API ev
     assert.deepEqual(env.calls(), { planCalls: stopAt, imageCalls: 0 });
     assert.equal(env.errorReports.length, 1);
     assert.equal(env.errorReports[0].stage, 'image-frame-plan');
-    assert.equal(env.errorReports[0].error, failure);
+    assert.deepEqual(env.errorReports[0].error, getSafeErrorDiagnostics(failure));
     assert.equal(env.errorReports[0].context?.model, 'mock-text');
     assert.equal(env.errorReports[0].context?.endpoint, 'https://never-called.example.test');
     assert.equal(env.errorReports[0].context?.projectId, 'project-count');
     assert.ok(env.notices.some((notice) => /尚未提交生图.*content_filter/u.test(notice)));
-    assert.equal(env.current().project.generationTasks.length, 0);
+    assert.equal(env.current().project.generationTasks.length, 1, 'planning failure retains every immediately registered slot');
+    assert.ok(env.current().project.generationTasks.every((task) => task.status === 'failed'));
     assert.equal(env.preparation(), undefined);
   }
 });
@@ -345,7 +359,7 @@ test('all director still-image entry points use the shared resolution without mo
         assert.match(task.bindingWarning || '', /实际返回2×2/u, 'provider downscale is visible, not silently relabeled as 2K');
         const asset = env.current().project.assets.find((entry) => entry.id === task.resultAssetId)!;
         assert.deepEqual([asset.width, asset.height], [2, 2], 'asset records actual returned pixels');
-        assert.deepEqual(asset.imageRequestSize, { width: expected[0], height: expected[1], sizeOverride: true }, 'requested size is separately persisted for retry');
+        assert.deepEqual(requestSizeFacts(asset.imageRequestSize), { width: expected[0], height: expected[1], sizeOverride: true }, 'requested size is separately persisted for retry');
       }
       const updated = env.current().project.storyboards[0];
       for (const key of ['aspectRatio', 'resolution', 'durationSec', 'finalPrompt', 'officialPromptZh'] as const) assert.equal(updated[key], original[key], `still size must not mutate video ${key}`);
@@ -393,24 +407,64 @@ test('owned identity enrichment stays current before React renders, keeps the sa
     .every((task) => task.conversionSource?.includes('AI补齐的黑发青衣外貌')));
 });
 
-test('edits, deletion, workspace undo and navigation during AI planning create no image tasks', async () => {
-  for (const change of ['edit', 'delete', 'undo', 'navigate', 'project']) {
+test('authored edits and deletion during AI planning retain cancelled tasks without image submission', async () => {
+  for (const change of ['edit', 'delete']) {
     const env = harness(3, true);
     env.onPlan(() => {
-      if (change === 'undo') env.identity.workspaceEpoch += 1;
-      else if (change === 'navigate') env.identity.storyboardId = 'another-board';
-      else env.setCurrent((current) => ({ ...current, project: {
+      env.setCurrent((current) => ({ ...current, project: {
         ...current.project,
-        ...(change === 'project' ? { id: 'another-project' } : {}),
         storyboards: change === 'delete' ? [] : current.project.storyboards.map((item) => change === 'edit'
           ? { ...item, finalPrompt: 'user edited canonical prompt' } : item),
       } }));
     });
     await env.run('storyboard-shots');
     assert.equal(env.calls().imageCalls, 0, change);
-    assert.equal(env.current().project.generationTasks.length, 0, change);
+    assert.equal(env.current().project.generationTasks.length, 3, change);
+    assert.ok(env.current().project.generationTasks.every((task) => task.status === 'cancelled'), change);
     assert.equal(env.preparation(), undefined, change);
   }
+});
+
+test('首尾帧和自定义分镜立即登记，延迟人物解析期间切段及其它图片入库不丢任务', async () => {
+  for (const mode of ['boundary-frames', 'storyboard-shots'] as const) {
+    const env = harness(5);
+    let release!: () => void;
+    env.onIdentity(() => new Promise<void>((resolve) => { release = resolve; }));
+    const pending = env.run(mode);
+    const expectedCount = mode === 'boundary-frames' ? 2 : 5;
+    const reserved = env.current().project.generationTasks.filter(taskHelpers.isImageGenerationTask);
+    assert.equal(reserved.length, expectedCount, 'the click records every task before identity AI returns');
+    assert.ok(reserved.every((task) => task.status === 'queued' && task.preparationStage === 'identity'));
+    assert.deepEqual(env.calls(), { imageCalls: 0, planCalls: 0 });
+    const ids = reserved.map((task) => task.id);
+    env.identity.storyboardId = 'another-segment';
+    env.setCurrent((state) => ({ ...state, project: { ...state.project, assets: [{
+      id: 'unrelated-generated-image', name: 'Another batch result', type: 'reference', role: 'composition',
+      mediaType: 'image', source: 'generated', dataUrl: 'data:image/png;base64,Ag==', tags: [], createdAt: 1, updatedAt: 1,
+    }, ...state.project.assets] } }));
+    release(); await pending;
+    const tasks = env.current().project.generationTasks.filter(taskHelpers.isImageGenerationTask);
+    assert.deepEqual(tasks.map((task) => task.id), ids, 'preparation updates the same stable records');
+    assert.ok(tasks.every((task) => task.status === 'succeeded' && !task.preparationStage));
+    assert.equal(env.calls().imageCalls, expectedCount);
+    assert.equal(env.current().project.assets.length, expectedCount + 1, 'unrelated output remains in the library');
+  }
+});
+
+test('取消仍在人物解析中的分镜保留取消记录且不调用图像模型', async () => {
+  const env = harness(3);
+  let release!: () => void;
+  env.onIdentity(() => new Promise<void>((resolve) => { release = resolve; }));
+  const pending = env.run('storyboard-shots');
+  const ids = env.current().project.generationTasks.map((task) => task.id);
+  env.setCurrent((state) => ({ ...state, project: { ...state.project,
+    generationTasks: ids.reduce((tasks, id) => taskHelpers.cancelQueuedGenerationTask(tasks, id).tasks, state.project.generationTasks),
+  } }));
+  release(); await pending;
+  assert.equal(env.calls().imageCalls, 0);
+  assert.equal(env.conversionCalls(), 0);
+  assert.deepEqual(env.current().project.generationTasks.map((task) => task.id), ids);
+  assert.ok(env.current().project.generationTasks.every((task) => task.status === 'cancelled'));
 });
 
 test('quantity input accepts blank/1–100, persists per board and rejects invalid totals without changing video structure', () => {

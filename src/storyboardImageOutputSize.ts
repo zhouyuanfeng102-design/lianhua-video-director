@@ -1,5 +1,6 @@
 import { resolveImageOutputSize, type ResolvedImageOutputSize } from './imageOutputSize';
 import type { ImageApiConfig } from './types';
+import { resolveImageResolution } from './imageResolution';
 
 export type StoryboardImageOutputSizeMode = 'default' | '1k' | '2k' | '4k' | 'custom';
 
@@ -8,19 +9,21 @@ export interface StoryboardImageOutputSizePreference {
   mode: StoryboardImageOutputSizeMode;
   width: number;
   height: number;
+  resolutionVersion?: 1;
 }
 
 const MODES: readonly StoryboardImageOutputSizeMode[] = ['default', '1k', '2k', '4k', 'custom'];
-const PRESET_LONG_SIDES = { '1k': 1024, '2k': 2048, '4k': 4096 } as const;
+const PRESET_MODES = ['1k', '2k', '4k'] as const;
 
 export const defaultStoryboardImageOutputSize = (): StoryboardImageOutputSizePreference => ({
-  mode: 'default', width: 1024, height: 1024,
+  mode: '1k', width: 1024, height: 1024, resolutionVersion: 1,
 });
+const legacyStoryboardImageOutputSize = (): StoryboardImageOutputSizePreference => ({ mode: 'default', width: 1024, height: 1024 });
 
 /** Missing old settings keep the previous default. A malformed explicit custom
  * dimension remains visibly invalid instead of silently becoming 1024 px. */
 export const normalizeStoryboardImageOutputSize = (input: unknown): StoryboardImageOutputSizePreference => {
-  const initial = defaultStoryboardImageOutputSize();
+  const initial = legacyStoryboardImageOutputSize();
   if (!input || typeof input !== 'object' || Array.isArray(input)) return initial;
   const candidate = input as Record<string, unknown>;
   const mode = MODES.includes(candidate.mode as StoryboardImageOutputSizeMode)
@@ -29,7 +32,8 @@ export const normalizeStoryboardImageOutputSize = (input: unknown): StoryboardIm
     if (typeof value === 'number' && Number.isFinite(value)) return value;
     return mode === 'custom' ? 0 : 1024;
   };
-  return { mode, width: dimension(candidate.width), height: dimension(candidate.height) };
+  return { mode, width: dimension(candidate.width), height: dimension(candidate.height),
+    ...(candidate.resolutionVersion === 1 ? { resolutionVersion: 1 as const } : {}) };
 };
 
 interface AspectRatio { width: number; height: number; ratio: number; label: string }
@@ -61,13 +65,13 @@ const customAspectLabel = (width: number, height: number): string => {
   return `${width / divisor}:${height / divisor}`;
 };
 
-/** The same resolved result must drive both the displayed size and the request.
- * Presets keep the requested long edge and visibly round their short edge UP
- * to backend pixel steps. Custom values are never rounded, clamped or reduced. */
+/** The displayed size and submitted request share one result. Versioned presets
+ * use model-native sizes or a declared pixel mapping; old presets keep their
+ * original long-edge semantics. Custom pixels are never resized or reduced. */
 export const resolveStoryboardImageOutputSize = (
   preference: StoryboardImageOutputSizePreference,
   aspectRatio: string,
-  backend: ImageApiConfig['backend'],
+  api: ImageApiConfig['backend'] | ImageApiConfig,
 ): ResolvedImageOutputSize => {
   const canvas = defaultCanvas(aspectRatio);
   const aspect = parseAspectRatio(aspectRatio);
@@ -77,17 +81,19 @@ export const resolveStoryboardImageOutputSize = (
 
   if (preference.mode === 'custom') {
     const resolved = resolveImageOutputSize(
-      { mode: 'custom', aspect: 'variant', width: preference.width, height: preference.height },
-      canvas, backend, 'reference',
+      { mode: 'custom', aspect: 'variant', width: preference.width, height: preference.height, resolutionVersion: preference.resolutionVersion },
+      canvas, api, 'reference',
     );
     const label = customAspectLabel(resolved.width, resolved.height);
-    const differs = aspect && Math.abs(resolved.width * aspect.height - resolved.height * aspect.width) > 1e-8;
-    return { ...resolved, layoutNote: label
-      ? `自定义比例 ${label}${differs ? ` · 与分镜比例 ${aspect.label} 不同，按自定义像素提交` : ''}`
+    const nativeAspect = resolved.resolutionPlan?.logicalAspectRatio;
+    const nominalMatches = aspect && nativeAspect && Math.abs(Number(nativeAspect.split(':')[0]) / Number(nativeAspect.split(':')[1]) - aspect.ratio) < 1e-8;
+    const differs = aspect && !nominalMatches && Math.abs(resolved.width * aspect.height - resolved.height * aspect.width) > 1e-8;
+    return { ...resolved, ...(differs ? { warning: [resolved.warning, `自定义画幅与分镜推荐比例${aspect!.label}不同；按实际像素提交。`].filter(Boolean).join(' ') } : {}), layoutNote: label
+      ? `自定义比例 ${label}${nativeAspect && nativeAspect !== label ? ` · 原生${nativeAspect}画幅` : ''}${differs ? ` · 与分镜比例 ${aspect.label} 不同，按自定义像素提交` : ''}`
       : '自定义宽高按输入原样提交，不自动降档' };
   }
 
-  if (!Object.prototype.hasOwnProperty.call(PRESET_LONG_SIDES, preference.mode)) {
+  if (!(PRESET_MODES as readonly string[]).includes(preference.mode)) {
     return { width: preference.width, height: preference.height, sizeOverride: true,
       issue: '分镜图分辨率规格无效，请重新选择；不会自动改用默认尺寸。', layoutNote: '' };
   }
@@ -95,21 +101,18 @@ export const resolveStoryboardImageOutputSize = (
     return { width: 0, height: 0, sizeOverride: true,
       issue: '分镜画面比例无效，无法计算所选分辨率；请设置有效比例，例如16:9，不会自动降档。', layoutNote: '' };
   }
-  const longSide = PRESET_LONG_SIDES[preference.mode];
-  const pixelStep = backend === 'novelai' ? 64 : backend === 'sd_webui' ? 8 : 1;
-  const shortSide = longSide / Math.max(aspect.ratio, 1 / aspect.ratio);
-  const alignedShortSide = Math.ceil((shortSide - 1e-8) / pixelStep) * pixelStep;
-  const width = aspect.ratio >= 1 ? longSide : alignedShortSide;
-  const height = aspect.ratio >= 1 ? alignedShortSide : longSide;
-  const resolved = resolveImageOutputSize({ mode: 'custom', aspect: 'variant', width, height }, canvas, backend, 'reference');
-  const adjusted = Math.abs(alignedShortSide - shortSide) > 1e-8;
-  const alignmentNote = adjusted
-    ? ` · 短边向上对齐${pixelStep === 1 ? '整数像素' : `${pixelStep}像素步长`}，实际比例略有差异`
-    : pixelStep > 1 ? ` · 已满足${pixelStep}像素步长` : '';
-  return { ...resolved, sizeOverride: true,
-    layoutNote: `按分镜 ${aspect.label} · 长边 ${longSide}px${alignmentNote}`,
-    issue: shortSide < 64
+  if (preference.resolutionVersion !== 1) {
+    const backend = typeof api === 'string' ? api : api.backend;
+    const longSide = preference.mode === '4k' ? 4096 : preference.mode === '2k' ? 2048 : 1024;
+    const step = backend === 'novelai' ? 64 : backend === 'sd_webui' ? 8 : 1;
+    const shortSide = Math.ceil((longSide / Math.max(aspect.ratio, 1 / aspect.ratio) - 1e-8) / step) * step;
+    const width = aspect.ratio >= 1 ? longSide : shortSide; const height = aspect.ratio >= 1 ? shortSide : longSide;
+    const resolved = resolveImageOutputSize({ mode: 'custom', aspect: 'variant', width, height }, canvas, api, 'reference');
+    return { ...resolved, sizeOverride: true, layoutNote: `旧规格 · 保留长边${longSide}px及原像素对齐；重新选择K档位后使用当前模型规格` };
+  }
+  const resolved = resolveImageResolution({ tier: preference.mode.toUpperCase() as '1K' | '2K' | '4K', logicalAspectRatio: aspect.label, config: api });
+  return { ...resolved, sizeOverride: true, layoutNote: `按分镜 ${aspect.label} · ${resolved.layoutNote}`,
+    issue: resolved.height < 64 || resolved.width < 64
       ? '按分镜比例计算的短边不足64像素，请提高分辨率或使用自定义尺寸；不会暗中更改画面比例。'
-      : resolved.issue,
-  };
+      : resolved.issue };
 };

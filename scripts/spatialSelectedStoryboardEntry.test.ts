@@ -7,6 +7,8 @@ import * as imageRules from '../src/imagePromptRules';
 import { buildImagePromptIdentityContext } from '../src/imagePromptIdentityContext';
 import { getSafeErrorDiagnostics } from '../src/errorDiagnostics';
 import * as taskHelpers from '../src/generationTasks';
+import * as preparationHelpers from '../src/imageTaskPreparation';
+import { buildStoryboardImagePromptWithReferences } from '../src/storyboardImageReferences';
 import { imageBatchTaskIsActive } from '../src/imageBatch';
 import { readGeneratedImageDimensions } from '../src/imageDimensions';
 import { imageReturnedSizeWarning } from '../src/imageOutputSize';
@@ -34,6 +36,11 @@ const javascript = ts.transpileModule(handler.getText(ast), {
   compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None },
 }).outputText;
 const evaluate = (bindings: Record<string, unknown>) => new Function('dependencies', `with (dependencies) {
+  ${ts.transpileModule(['imagePreparationProject', 'imagePreparationContext', 'reserveStoryboardImagePreparationTasks']
+    .map((name) => {
+      const helper = ast.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === name);
+      assert.ok(helper, `production ${name}`); return helper.getText(ast);
+    }).join('\n'), { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.None } }).outputText}
   ${javascript}
   return generateSelectedStoryboardImages;
 }`)(bindings) as () => Promise<void>;
@@ -84,6 +91,7 @@ const storyboard = (): Storyboard => ({
 const visibility = { 'shot-1': ['阿莲', '青岚'], 'shot-2': ['阿莲'], 'shot-3': [] };
 const fixtureTextApiKey = 'selected-fixture-frozen-text-credential';
 const fixtureImageApiKey = 'selected-fixture-frozen-image-credential';
+const requestSizeFacts = (size: ReferenceAsset['imageRequestSize']) => ({ width: size?.width, height: size?.height, sizeOverride: size?.sizeOverride });
 const imageSamples = JSON.parse(readFileSync(new URL('./fixtures/generatedImageSamples.json', import.meta.url), 'utf8')) as Record<string, string>;
 const pngWithDimensions = (width: number, height: number): string => {
   const pixels = Buffer.from(imageSamples.png, 'base64');
@@ -138,7 +146,9 @@ const harness = (selected = ['shot-2'], options: {
   let imageError: Error | undefined;
   const commit = (update: AppState | ((state: AppState) => AppState)) => {
     const next = typeof update === 'function' ? update(current) : update;
-    current = { ...next, projects: [next.project], activeProjectId: next.project.id };
+    const projects = new Map(next.projects.map((project) => [project.id, project]));
+    projects.set(next.project.id, next.project);
+    current = { ...next, projects: [...projects.values()], activeProjectId: next.project.id };
   };
   const context = (): imageHelpers.StoryboardImageBuildContext => ({
     projectName: current.project.name, characters: current.project.characters, locations: current.project.locations,
@@ -147,9 +157,9 @@ const harness = (selected = ['shot-2'], options: {
   });
   const setBusy = (value: boolean) => { busyEpoch += 1; busy = value; busyEvents.push(value); };
   const bindings: Record<string, unknown> = {
-    ...imageHelpers, ...imageRules, ...taskHelpers, imageBatchTaskIsActive, buildImagePromptIdentityContext, getSafeErrorDiagnostics,
+    ...imageHelpers, ...imageRules, ...taskHelpers, ...preparationHelpers, imageBatchTaskIsActive, buildImagePromptIdentityContext, getSafeErrorDiagnostics,
     resolveStoryboardImageOutputSize, defaultStoryboardImageOutputSize,
-    readGeneratedImageDimensions, imageReturnedSizeWarning,
+    readGeneratedImageDimensions, imageReturnedSizeWarning, buildStoryboardImagePromptWithReferences,
     applyOwnedProjectUpdate, isCurrentProjectOperation, checkNovelAIReferenceImagePreflight,
     state: initial, selectedStoryboard: board, selectedStoryboardShotIds: selected,
     activeImagePromptRuleSetId: '', activeImagePromptPresetId: '',
@@ -159,7 +169,15 @@ const harness = (selected = ['shot-2'], options: {
     getCurrentState: () => current, getCurrentProjectId: () => current.project.id,
     getCurrentProjectImageContext: context,
     setState: (update: AppState | ((state: AppState) => AppState)) => { commit(update); onQueued?.(); },
-    setBackgroundState: commit,
+    setBackgroundState: (update: AppState | ((state: AppState) => AppState)) => {
+      const before = current.project.generationTasks;
+      commit(update);
+      if (current.project.generationTasks.some((task) => {
+        const previous = before.find((item) => item.id === task.id);
+        return !previous || task.kind === 'image' && previous.kind === 'image'
+          && previous.preparationStage && !task.preparationStage && task.status === 'queued';
+      })) onQueued?.();
+    },
     notify: (message: string, level?: string) => notices.push({ message, level }), setView: () => {},
     imagePromptBackendForApi: (backend: string) => backend,
     requestStoryboardVisibleCharacters: async (_api: unknown, input: StoryboardVisibleCharacterAnalysisInput) => {
@@ -185,6 +203,7 @@ const harness = (selected = ['shot-2'], options: {
       return options.imageResult || { dataUrl: 'data:image/png;base64,Ag==' };
     },
     window: {}, safeFileName, createId: (kind: string) => `${initial.project.id}-${kind}-${++serial}`,
+    isAbortError: (error: unknown) => error instanceof Error && error.name === 'AbortError',
   };
   return {
     run: evaluate(bindings), initial, identity, lifecycle, guardKey, notices, analyses, builds, conversions, imageInputs, busyEvents,
@@ -211,7 +230,7 @@ test('selected entry uses final natural-language H3 and AI visibility to carry o
   assert.ok(env.analyses[0].shots[1].description.includes(finalH3Shots[1]));
   assert.doesNotMatch(env.analyses[0].shots[1].description, /旧视频镜头二|旧分镜未标明/u);
   assert.deepEqual(env.builds[0].selected, ['shot-2']);
-  assert.strictEqual(env.builds[0].context?.visibleCharacterNamesByShotId, visibility);
+  assert.strictEqual(env.builds[1].context?.visibleCharacterNamesByShotId, visibility);
   assert.equal(env.tasks().length, 1); assert.equal(env.imageInputs.length, 1);
   const task = env.tasks()[0];
   assert.equal(task.sourceShotId, 'shot-2'); assert.equal(task.status, 'succeeded');
@@ -242,36 +261,64 @@ test('lease and busy are held while visibility is pending and reject a duplicate
   env.onAnalyze(() => new Promise<void>((resolve) => { resolveAnalysis = resolve; }));
   const running = env.run();
   assert.equal(env.analyses.length, 1); assert.equal(env.busy(), true);
-  assert.equal(env.lifecycle.isActive(env.guardKey), true); assert.equal(env.tasks().length, 0);
+  assert.equal(env.lifecycle.isActive(env.guardKey), true); assert.equal(env.tasks().length, 1);
+  assert.equal(env.tasks()[0].preparationStage, 'identity', 'task is visible before delayed visibility analysis returns');
   await env.run();
   assert.equal(env.analyses.length, 1); assert.equal(env.busy(), true);
   resolveAnalysis(); await running;
   assert.equal(env.tasks().length, 1); assert.deepEqual(env.busyEvents, [true, false]);
 });
 
-test('source edits, identity/reference edits, deletion, project switch, navigation and undo discard stale AI replies', async () => {
-  for (const change of ['prompt', 'character', 'asset', 'location', 'prop', 'scene', 'delete', 'project', 'navigate', 'undo', 'binding']) {
+test('delayed selected-shot preparation survives segment navigation and another generated asset without replacing task IDs', async () => {
+  const env = harness(['shot-1', 'shot-3']);
+  let release!: () => void;
+  env.onAnalyze(() => new Promise<void>((resolve) => { release = resolve; }));
+  const pending = env.run();
+  const ids = env.tasks().map((task) => task.id);
+  assert.equal(ids.length, 2);
+  assert.ok(env.tasks().every((task) => task.status === 'queued' && task.preparationStage === 'identity'));
+  env.identity.storyboardId = 'another-segment';
+  env.setCurrent((state) => ({ ...state, project: { ...state.project, assets: [{
+    id: 'other-batch-result', name: 'Unrelated completed image', type: 'reference', role: 'composition',
+    mediaType: 'image', source: 'generated', dataUrl: 'data:image/png;base64,Ag==', tags: [], createdAt: 1, updatedAt: 1,
+  }, ...state.project.assets] } }));
+  release(); await pending;
+  assert.deepEqual(env.tasks().map((task) => task.id), ids);
+  assert.ok(env.tasks().every((task) => task.status === 'succeeded' && !task.preparationStage));
+  assert.equal(env.imageInputs.length, 2);
+  assert.equal(env.generated().length, 3, 'the other batch output is retained too');
+});
+
+test('cancelling visible tasks during delayed analysis retains records and prevents conversion and image submission', async () => {
+  const env = harness(['shot-1', 'shot-3']);
+  let release!: () => void;
+  env.onAnalyze(() => new Promise<void>((resolve) => { release = resolve; }));
+  const pending = env.run();
+  const ids = env.tasks().map((task) => task.id);
+  env.setCurrent((state) => ({ ...state, project: { ...state.project,
+    generationTasks: ids.reduce((tasks, id) => taskHelpers.cancelQueuedGenerationTask(tasks, id).tasks, state.project.generationTasks),
+  } }));
+  release(); await pending;
+  assert.deepEqual(env.tasks().map((task) => task.id), ids);
+  assert.ok(env.tasks().every((task) => task.status === 'cancelled' && !task.preparationStage));
+  assert.equal(env.conversions.length, 0); assert.equal(env.imageInputs.length, 0);
+});
+
+test('authored source edits and deletion retain stopped task records instead of silently discarding AI replies', async () => {
+  for (const change of ['prompt', 'delete']) {
     const env = harness();
     env.onAnalyze(() => {
-      if (change === 'navigate') env.identity.storyboardId = 'another-board';
-      else if (change === 'undo') env.identity.workspaceEpoch += 1;
-      else if (change === 'binding') env.lifecycle.invalidateBindings();
-      else env.setCurrent((state) => ({ ...state, project: {
+      env.setCurrent((state) => ({ ...state, project: {
         ...state.project,
-        ...(change === 'project' ? { id: 'another-project' } : {}),
         ...(change === 'prompt' ? { storyboards: state.project.storyboards.map((board) => ({ ...board, officialPromptZh: `${board.officialPromptZh}\n用户改稿` })) } : {}),
         ...(change === 'delete' ? { storyboards: [] } : {}),
-        ...(change === 'character' ? { characters: state.project.characters.map((item) => ({ ...item, appearance: '用户新外貌' })) } : {}),
-        ...(change === 'asset' ? { assets: state.project.assets.map((item) => ({ ...item, visualAnchor: '用户新参考资料' })) } : {}),
-        ...(change === 'location' ? { locations: [{ id: 'new-place', name: '用户新地点', description: '', timeWeather: '', lighting: '', palette: '', fixedProps: '', anchor: '', assetIds: [] }] } : {}),
-        ...(change === 'prop' ? { props: [{ id: 'new-prop', name: '用户新道具', category: '', material: '', appearance: '', effect: '', stateRules: '', assetIds: [] }] } : {}),
-        ...(change === 'scene' ? { scenes: [{ id: 'new-scene', title: '用户新场景', content: '', summary: '', characterIds: [], locationId: '', propIds: [], storyboardIds: [], createdAt: 1, updatedAt: 1 }] } : {}),
       } }));
     });
     await env.run();
     assert.equal(env.analyses.length, 1, change);
-    assert.equal(env.builds.length, 0, change); assert.equal(env.conversions.length, 0, change);
-    assert.equal(env.imageInputs.length, 0, change); assert.equal(env.tasks().length, 0, change);
+    assert.equal(env.builds.length, 1, change); assert.equal(env.conversions.length, 0, change);
+    assert.equal(env.imageInputs.length, 0, change); assert.equal(env.tasks().length, 1, change);
+    assert.equal(env.tasks()[0].status, 'cancelled', change);
     assert.equal(env.busy(), false, change); assert.equal(env.lifecycle.isActive(env.guardKey), false, change);
   }
 });
@@ -279,19 +326,20 @@ test('source edits, identity/reference edits, deletion, project switch, navigati
 test('an older analysis cannot clear a later operation busy flag', async () => {
   const env = harness(); env.onAnalyze(() => { env.setBusy(true); });
   await env.run();
-  assert.equal(env.builds.length, 0); assert.equal(env.busy(), true);
+  assert.equal(env.builds.length, 2); assert.equal(env.busy(), true);
   assert.deepEqual(env.busyEvents, [true, true]); assert.equal(env.lifecycle.isActive(env.guardKey), false);
 });
 
 test('analysis errors retain their cause, release ownership and allow a fresh retry', async () => {
   const env = harness(); env.failAnalysis(new Error('fixture visibility API timeout'));
   await env.run();
-  assert.equal(env.builds.length, 0); assert.equal(env.tasks().length, 0);
+  assert.equal(env.builds.length, 1); assert.equal(env.tasks().length, 1);
+  assert.equal(env.tasks()[0].status, 'failed');
   assert.ok(env.notices.some((notice) => notice.level === 'error' && notice.message.includes('fixture visibility API timeout')));
   assert.equal(env.busy(), false); assert.equal(env.lifecycle.isActive(env.guardKey), false);
   env.failAnalysis(); await env.run();
-  assert.equal(env.analyses.length, 2); assert.equal(env.tasks().length, 1);
-  assert.equal(env.tasks()[0].status, 'succeeded'); assert.equal(env.busy(), false);
+  assert.equal(env.analyses.length, 2); assert.equal(env.tasks().length, 2);
+  assert.equal(env.tasks()[0].status, 'succeeded'); assert.equal(env.tasks()[1].status, 'failed'); assert.equal(env.busy(), false);
 });
 
 test('converter/image failures release lease and busy without replaying paid generation', async () => {
@@ -405,7 +453,7 @@ test('selected-shot entry freezes one storyboard size before AI planning and ret
     assert.deepEqual({ width: input.width, height: input.height, sizeOverride: input.sizeOverride }, requested);
   }
   for (const asset of env.generated()) {
-    assert.deepEqual(asset.imageRequestSize, requested);
+    assert.deepEqual(requestSizeFacts(asset.imageRequestSize), requested);
     assert.deepEqual({ width: asset.width, height: asset.height }, { width: 2048, height: 1152 });
   }
   assert.equal(env.current().settings.storyboardImageOutputSize?.mode, '1k', 'new preference is retained for the next batch');
@@ -420,7 +468,7 @@ test('selected-shot entry freezes one storyboard size before AI planning and ret
 });
 
 test('selected-shot default retains the legacy canvas and ignores ordinary/private output choices', async () => {
-  const env = harness();
+  const env = harness(['shot-2'], { outputSize: { mode: 'default', width: 1024, height: 1024 } });
   env.initial.settings.imageOutputSizes = {
     ordinary: { mode: 'custom', aspect: '1:1', width: 4096, height: 4096 },
     private: { mode: 'custom', aspect: '9:16', width: 576, height: 1024 },
@@ -433,7 +481,7 @@ test('selected-shot default retains the legacy canvas and ignores ordinary/priva
   assert.equal(task.status, 'succeeded');
   assert.deepEqual({ width: task.width, height: task.height, sizeOverride: task.sizeOverride }, requested);
   assert.deepEqual({ width: input.width, height: input.height, sizeOverride: input.sizeOverride }, requested);
-  assert.deepEqual(env.generated()[0].imageRequestSize, requested);
+  assert.deepEqual(requestSizeFacts(env.generated()[0].imageRequestSize), requested);
   assert.deepEqual(env.current().settings.imageOutputSizes, independentSizes);
   assert.equal(env.current().project.storyboards[0].resolution, '1080p');
 });
@@ -450,11 +498,11 @@ test('selected-shot assets record encoded pixels separately from the original re
   assert.equal(task.status, 'succeeded', 'a returned size mismatch must not reject a usable image');
   assert.deepEqual({ width: task.width, height: task.height, sizeOverride: task.sizeOverride }, requested);
   assert.deepEqual({ width: asset.width, height: asset.height }, { width: 1024, height: 576 });
-  assert.deepEqual(asset.imageRequestSize, requested);
+  assert.deepEqual(requestSizeFacts(asset.imageRequestSize), requested);
   assert.match(task.bindingWarning || '', /实际返回1024×576.*请求2048×1152/u);
   assert.equal(env.current().project.storyboards[0].shots[1].referenceAssetIds[0], asset.id);
   env.setCurrent((state) => ({ ...state, project: { ...state.project, generationTasks: [] } }));
-  assert.deepEqual(env.generated()[0].imageRequestSize, requested, 'the request size survives deletion of its task');
+  assert.deepEqual(requestSizeFacts(env.generated()[0].imageRequestSize), requested, 'the request size survives deletion of its task');
 });
 
 test('selected-shot size mismatch is combined with stale-binding warnings instead of replacing them', async () => {
@@ -493,7 +541,7 @@ test('selected-shot URL-only and unreadable outputs never report requested pixel
     const asset = env.generated()[0];
     assert.equal(asset.width, undefined, 'unknown width stays unknown');
     assert.equal(asset.height, undefined, 'unknown height stays unknown');
-    assert.deepEqual(asset.imageRequestSize, { width: 4096, height: 2304, sizeOverride: true });
+    assert.deepEqual(requestSizeFacts(asset.imageRequestSize), { width: 4096, height: 2304, sizeOverride: true });
     assert.equal(env.tasks()[0].bindingWarning, undefined, 'unknown metadata is not a confirmed mismatch');
   }
 });
@@ -506,7 +554,7 @@ test('invalid custom storyboard pixels fail before visibility analysis or paid i
   assert.equal(env.imageInputs.length, 0);
   assert.equal(env.tasks().length, 0);
   assert.equal(env.generated().length, 0);
-  assert.ok(env.notices.some((notice) => notice.level === 'error' && /分镜图分辨率.*64–4096/u.test(notice.message)));
+  assert.ok(env.notices.some((notice) => notice.level === 'error' && /分镜图分辨率.*64–16384/u.test(notice.message)));
   assert.equal(env.busy(), false);
   assert.equal(env.lifecycle.isActive(env.guardKey), false);
 });

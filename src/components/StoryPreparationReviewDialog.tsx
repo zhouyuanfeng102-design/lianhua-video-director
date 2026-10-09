@@ -1,6 +1,8 @@
 import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
 import type { StoryPreparationResult, StoryPreparationWarning } from '../storyPreparationReview';
+import type { StoryReferenceContext } from '../types';
+import { StoryReferenceAnalysisView } from './StoryReferencePanel';
 import '../storyPreparationReview.css';
 
 export interface StoryPreparationReviewDialogProps {
@@ -10,6 +12,7 @@ export interface StoryPreparationReviewDialogProps {
   /** Reuse the comparison to inspect an already adopted source snapshot. */
   sourceOnly?: boolean;
   fontScalePercent?: number;
+  referenceContext?: StoryReferenceContext;
   onAdopt: () => void;
   onKeepOriginal: () => void;
   /** Hide the dialog without discarding the pending result. */
@@ -36,7 +39,7 @@ function DialogueDetail({ label, value }: {
 
 /** The returned story is always plain, read-only text until the caller accepts it. */
 export function StoryPreparationReviewDialog({
-  original, result, stale, sourceOnly = false, fontScalePercent = 100, onAdopt, onKeepOriginal, onClose,
+  original, result, stale, sourceOnly = false, fontScalePercent = 100, referenceContext, onAdopt, onKeepOriginal, onClose,
 }: StoryPreparationReviewDialogProps) {
   const titleId = useId();
   const descriptionId = useId();
@@ -168,7 +171,25 @@ export function StoryPreparationReviewDialog({
           tabIndex={tab === 'warnings' ? 0 : -1} onClick={() => setTab('warnings')} onKeyDown={onTabKeyDown}>核对提示（{result.warnings.length}）</button>}
       </div>
 
-      {stale && <p className="sr-review-stale" role="status">原文或当前项目已变化，此结果对应的是旧原文，不能覆盖当前编辑区。仍可查看、复制或保留原文。</p>}
+      {stale && <p className="sr-review-stale" role="status">原文、参考资料或当前项目已变化，此结果对应旧资料，不能覆盖当前编辑区。仍可查看、复制或保留原文。</p>}
+
+      {referenceContext && <details className="sr-review-reference-source">
+        <summary>本次使用的参考资料：{referenceContext.references.map((reference) => `图${reference.number}`).join('、')}</summary>
+        <div className="sr-review-reference-content">
+          {referenceContext.narrator && <p>“我”：{referenceContext.narrator.name || '已有项目人物'} {referenceContext.narrator.description}</p>}
+          {referenceContext.references.map((reference) => <article key={reference.referenceId}>
+            <strong>图{reference.number} · 识别版本 {reference.analysis.revision}</strong>
+            <StoryReferenceAnalysisView analysis={reference.analysis} />
+            {reference.fullDescription !== undefined && <p className="story-reference-prose">人工修订：{reference.fullDescription}</p>}
+            {reference.notes && <p className="story-reference-prose">补充要求：{reference.notes}</p>}
+            {reference.subjectBindings.length > 0 && <p>主体对应：{reference.subjectBindings.map((binding) => {
+              const subjects = binding.kind === 'character' ? reference.analysis.characters : binding.kind === 'location' ? reference.analysis.locations : reference.analysis.props;
+              const subject = subjects.find((item) => item.id === binding.subjectId);
+              return `${subject?.label || binding.subjectId}${binding.name ? `＝${binding.name}` : ''}${binding.isNarrator ? '（我）' : ''}`;
+            }).join('；')}</p>}
+          </article>)}
+        </div>
+      </details>}
 
       <div className="sr-review-content">
         {tab === 'comparison' ? <section className="sr-review-comparison" id={comparisonId} role="tabpanel" aria-labelledby={`${comparisonId}-tab`}>

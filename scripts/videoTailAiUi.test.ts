@@ -13,6 +13,9 @@ import * as drafts from '../src/videoDirectorDraft';
 import * as output from '../src/videoOutputParameters';
 import * as sources from '../src/videoGenerationSource';
 import * as runningHub from '../src/runningHubVideo';
+import * as runningHubPromptPictures from '../src/runningHubPromptPictures';
+import * as chapters from '../src/chapters';
+import * as segmentCharacters from '../src/videoSegmentCharacters';
 import * as provenance from '../src/videoProvenance';
 import * as directorReferences from '../src/videoDirectorReferences';
 import * as errorDiagnostics from '../src/errorDiagnostics';
@@ -59,13 +62,17 @@ Object.defineProperty(globalThis, 'HTMLElement', { configurable: true, value: cl
 function harness(file: 'PreviousVideoTailDialog' | 'VideoDirectorView', component: string, initialProps: Props) {
   let props = { ...initialProps }; let cursor = 0; let dirty = true; let effects: Array<() => void> = [];
   const slots: Slot[] = [];
+  let mountedKey: React.Key | null | undefined;
+  let mountGeneration = 0;
   const hooks = {
-    useState: (initial: unknown) => { const index = cursor++; if (!slots[index]) slots[index] = { value: typeof initial === 'function' ? initial() : initial }; return [slots[index].value, (next: any) => { const value = typeof next === 'function' ? next(slots[index].value) : next; if (!Object.is(value, slots[index].value)) { slots[index].value = value; dirty = true; } }]; },
+    useState: (initial: unknown) => { const index = cursor++; if (!slots[index]) slots[index] = { value: typeof initial === 'function' ? initial() : initial }; const slot = slots[index]; const generation = mountGeneration; return [slot.value, (next: any) => { if (generation !== mountGeneration) return; const value = typeof next === 'function' ? next(slot.value) : next; if (!Object.is(value, slot.value)) { slot.value = value; dirty = true; } }]; },
     useRef: (initial: unknown) => { const index = cursor++; if (!slots[index]) slots[index] = { value: { current: initial } }; return slots[index].value; },
     useMemo: (run: () => unknown, deps?: readonly unknown[]) => { const index = cursor++; if (!slots[index] || !sameDeps(slots[index].deps, deps)) slots[index] = { value: run(), deps }; return slots[index].value; },
     useEffect: (run: () => (() => void) | void, deps?: readonly unknown[]) => { const index = cursor++; if (!slots[index] || !sameDeps(slots[index].deps, deps)) { const previous = slots[index]; slots[index] = { ...previous, deps }; effects.push(() => { previous?.cleanup?.(); slots[index].cleanup = run() || undefined; }); } },
   };
   const modules: Record<string, unknown> = {
+    '../chapters': chapters,
+    '../videoSegmentCharacters': segmentCharacters,
     '../videoH3ReferenceBinding': h3ReferenceBinding,
     react: { ...React, ...hooks }, '../media': { assetPreviewUrl: (asset: ReferenceAsset) => asset.url || '' },
     '../userFacingError': { formatUserFacingError: (cause: unknown) => cause instanceof Error ? cause.message : String(cause) },
@@ -74,7 +81,7 @@ function harness(file: 'PreviousVideoTailDialog' | 'VideoDirectorView', componen
     './ReferenceImageName': { ReferenceImageName: ({ name }: { name: string }) => React.createElement('strong', null, name) },
     './VideoExecutionControls': { VideoExecutionControls: () => null },
     '../videoTailReference': tails, '../videoTailCharacters': tailCharacters, '../videoReferenceUsage': referenceUsage, '../videoReferenceSlots': referenceSlots, '../videoBatch': batch, '../videoBatchSelection': batchSelection,
-    '../videoDirectorDraft': drafts, '../videoGenerationSource': sources, '../runningHubVideo': runningHub,
+    '../videoDirectorDraft': drafts, '../videoGenerationSource': sources, '../runningHubVideo': runningHub, '../runningHubPromptPictures': runningHubPromptPictures,
     '../videoOutputParameters': output, './VideoOutputParameters': { VideoOutputParameters: () => null },
     '../videoRuntimeStore': { useVideoTaskRuntime: (_id: string, _store: unknown, fallback: unknown) => fallback },
     '../videoProvenance': provenance, '../videoDirectorReferences': directorReferences,
@@ -86,13 +93,26 @@ function harness(file: 'PreviousVideoTailDialog' | 'VideoDirectorView', componen
     compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.React },
   }).outputText;
   const module = { exports: {} as Record<string, (props: Props) => React.ReactNode> };
-  new Function('require', 'module', 'exports', 'React', `${compiled}${file === 'VideoDirectorView' ? '\nObject.assign(module.exports, { VideoBatchPanel, VideoBatchImagePicker, VideoReferenceSlotUsageEditor });' : ''}`)((name: string) => {
+  new Function('require', 'module', 'exports', 'React', `${compiled}${file === 'VideoDirectorView' ? '\nObject.assign(module.exports, { VideoDirectorWrapper: module.exports.VideoDirectorView, VideoDirectorView: ChapterVideoDirectorView, VideoBatchPanel, VideoBatchImagePicker, VideoReferenceSlotUsageEditor });' : ''}`)((name: string) => {
     if (name.endsWith('.css')) return {}; if (name in modules) return modules[name]; throw new Error(`Unexpected import: ${name}`);
   }, module, module.exports, React);
   let tree: React.ReactNode;
   const render = () => {
     let count = 0;
-    do { assert.ok(count++ < 20, 'hooks settle'); cursor = 0; dirty = false; tree = module.exports[component](props); const queue = effects; effects = []; queue.forEach((effect) => effect()); } while (dirty);
+    do {
+      assert.ok(count++ < 20, 'hooks settle'); cursor = 0; dirty = false;
+      let componentProps = component === 'VideoBatchPanel' ? { onBatchDraftChange: () => {}, ...props } : props;
+      if (file === 'VideoDirectorView' && component === 'VideoDirectorView') {
+        const child = module.exports.VideoDirectorWrapper(componentProps) as React.ReactElement<Props>;
+        if (child.key !== mountedKey) {
+          slots.forEach((slot) => slot.cleanup?.()); slots.length = 0; effects = [];
+          mountGeneration += 1; mountedKey = child.key;
+        }
+        componentProps = child.props;
+      }
+      tree = module.exports[component](componentProps);
+      const queue = effects; effects = []; queue.forEach((effect) => effect());
+    } while (dirty);
     return tree;
   };
   const flush = async () => { for (let index = 0; index < 10; index += 1) await Promise.resolve(); return render(); };

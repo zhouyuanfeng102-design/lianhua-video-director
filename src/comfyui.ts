@@ -100,7 +100,7 @@ const hasDirectScalarInput = (inputs: JsonObject, inputName: string): boolean =>
 
 const isPromptTextNode = (node: unknown): boolean => {
   const inputs = nodeInputs(node);
-  if (!inputs || typeof inputs.text !== 'string' || !isPlainObject(node)) return false;
+  if (!inputs || !['text', 'text_g', 'text_l'].some((field) => typeof inputs[field] === 'string') || !isPlainObject(node)) return false;
   const classType = String(node.class_type || '').toLowerCase();
   return classType.includes('cliptextencode') || classType.includes('t5gemmatextencoder');
 };
@@ -291,34 +291,46 @@ export const importComfyUIApiWorkflow = (
   let heightCount = 0;
   let targetWidthCount = 0;
   let targetHeightCount = 0;
+  // A workflow's resize, crop and reference-preprocessing dimensions are not
+  // the generation canvas. Preserve those values, including two-stage graphs.
+  const dimensionBindings = options.preserveImageSize
+    ? [] : automaticGenerationSizeBindings(workflow);
+  const dimensionInputsByNode = new Map<string, Set<string>>();
+  dimensionBindings.forEach(({ nodeId, inputName }) => {
+    const fields = dimensionInputsByNode.get(nodeId) || new Set<string>();
+    fields.add(inputName);
+    dimensionInputsByNode.set(nodeId, fields);
+  });
 
   Object.entries(workflow).forEach(([nodeId, node]) => {
     const inputs = nodeInputs(node);
     if (!inputs) return;
 
-    if (typeof inputs.text === 'string') {
+    const textFields = ['text', 'text_g', 'text_l'].filter((field) => typeof inputs[field] === 'string');
+    if (textFields.length) {
       if (negativeNodeIds.has(nodeId)) {
-        inputs.text = '__NEGATIVE_PROMPT__';
+        textFields.forEach((field) => { inputs[field] = '__NEGATIVE_PROMPT__'; });
         negativeCount += 1;
       } else if (positiveNodeIds.has(nodeId)) {
-        inputs.text = '__PROMPT__';
+        textFields.forEach((field) => { inputs[field] = '__PROMPT__'; });
         positiveCount += 1;
       }
     }
 
-    if (!options.preserveImageSize && hasDirectScalarInput(inputs, 'width')) {
+    const dimensions = dimensionInputsByNode.get(nodeId);
+    if (dimensions?.has('width') && hasDirectScalarInput(inputs, 'width')) {
       inputs.width = '__WIDTH__';
       widthCount += 1;
     }
-    if (!options.preserveImageSize && hasDirectScalarInput(inputs, 'height')) {
+    if (dimensions?.has('height') && hasDirectScalarInput(inputs, 'height')) {
       inputs.height = '__HEIGHT__';
       heightCount += 1;
     }
-    if (!options.preserveImageSize && hasDirectScalarInput(inputs, 'target_width')) {
+    if (dimensions?.has('target_width') && hasDirectScalarInput(inputs, 'target_width')) {
       inputs.target_width = '__TARGET_WIDTH__';
       targetWidthCount += 1;
     }
-    if (!options.preserveImageSize && hasDirectScalarInput(inputs, 'target_height')) {
+    if (dimensions?.has('target_height') && hasDirectScalarInput(inputs, 'target_height')) {
       inputs.target_height = '__TARGET_HEIGHT__';
       targetHeightCount += 1;
     }
@@ -394,6 +406,8 @@ const WIDTH_MARKERS = ['__WIDTH__', '{{width}}', '__TARGET_WIDTH__', '{{target_w
 const HEIGHT_MARKERS = ['__HEIGHT__', '{{height}}', '__TARGET_HEIGHT__', '{{target_height}}'];
 const SIZE_MARKERS = ['__SIZE__', '{{size}}'];
 const IMAGE_CANVAS_CLASSES = new Set(['emptylatentimage', 'emptysd3latentimage', 'emptyflux2latentimage']);
+const DIMENSION_CONDITIONING_CLASSES = new Set(['cliptextencodesdxl', 'cliptextencodesdxlrefiner']);
+type GenerationSizeBinding = { nodeId: string; inputName: 'width' | 'height' | 'target_width' | 'target_height' };
 
 const hasExactSizePair = (inputs: JsonObject): boolean => {
   const values = Object.values(inputs).filter((value): value is string => typeof value === 'string');
@@ -406,30 +420,111 @@ const scalarCanvasDimension = (value: unknown, markers: readonly string[]): bool
     : typeof value === 'string' && (markers.includes(value) || /^\d+$/u.test(value) && Number(value) >= 64)
 );
 
+const reachesImageOutput = (
+  workflow: JsonObject,
+  downstream: ReadonlyMap<string, ReadonlySet<string>>,
+  sourceId: string,
+): boolean => {
+  const visited = new Set<string>();
+  const pending = [sourceId];
+  while (pending.length) {
+    const current = pending.pop()!;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    if (isImageOutputNode(workflow[current])) return true;
+    downstream.get(current)?.forEach((id) => pending.push(id));
+  }
+  return false;
+};
+
+const generationCanvasEntries = (workflow: JsonObject): Array<[string, unknown]> => {
+  const downstream = downstreamNodeIds(workflow);
+  return Object.entries(workflow).filter(([nodeId, node]) => {
+    const inputs = nodeInputs(node);
+    return inputs && IMAGE_CANVAS_CLASSES.has(normalizedClassType(node))
+      && scalarCanvasDimension(inputs.width, WIDTH_MARKERS)
+      && scalarCanvasDimension(inputs.height, HEIGHT_MARKERS)
+      && reachesGeneratedImageOutput(workflow, downstream, nodeId);
+  });
+};
+
+/** Only the first sampler's matching SDXL size conditioning belongs to its
+ * empty canvas. Refinement and unrelated conditioning retain their own sizes. */
+const conditioningSizeBindings = (workflow: JsonObject, canvasId: string): GenerationSizeBinding[] => {
+  const canvas = nodeInputs(workflow[canvasId])!;
+  const conditioningIds = new Set<string>();
+  const visitUpstream = (nodeId: string): void => {
+    if (!nodeId || conditioningIds.has(nodeId)) return;
+    conditioningIds.add(nodeId);
+    const inputs = nodeInputs(workflow[nodeId]);
+    if (!inputs) return;
+    Object.values(inputs).forEach((value) => {
+      const upstream = readConnectionNodeId(value);
+      if (upstream) visitUpstream(upstream);
+    });
+  };
+  Object.values(workflow).forEach((node) => {
+    const inputs = nodeInputs(node);
+    if (!inputs || readConnectionNodeId(inputs.latent_image) !== canvasId) return;
+    visitUpstream(readConnectionNodeId(inputs.positive));
+    visitUpstream(readConnectionNodeId(inputs.negative));
+  });
+  return [...conditioningIds].flatMap((nodeId) => {
+    const node = workflow[nodeId];
+    const inputs = nodeInputs(node);
+    if (!inputs || !DIMENSION_CONDITIONING_CLASSES.has(normalizedClassType(node))) return [];
+    const pairs = [['width', 'height'], ['target_width', 'target_height']] as const;
+    return pairs.flatMap<GenerationSizeBinding>(([width, height]) => (
+      inputs[width] === canvas.width && inputs[height] === canvas.height
+        ? [{ nodeId, inputName: width }, { nodeId, inputName: height }] : []
+    ));
+  });
+};
+
+const automaticGenerationSizeBindings = (workflow: JsonObject): GenerationSizeBinding[] => {
+  // An existing explicit binding is authoritative, including an output scaler.
+  // The importer must not additionally opt an earlier numeric canvas in.
+  if (Object.values(workflow).some((node) => {
+    const inputs = nodeInputs(node);
+    return inputs && hasExactSizePair(inputs) && !isPromptTextNode(node)
+      && !DIMENSION_CONDITIONING_CLASSES.has(normalizedClassType(node));
+  })) return [];
+  const canvases = generationCanvasEntries(workflow);
+  if (canvases.length !== 1) return [];
+  const canvasId = canvases[0][0];
+  return [{ nodeId: canvasId, inputName: 'width' }, { nodeId: canvasId, inputName: 'height' },
+    ...conditioningSizeBindings(workflow, canvasId)];
+};
+
 /** This is deliberately not the broad legacy importer: changing a reference
  * preprocessor, disconnected preview, or a linked width would not select the
  * generated canvas. Explicit markers are the workflow author's opt-in. */
-const imageSizeOverridePlan = (workflow: JsonObject): { canvasNodeIds: string[]; message: string } => {
+const imageSizeOverridePlan = (workflow: JsonObject): { bindings: GenerationSizeBinding[]; message: string } => {
   const downstream = downstreamNodeIds(workflow);
   const connected = Object.entries(workflow).filter(([nodeId, node]) => (
-    nodeInputs(node) && !isPromptTextNode(node) && reachesGeneratedImageOutput(workflow, downstream, nodeId)
+    nodeInputs(node) && !isPromptTextNode(node) && reachesImageOutput(workflow, downstream, nodeId)
   ));
   const marked = connected.filter(([, node]) => hasExactSizePair(nodeInputs(node)!));
-  const canvases = connected.filter(([, node]) => {
-    const inputs = nodeInputs(node)!;
-    return IMAGE_CANVAS_CLASSES.has(normalizedClassType(node))
-      && scalarCanvasDimension(inputs.width, WIDTH_MARKERS)
-      && scalarCanvasDimension(inputs.height, HEIGHT_MARKERS);
+  const sizeStages = marked.filter(([, node]) => !DIMENSION_CONDITIONING_CLASSES.has(normalizedClassType(node)));
+  const disconnectedSizeStages = Object.entries(workflow).filter(([nodeId, node]) => {
+    const inputs = nodeInputs(node);
+    return inputs && hasExactSizePair(inputs) && !isPromptTextNode(node)
+      && !DIMENSION_CONDITIONING_CLASSES.has(normalizedClassType(node))
+      && !reachesImageOutput(workflow, downstream, nodeId);
   });
-  if (canvases.length > 1 && canvases.some(([, node]) => !hasExactSizePair(nodeInputs(node)!))) {
-    throw new Error('该 ComfyUI 工作流有多个生成画布，无法确定应修改哪一个。请在目标画布明确绑定 __WIDTH__ 与 __HEIGHT__，或选择“默认尺寸”并在工作流中设置像素。');
+  if (sizeStages.length > 1 || disconnectedSizeStages.length > 0) {
+    throw new Error('该 ComfyUI 模板把多个生成、缩放或预处理尺寸绑定到了同一宽高标记，无法恢复各阶段原尺寸。请重新导入原始 API JSON，并只绑定需要控制的尺寸入口；不会把所有节点改成同一像素。');
   }
-  if (canvases.length === 0 && marked.length === 0) {
-    throw new Error('该 ComfyUI 工作流没有可确认的生成尺寸入口，像素由工作流或参考图决定。请在生成画布绑定 __WIDTH__ 与 __HEIGHT__，或选择“默认尺寸”；不会静默忽略所选像素。');
+  const canvases = generationCanvasEntries(workflow);
+  if (marked.length === 0 && canvases.length > 1) {
+    throw new Error('该 ComfyUI 工作流有多个生成画布，无法确定应修改哪一个。请重新导入原始 API JSON，在需要控制的目标画布明确绑定 __WIDTH__ 与 __HEIGHT__；新任务不会猜测其他画布的尺寸。');
+  }
+  if (canvases.length === 0 && sizeStages.length === 0) {
+    throw new Error('该 ComfyUI 工作流没有可确认的生成尺寸入口，像素由工作流或参考图决定。请重新导入原始 API JSON，在生成画布绑定 __WIDTH__ 与 __HEIGHT__；不会静默忽略所选像素。');
   }
   return {
-    canvasNodeIds: canvases.map(([nodeId]) => nodeId),
-    message: '所选像素会写入已连接的生成画布或明确尺寸标记；后续缩放和实际输出仍由工作流决定。',
+    bindings: sizeStages.length ? [] : automaticGenerationSizeBindings(workflow),
+    message: '仅控制明确绑定的尺寸入口或唯一生成画布；保留缩放、预处理和其他阶段原尺寸。此检查只确认尺寸可注入，原生分辨率能力须另行确认。',
   };
 };
 
@@ -457,10 +552,10 @@ export const buildComfyUIWorkflow = (
   const workflow = hasPromptPlaceholder
     ? parsedWorkflow
     : parseWorkflowJson(importComfyUIApiWorkflow(workflowJson, { preserveImageSize: input.sizeOverride }).workflowJson);
-  sizePlan?.canvasNodeIds.forEach((nodeId) => {
+  sizePlan?.bindings.forEach(({ nodeId, inputName }) => {
     const inputs = nodeInputs(workflow[nodeId])!;
-    inputs.width = '__WIDTH__';
-    inputs.height = '__HEIGHT__';
+    inputs[inputName] = inputName === 'width' ? '__WIDTH__' : inputName === 'height' ? '__HEIGHT__'
+      : inputName === 'target_width' ? '__TARGET_WIDTH__' : '__TARGET_HEIGHT__';
   });
   const hasNegativePlaceholder = workflowContainsAnyToken(
     workflow,

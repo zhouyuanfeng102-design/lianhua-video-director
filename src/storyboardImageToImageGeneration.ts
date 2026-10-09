@@ -17,6 +17,9 @@ import { runStoryboardImageBatch, type StoryboardImageBatchLifecycle, type Story
 import { assertDirectStoryboardImageApiSupport, buildDirectStoryboardImageBatchRequests, buildDirectStoryboardImagePromptWithReferences, directStoryboardImageSourceFingerprint, normalizeStoryboardImageToImageSettings, resolveDirectStoryboardReferenceImages, type DirectStoryboardImagePromptConversion } from './storyboardImageToImage';
 import { requestStoryboardImageFramePlan, validateStoryboardImagePlanCount, type StoryboardImageFramePlan } from './storyboardImagePlan';
 import { withDirectImageRegenerationSnapshot } from './imageAssetRegenerationSnapshot';
+import { imagePromptOutputSpecificationRule } from './imageGeneration';
+import { authoredStoryboardImageSourceFingerprint, failImagePreparationTasks, updateImagePreparationTasks } from './imageTaskPreparation';
+import { sourceContentHash } from './sourceContentHash';
 
 type Update = (updater: (state: AppState) => AppState) => void;
 
@@ -51,23 +54,17 @@ export interface DirectStoryboardImageGenerationOptions {
 
 /** Track authored source facts only. Picker settings, resolution controls,
  * output links and unrelated task writes cannot invalidate a captured batch. */
-const planningSourceIdentity = (state: AppState, board: Storyboard): string => {
+const planningSourceIdentity = (project: AppState['project'], board: Storyboard): string => {
   const sourceSceneIds = new Set([board.sceneId, ...(board.sourceSceneIds || [])]);
   return JSON.stringify({
-    projectId: state.project.id,
-    sourceDocuments: state.project.sourceDocuments.map(({ id, name, content }) => ({ id, name, content })),
-    scenes: state.project.scenes.filter((scene) => sourceSceneIds.has(scene.id)).map(({ id, title, content, summary }) => ({ id, title, content, summary })),
-    board: {
-      id: board.id, sceneId: board.sceneId, sourceSceneIds: board.sourceSceneIds,
-      sourceStoryTitle: board.sourceStoryTitle, sourceStoryContent: board.sourceStoryContent,
-      sourceContentHash: board.sourceContentHash, sourceSceneSnapshots: board.sourceSceneSnapshots,
-      durationSec: board.durationSec, aspectRatio: board.aspectRatio, resolution: board.resolution,
-      globalLock: board.globalLock, continuityIn: board.continuityIn, continuityOut: board.continuityOut,
-      visualStyle: board.visualStyle, extraRequirement: board.extraRequirement,
-      finalPrompt: board.finalPrompt, promptPlan: board.promptPlan,
-      officialPromptZh: board.officialPromptZh, officialPromptEn: board.officialPromptEn,
-      shots: board.shots.map(({ referenceAssetIds: _references, ...shot }) => shot),
-    },
+    projectId: project.id,
+    sourceDocuments: project.sourceDocuments.filter((document) => board.chapterId
+      ? document.id === board.chapterId
+      : Boolean(board.sourceStoryContent && document.content === board.sourceStoryContent
+        || board.sourceContentHash && sourceContentHash(document.content) === board.sourceContentHash))
+      .map(({ id, name, content }) => ({ id, name, content })),
+    scenes: project.scenes.filter((scene) => sourceSceneIds.has(scene.id)).map(({ id, title, content, summary }) => ({ id, title, content, summary })),
+    board: authoredStoryboardImageSourceFingerprint(board),
   });
 };
 
@@ -115,19 +112,23 @@ export const generateDirectStoryboardImages = async (
     model: initial.settings.imageApi.model, endpoint: initial.settings.imageApi.baseUrl,
   };
   let failureDetail: DirectStoryboardImageErrorDetail = { stage: 'image-preparation', context: imageErrorContext };
-  let conversionErrorSensitiveTexts: readonly string[] | undefined;
+  let tasks: ImageGenerationTask[] = [];
   // The original button paths and every direct mode own the same board lease.
   const lease = ctx.lifecycle.begin(`${projectId}:${storyboardId}`);
   if (!lease) { ctx.notify('当前分镜已有图片批次正在生成，请等待任务完成。', 'normal'); return; }
-  const sourceIdentity = planningSourceIdentity(initial, board);
+  const sourceIdentity = planningSourceIdentity(initial.project, board);
+  const ownerProject = (state: AppState) => state.project.id === projectId
+    ? state.project : state.projects.find((project) => project.id === projectId);
   const sourceIsCurrent = () => {
     const current = ctx.getState();
-    const currentBoard = current.project.storyboards.find((item) => item.id === storyboardId);
-    return ctx.lifecycle.canBind(lease) && current.project.id === projectId && Boolean(currentBoard)
-      && planningSourceIdentity(current, currentBoard!) === sourceIdentity;
+    const project = ownerProject(current);
+    const currentBoard = project?.storyboards.find((item) => item.id === storyboardId);
+    return ctx.lifecycle.canSubmit(lease) && Boolean(project && currentBoard)
+      && planningSourceIdentity(project!, currentBoard!) === sourceIdentity
+      && (!tasks.length || tasks.some((task) => imageBatchTaskIsActive(current, projectId, task)));
   };
   const assertSourceCurrent = () => {
-    if (!sourceIsCurrent()) throw new GenerationTaskCancelledError('项目、剧情或 H3 分镜已变化，本次未提交生图请求。');
+    if (!sourceIsCurrent()) throw new GenerationTaskCancelledError('任务已取消，或原剧情、H3 分镜已变化，本次未提交生图请求。');
   };
   const announce = (message: string, tone?: 'normal' | 'error') => {
     if (ctx.getState().project.id === projectId) ctx.notify(message, tone);
@@ -222,8 +223,9 @@ export const generateDirectStoryboardImages = async (
       failureDetail = { stage: 'image-prompt-convert', context: textErrorContext };
       throw new Error('GPT Image 2.5 微 NSFW 分镜图生图必须先由文本模型转换成最终微 NSFW 生图提示词；请先启用并配置文本 API，本次没有调用图像模型。');
     }
-    const size = resolveStoryboardImageOutputSize(initial.settings.storyboardImageOutputSize || defaultStoryboardImageOutputSize(), board.aspectRatio, api.backend);
+    const size = resolveStoryboardImageOutputSize(initial.settings.storyboardImageOutputSize || defaultStoryboardImageOutputSize(), board.aspectRatio, api);
     if (size.issue) throw new Error(`分镜图片分辨率无效：${size.issue}`);
+    if (imagePromptConverterRules) imagePromptConverterRules += `\n\n${imagePromptOutputSpecificationRule({ width: size.width, height: size.height, aspectRatio: size.resolutionPlan?.logicalAspectRatio || board.aspectRatio, resolution: size.resolutionPlan?.tier }, 'storyboard-frame')}`;
     const projectContext = {
       includeReferenceMetadata: api.backend === 'openai' && selectedPromptFormat === 'natural-language',
       characters: cloneImageBatchConfig(initial.project.characters.filter((character) => !character.dossier?.archivedIntoCharacterId)), locations: cloneImageBatchConfig(initial.project.locations),
@@ -241,8 +243,53 @@ export const generateDirectStoryboardImages = async (
         }]] : [])),
       ...(directPromptConversion ? { directPromptConversion, conversionIdentityContext } : {}),
     };
+    failureDetail = { stage: 'image-reference-load', context: imageErrorContext };
+    const initialRequests = requested.count === undefined
+      ? buildDirectStoryboardImageBatchRequests(board, {
+          mode: requested.mode, shotIds: requested.shotIds, referenceAssetIds: settings.referenceAssetIds,
+        }, projectContext, size)
+      : [];
+    const taskCount = requested.count ?? initialRequests.length;
+    if (!taskCount || !board.shots.length) throw new Error('当前没有可生成图片的视频分镜。');
+    const createdAt = Date.now();
+    const batchId = createId('direct_image_batch');
+    tasks = Array.from({ length: taskCount }, (_, index) => {
+      const request = initialRequests[index];
+      return createImageGenerationTask({
+        id: createId('image_task'), name: request?.name || `${initial.project.name} · 第 ${board.segmentIndex || 1} 段 · 静帧 ${index + 1}（待规划）`,
+        assetKind: 'storyboard', imageVariant: request?.imageVariant || 'storyboard-frame',
+        imageFrameBatchId: requested.mode === 'boundary-frames' ? undefined : batchId,
+        ...(requested.count !== undefined ? { imageFrameIndex: index + 1, imageFrameCount: taskCount } : {}),
+        imageGenerationMode: 'image-to-image', prompt: '', imagePromptFormat: 'natural-language',
+        ...(imagePromptTrace || {}),
+        conversionSource: request?.conversionSource || '', width: size.width, height: size.height,
+        sizeOverride: size.sizeOverride, resolutionPlan: size.resolutionPlan,
+        ...(directPromptConversion ? { conversionIdentityContext, converterSystemPrompt: imagePromptConverterRules } : {}),
+        backend: api.backend, model: api.backend === 'comfyui'
+          ? api.comfyuiWorkflows?.find((item) => item.id === api.activeComfyuiWorkflowId)?.name || 'ComfyUI Workflow'
+          : api.model.trim(),
+        sourceStoryboardId: board.id, sourceShotId: request?.shotId,
+        referenceAssetIds: [...settings.referenceAssetIds], primaryReferenceAssetIds: [...settings.referenceAssetIds],
+        batchId, batchIndex: index + 1, batchCount: taskCount, preparationStage: 'reference',
+      }, createdAt + index, 'queued');
+    });
+    ctx.lifecycle.trackBatchSubmissions(lease, tasks.map((task) => task.id));
+    let committed = false;
+    ctx.updateBackground((state) => {
+      const project = ownerProject(state);
+      const currentBoard = project?.storyboards.find((item) => item.id === storyboardId);
+      if (!ctx.lifecycle.canSubmit(lease) || !project || !currentBoard
+        || planningSourceIdentity(project, currentBoard) !== sourceIdentity) return state;
+      committed = true;
+      return applyOwnedProjectUpdate(state, projectId, (owner) => ({
+        ...owner, generationTasks: [...tasks, ...owner.generationTasks],
+      }));
+    });
+    if (!committed) throw new GenerationTaskCancelledError('原剧情或 H3 分镜已变化，本次未提交生图请求。');
+    announce(`已加入 ${tasks.length} 个分镜图生图任务，正在准备参考图；可在“生成任务”查看进度或取消排队。`);
     announce(`正在固定本段 ${settings.referenceAssetIds.length} 张公共参考图，全部生成图片使用同一组原图。`);
     const apiSnapshot = await captureImageApiSnapshot(api, selection.profileId);
+    assertSourceCurrent();
     const cache = new Map<string, Promise<string>>();
     const snapshots = new Map<string, ImageReferenceAssetSnapshot>();
     // Resolve and freeze all originals before queueing. A reference used by
@@ -264,6 +311,10 @@ export const generateDirectStoryboardImages = async (
     let frames: StoryboardImageFramePlan[] | undefined;
     if (requested.count !== undefined) {
       failureDetail = { stage: 'image-frame-plan', context: textErrorContext };
+      ctx.updateBackground((state) => applyOwnedProjectUpdate(state, projectId, (project) => ({
+        ...project, generationTasks: updateImagePreparationTasks(project.generationTasks, tasks,
+          (task) => ({ ...task, preparationStage: 'frame-plan' })),
+      })));
       announce(`AI 正在按原剧情和 H3 规划 ${requested.count} 张静帧；参考图不参与文字规划，稍后直接用于图生图。`);
       frames = await (ctx.planFrames || requestStoryboardImageFramePlan)({
         storyboard: board, count: requested.count, isCurrent: sourceIsCurrent,
@@ -276,82 +327,36 @@ export const generateDirectStoryboardImages = async (
       assertSourceCurrent();
     }
     failureDetail = { stage: 'image-preparation', context: imageErrorContext };
-    const rawRequests = buildDirectStoryboardImageBatchRequests(board, {
+    const requests = requested.count === undefined ? initialRequests : buildDirectStoryboardImageBatchRequests(board, {
       mode: requested.mode, shotIds: requested.shotIds, referenceAssetIds: settings.referenceAssetIds, frames,
     }, projectContext, size);
-    const assetById = new Map(projectContext.assets.map((asset) => [asset.id, asset]));
-    if (directPromptConversion) {
-      failureDetail = { stage: 'image-prompt-convert', context: textErrorContext };
-      // Conversion can fail before tasks exist. Capture its request-owned
-      // evidence here so that UI notices and diagnostics cannot echo it.
-      conversionErrorSensitiveTexts = [
-        conversionIdentityContext, imagePromptConverterRules,
-        ...rawRequests.map((request) => request.conversionSource),
-      ];
-    }
-    const requests = directPromptConversion
-      ? await Promise.all(rawRequests.map(async (request) => {
-          if (request.directPromptSource === 'current-image-prompt') return request;
-          assertSourceCurrent();
-          const converted = await (ctx.convertPrompt || requestImagePromptConverter)(
-            textApi,
-            'storyboard',
-            request.conversionSource,
-            imagePromptTrace!.imagePromptFormat!,
-            imagePromptConverterRules,
-            conversionIdentityContext,
-          );
-          assertSourceCurrent();
-          const orderedAssets = request.referenceAssetIds.map((id) => {
-            const asset = assetById.get(id);
-            if (!asset) throw new Error(`参考图已不存在：${id}`);
-            return asset;
-          });
-          return {
-            ...request,
-            directPrompt: buildDirectStoryboardImagePromptWithReferences(converted, orderedAssets, projectContext, projectContext.includeReferenceMetadata),
-          };
-        }))
-      : rawRequests;
+    if (requests.length !== tasks.length) throw new Error(`分镜图片规划返回 ${requests.length} 张，与已登记的 ${tasks.length} 个任务不一致。`);
     failureDetail = { stage: 'image-preparation', context: imageErrorContext };
     for (const request of requests) assertDirectStoryboardImageApiSupport(api, request.referenceAssetIds.length);
     assertSourceCurrent();
-    const createdAt = Date.now();
-    const batchId = createId('direct_image_batch');
-    const tasks = requests.map((request, index) => createImageGenerationTask({
-      id: createId('image_task'), name: request.name, assetKind: 'storyboard', imageVariant: request.imageVariant,
+    const preparedTasks: ImageGenerationTask[] = requests.map((request, index) => ({
+      ...tasks[index], name: request.name, imageVariant: request.imageVariant,
       imageFrameBatchId: request.purpose === 'storyboard-shot' ? batchId : undefined,
       imageFrameIndex: request.imageFrameIndex, imageFrameCount: request.imageFrameCount,
       imageFrameDescription: request.imageFrameDescription, imageFrameTimeSec: request.imageFrameTimeSec,
-      imageGenerationMode: 'image-to-image', prompt: request.directPrompt, imagePromptFormat: 'natural-language',
-      ...(imagePromptTrace || {}),
-      conversionSource: request.conversionSource, width: request.width, height: request.height, sizeOverride: request.sizeOverride,
-      ...(directPromptConversion ? { conversionIdentityContext } : {}),
-      backend: api.backend, model: api.backend === 'comfyui'
-        ? api.comfyuiWorkflows?.find((item) => item.id === api.activeComfyuiWorkflowId)?.name || 'ComfyUI Workflow'
-        : api.model.trim(),
+      imageGenerationMode: 'image-to-image',
+      prompt: directPromptConversion && request.directPromptSource !== 'current-image-prompt' ? '' : request.directPrompt,
+      imagePromptFormat: 'natural-language',
+      conversionSource: request.conversionSource, width: request.width, height: request.height, sizeOverride: request.sizeOverride, resolutionPlan: request.resolutionPlan,
       imageApiSnapshot: apiSnapshot, sourceStoryboardId: board.id, sourceShotId: request.shotId,
       sourceFingerprint: directStoryboardImageSourceFingerprint(board, request, projectContext),
       referenceAssetIds: [...request.referenceAssetIds], primaryReferenceAssetIds: [...request.referenceAssetIds],
       referenceAssetSnapshots: request.referenceAssetIds.map((id) => snapshots.get(id)!),
-      batchId, batchIndex: index + 1, batchCount: requests.length,
-    }, createdAt + index, 'queued'));
-    ctx.lifecycle.trackBatchSubmissions(lease, tasks.map((task) => task.id));
-    let committed = false;
-    ctx.update((state) => {
-      const currentBoard = state.project.storyboards.find((item) => item.id === storyboardId);
-      if (!ctx.lifecycle.canBind(lease) || state.project.id !== projectId || !currentBoard
-        || planningSourceIdentity(state, currentBoard) !== sourceIdentity) return state;
-      committed = true;
-      return applyOwnedProjectUpdate(state, projectId, (project) => ({
-        ...project, generationTasks: [...tasks, ...project.generationTasks],
-      }));
-    });
-    if (!committed) throw new GenerationTaskCancelledError('项目、剧情或 H3 分镜已变化，本次未提交生图请求。');
-    announce(`已加入 ${tasks.length} 个分镜图生图任务，可在“生成任务”取消排队、查看参考图及失败原因。`);
+      preparationStage: undefined,
+    }));
+    ctx.updateBackground((state) => applyOwnedProjectUpdate(state, projectId, (project) => ({
+      ...project, generationTasks: updateImagePreparationTasks(project.generationTasks, tasks,
+        (task, index) => isGenerationTaskRevoked(projectId, task) ? task : { ...task, ...preparedTasks[index] }),
+    })));
+    tasks = preparedTasks;
     failureDetail = { stage: 'image-generation', context: imageErrorContext };
     const results = await runStoryboardImageBatch(requests, async (request, index) => {
-      const task = tasks[index];
+      let task = tasks[index];
       const assertActive = () => {
         if (!ctx.lifecycle.canSubmit(lease) || !imageBatchTaskIsActive(ctx.getState(), projectId, task)) throw new GenerationTaskCancelledError();
       };
@@ -363,9 +368,30 @@ export const generateDirectStoryboardImages = async (
         })));
         const referenceImages = await resolveDirectStoryboardReferenceImages(task.referenceAssetIds!, imageReferenceSnapshotAssets(task.referenceAssetSnapshots), ctx.loader);
         assertActive();
+        if (directPromptConversion && request.directPromptSource !== 'current-image-prompt') {
+          taskFailureStage = 'image-prompt-convert';
+          ctx.updateBackground((state) => applyOwnedProjectUpdate(state, projectId, (project) => ({
+            ...project, generationTasks: updateImagePreparationTasks(project.generationTasks, [task],
+              (current) => ({ ...current, preparationStage: 'prompt-convert' })),
+          })));
+          const converted = await (ctx.convertPrompt || requestImagePromptConverter)(
+            textApi, 'storyboard', request.conversionSource, imagePromptTrace!.imagePromptFormat!,
+            imagePromptConverterRules, conversionIdentityContext,
+          );
+          assertActive();
+          const orderedAssets = request.referenceAssetIds.map((id) => projectContext.assets.find((asset) => asset.id === id)!);
+          task = { ...task, prompt: buildDirectStoryboardImagePromptWithReferences(
+            converted, orderedAssets, projectContext, projectContext.includeReferenceMetadata,
+          ) };
+          tasks[index] = task;
+          ctx.updateBackground((state) => applyOwnedProjectUpdate(state, projectId, (project) => ({
+            ...project, generationTasks: updateImagePreparationTasks(project.generationTasks, [task],
+              (current) => ({ ...current, prompt: task.prompt, preparationStage: undefined })),
+          })));
+        }
         taskFailureStage = 'image-generation';
         const generated = await (ctx.generateImage || requestImageModel)(api, {
-          prompt: task.prompt, width: task.width, height: task.height, sizeOverride: task.sizeOverride,
+          prompt: task.prompt, width: task.width, height: task.height, sizeOverride: task.sizeOverride, resolutionPlan: task.resolutionPlan,
           referenceImages, primaryReferenceImageCount: referenceImages.length, preserveReferenceImageOrder: true,
         }, assertActive);
         taskFailureStage = 'image-result-save';
@@ -390,7 +416,7 @@ export const generateDirectStoryboardImages = async (
           imagePromptPresetName: task.imagePromptPresetName,
           imagePromptPresetVersion: task.imagePromptPresetVersion, imagePromptFormat: task.imagePromptFormat || 'natural-language',
           width: actual?.width, height: actual?.height,
-          imageRequestSize: { width: task.width, height: task.height, sizeOverride: task.sizeOverride },
+          imageRequestSize: { width: task.width, height: task.height, sizeOverride: task.sizeOverride, resolutionPlan: task.resolutionPlan },
           tags: ['剧情分镜', `第${request.shotIndex}镜`, '图生图', ...(request.purpose === 'first-frame' ? ['首帧'] : request.purpose === 'last-frame' ? ['尾帧'] : [])], createdAt: timestamp, updatedAt: timestamp,
         }, task);
         ctx.updateBackground((state) => applyOwnedProjectUpdate(state, projectId, (project) => ({
@@ -404,32 +430,48 @@ export const generateDirectStoryboardImages = async (
         })));
         return asset.id;
       } catch (error) {
-        if (isGenerationTaskCancelledError(error) || isGenerationTaskRevoked(projectId, task)) throw new GenerationTaskCancelledError();
-        const message = `第 ${request.shotIndex} 镜图生图失败：${error instanceof Error ? error.message : String(error)}`;
-        ctx.reportError?.(error, { stage: taskFailureStage, context: imageErrorContext });
+        if (isGenerationTaskCancelledError(error) || isGenerationTaskRevoked(projectId, task)) {
+          ctx.updateBackground((state) => applyOwnedProjectUpdate(state, projectId, (project) => ({
+            ...project, generationTasks: failImagePreparationTasks(project.generationTasks, [task],
+              error instanceof Error ? error.message : '任务已取消，未继续调用生成接口。', true),
+          })));
+          throw new GenerationTaskCancelledError();
+        }
+        const diagnostic = taskFailureStage === 'image-prompt-convert'
+          ? getSafeErrorDiagnostics(error, {
+              sensitiveTexts: [conversionIdentityContext, imagePromptConverterRules, request.conversionSource],
+              knownSecrets: [textApi.apiKey, api.apiKey],
+            }) : undefined;
+        const detail = diagnostic?.message || (error instanceof Error ? error.message : String(error));
+        const message = `第 ${request.shotIndex} 镜${taskFailureStage === 'image-prompt-convert' ? '生图提示词转换未完成，尚未提交生图' : '图生图失败'}：${detail}`;
+        ctx.reportError?.(diagnostic || error, { stage: taskFailureStage,
+          context: taskFailureStage === 'image-prompt-convert' ? textErrorContext : imageErrorContext });
+        if (taskFailureStage === 'image-prompt-convert') announce(message, 'error');
         ctx.updateBackground((state) => applyOwnedProjectUpdate(state, projectId, (project) => ({
-          ...project, generationTasks: settleImageGenerationTask(project.generationTasks, task, { status: 'failed', error: message }, Date.now(), projectId),
+          ...project, generationTasks: failImagePreparationTasks(project.generationTasks, [task], message),
         })));
         throw new Error(message);
       }
     }, (_request, index) => ctx.lifecycle.canSubmit(lease) && imageBatchTaskIsActive(ctx.getState(), projectId, tasks[index], true));
+    const cancelledTasks = results.flatMap((result, index) => result.status === 'cancelled' ? [tasks[index]] : []);
+    if (cancelledTasks.length) ctx.updateBackground((state) => applyOwnedProjectUpdate(state, projectId, (project) => ({
+      ...project, generationTasks: failImagePreparationTasks(project.generationTasks, cancelledTasks,
+        '任务已取消或已失效，未继续调用生成接口。', true),
+    })));
     const count = (status: 'succeeded' | 'failed' | 'cancelled') => results.filter((item) => item.status === status).length;
     announce(`分镜图生图完成：成功 ${count('succeeded')}，失败 ${count('failed')}，取消 ${count('cancelled')}。${count('failed') ? '具体原因已记录在生成任务中。' : ''}`, count('failed') ? 'error' : 'normal');
   } catch (error) {
     const cancelled = isGenerationTaskCancelledError(error) || error instanceof Error && error.name === 'AbortError';
-    const conversionDiagnostic = failureDetail.stage === 'image-prompt-convert' && conversionErrorSensitiveTexts
-      ? getSafeErrorDiagnostics(error, { sensitiveTexts: conversionErrorSensitiveTexts, knownSecrets: [textApi.apiKey] })
-      : undefined;
-    const message = conversionDiagnostic?.message || (error instanceof Error ? error.message : String(error));
+    const message = error instanceof Error ? error.message : String(error);
     const prefix = !cancelled && failureDetail.stage === 'image-frame-plan'
       ? '分镜静帧规划未完成，尚未提交生图：'
       : !cancelled && failureDetail.stage === 'image-prompt-convert'
         ? '生图提示词转换未完成，尚未提交生图：' : '';
     announce(`${prefix}${message}`, cancelled ? 'normal' : 'error');
-    // Converter diagnostics retain protocol status/code/stage/route without
-    // request data. Other direct paths keep their existing error behavior;
-    // provider failures never become JSON retries here.
-    if (!cancelled) ctx.reportError?.(conversionDiagnostic || error, failureDetail);
+    if (tasks.length) ctx.updateBackground((state) => applyOwnedProjectUpdate(state, projectId, (project) => ({
+      ...project, generationTasks: failImagePreparationTasks(project.generationTasks, tasks, `${prefix}${message}`, cancelled),
+    })));
+    if (!cancelled) ctx.reportError?.(error, failureDetail);
   } finally {
     ctx.lifecycle.finish(lease);
   }

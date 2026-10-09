@@ -1,4 +1,5 @@
 import type { ChapterWorkspace, GenerationTask, Project, ReferenceAsset, Scene, SourceDocument, Storyboard, VideoSequencePlan } from './types';
+import { normalizeStoryReferenceWorkspace } from './storyReferences';
 import { sourceContentHash } from './sourceContentHash';
 import { normalizeDirectorLookDraft } from './directorLookDraft';
 
@@ -131,7 +132,7 @@ export const chapterScopeProject = (project: Project, chapterId = activeChapter(
 
 const normalizeWorkspace = (value: unknown): ChapterWorkspace => {
   if (!record(value)) return {};
-  const workspace: ChapterWorkspace = {};
+  const workspace: ChapterWorkspace = { ...normalizeStoryReferenceWorkspace(value) };
   if (record(value.storyDraft) && typeof value.storyDraft.name === 'string' && typeof value.storyDraft.content === 'string') workspace.storyDraft = {
     name: value.storyDraft.name, content: value.storyDraft.content,
     updatedAt: typeof value.storyDraft.updatedAt === 'number' && Number.isFinite(value.storyDraft.updatedAt) ? value.storyDraft.updatedAt : 0,

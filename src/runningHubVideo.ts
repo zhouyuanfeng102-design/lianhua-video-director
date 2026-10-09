@@ -7,6 +7,7 @@ import type {
 import { normalizeRunningHubVideoFieldControls, normalizeRunningHubVideoNodeCatalog, resolveRunningHubVideoFieldControl } from './runningHubVideoNodes';
 import { assertVideoReferenceSlots, videoReferenceSlotIndex } from './videoReferenceSlots';
 import { resolveRunningHubVideoImageProtocol } from './runningHubImageProtocol';
+import { assertRunningHubPromptPictureSlots, isRunningHubH3AutoPromptInput, runningHubH3AutoPromptInput } from './runningHubPromptPictures';
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const own = (value: object, key: string): boolean => Object.prototype.hasOwnProperty.call(value, key);
@@ -533,6 +534,7 @@ export const bindRunningHubVideoRequest = (
   mappedFields: NonNullable<VideoTaskApiConfig['runningHubMappedFields']>,
   draft: Pick<VideoGenerationDraft, 'prompt' | 'parameters'> & Partial<Pick<VideoGenerationDraft, 'references'>>,
   images: string[],
+  submitContext?: Pick<VideoTaskApiConfig, 'provider' | 'runningHubAppId' | 'endpoint'>,
 ): Record<string, unknown> => {
   assertSafeNumbers(template);
   if (draft.references) {
@@ -546,6 +548,8 @@ export const bindRunningHubVideoRequest = (
     uploadBySlot.set(draft.references ? videoReferenceSlotIndex(draft.references[index], index) : index, { image, index });
   }
   const request = readRunningHubVideoRequest(template);
+  const submittedPrompt = submitContext && isRunningHubH3AutoPromptInput({ ...submitContext, runningHubMappedFields: mappedFields })
+    ? runningHubH3AutoPromptInput(draft.prompt, uploadBySlot.size) : draft.prompt;
   const parameterNames = new Set(mappedFields.filter((field) => field.kind === 'parameter' && field.parameter).map((field) => field.parameter!));
   const unmapped = Object.keys(draft.parameters).filter((name) => draft.parameters[name] !== undefined && !parameterNames.has(name));
   if (unmapped.length) throw new Error(`RunningHub 参数 ${unmapped.join('、')} 尚未绑定节点字段；请配置明确映射或清空这些覆盖值。`);
@@ -561,7 +565,7 @@ export const bindRunningHubVideoRequest = (
     const node = request.nodeInfoList[index];
     if (field.kind === 'prompt') {
       if (typeof node.fieldValue !== 'string') throw new Error('RunningHub 提示词映射只能替换文本字段。');
-      node.fieldValue = draft.prompt; prompts += 1;
+      node.fieldValue = submittedPrompt; prompts += 1;
     } else if (field.kind === 'image') {
       const imageIndex = field.imageIndex;
       if (typeof node.fieldValue !== 'string' || !Number.isSafeInteger(imageIndex) || imageIndex! < 0) throw new Error(`RunningHub 图片字段 ${field.nodeId}.${field.fieldName} 的槽位映射无效，请核对工作流配置。`);
@@ -595,6 +599,7 @@ export const bindRunningHubVideoRequest = (
   }
   if (!prompts) throw new Error('RunningHub 工作流未明确绑定提示词字段。');
   if (consumedImages.size !== images.length) throw new Error('参考图数量与 RunningHub 工作流的明确图槽不一致；不会静默丢弃图片。');
+  assertRunningHubPromptPictureSlots(mappedFields, submittedPrompt, [...uploadBySlot.keys()]);
   return request;
 };
 

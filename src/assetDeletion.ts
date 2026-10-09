@@ -1,4 +1,5 @@
 import type { Project, Storyboard } from './types';
+import { detachDeletedStoryReferenceAsset } from './storyReferences';
 
 /**
  * Locate current video references and saved delivery provenance. A match is
@@ -102,7 +103,7 @@ export const deleteAssetFromProject = (
     return mapped.some((entity, index) => entity !== entities[index]) ? mapped : entities;
   };
   const storyboards = project.storyboards.map((board) => unbindStoryboardAsset(board, assetId, updatedAt));
-  return {
+  return detachDeletedStoryReferenceAsset({
     ...project,
     assets: project.assets.filter((asset) => asset.id !== assetId),
     characters: unbindEntities(project.characters),
@@ -112,5 +113,5 @@ export const deleteAssetFromProject = (
       ? storyboards
       : project.storyboards,
     updatedAt,
-  };
+  }, assetId, updatedAt);
 };

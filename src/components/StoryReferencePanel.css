@@ -1,0 +1,69 @@
+.story-input-mode-switch { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.story-reference-panel { --story-reference-font-size: clamp(9px, calc((.4vw + .45vh + 1.5px) * var(--ui-font-scale, 1)), 11px); min-width: 0; border: 1px solid #e6d9e2; border-radius: 8px; background: #fffafd; padding: 4px; display: grid; gap: 3px; font-size: var(--story-reference-font-size); line-height: 1.2; }
+.story-reference-toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px; }
+.story-reference-toolbar-buttons { display: flex; flex-wrap: wrap; gap: 3px; min-width: 0; }
+.story-reference-panel .story-reference-toolbar-buttons .btn.small,
+.story-reference-panel .story-reference-card-actions .btn.small { max-width: 100%; padding: 1px 4px; gap: 3px; font-size: var(--story-reference-font-size); line-height: 1.2; }
+.story-reference-panel .btn svg { width: 1.25em; height: 1.25em; flex: 0 0 auto; }
+.story-reference-panel .field-hint { font-size: max(8px, .9em); line-height: 1.25; }
+.story-reference-toolbar-buttons .btn { overflow-wrap: anywhere; }
+.story-reference-file-input { display: none; }
+.story-reference-cards { display: flex; gap: 5px; overflow-x: auto; overflow-y: hidden; padding-bottom: 2px; min-width: 0; scroll-snap-type: x proximity; }
+.story-reference-cards::-webkit-scrollbar, .story-reference-subject-chips::-webkit-scrollbar { height: 5px; }
+.story-reference-cards::-webkit-scrollbar-thumb, .story-reference-subject-chips::-webkit-scrollbar-thumb { border-radius: 4px; background: #ccb9c6; }
+/* Keep the preview beside the metadata and actions, leaving the source text more room. */
+.story-reference-card { flex: 0 0 330px; min-width: 0; max-width: 100%; padding: 4px; border: 1px solid var(--line, #e4e2e8); border-radius: 7px; background: #fff; scroll-snap-align: start; display: grid; grid-template-columns: 42px minmax(0, 1fr); grid-template-rows: auto auto auto; align-content: start; gap: 3px 6px; }
+.story-reference-card.is-disabled { background: #f7f6f8; }
+.story-reference-card-top { display: contents; }
+.story-reference-thumbnail { grid-column: 1; grid-row: 1 / span 2; width: 42px; height: clamp(36px, 5vh, 48px); align-self: center; background: #f1edf3; padding: 0; border: 1px solid var(--line, #e4e2e8); border-radius: 5px; overflow: hidden; cursor: zoom-in; font-size: inherit; color: var(--muted); }
+.story-reference-thumbnail img { width: 100%; height: 100%; object-fit: contain; }
+.story-reference-card-meta { grid-column: 2; grid-row: 1; min-width: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 2px 6px; font-size: inherit; }
+.story-reference-card-meta > strong { font-size: 1.1em; }
+.story-reference-file-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+.story-reference-status { color: var(--teal, #308a7c); font-size: inherit; }
+.story-reference-status.is-error, .story-reference-card-error { color: var(--danger, #b24661); }
+.story-reference-enabled { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+.story-reference-panel .story-reference-enabled input { width: 12px; height: 12px; padding: 0; margin: 0; }
+.story-reference-card-actions { grid-column: 2; grid-row: 2; display: flex; flex-wrap: wrap; gap: 3px; }
+.story-reference-card-error { grid-column: 1 / -1; grid-row: 4; font-size: max(8px, .9em); overflow-wrap: anywhere; max-height: 26px; overflow: auto; }
+.story-reference-subject-chips { grid-column: 1 / -1; grid-row: 3; display: flex; gap: 3px; overflow-x: auto; overflow-y: hidden; min-width: 0; padding-bottom: 1px; }
+.story-reference-subject-chip { flex: 0 0 auto; border: 1px solid #e9dae4; border-radius: 4px; padding: 1px 4px; background: #fff7fb; color: #8c4067; display: inline-flex; align-items: center; gap: 2px; font-size: max(8px, .9em); line-height: 1.2; text-align: left; white-space: nowrap; cursor: pointer; }
+.story-reference-subject-chip svg { width: 1.1em; height: 1.1em; flex: 0 0 auto; }
+.story-reference-subject-chip:hover { background: #f8e6f0; }
+.story-reference-empty { color: var(--muted); display: flex; align-items: center; gap: 6px; padding: 3px 2px; font-size: inherit; line-height: 1.3; }
+.story-reference-empty svg { flex: 0 0 auto; color: var(--pink); }
+.story-reference-bottom-hint { line-height: 1.25; }
+.story-reference-backdrop { z-index: 11000; }
+.modal.story-reference-modal { width: min(840px, 100%); height: min(820px, 88vh); display: flex; flex-direction: column; overflow: hidden; padding: 16px; gap: 10px; }
+.story-reference-modal .modal-head { margin-bottom: 0; gap: 8px; flex: 0 0 auto; }
+.story-reference-modal .modal-head h3 { min-width: 0; overflow-wrap: anywhere; }
+.story-reference-modal .modal-head .btn { flex: 0 0 auto; }
+.story-reference-dialog-tabs { display: flex; flex-wrap: wrap; gap: 5px; flex: 0 0 auto; }
+.story-reference-dialog-body { flex: 1 1 auto; min-height: 0; overflow: auto; padding-right: 4px; }
+.story-reference-image-body { display: flex; overflow: hidden; padding: 0; }
+.story-reference-image-body > .asset-image-viewer { width: 100%; min-height: 0; }
+.story-reference-dialog-body details { margin-bottom: 9px; border: 1px solid var(--line, #e4e2e8); border-radius: 6px; padding: 9px; }
+.story-reference-dialog-body summary { cursor: pointer; color: var(--muted); font-weight: 600; font-size: calc(11px * var(--ui-font-scale, 1)); }
+.story-reference-analysis { display: grid; gap: 9px; padding-top: 9px; }
+.story-reference-analysis h4 { font-size: calc(11px * var(--ui-font-scale, 1)); color: var(--teal); margin: 0 0 4px; }
+.story-reference-prose { font-size: calc(11px * var(--ui-font-scale, 1)); line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.story-reference-subject-detail { padding: 8px; margin-top: 5px; border-radius: 5px; background: #f8f8fa; font-size: calc(11px * var(--ui-font-scale, 1)); }
+.story-reference-subject-detail p { white-space: pre-wrap; line-height: 1.65; margin: 5px 0; }
+.story-reference-subject-detail dl { margin: 5px 0 0; }
+.story-reference-subject-detail dl > div { display: grid; grid-template-columns: minmax(70px, .2fr) minmax(0, 1fr); gap: 8px; margin-top: 4px; }
+.story-reference-subject-detail dt { color: var(--muted); overflow-wrap: anywhere; }
+.story-reference-subject-detail dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.story-reference-edit-field { display: grid; gap: 5px; margin-top: 11px; font-size: calc(11px * var(--ui-font-scale, 1)); }
+.story-reference-edit-field > span, .story-reference-binding label > span { color: var(--muted); }
+.story-reference-edit-field textarea { min-height: 100px; resize: vertical; }
+.story-reference-binding { padding: 10px; border: 1px solid var(--line, #e4e2e8); border-radius: 6px; margin-top: 8px; display: grid; gap: 6px; font-size: calc(11px * var(--ui-font-scale, 1)); }
+.story-reference-binding p { margin: 0; }
+.story-reference-binding label { display: grid; grid-template-columns: 70px minmax(0, 1fr); gap: 8px; align-items: center; }
+.story-reference-dialog-footer { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 6px; flex: 0 0 auto; border-top: 1px solid var(--line, #e4e2e8); padding-top: 9px; }
+.story-reference-warning { color: #9b6425; background: #fff7e8; padding: 7px; margin: 0; font-size: calc(11px * var(--ui-font-scale, 1)); }
+.modal.story-reference-narrator-modal { width: min(560px, 100%); height: auto; overflow: auto; }
+.story-reference-narrator-modal > p { margin: 0; }
+.story-input-card:has(> .story-reference-panel) { display: flex; flex-direction: column; overflow-y: auto; }
+.story-input-card:has(> .story-reference-panel) > :not(.story-source-field) { flex: 0 0 auto; }
+.story-input-card:has(> .story-reference-panel) > .story-source-field { flex: 1 0 120px; }
+@media (max-width: 700px) { .story-reference-backdrop { padding: 10px; } .modal.story-reference-modal { padding: 11px; max-height: calc(100dvh - 20px); height: calc(100dvh - 20px); } .modal.story-reference-narrator-modal { height: auto; } .story-reference-binding label { grid-template-columns: 1fr; gap: 4px; } }

@@ -354,7 +354,7 @@ export const buildDirectStoryboardImageRequests = (
       // Retained as provenance only. The direct path submits directPrompt.
       conversionSource: visual.body,
       directPrompt, directPromptSource: reusable ? 'current-image-prompt' : visual.source,
-      width: output.width, height: output.height, sizeOverride: output.sizeOverride,
+      width: output.width, height: output.height, sizeOverride: output.sizeOverride, resolutionPlan: output.resolutionPlan,
     };
   });
 };

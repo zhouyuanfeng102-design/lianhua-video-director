@@ -50,6 +50,9 @@ export default defineConfig({
           // Keep them in a dependency-free chunk: the domain fallback imports
           // those catalogs and would create a startup TDZ through their rules.
           if (normalized.endsWith('/src/storyCausalityRules.ts')) return 'story-causality';
+          // Size modules read this technical limit during initialization.
+          // It has only type imports, so keep it outside domain's runtime cycle.
+          if (normalized.endsWith('/src/imageResolution.ts')) return 'image-resolution';
           // Dossier editing is independent of the large shared project domain.
           if (['characterDossierApplication.ts', 'components/CharacterDossierApplyDialog.tsx', 'components/CharacterDossierApplyDialog.css']
             .some((file) => normalized.endsWith(`/src/${file}`))) return 'character-dossier';
@@ -73,6 +76,11 @@ export default defineConfig({
             'storyboardDelivery.ts',
             'h3OutputRecovery.ts',
             'videoH3ReferenceBinding.ts',
+            // H3 bindings read the pattern during module initialization; keep
+            // its dependency-free parser here rather than in the domain cycle.
+            'videoPictureReferences.ts',
+            'videoPromptInstructionLeak.ts',
+            'runningHubPromptPictures.ts',
             'rhtvBridge.ts',
             'videoPrivateScope.ts',
             'videoReferenceUsage.ts',
@@ -97,6 +105,7 @@ export default defineConfig({
             'semanticSequencePlan.ts',
             'storyPacingEstimate.ts',
             'sourceContentHash.ts',
+            'imageTaskPreparation.ts',
             'officialH3SourceIdentity.ts',
             'officialH3Context.ts',
             'storyboardImageH3Source.ts',

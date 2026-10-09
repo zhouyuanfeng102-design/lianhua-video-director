@@ -1,4 +1,6 @@
 import { getSafeErrorDiagnostics, type ErrorDiagnosticOptions, type SafeErrorDiagnostics } from './errorDiagnostics';
+import { runningHubWholePromptPictureNumbers } from './runningHubPromptPictures';
+import { videoReferenceSlotIndex } from './videoReferenceSlots';
 import type { VideoGenerationTask } from './types';
 
 const dataProperty = (value: unknown, key: string): unknown => {
@@ -122,6 +124,44 @@ const mergeDiagnostics = (values: readonly (SafeErrorDiagnostics | undefined)[])
   return { message: messages.join('\n原因：') || emptyMessage, ...fields };
 };
 
+/** Historical evidence only. The existing provider extractor supplies its
+ * whitelisted, redacted message; neither remote inputs nor tracebacks are read.
+ * A completed local upload plus a verified prefix mapping proves our connected
+ * set, without claiming which later cloud node changed its prompt. */
+const runningHubHistoricalPictureDiagnostic = (
+  task: VideoGenerationTask, provider: SafeErrorDiagnostics | undefined,
+): string | undefined => {
+  const job = task.videoJob; const snapshot = job?.snapshot; const api = snapshot?.connection.api;
+  if (task.status !== 'failed' || !task.remoteTaskId?.trim() || snapshot?.connection.backend !== 'api'
+    || api?.provider !== 'runninghub' || !provider || job?.preparation?.phase !== 'acknowledged') return;
+  const counts = api.runningHubMappedFields?.filter((field) => field.kind === 'image-count') || [];
+  if (counts.length !== 1 || counts[0].imageCountMode !== 'prefix'
+    || !['verified-app', 'explicit'].includes(counts[0].imageCountSource || '')) return;
+  const images = snapshot.images; const references = snapshot.draft.references;
+  const uploads = job.preparation.uploadedImages; const count = images.length;
+  if (!count || references.length !== count || uploads.length !== count
+    || uploads.some((value) => typeof value !== 'string' || !value.trim())) return;
+  const mappedSlots = (api.runningHubMappedFields || []).filter((field) => field.kind === 'image').map((field) => field.imageIndex);
+  if (new Set(mappedSlots).size !== mappedSlots.length) return;
+  if (images.some((image, index) => image.freezeState !== 'frozen'
+    || image.assetId !== references[index].assetId
+    || videoReferenceSlotIndex(image, index) !== index || videoReferenceSlotIndex(references[index], index) !== index
+    || !mappedSlots.includes(index))) return;
+  const local = runningHubWholePromptPictureNumbers(snapshot.draft.prompt);
+  const connected = new Set(Array.from({ length: count }, (_, index) => String(index + 1)));
+  if (local.some((number) => !connected.has(number))) return;
+  const message = provider.message;
+  if (!/节点类型：(?:MiniMaxH3AudioConditioningT8|MiniMaxH3NodeProviderT8)(?:；|\n|$)/iu.test(message)
+    || !/MiniMax H3 prompt media tag validation failed:/iu.test(message)) return;
+  const rejected = [...message.matchAll(/<Picture\s+(\d+)>\s+is not connected;\s+available picture count is\s+(\d+)\b/giu)];
+  if (!rejected.length || rejected.some((match) => Number(match[2]) !== count)) return;
+  const remote = [...new Set(rejected.map((match) => match[1].replace(/^0+(?=\d)/u, '')))];
+  if (remote.some((number) => connected.has(number) || local.includes(number))
+    || runningHubWholePromptPictureNumbers(message).some((number) => !remote.includes(number))) return;
+  const labels = (numbers: readonly string[]) => numbers.map((number) => `<Picture ${number}>`).join('、') || '无图片标签';
+  return `历史提交核对：本地已提交 ${count} 张图片，保存的正文仅引用 ${labels(local)}，均在已连接范围内；云端后续处理却报告未连接的 ${labels(remote)}（可用图片数 ${count}），这些编号未出现在本地保存正文中。请让工作流作者核对云端后续处理及最终 H3 输入；若公开应用不能绕过这一步，可改用直接接收最终 H3 正文的工作流。此记录保留，未重新提交任务。`;
+};
+
 /** A single generation-error block replaces the old duplicate grey/red lines;
  * distinct save/action failures keep their own labelled diagnostic block. */
 export const videoTaskDiagnosticEntries = (input: {
@@ -139,6 +179,7 @@ export const videoTaskDiagnosticEntries = (input: {
   const taskError = diagnostic(input.task.error);
   const failureMessage = diagnostic(input.failed ? input.message : undefined);
   const providerError = input.failed && !download ? videoProviderErrorDiagnostics(input.task.response, options) : undefined;
+  const historicalPictures = input.failed && !download ? runningHubHistoricalPictureDiagnostic(input.task, providerError) : undefined;
   const tailError = diagnostic(input.tailFailureMessage);
   const primaryCandidates = [
     taskError?.message === download?.message ? undefined : taskError,
@@ -157,8 +198,8 @@ export const videoTaskDiagnosticEntries = (input: {
     // provider's actual error. Never infer a reason from unrelated node data.
     const isPlaceholder = (message: string) => message === emptyMessage || /^(?:操作失败，暂时无法识别具体原因|视频接口报告任务失败|RunningHub 任务失败(?:（[^）]*）)?|生成失败)[。.]?$/u.test(message);
     const primary = primaryCandidates.find((value) => !isPlaceholder(value.message.split('\n原因：')[0])) || primaryCandidates[0];
-    entries.push({ key: 'generation', label: '失败原因', error: failure,
-      summaryError: { ...failure, message: primary?.message.split('\n原因：')[0] || failure.message } });
+    entries.push({ key: 'generation', label: '失败原因', error: historicalPictures ? { ...failure, message: `${failure.message}\n${historicalPictures}` } : failure,
+      summaryError: { ...failure, message: `${primary?.message.split('\n原因：')[0] || failure.message}${historicalPictures ? `\n${historicalPictures}` : ''}` } });
   }
   else if (input.failed && !input.suppressGenerationFailure && !download) entries.push({
     key: 'generation', label: '失败原因', error: getSafeErrorDiagnostics('此任务没有保存可读的错误详情，无法从现有记录确定原因。'),

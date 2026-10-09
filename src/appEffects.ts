@@ -73,6 +73,7 @@ import {
 import { hasNonHumanAgeTemplateConflict } from './imageGeneration';
 import { canonicalCharacterVariantName, normalizeCharacterVariantRecord } from './characterVariants';
 import { isSemanticSequencePlan, semanticSegmentStoryContent } from './semanticSequencePlan';
+import { assertVideoPromptHasNoInstructionLeak } from './videoPromptInstructionLeak';
 
 export type SourceIntegrityAction = 'keep-first' | 'continue' | 'cancel';
 
@@ -158,7 +159,10 @@ export const mergeAuthoritativeStorySceneBlocks = (
 export const buildStoryAnalysisRequestIdentity = (
   project: Pick<Project, 'id'>,
   storyInput: string,
-): string => JSON.stringify([project.id, sourceContentHash(storyInput)]);
+  referenceFingerprint?: string,
+): string => JSON.stringify([project.id, sourceContentHash(storyInput),
+  ...(referenceFingerprint ? [referenceFingerprint] : []),
+]);
 
 /** The merged story action stays available offline and upgrades itself to the
  * AI analysis/enrichment pipeline only when the text endpoint is usable. */
@@ -289,6 +293,22 @@ const unwrapConversionResponse = (value: unknown): string => {
   const text = String(value || '').replace(/^\uFEFF/u, '').trim();
   const fenced = text.match(/^(`{3,}|~{3,})[^\r\n]*\r?\n([\s\S]*?)\r?\n\1[ \t]*$/u);
   return fenced ? fenced[2].trim() : text;
+};
+
+/** Check only delivered body text, never converter rules or source data.
+ * Decode JSON body fields before literal protection: envelope quotes are
+ * serialization, while quotes inside those bodies still belong to dialogue. */
+const assertConversionResponseHasNoInstructionLeak = (value: string): void => {
+  let envelope: unknown;
+  try { envelope = JSON.parse(value); } catch { /* Plain six-field text keeps its existing protocol. */ }
+  if (envelope && typeof envelope === 'object' && !Array.isArray(envelope)) {
+    const fields = envelope as Record<string, unknown>;
+    for (const key of ['canonicalPrompt', 'finalPrompt', 'h3Prompt', 'seedancePrompt', 'englishPrompt']) {
+      if (typeof fields[key] === 'string') assertVideoPromptHasNoInstructionLeak(fields[key], '视频转换返回正文');
+    }
+    return;
+  }
+  assertVideoPromptHasNoInstructionLeak(value, '视频转换返回正文');
 };
 
 const standaloneConversionRefusalReason = (value: string): string => {
@@ -558,6 +578,7 @@ export const convertStoryboardDraftToFinal = async (
   assertNotAborted();
   let convertedPrompt = unwrapConversionResponse(rawResult);
   if (!convertedPrompt) throw new Error('转化器没有返回最终视频提示词。');
+  assertConversionResponseHasNoInstructionLeak(convertedPrompt);
   const rejected = convertedPrompt.match(/^CONVERSION_REJECTED\s*[:：]\s*(.+)$/iu);
   if (rejected && !input.acceptAiAuthoredContent) throw new Error(`转化器拒绝：${rejected[1].trim() || '无法满足当前时长与证据约束'}`);
   const refusalReason = standaloneConversionRefusalReason(convertedPrompt);
@@ -642,6 +663,7 @@ export const convertStoryboardDraftToFinal = async (
     if (!repairedPrompt) {
       throw new Error(`转化器结构自动修复时没有返回内容；首次失败：${initialStructureFailure}`);
     }
+    assertConversionResponseHasNoInstructionLeak(repairedPrompt);
     const repairRejected = repairedPrompt.match(/^CONVERSION_REJECTED\s*[:：]\s*(.+)$/iu);
     if (repairRejected) {
       throw new Error(`转化器结构自动修复时拒绝：${repairRejected[1].trim() || initialStructureFailure}`);

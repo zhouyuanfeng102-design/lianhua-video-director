@@ -650,6 +650,82 @@ export interface ImageVariantGenerationSpec {
   };
 }
 
+/** Frozen request metadata for the converter, separate from visible image text.
+ * Optional fields keep legacy callers and stored task dimensions usable. */
+export interface ImagePromptOutputSpecification {
+  width: number;
+  height: number;
+  aspectRatio?: string;
+  resolution?: string;
+}
+
+const imagePromptOutputFrame = (
+  specification: ImagePromptOutputSpecification | undefined,
+): { width: number; height: number; aspect: string; orientation: string } | undefined => {
+  if (!specification || !Number.isSafeInteger(specification.width) || !Number.isSafeInteger(specification.height)
+    || specification.width <= 0 || specification.height <= 0) return undefined;
+  const { width, height } = specification;
+  const orientation = width === height ? '方形' : width > height ? '横向' : '竖向';
+  const declaredAspect = (specification.aspectRatio || '').trim().replace(/\s+/gu, '');
+  const parsed = /^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/u.exec(declaredAspect);
+  const declaredRatio = parsed ? Number(parsed[1]) / Number(parsed[2]) : 0;
+  // Native K tables round edges to model alignment. Keep a matching logical
+  // aspect, but do not let stale requested metadata describe a new canvas.
+  const declaredMatches = declaredRatio > 0 && Number.isFinite(declaredRatio)
+    && Math.abs(width / height / declaredRatio - 1) <= 0.02;
+  let divisor = width;
+  let remainder = height;
+  while (remainder) [divisor, remainder] = [remainder, divisor % remainder];
+  const aspect = declaredMatches ? declaredAspect : `${width / divisor}:${height / divisor}`;
+  return { width, height, aspect, orientation };
+};
+
+/** Adapt only generated layout instructions. Saved presets and user text keep
+ * their own wording and receive the final output contract at request time. */
+const imageVariantLayoutForOutput = (
+  layout: string,
+  specification: ImagePromptOutputSpecification | undefined,
+): string => {
+  const frame = imagePromptOutputFrame(specification);
+  if (!frame) return layout;
+  return layout.replace(/横向\s*3\s*:\s*2|2\s*:\s*3\s*竖向|1\s*:\s*1\s*方形/gu,
+    `${frame.aspect} ${frame.orientation}`);
+};
+
+export const imagePromptOutputSpecificationRule = (
+  specification: ImagePromptOutputSpecification | undefined,
+  variant?: ImageVariant,
+): string => {
+  const frame = imagePromptOutputFrame(specification);
+  if (!specification || !frame) return '';
+  const { width, height, aspect, orientation } = frame;
+  const resolution = /^(?:1K|2K|4K)$/iu.test(specification.resolution || '')
+    ? specification.resolution!.toUpperCase() : '当前请求';
+  const framing = variant === 'private-close-up'
+    ? '本次仍只绘制一个指定部位的连续近景或微距画面，保留裁切与部位占画面比例；指定部位只出现一次，邻近结构只作方位锚点，不拉远补全身或另开窗口。'
+    : variant === 'private-full-body' || variant === 'full-body'
+      ? '本次仍是一个完整主体的单幅全身图，头到脚或对应物种端点完整入画，身体比例与主体相对画面高度保持自然。'
+      : variant === 'five-view' || variant === 'private-five-view'
+        ? '本次仍是同一人物的五区域参考板：左侧上下两头肩特写，右侧三个指定角度全身；固定区域、顺序与各区取景保持。'
+        : variant === 'turnaround' || variant === 'private-turnaround'
+          ? '本次仍是同一人物的历史四视图参考板，四个全身视角及其顺序保持。'
+          : variant === 'private-four-in-one'
+            ? '本次仍是四个固定槽位：左侧约70%为一个全身主画面，右侧约30%为三个辅助部位窗；每个槽位只绘制一次指定内容。'
+            : variant === 'grid'
+              ? '本次仍是一张当前实际画幅的3×3九宫格母版，九格数量、阅读顺序与逐格时刻保持；九格在当前画布内等大分配，不要求每个画格为方形。'
+              : '本次人物或物件数量、选定时刻、机位、景别、裁切和主体相对画面占比保持当前目标。';
+  return [
+    '<current_image_output_specification>',
+    `当前生图规格：${resolution}分辨率档位；逻辑画幅${aspect}，${orientation}画幅；实际请求${width}×${height}像素。`,
+    '本块给出的实际请求画幅与宽高是本次最终画布依据，优先于前文规则、预设、图片规格中默认或推荐的画布比例；前文比例与这里不一致时，最终画面采用这里的实际画幅。',
+    '这里的档位和宽高是本次请求元数据，不是画面内容、图中文字或质量标签；最终正文只落实当前实际画幅与可见构图，不输出档位、像素数字、API参数或此规格说明。',
+    framing,
+    '画幅调整只在当前画布内重新分配各区域尺寸、等比适配主体及连续背景留白；完整保留当前槽位数量、左右或上下关系、视角顺序和各槽位指定的取景，不删槽位、不把近景补成全身、不拉伸身体，也不增加区域填充画布。',
+    '提高分辨率不会增加人物、物件、区域、角度或身体部位；留白延续同一背景，不以重复主体填充画布，不改变当前身份、风格、服装或内容状态。',
+    '</current_image_output_specification>',
+  ].join('\n');
+};
+
 const SQUARE_CANVAS = { width: 1024, height: 1024 } as const;
 const PRIVATE_FULL_BODY_CANVAS = { width: 1024, height: 1536 } as const;
 const FOUR_VIEW_CANVAS = { width: 1536, height: 1024 } as const;
@@ -691,7 +767,7 @@ export const FULL_BODY_LAYOUT_RULE = [
   '当前规格是单幅全身人物图，不是头像、半身、膝上、中景或下半身裁切',
   '画面中只有一个主体，主体从头顶（或最高点）到双脚/足底（或最低附肢端点）完整入画，头顶与足底保留窄边',
   '双臂、双手、双腿、双脚和鞋靴（或该物种全部附肢）都完整可见，不被画框、前景或其他物体截断',
-  '主体居中并成为主要视觉焦点；横向3:2画布以完整身体高度为优先，不为填满左右宽度而放大或横向拉伸身体，左右保留连续环境和自然留白',
+  '主体居中并成为主要视觉焦点；画幅服从当前实际生图规格，以完整身体高度为优先，不为填满横向、竖向或方形画布而放大或拉伸身体，周围保留连续环境和自然留白',
   '使用自然静态全身站姿、正常透视和自然相机距离，禁止近景放大或只展示腰部以下',
   BODY_PROPORTION_STABILITY_RULE,
 ].join('；') + '。';
@@ -884,16 +960,22 @@ export const isPrivateImageVariant = (variant: ImageVariant | undefined): boolea
 
 /** Legacy turnaround remains a four-view snapshot; never reinterpret an old
  * saved task as the new five-region layout when it is retried. */
-export const ordinaryImageVariantConverterRule = (variant: ImageVariant): string => {
-  if (variant === 'landscape') return IMAGE_PROMPT_LANDSCAPE_SCOPE_CONTRACT;
+export const ordinaryImageVariantConverterRule = (
+  variant: ImageVariant,
+  outputSpecification?: ImagePromptOutputSpecification,
+): string => {
+  const withOutputSpecification = (rule: string): string => [
+    imageVariantLayoutForOutput(rule, outputSpecification), imagePromptOutputSpecificationRule(outputSpecification, variant),
+  ].filter(Boolean).join('\n');
+  if (variant === 'landscape') return withOutputSpecification(IMAGE_PROMPT_LANDSCAPE_SCOPE_CONTRACT);
   if (variant === 'full-body') {
-    return `当前目标是普通人物单幅全身参考图。${FULL_BODY_LAYOUT_RULE}优先服从当前全身画面规格，再组织角色身份、物种结构、服装、道具和风格；不要把全身目标改成半身、膝上、下半身或局部特写。`;
+    return withOutputSpecification(`当前目标是普通人物单幅全身参考图。${FULL_BODY_LAYOUT_RULE}优先服从当前全身画面规格，再组织角色身份、物种结构、服装、道具和风格；不要把全身目标改成半身、膝上、下半身或局部特写。`);
   }
   if (variant === 'five-view') {
-    return `当前目标是普通人物五视图参考板。${FIVE_VIEW_LAYOUT_RULE}仅使用当前普通人物外观与衣着资料，私密档案不属于本次普通生图内容。`;
+    return withOutputSpecification(`当前目标是普通人物五视图参考板。${FIVE_VIEW_LAYOUT_RULE}仅使用当前普通人物外观与衣着资料，私密档案不属于本次普通生图内容。`);
   }
   if (variant === 'turnaround') {
-    return `当前目标是历史四视图参考板，保留其原有版式。${IMAGE_VARIANT_SPECS.turnaround.direction}`;
+    return withOutputSpecification(`当前目标是历史四视图参考板，保留其原有版式。${IMAGE_VARIANT_SPECS.turnaround.direction}`);
   }
   return '';
 };
@@ -962,22 +1044,26 @@ const PRIVATE_PART_LABELS: Readonly<Record<NsfwPrivatePart, string>> = {
 export const privateImageVariantConverterRule = (
   variant: ImageVariant,
   selectedPart?: NsfwPrivatePart,
+  outputSpecification?: ImagePromptOutputSpecification,
 ): string => {
+  const withOutputSpecification = (rule: string): string => [
+    imageVariantLayoutForOutput(rule, outputSpecification), imagePromptOutputSpecificationRule(outputSpecification, variant),
+  ].filter(Boolean).join('\n');
   if (variant === 'private-full-body') {
-    return `当前目标是私密全身单幅参考图：最终提示词采用 2:3 竖向的一幅连续单画面，唯一完整主体沿画面中央竖轴站立，从头到脚完整入画，头顶和足底保留窄边，主体左右只延续同一片干净背景；视觉焦点是整体裸体比例、轮廓、肤色、纹理与长期标记。\n${BODY_PROPORTION_STABILITY_RULE}`;
+    return withOutputSpecification(`当前目标是私密全身单幅参考图：最终提示词采用 2:3 竖向的一幅连续单画面，唯一完整主体沿画面中央竖轴站立，从头到脚完整入画，头顶和足底保留窄边，主体左右只延续同一片干净背景；视觉焦点是整体裸体比例、轮廓、肤色、纹理与长期标记。\n${BODY_PROPORTION_STABILITY_RULE}`);
   }
   if (variant === 'private-close-up') {
     const label = selectedPart ? PRIVATE_PART_LABELS[selectedPart] : '当前指定部位';
-    return `当前目标是${label}单部位近景：最终提示词采用一幅连续近景或微距画面，${label}占据画面主体，紧邻皮肤提供解剖方位；人物一致性由当前部位的肤色、肤质、体表纹理与比例锚定，画面只建立这一处部位资料。`;
+    return withOutputSpecification(`当前目标是${label}单部位近景：最终提示词采用一幅连续近景或微距画面，${label}占据画面主体，紧邻皮肤提供解剖方位；人物一致性由当前部位的肤色、肤质、体表纹理与比例锚定，画面只建立这一处部位资料。`);
   }
   if (variant === 'private-five-view') {
-    return `当前目标是私密五视图参考板：横向 3:2 画布沿用当前人物的私密资料模式和已确认身份，仅改变参考板布局。${FIVE_VIEW_LAYOUT_RULE}${PRIVATE_FIVE_VIEW_LAYOUT_RULE}当前全身资料用于右侧三个完整全身视图；左侧两格呈现同一人物的头肩近景，头像区保持头肩取景，全身区保持完整全身取景。`;
+    return withOutputSpecification(`当前目标是私密五视图参考板：横向 3:2 画布沿用当前人物的私密资料模式和已确认身份，仅改变参考板布局。${FIVE_VIEW_LAYOUT_RULE}${PRIVATE_FIVE_VIEW_LAYOUT_RULE}当前全身资料用于右侧三个完整全身视图；左侧两格呈现同一人物的头肩近景，头像区保持头肩取景，全身区保持完整全身取景。`);
   }
   if (variant === 'private-turnaround') {
-    return `当前目标是私密四视图参考板：横向 3:2 画布，恰好四个同身份、同裸体身体锚点、同尺寸、同基线的完整全身视图；依次表现正面、严格 90 度左侧面、背面、45 度前三分之四视图；正交或低透视，中性灰无缝背景。\n${BODY_PROPORTION_STABILITY_RULE}`;
+    return withOutputSpecification(`当前目标是私密四视图参考板：横向 3:2 画布，恰好四个同身份、同裸体身体锚点、同尺寸、同基线的完整全身视图；依次表现正面、严格 90 度左侧面、背面、45 度前三分之四视图；正交或低透视，中性灰无缝背景。\n${BODY_PROPORTION_STABILITY_RULE}`);
   }
   if (variant === 'private-four-in-one') {
-    return `当前目标是严格私密四合一参考板。${PRIVATE_FOUR_IN_ONE_LAYOUT_RULE}\n${BODY_PROPORTION_STABILITY_RULE}`;
+    return withOutputSpecification(`当前目标是严格私密四合一参考板。${PRIVATE_FOUR_IN_ONE_LAYOUT_RULE}\n${BODY_PROPORTION_STABILITY_RULE}`);
   }
   return '';
 };
@@ -985,8 +1071,9 @@ export const privateImageVariantConverterRule = (
 export const privateImageVariantRepairRule = (
   variant: ImageVariant,
   selectedPart?: NsfwPrivatePart,
+  outputSpecification?: ImagePromptOutputSpecification,
 ): string => {
-  const targetRule = privateImageVariantConverterRule(variant, selectedPart);
+  const targetRule = privateImageVariantConverterRule(variant, selectedPart, outputSpecification);
   return targetRule
     ? `这是自动返修请求。上一轮没有落实当前唯一画面规格。请依据原始人物资料重新写一条完整正向提示词。${targetRule}`
     : '';

@@ -8,10 +8,15 @@ import {
   type StoryboardImageOutputSizePreference,
 } from '../src/storyboardImageOutputSize';
 import { createInitialState, defaultSettings, normalizeState, serializeStateForStorage } from '../src/storage';
+import type { ImageApiConfig } from '../src/types';
 
 let checks = 0;
 const preference = (mode: StoryboardImageOutputSizePreference['mode']): StoryboardImageOutputSizePreference => ({
   ...defaultStoryboardImageOutputSize(), mode,
+});
+const legacyDefault = { mode: 'default', width: 1024, height: 1024 } as const;
+const declaredApi = (backend: ImageApiConfig['backend']): ImageApiConfig => ({
+  enabled: false, backend, model: '', baseUrl: '', apiKey: '', imageSupportedResolutions: ['1K', '2K', '4K'],
 });
 
 for (const [aspect, width, height] of [
@@ -34,16 +39,16 @@ for (const [mode, edge] of [['1k', 1024], ['2k', 2048], ['4k', 4096]] as const) 
       ['16:9', edge, edge * 9 / 16], ['9:16', edge * 9 / 16, edge],
       ['4:3', edge, edge * 3 / 4], ['3:4', edge * 3 / 4, edge], ['1:1', edge, edge],
     ] as const) {
-      const result = resolveStoryboardImageOutputSize(preference(mode), aspect, backend);
+      const result = resolveStoryboardImageOutputSize(preference(mode), aspect, declaredApi(backend));
       assert.deepEqual([result.width, result.height, result.sizeOverride, result.issue], [width, height, true, '']);
-      assert.match(result.layoutNote, new RegExp(`按分镜 ${aspect}.*长边 ${edge}px`, 'u'));
+      assert.match(result.layoutNote, new RegExp(`按分镜 ${aspect}.*长边目标${edge}px`, 'u'));
       checks++;
     }
   }
 }
 
 for (const [backend, height, alignment] of [
-  ['openai', 683, '整数像素'], ['comfyui', 683, '整数像素'],
+  ['openai', 683, '整数像素'], ['comfyui', 688, '8像素步长'],
   ['sd_webui', 688, '8像素步长'], ['novelai', 704, '64像素步长'],
 ] as const) {
   const result = resolveStoryboardImageOutputSize(preference('1k'), '3:2', backend);
@@ -54,7 +59,7 @@ for (const [backend, height, alignment] of [
   checks += 2;
 }
 
-for (const [backend, height] of [['openai', 429], ['comfyui', 429], ['sd_webui', 432], ['novelai', 448]] as const) {
+for (const [backend, height] of [['openai', 429], ['comfyui', 432], ['sd_webui', 432], ['novelai', 448]] as const) {
   const result = resolveStoryboardImageOutputSize(preference('1k'), '2.39:1', backend);
   assert.deepEqual([result.width, result.height, result.issue], [1024, height, '']);
   assert.match(result.layoutNote, /短边向上对齐/u);
@@ -82,10 +87,27 @@ for (const backend of ['openai', 'comfyui'] as const) {
   assert.deepEqual([result.width, result.height, result.issue], [1025, 1024, ''], 'unknown providers and workflows receive the exact custom request');
   checks++;
 }
-assert.match(resolveStoryboardImageOutputSize({ ...custom, width: 1025, height: 1024 }, '16:9', 'novelai').issue, /64的倍数/u); checks++;
-assert.match(resolveStoryboardImageOutputSize({ ...custom, width: 1025, height: 1024 }, '16:9', 'sd_webui').issue, /8的倍数/u); checks++;
+assert.match(resolveStoryboardImageOutputSize({ ...custom, width: 1025, height: 1024 }, '16:9', 'novelai').warning || '', /64的倍数/u); checks++;
+assert.match(resolveStoryboardImageOutputSize({ ...custom, width: 1025, height: 1024 }, '16:9', 'sd_webui').warning || '', /8的倍数/u); checks++;
+for (const backend of ['novelai', 'sd_webui', 'comfyui'] as const) {
+  const result = resolveStoryboardImageOutputSize({ ...custom, width: 1025, height: 1024, resolutionVersion: 1 }, '16:9', backend);
+  assert.equal(result.issue, '', 'pixel alignment and capability declarations are advisory');
+  assert.ok(result.warning);
+  assert.deepEqual([result.width, result.height], [1025, 1024]); checks += 3;
+}
+const modernApi: ImageApiConfig = { enabled: true, backend: 'openai', model: 'gpt-image-2', imageProtocol: 'openai-images', baseUrl: '', apiKey: '' };
+for (const [ratio, width, height, actual] of [['3:2', 3840, 2160, '16:9'], ['1:1', 3840, 2160, '16:9'], ['2:3', 2160, 3840, '9:16']] as const) {
+  const result = resolveStoryboardImageOutputSize(preference('4k'), ratio, modernApi);
+  assert.deepEqual([result.width, result.height, result.issue], [width, height, '']);
+  assert.equal(result.resolutionPlan?.logicalAspectRatio, actual);
+  assert.match(result.warning || '', /已适配原画幅/u); checks += 3;
+}
+const customUhd = resolveStoryboardImageOutputSize({ mode: 'custom', width: 3840, height: 2160, resolutionVersion: 1 }, '3:2', modernApi);
+assert.deepEqual([customUhd.width, customUhd.height, customUhd.issue], [3840, 2160, '']);
+assert.equal(customUhd.resolutionPlan?.logicalAspectRatio, '16:9');
+assert.match(customUhd.warning || '', /推荐比例3:2/u); checks += 3;
 
-for (const dimension of [0, -1, 63, 4097, 8192, 1024.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
+for (const dimension of [0, -1, 63, 16385, 32768, 1024.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) {
   for (const key of ['width', 'height'] as const) {
     const result = resolveStoryboardImageOutputSize({ ...custom, [key]: dimension }, '16:9', 'openai');
     assert.ok(result.issue);
@@ -111,10 +133,10 @@ assert.deepEqual(normalized, custom);
 assert.notEqual(normalized, custom);
 assert.notEqual(defaultStoryboardImageOutputSize(), defaultStoryboardImageOutputSize());
 for (const missing of [undefined, null, [], false, '2k', {}]) {
-  assert.deepEqual(normalizeStoryboardImageOutputSize(missing), defaultStoryboardImageOutputSize());
+  assert.deepEqual(normalizeStoryboardImageOutputSize(missing), legacyDefault);
   checks++;
 }
-for (const invalid of [0, 8192, 10.5, -12]) {
+for (const invalid of [0, 32768, 10.5, -12]) {
   const result = normalizeStoryboardImageOutputSize({ ...custom, width: invalid });
   assert.equal(result.width, invalid, 'saved invalid custom pixels stay invalid instead of silently degrading');
   assert.ok(resolveStoryboardImageOutputSize(result, '16:9', 'openai').issue);
@@ -148,7 +170,7 @@ assert.deepEqual(restored.settings.storyboardImageOutputSize, state.settings.sto
 assert.deepEqual(restored.settings.imageOutputSizes, ordinaryBefore);
 delete state.settings.storyboardImageOutputSize;
 restored = normalizeState(JSON.parse(serializeStateForStorage(state).serialized));
-assert.deepEqual(restored.settings.storyboardImageOutputSize, defaultStoryboardImageOutputSize(), 'old projects retain the previous canvas default');
+assert.deepEqual(restored.settings.storyboardImageOutputSize, legacyDefault, 'old projects retain the previous canvas default');
 assert.deepEqual(restored.settings.imageOutputSizes, ordinaryBefore);
 checks += 6;
 

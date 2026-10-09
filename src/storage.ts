@@ -1,3 +1,4 @@
+import { normalizeStoryReferenceContext, normalizeStoryReferenceAssetSubjects, recoverInterruptedStoryReferenceRecognition } from './storyReferences';
 ﻿import type {
   AppSettings,
   AppState,
@@ -23,10 +24,13 @@
 import { repairSequencePlanResults } from './appEffects';
 import { normalizeCharacterDossier } from './characterDossierPolicy';
 import { normalizeComfyUIImageConfig } from './comfyui';
-import { normalizeImageOutputSizes } from './imageOutputSize';
+import { defaultImageOutputSize, normalizeImageOutputSizes } from './imageOutputSize';
+import { IMAGE_RESOLUTION_TECHNICAL_MAX_SIDE, normalizeImageResolutionPlan } from './imageResolution';
+import type { ImageResolutionPlan } from './imageResolution';
 import { normalizeReferenceImageDataUrl } from './imageReferenceData';
 import { defaultStoryboardImageOutputSize, normalizeStoryboardImageOutputSize } from './storyboardImageOutputSize';
 import { normalizeImageApiSnapshot } from './imageApiSelection';
+import { imagePreparationStageLabel, normalizeImageTaskPreparationStage } from './imageTaskPreparation';
 import { normalizeImageAssetRegenerationSnapshot } from './imageAssetRegenerationSnapshot';
 import { normalizeImageReferenceAssetSnapshots, normalizeStoryboardImageToImageSettings } from './imageGeneration';
 import { defaultComfyVideoConfig } from './videoGenerationTypes';
@@ -107,7 +111,7 @@ export const STORAGE_KEY = 'lianhua_video_director_state_v22';
  * explicit marker lets future migrations distinguish old `.lhvd` exports from
  * current state without changing nested user data.
  */
-export const CURRENT_SCHEMA_VERSION = 23;
+export const CURRENT_SCHEMA_VERSION = 24;
 export const STORAGE_SCHEMA_VERSION = CURRENT_SCHEMA_VERSION;
 /** Must match electron/main.cjs. This bounds the whole library, not one image. */
 // Desktop persistence stores projects and image bytes separately. A library's
@@ -946,6 +950,7 @@ export const defaultSettings: AppSettings = {
   imagePromptRuleSetIdByBackend: {},
   privateImagePromptRuleSetIdByBackend: {},
   imagePromptPresetIdByAssetKind: {},
+  imageOutputSizes: { ordinary: defaultImageOutputSize(), private: defaultImageOutputSize() },
   storyboardImageOutputSize: defaultStoryboardImageOutputSize(),
   defaultRuleSetId: 'timeline_director_cn',
   defaultStoryExpansionPresetId: DEFAULT_STORY_EXPANSION_PRESET_ID,
@@ -993,6 +998,7 @@ export const createInitialState = (): AppState => {
       imagePromptRuleSetIdByBackend: { ...defaultSettings.imagePromptRuleSetIdByBackend },
       privateImagePromptRuleSetIdByBackend: { ...defaultSettings.privateImagePromptRuleSetIdByBackend },
       imagePromptPresetIdByAssetKind: { ...defaultSettings.imagePromptPresetIdByAssetKind },
+      imageOutputSizes: { ordinary: defaultImageOutputSize(), private: defaultImageOutputSize() },
       storyboardImageOutputSize: defaultStoryboardImageOutputSize(),
     },
     imagePromptRules: migrateImagePromptRulesState(undefined),
@@ -1604,6 +1610,27 @@ const normalizedImageTaskNumber = (value: unknown, fallback: number): number => 
   typeof value === 'number' && Number.isFinite(value) ? value : fallback
 );
 
+/** Retain an unavailable plan for damaged explicit metadata. Dropping it would
+ * make a new task look like a legacy task and bypass native request checks. */
+const persistedImageResolutionPlan = (value: unknown): ImageResolutionPlan | undefined => {
+  if (value === undefined) return undefined;
+  return normalizeImageResolutionPlan(value) || {
+    version: 1, tier: 'legacy', logicalAspectRatio: '', expected: { width: 0, height: 0 },
+    encoding: { kind: 'width-height', width: 0, height: 0 }, profile: 'auto', verified: false,
+  };
+};
+
+const normalizeImageRequestSize = (value: unknown): ReferenceAsset['imageRequestSize'] => {
+  if (!isRecord(value) || ![value.width, value.height].every((dimension) =>
+    typeof dimension === 'number' && Number.isSafeInteger(dimension) && dimension >= 64 && dimension <= IMAGE_RESOLUTION_TECHNICAL_MAX_SIDE)) return undefined;
+  const resolutionPlan = persistedImageResolutionPlan(value.resolutionPlan);
+  return {
+    width: value.width as number, height: value.height as number,
+    ...(typeof value.sizeOverride === 'boolean' ? { sizeOverride: value.sizeOverride } : {}),
+    ...(resolutionPlan ? { resolutionPlan } : {}),
+  };
+};
+
 const normalizeStoryboardImageCount = (value: unknown): number | undefined => (
   typeof value === 'number' && Number.isInteger(value) && value >= 1 && value <= STORYBOARD_IMAGE_PLAN_MAX_COUNT
     ? value : undefined
@@ -1890,6 +1917,8 @@ const normalizeGenerationTasks = (incoming: unknown, projectId: string): Generat
     }
     if (task.kind !== 'image') return task;
     const interrupted = task.status === 'queued' || task.status === 'running';
+    const preparationStage = normalizeImageTaskPreparationStage(task.preparationStage);
+    const storyboardBatch = task.assetKind === 'storyboard' || task.imageGenerationMode === 'image-to-image';
     const status = interrupted
       ? 'failed'
       : task.status === 'succeeded' || task.status === 'failed' || task.status === 'cancelled'
@@ -1908,6 +1937,7 @@ const normalizeGenerationTasks = (incoming: unknown, projectId: string): Generat
       ...normalizeStoryboardImageFrameMetadata(task),
       ...normalizePrivateReferenceMetadata(task.referenceScope, task.nsfwPrivatePart),
       status,
+      ...(preparationStage ? { preparationStage } : {}),
       prompt: typeof task.prompt === 'string' ? task.prompt : '',
       ...(typeof task.negativePrompt === 'string' && task.negativePrompt
         ? { negativePrompt: task.negativePrompt }
@@ -1915,6 +1945,7 @@ const normalizeGenerationTasks = (incoming: unknown, projectId: string): Generat
       width: normalizedImageTaskNumber(task.width, 1024),
       height: normalizedImageTaskNumber(task.height, 1024),
       ...(typeof task.sizeOverride === 'boolean' ? { sizeOverride: task.sizeOverride } : {}),
+      ...(task.resolutionPlan !== undefined ? { resolutionPlan: persistedImageResolutionPlan(task.resolutionPlan) } : {}),
       backend: imageTaskBackends.has(task.backend) ? task.backend : 'openai',
       model: typeof task.model === 'string' ? task.model : '',
       ...(task.imageApiSnapshot !== undefined ? { imageApiSnapshot: normalizeImageApiSnapshot(task.imageApiSnapshot) } : {}),
@@ -1952,12 +1983,12 @@ const normalizeGenerationTasks = (incoming: unknown, projectId: string): Generat
         ? { batchId: task.batchId }
         : {}),
       ...(typeof task.batchIndex === 'number' && Number.isInteger(task.batchIndex)
-        && (task.imageGenerationMode === 'image-to-image'
-          ? task.batchIndex >= 1 && task.batchIndex <= 100
+        && (storyboardBatch
+          ? task.batchIndex >= 1 && task.batchIndex <= STORYBOARD_IMAGE_PLAN_MAX_COUNT
           : task.batchIndex >= 0 && task.batchIndex < 8)
         ? { batchIndex: task.batchIndex } : {}),
       ...(typeof task.batchCount === 'number' && Number.isInteger(task.batchCount) && task.batchCount >= 1
-        && task.batchCount <= (task.imageGenerationMode === 'image-to-image' ? 100 : 8)
+        && task.batchCount <= (storyboardBatch ? STORYBOARD_IMAGE_PLAN_MAX_COUNT : 8)
         ? { batchCount: task.batchCount } : {}),
       ...(typeof task.seed === 'number' && Number.isSafeInteger(task.seed) && task.seed >= 0 && task.seed <= 0xffff_ffff
         ? { seed: task.seed } : {}),
@@ -2007,7 +2038,9 @@ const normalizeGenerationTasks = (incoming: unknown, projectId: string): Generat
         ? { resultAssetId: task.resultAssetId }
         : {}),
       ...(interrupted
-        ? { error: IMAGE_TASK_INTERRUPTED_ERROR }
+        ? { error: preparationStage
+            ? `上次图像任务在“${imagePreparationStageLabel(preparationStage)}”准备阶段因应用关闭或刷新而中断，尚未完成生图准备；任务记录已保留，请确认后重新生成。`
+            : IMAGE_TASK_INTERRUPTED_ERROR }
         : typeof task.error === 'string' && task.error
           ? { error: task.error }
           : status === 'failed'
@@ -2621,6 +2654,19 @@ const emptyProjectCollectionFallbacks = (): ProjectCollectionFallbacks => ({
 });
 
 /** Normalize both active and archived projects through the same runtime shape. */
+const normalizeStoryReferenceProvenance = <T extends object>(value: T): T => {
+  const output = { ...value } as T & { storyReferenceContext?: unknown; storyReferenceFingerprint?: unknown; storyReferenceAssetIds?: unknown };
+  if ('storyReferenceContext' in output) {
+    const context = normalizeStoryReferenceContext(output.storyReferenceContext);
+    if (context) output.storyReferenceContext = context;
+    else delete output.storyReferenceContext;
+  }
+  if ('storyReferenceFingerprint' in output && typeof output.storyReferenceFingerprint !== 'string') delete output.storyReferenceFingerprint;
+  if ('storyReferenceAssetIds' in output) output.storyReferenceAssetIds = Array.isArray(output.storyReferenceAssetIds)
+    ? [...new Set(output.storyReferenceAssetIds.filter((id): id is string => typeof id === 'string'))] : [];
+  return output;
+};
+
 const normalizePersistedProject = (
   incoming: Record<string, any>,
   fallback: Project,
@@ -2679,11 +2725,13 @@ const normalizePersistedProject = (
       nsfwPrivatePart: rawNsfwPrivatePart,
       imageGenerationMode: rawImageGenerationMode,
       imageRegenerationSnapshot: rawImageRegenerationSnapshot,
+      imageRequestSize: rawImageRequestSize,
       characterReferenceId: rawCharacterReferenceId,
       ...asset
     } = item;
     return {
       ...asset,
+      ...(item.storyReferenceSubjects !== undefined ? { storyReferenceSubjects: normalizeStoryReferenceAssetSubjects(item.storyReferenceSubjects) } : {}),
       ...(rawCharacterReferenceId !== undefined ? { characterReferenceId:
         typeof rawCharacterReferenceId === 'string' && rawCharacterReferenceId.trim() ? rawCharacterReferenceId : null } : {}),
       ...normalizeStoryboardImageFrameMetadata(item),
@@ -2691,6 +2739,7 @@ const normalizePersistedProject = (
         ? { imageGenerationMode: rawImageGenerationMode } : {}),
       ...(rawImageRegenerationSnapshot !== undefined
         ? { imageRegenerationSnapshot: normalizeImageAssetRegenerationSnapshot(rawImageRegenerationSnapshot) } : {}),
+      ...(rawImageRequestSize !== undefined ? { imageRequestSize: normalizeImageRequestSize(rawImageRequestSize) } : {}),
       mediaType: item.mediaType || (item.type === 'video' ? 'video' : item.type === 'audio' ? 'audio' : item.type === 'clay-render' ? 'clay-render' : 'image'),
       tags: Array.isArray(item.tags) ? [...item.tags] : [],
       targetBindings: Array.isArray(item.targetBindings) ? [...item.targetBindings] : [],
@@ -2744,7 +2793,7 @@ const normalizePersistedProject = (
     incoming.scenes,
     collectionFallbacks.scenes,
   ).map((scene: any) => {
-    const normalized = { ...scene };
+    const normalized = normalizeStoryReferenceProvenance({ ...scene });
     normalized.characterIds = Array.isArray(scene.characterIds) ? [...scene.characterIds] : [];
     if (Array.isArray(scene.locationIds)) normalized.locationIds = [...scene.locationIds];
     else if (typeof scene.locationId === 'string' && scene.locationId) normalized.locationIds = [scene.locationId];
@@ -2825,7 +2874,7 @@ const normalizePersistedProject = (
         })
       : [];
     return {
-      ...boardFields,
+      ...normalizeStoryReferenceProvenance(boardFields),
       sceneId,
       storyboardImageCount: normalizeStoryboardImageCount(board.storyboardImageCount),
       ...(board.imageToImage !== undefined
@@ -2897,7 +2946,7 @@ const normalizePersistedProject = (
   const sequencePlans = projectArray<VideoSequencePlan>(
     incoming.sequencePlans,
     collectionFallbacks.sequencePlans,
-  ).map((plan: any) => normalizePersistedSequencePlan(plan, storyboards));
+  ).map((plan: any) => normalizeStoryReferenceProvenance(normalizePersistedSequencePlan(plan, storyboards)));
   const boardsByScene = new Map<string, string[]>();
   storyboards.forEach((board) => board.sourceSceneIds.forEach((sceneId: string) => (
     boardsByScene.set(sceneId, [...(boardsByScene.get(sceneId) || []), board.id])
@@ -2932,7 +2981,7 @@ const normalizePersistedProject = (
       ),
     }, migrateAutomaticExtraRequirement),
   ));
-  return migrateProjectChapters(migrateLegacyStoryboardImageNames(normalizedProject));
+  return recoverInterruptedStoryReferenceRecognition(migrateProjectChapters(migrateLegacyStoryboardImageNames(normalizedProject)));
 };
 
 /** Keep archived projects readable without resurrecting default demo records. */
