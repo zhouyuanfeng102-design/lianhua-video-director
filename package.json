@@ -1,6 +1,6 @@
 {
   "name": "lianhua-video-director",
-  "version": "1.6.8",
+  "version": "1.7.2",
   "productName": "莲华视频导演台",
   "private": true,
   "description": "莲华视频导演台：从小说到连续视频分镜与提示词",
@@ -23,6 +23,10 @@
     "deliver:1.6.6": "node scripts/createDelivery.mjs",
     "deliver:1.6.7": "node scripts/createDelivery.mjs",
     "deliver:1.6.8": "node scripts/createDelivery.mjs",
+    "deliver:1.6.9": "node scripts/createDelivery.mjs",
+    "deliver:1.7.0": "node scripts/createDelivery.mjs",
+    "deliver:1.7.1": "node scripts/createDelivery.mjs",
+    "deliver:1.7.2": "node scripts/createDelivery.mjs",
     "test:runninghub-generation-extras": "tsx scripts/runningHubGenerationExtras.test.ts",
     "test:runninghub-generation-extras-ui": "node scripts/runningHubGenerationExtrasUiQa.mjs",
     "test:prompt-more": "tsx scripts/promptMoreExport.test.ts",

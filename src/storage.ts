@@ -1,4 +1,5 @@
 import { normalizeStoryReferenceContext, normalizeStoryReferenceAssetSubjects, recoverInterruptedStoryReferenceRecognition } from './storyReferences';
+import { normalizeAppColorMode, normalizeAppColorTheme } from './appTheme';
 ﻿import type {
   AppSettings,
   AppState,
@@ -963,7 +964,8 @@ export const defaultSettings: AppSettings = {
   assetFilter: 'all',
   autoBackup: true,
   restorePointLimit: 20,
-  theme: 'ink',
+  theme: 'light',
+  themeColor: 'classic',
   uiFontScalePercent: UI_FONT_SCALE_DEFAULT_PERCENT,
 };
 
@@ -3077,6 +3079,8 @@ export const normalizeState = (raw: unknown): AppState => {
     incomingSettings.defaultStoryExpansionPresetId;
   const settings: AppSettings = {
     ...settingsInput,
+    theme: normalizeAppColorMode(incomingSettings.theme),
+    themeColor: normalizeAppColorTheme(incomingSettings.themeColor),
     uiFontScalePercent: normalizeUiFontScalePercent(
       incomingSettings.uiFontScalePercent,
     ),

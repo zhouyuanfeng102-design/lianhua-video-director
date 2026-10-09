@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import './styles.css';
+import './appThemes.css';
 
 class AppErrorBoundary extends React.Component<React.PropsWithChildren, { error: string }> {
   state = { error: '' };

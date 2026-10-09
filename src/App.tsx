@@ -1,6 +1,7 @@
 import { askChapterEntityResolutions, applyChapterEntityResolutions } from "./components/ChapterEntityConflictDialog";
 import { chapterContentForEntity } from "./chapters";
 import { imageTaskRuleMetadata } from "./imageTaskRuleMetadata";
+import { appColorModes, appColorThemes, normalizeAppColorMode, normalizeAppColorTheme, resolveAppColorMode } from "./appTheme";
 ﻿import { activeChapter, chapterScenes, chapterBoards, chapterPlans, chapterScopeProject, chapterWorkspace, withChapterWorkspace, withChapterSelection, migrateProjectChapters, appendChapters, addChapter, archiveChapter, reorderChapters, chapterIdForTask, chapterIdForAsset } from "./chapters";
 import { ChapterManager } from "./components/ChapterManager";
 import { buildChapterEntityCatalog, resolveChapterAnalysisEntities } from "./chapterEntities";
@@ -1963,6 +1964,21 @@ export default function App() {
   const updateLogTriggerRef = useRef<HTMLButtonElement>(null);
   const updateLogDialogRef = useRef<HTMLDivElement>(null);
   const [uiSettingsOpen, setUiSettingsOpen] = useState(false);
+  const colorMode = normalizeAppColorMode(state.settings.theme);
+  const colorTheme = normalizeAppColorTheme(state.settings.themeColor);
+  const [systemDarkMode, setSystemDarkMode] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const effectiveColorMode = resolveAppColorMode(colorMode, systemDarkMode);
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const updateSystemMode = () => setSystemDarkMode(mediaQuery.matches);
+    updateSystemMode();
+    mediaQuery.addEventListener('change', updateSystemMode);
+    return () => mediaQuery.removeEventListener('change', updateSystemMode);
+  }, []);
+  useLayoutEffect(() => {
+    document.documentElement.dataset.colorMode = effectiveColorMode;
+    document.documentElement.dataset.colorTheme = colorTheme;
+  }, [effectiveColorMode, colorTheme]);
   const [uiFontScaleDraft, setUiFontScaleDraft] = useState(
     () => String(state.settings.uiFontScalePercent),
   );
@@ -9647,7 +9663,7 @@ export default function App() {
               <div>
                 <h3 id="ui-settings-title">界面设置</h3>
                 <div id="ui-settings-description" className="field-hint">
-                  调整应用内全部文字大小；修改后立即生效并自动保存。
+                  调整显示模式、配色和字体大小；修改后立即生效并自动保存。
                 </div>
               </div>
               <Button
@@ -9658,6 +9674,43 @@ export default function App() {
                 title="关闭界面设置"
               />
             </div>
+            <section className="ui-appearance-section" role="group" aria-label="显示模式">
+              <strong>显示模式</strong>
+              <div className="ui-color-mode-options">
+                {appColorModes.map((mode) => <button
+                  key={mode.id}
+                  type="button"
+                  className="btn small"
+                  aria-pressed={colorMode === mode.id}
+                  onClick={() => setState((current) => ({ ...current, settings: { ...current.settings, theme: mode.id } }))}
+                >{mode.name}</button>)}
+              </div>
+            </section>
+            <section className="ui-appearance-section" role="group" aria-label="颜色主题">
+              <strong>颜色主题</strong>
+              <div className="field-hint">经典原色保留原来的多彩配色。</div>
+              <div className="ui-theme-grid">
+                {appColorThemes.map((theme) => <button
+                  key={theme.id}
+                  type="button"
+                  className="ui-theme-choice"
+                  aria-label={`${theme.name}主题`}
+                  aria-pressed={colorTheme === theme.id}
+                  style={{
+                    '--theme-preview-bg': effectiveColorMode === 'dark' ? '#171b23' : theme.background,
+                    '--theme-preview-panel': effectiveColorMode === 'dark' ? '#252b35' : '#ffffff',
+                    '--theme-preview-accent': theme.id === 'classic'
+                      ? 'linear-gradient(90deg, #c84f86 0% 25%, #3f72b5 25% 50%, #287e57 50% 75%, #6f63cf 75% 100%)'
+                      : theme.accent,
+                  } as CSSProperties}
+                  onClick={() => setState((current) => ({ ...current, settings: { ...current.settings, themeColor: theme.id } }))}
+                >
+                  <span className="ui-theme-swatch" aria-hidden="true"><i /><i /><i /></span>
+                  <span>{theme.name}</span>
+                  {colorTheme === theme.id && <Check size={13} aria-hidden="true" />}
+                </button>)}
+              </div>
+            </section>
             <section
               className="ui-settings-font-group"
               role="group"
@@ -20698,27 +20751,32 @@ function AssetsView(ctx: AppContext) {
                       aria-label={`选中用于生成视频：${asset.name}`}
                       onChange={(event) => setVideoImageSelection((ids) => event.target.checked ? [...ids, asset.id] : ids.filter((id) => id !== asset.id))} />选中用于生成视频</label>)}
                 <strong title={asset.name}>{asset.name}</strong>
-                {canBindCharacter && <small className="asset-character-binding-note">
-                  {referenceCharacters.length ? `人物参考：${referenceCharacters.map((character) => characterVariantDisplayName(character) || character.name).join("、")}`
-                    : asset.characterReferenceId ? "已绑定人物不可用，可重新选择（图片仍可使用）" : "未绑定人物（可直接使用）"}
-                </small>}
-                <small className="asset-chapter-label">{assetChapterLabel(asset)}</small>
-                <small>
-                  {asset.mediaType || "image"} · {asset.referenceRole || asset.role} · {asset.tags.join("、")}
-                </small>
-                {asset.durationSec ? <small>素材时长 {asset.durationSec} 秒</small> : null}
-                {asset.width && asset.height ? <small>{asset.width} × {asset.height}</small> : null}
-                {asset.sampleRate ? <small>{asset.sampleRate} Hz · {asset.channelCount || 1} 声道</small> : null}
-                {asset.sizeBytes ? <small>{(asset.sizeBytes / 1024 / 1024).toFixed(2)} MB · SHA-256 {asset.checksum?.slice(0, 12)}</small> : null}
-                {asset.duplicateOfAssetId ? <small>重复内容，文件已去重</small> : null}
+                <details className="asset-metadata-details">
+                  <summary>详细信息</summary>
+                  <div className="asset-metadata-content">
+                    {canBindCharacter && <small className="asset-character-binding-note">
+                      {referenceCharacters.length ? `人物参考：${referenceCharacters.map((character) => characterVariantDisplayName(character) || character.name).join("、")}`
+                        : asset.characterReferenceId ? "已绑定人物不可用，可重新选择（图片仍可使用）" : "未绑定人物（可直接使用）"}
+                    </small>}
+                    <small className="asset-chapter-label">{assetChapterLabel(asset)}</small>
+                    <small>
+                      {asset.mediaType || "image"} · {asset.referenceRole || asset.role} · {asset.tags.join("、")}
+                    </small>
+                    {asset.durationSec ? <small>素材时长 {asset.durationSec} 秒</small> : null}
+                    {asset.width && asset.height ? <small>{asset.width} × {asset.height}</small> : null}
+                    {asset.sampleRate ? <small>{asset.sampleRate} Hz · {asset.channelCount || 1} 声道</small> : null}
+                    {asset.sizeBytes ? <small>{(asset.sizeBytes / 1024 / 1024).toFixed(2)} MB · SHA-256 {asset.checksum?.slice(0, 12)}</small> : null}
+                    {asset.duplicateOfAssetId ? <small>重复内容，文件已去重</small> : null}
+                    {asset.visualAnchor && <small>{asset.visualAnchor}</small>}
+                    {asset.gridStates?.length === 9 && (
+                      <small>已识别 9 格状态</small>
+                    )}
+                    {asset.url && !asset.dataUrl && (asset.mediaType || "image") === "image" && !asset.managed && (
+                      <small>远程图片地址已记录</small>
+                    )}
+                  </div>
+                </details>
                 {asset.missing ? <small className="asset-missing">原文件缺失，需要重连，无法查看或保存</small> : null}
-                {asset.visualAnchor && <small>{asset.visualAnchor}</small>}
-                {asset.gridStates?.length === 9 && (
-                  <small>已识别 9 格状态</small>
-                )}
-                {asset.url && !asset.dataUrl && (asset.mediaType || "image") === "image" && !asset.managed && (
-                  <small>远程图片地址已记录</small>
-                )}
                 {regenerationIssue && <small className="error-text asset-regeneration-issue" role="status">重新生成不可用：{regenerationIssue}</small>}
                 <div className="asset-actions">
                   {isVisualAsset && !isPrivateProfileAsset && <Button small icon={<Film size={13} />} disabled={asset.missing || !previewUrl}
@@ -23679,9 +23737,17 @@ function GenerationTasksView(ctx: AppContext) {
                 原始参考图 {task.referenceAssetSnapshots?.length || 0} 张：{task.referenceAssetSnapshots?.map((asset) => asset.name).join("、") || "快照缺失"}
                 {task.sourceShotId && ` · 镜头 ${state.project.storyboards.find((board) => board.id === task.sourceStoryboardId)?.shots.find((shot) => shot.id === task.sourceShotId)?.index || task.sourceShotId}`}
               </div>}
-              <div className="field-hint job-prompt" title={task.prompt || "等待转换器生成最终生图提示词"}>
-                {task.prompt || "等待转换器生成最终生图提示词"}
-              </div>
+            </div>
+          </div>
+          <div className="image-task-prompt-panel">
+            <span className="image-task-prompt-title">最终提示词</span>
+            <div
+              className="image-task-prompt-content"
+              role="region"
+              aria-label={`「${task.name}」的最终提示词`}
+              tabIndex={0}
+            >
+              {task.prompt || "等待转换器生成最终生图提示词"}
             </div>
           </div>
           <div className="row wrap job-card-actions">

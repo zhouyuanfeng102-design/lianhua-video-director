@@ -1,0 +1,487 @@
+/* Shared application theme. Import after the component styles. Media pixels
+   keep their original appearance; only surrounding interface surfaces change. */
+/* Classic light deliberately bypasses these modern overrides. The original
+   styles and component styles remain the source of its exact color palette. */
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) {
+  color-scheme: light;
+  --bg: #f3f5f7;
+  --panel: #ffffff;
+  --panel-2: #f7f8fa;
+  --panel-3: #edf0f4;
+  --text: #252a34;
+  --muted: #556071;
+  --faint: #6b7685;
+  --line: #d9dee6;
+  --line-strong: #bbc4d0;
+  --accent: #a83569;
+  --accent-strong: #b53670;
+  --accent-solid: #ae326c;
+  --on-accent: #ffffff;
+  --accent-soft: color-mix(in srgb, var(--accent) 7%, var(--panel));
+  --accent-hover: color-mix(in srgb, var(--accent) 11%, var(--panel));
+  --accent-line: color-mix(in srgb, var(--accent) 40%, var(--line));
+  --pink: var(--accent);
+  --pink-strong: var(--accent-strong);
+  --violet: var(--accent);
+  --purple: var(--accent);
+  --green: #287e57;
+  --danger: #b9324e;
+  --danger-solid: #b9324e;
+  --cyan: #187886;
+  --amber: #885b12;
+  --orange: var(--amber);
+  --blue: #3f72b5;
+  --teal: #2d8578;
+  --indigo: #6258ad;
+  --coral: #b45b42;
+  --success-soft: color-mix(in srgb, var(--green) 7%, var(--panel));
+  --danger-soft: color-mix(in srgb, var(--danger) 7%, var(--panel));
+  --warning-soft: color-mix(in srgb, var(--amber) 8%, var(--panel));
+  --info-soft: color-mix(in srgb, var(--cyan) 7%, var(--panel));
+  --panel-soft: var(--panel-2);
+  --card-bg: var(--panel);
+  --shadow: 0 8px 24px rgb(25 37 53 / 8%);
+  --backdrop: rgb(20 27 37 / 45%);
+  --scroll-thumb: #b6bfcb;
+}
+:root[data-color-theme="blue"] { --accent: #235e9b; --accent-strong: #2468aa; --accent-solid: #2868a5; }
+:root[data-color-theme="jade"] { --accent: #176a57; --accent-strong: #1c775f; --accent-solid: #1e725d; }
+:root[data-color-theme="amber"] { --accent: #855611; --accent-strong: #926220; --accent-solid: #875a1e; }
+:root[data-color-theme="violet"] { --accent: #6750a6; --accent-strong: #7353b5; --accent-solid: #7051ad; }
+
+:root[data-color-mode="dark"] {
+  color-scheme: dark;
+  --bg: #10151b;
+  --panel: #1b222c;
+  --panel-2: #222b36;
+  --panel-3: #2c3744;
+  --text: #e5eaf0;
+  --muted: #b6c0ce;
+  --faint: #929faf;
+  --line: #374350;
+  --line-strong: #566376;
+  --accent: #f39cc5;
+  --accent-strong: #ffb4d4;
+  --accent-solid: #a93d74;
+  --accent-soft: color-mix(in srgb, var(--accent) 10%, var(--panel));
+  --accent-hover: color-mix(in srgb, var(--accent) 16%, var(--panel));
+  --accent-line: color-mix(in srgb, var(--accent) 42%, var(--line));
+  --green: #8fd3a8;
+  --danger: #f49baa;
+  --danger-solid: #b83c59;
+  --cyan: #81c9d5;
+  --amber: #e6bf7c;
+  --blue: #a5c8f5;
+  --teal: #88cbbb;
+  --indigo: #beb2ee;
+  --coral: #eca791;
+  --success-soft: color-mix(in srgb, var(--green) 10%, var(--panel));
+  --danger-soft: color-mix(in srgb, var(--danger) 10%, var(--panel));
+  --warning-soft: color-mix(in srgb, var(--amber) 10%, var(--panel));
+  --info-soft: color-mix(in srgb, var(--cyan) 10%, var(--panel));
+  --shadow: 0 10px 32px rgb(0 0 0 / 28%);
+  --backdrop: rgb(3 7 12 / 72%);
+  --scroll-thumb: #526174;
+}
+:root[data-color-mode="dark"][data-color-theme="blue"] { --accent: #8ec5ff; --accent-strong: #b0d7ff; --accent-solid: #28649e; }
+:root[data-color-mode="dark"][data-color-theme="jade"] { --accent: #83d3b2; --accent-strong: #a4e5c8; --accent-solid: #266b57; }
+:root[data-color-mode="dark"][data-color-theme="amber"] { --accent: #e6bf7c; --accent-strong: #f4d8a7; --accent-solid: #80541c; }
+:root[data-color-mode="dark"][data-color-theme="violet"] { --accent: #c4b0f5; --accent-strong: #dbcaff; --accent-solid: #7251ac; }
+
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) ::selection { background: var(--accent-hover); color: var(--text); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(.sidebar, .topbar) { background: var(--panel); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .card { box-shadow: var(--shadow); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .nav-item { --nav-accent: var(--accent); --nav-soft: var(--accent-soft); background: var(--panel); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .nav-item.active { background: var(--accent-soft); border-color: var(--accent-line); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .nav-item:hover { background: var(--accent-hover); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .director-option-card { --option-accent: var(--accent); --option-soft: var(--accent-soft); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .timing-parameter-card { --timing-accent: var(--accent); --timing-soft: var(--accent-soft); border-color: var(--accent-line); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .btn.top-action-card { --top-action-accent: var(--accent); --top-action-surface: var(--accent-soft); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .vwm-dialog { --vwm-accent: var(--accent-solid); --vwm-border: var(--line); --vwm-muted: var(--muted); }
+
+/* Neutral surfaces, including component-specific white backgrounds. */
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(
+  .shot-card, .revision-panel, .asset-card, .modal, .entity-chip, .entity-detail-card,
+  .story-expansion-length-control, .sequence-master-textarea,
+  .source-settings-card, .director-setup-section, .director-generate-bar,
+  .sequence-control-card, .sequence-estimate-detail-body, .sequence-master-review,
+  .sequence-segment-editor, .director-result-actions, .result-language-card,
+  .project-library-item, .reference-image-picker-item,
+  .save-close-overlay > div, .story-reference-card,
+  .chapter-dialog, .chapter-preview-list > button, .chapter-pagination,
+  .sr-review-dialog, .sr-review-detail-text, .rhv-import-dialog,
+  .vgs-api-dialog, .vwm-dialog, .vwm-confirm, .vwm-footer, .vwm-library-item,
+  .vwb-modal, .vwb-icon-button, .storyboard-i2i-asset,
+  .image-view .image-output-card.image-output-refined,
+  .image-output-refined .image-generate-row,
+  .image-output-refined .image-prompt-copy,
+  .director-look-analysis-row > .director-look-requirement,
+  .director-result-copy.h3-prompt-copy .h3-prompt-display-toolbar,
+  .director-result-copy.h3-prompt-copy .h3-prompt-mode-button,
+  .director-result-copy.h3-prompt-copy .h3-prompt-section,
+  .director-result-copy.h3-prompt-copy .h3-prompt-preamble
+) { background: var(--panel); border-color: var(--line); color: var(--text); }
+
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(
+  .card.soft, .status-card, .badge, .select-chip, .story-scene-card,
+  .director-asset-item, .list-item, .shot-assets label, .rule-tab,
+  .api-profile-box, .settings-storage, .runtime-error-log-entry pre,
+  .image-task-prompt-panel, .prompt-copy, .project-library-bulk-toolbar,
+  .sequence-planning-options, .sequence-master-review-head,
+  .sequence-master-review-actions, .sequence-ai-boundary-note,
+  .director-setup-body, .sequence-result-status,
+  .director-production-row, .sequence-director-strip,
+  .director-result-pane .sequence-text-handoff-details[open] > summary,
+  .sequence-plan-workspace > .sequence-filmstrip,
+  .storyboard-shot-picker-item, .image-prompt-selection-grid,
+  .image-private-profile-notice, .image-selected-reference-preview,
+  .image-output-refined .image-generation-mode-tabs,
+  .image-output-refined .image-setting-section,
+  .story-reference-panel, .story-reference-card.is-disabled,
+  .story-reference-subject-detail, .chapter-toolbar,
+  .sr-review-text-pane textarea, .sr-review-warning-card, .cda-impact,
+  .runninghub-video-settings .rhv-node-tools,
+  .rhv-manager .rhv-output-field, .rhv-manager .rhv-image-slot-card,
+  .rhv-manager .rhv-extras-card, .rhv-manager .rhv-generation-tabs button,
+  .vgs-card, .video-settings-redesign .vgs-provider-note,
+  .vwm-library, .vwm-state, .vwm-summary-grid > div,
+  .vwm-tabs button, .vwm-section-tabs button,
+  .vwm-mapping-item, .vwm-parameter-item, .vwm-notice,
+  .vwb-preview-empty, .vwb-timeline, .vwb-frame-settings,
+  .vwb-setting-group, .vwb-inline-output .vwb-setting-group,
+  .vwb-footer, .vd-result-selection,
+  .director-result-copy.h3-prompt-copy .h3-prompt-legend,
+  .director-result-copy.h3-prompt-copy .h3-prompt-audio
+) { background: var(--panel-2); border-color: var(--line); }
+
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(
+  .asset-thumb, .image-job-preview, .asset-preview-viewport, .director-asset-thumb,
+  .reference-image-picker-thumb, .image-preview-pane,
+  .image-output-refined .image-preview-pane, .image-batch-result-thumbnail,
+  .story-reference-thumbnail, .storyboard-i2i-thumb, .vwb-thumb,
+  .chip-index, .storyboard-shot-index, .generation-task-count,
+  .progress-bar, .vwb-clip-index, .vwb-timeline-clip-label b
+) { background: var(--panel-3); color: var(--muted); }
+
+/* Rules, setup panels and settings use restrained brand accents. */
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(
+  .card.highlight, .hero, .ui-settings-font-group, .update-log-entry,
+  .sequence-planner-panel, .sequence-plan-summary, .sequence-filmstrip,
+  .director-setup-section.tone-timing, .director-setup-section.tone-look,
+  .director-setup-section.tone-style, .director-setup-section.tone-motion,
+  .timing-parameter-card, .compact-option-grid .director-option-card,
+  .rules-view .list .list-item, .rule-tabs .rule-tab, .rule-layout > .card,
+  .api-tone-amber, .api-tone-pink, .api-tone-cyan, .api-tone-violet,
+  .api-profile-box, .api-tone-amber .api-profile-box,
+  .api-tone-pink .api-profile-box, .api-tone-cyan .api-profile-box,
+  .api-tone-violet .api-profile-box, .grid-workbench-guide,
+  .image-private-profile-panel, .image-private-generation-note,
+  .image-output-refined .image-panel-extra-popover
+) { background: var(--panel); border-color: var(--line); box-shadow: none; }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .rule-tabs .status-card { background: var(--warning-soft); border-color: color-mix(in srgb, var(--amber) 32%, var(--line)); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .video-task-batch { background: var(--panel); border-color: var(--line); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .video-task-batch-counts span { background: var(--panel-2); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .settings-panel-stage[data-active-panel="video"] > .video-generation-settings.video-settings-redesign { background: var(--panel-2); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(.asset-preview-trigger span, .image-selected-reference-preview img) { background: var(--panel); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .asset-preview-trigger:hover span { background: var(--accent-soft); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .status-card-switcher:hover { background: var(--accent-soft); border-color: var(--accent-line); }
+
+/* Controls have separate text-accent and solid-action colors so bright dark
+   theme accents never turn white action labels into low-contrast text. */
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(input, textarea, select, .model-picker-search) { background-color: var(--panel); border-color: var(--line); color: var(--text); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(input, textarea)::placeholder { color: var(--faint); opacity: 1; }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(input, textarea, select):focus { border-color: var(--accent); box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 20%, transparent); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(input, textarea, select):disabled { background-color: var(--panel-3); color: var(--faint); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(input[type="checkbox"], input[type="radio"], input[type="range"], progress) { accent-color: var(--accent-solid); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .btn { background: var(--panel); color: var(--text); border-color: var(--line); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .btn:hover { background: var(--panel-2); border-color: var(--line-strong); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .btn.ghost { background: transparent; }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .btn.top-action-card { background: var(--accent-soft); border-color: var(--accent-line); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .btn.top-action-card:hover { background: var(--accent-hover); border-color: var(--accent); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .ui-settings-trigger { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-line); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .ui-settings-trigger:hover { background: var(--accent-hover); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .runtime-error-log-trigger { background: var(--panel); color: var(--muted); border-color: var(--line); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .runtime-error-log-count { background: var(--panel-3); color: var(--muted); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(.btn.primary, .vwm-dialog .btn.primary, .segment.active,
+  .segment.active.violet, .segment.active.cyan, .segment.active.amber,
+  .generation-task-tab.active, .vwb-tab.active,
+  .result-language-card.active.zh, .result-language-card.active.en,
+  .vd-batch-row-tools .vd-tail-entry.primary, .shot-number) {
+  background: var(--accent-solid); border-color: var(--accent-solid); color: var(--on-accent);
+}
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(.btn.primary:hover, .vwm-dialog .btn.primary:hover) { background: var(--accent-solid); filter: brightness(1.08); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(.btn.danger, .vwm-dialog .btn.danger) { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, var(--line)); background: transparent; }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(.btn.danger:hover, .vwm-dialog .btn.danger:hover) { color: var(--danger); border-color: var(--danger); background: var(--danger-soft); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(.segment, .generation-task-tab, .vwb-tab) { background: var(--panel); border-color: var(--line); color: var(--muted); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(.segment.active, .generation-task-tab.active, .vwb-tab.active) { background: var(--accent-solid); border-color: var(--accent-solid); color: var(--on-accent); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .generation-task-tab.active .generation-task-count { background: rgb(255 255 255 / 18%); color: var(--on-accent); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .result-language-card:disabled { background: var(--panel-3); border-color: var(--line); color: var(--faint); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .director-option-card.selected .director-option-check { background: var(--accent-solid); color: var(--on-accent); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .video-settings-redesign .rhtv-automation-toggle input { background: var(--panel-3); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .video-settings-redesign .rhtv-automation-toggle input::before { background: var(--muted); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .video-settings-redesign .rhtv-automation-toggle input:checked { background: var(--accent-solid); border-color: var(--accent-solid); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .video-settings-redesign .rhtv-automation-toggle input:checked::before { background: var(--on-accent); }
+
+/* Selected states follow the chosen brand; task status colors remain semantic. */
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(
+  .select-chip.active, .select-chip.active.amber, .list-item.selected,
+  .story-scene-card.selected, .director-asset-item.selected,
+  .rule-tab.active, .rules-view .list-item.selected,
+  .reference-image-picker-item.selected, .project-library-item.active,
+  .project-library-item.selected, .project-library-item.active.selected,
+  .sequence-segment-chip.active, .update-log-entry.current,
+  .storyboard-shot-picker-item:has(input:checked),
+  .director-option-card.selected, .compact-option-grid .director-option-card.selected,
+  .result-language-card.zh, .result-language-card.en,
+  .chapter-management-row.selected, .chapter-preview-list > button.selected,
+  .sr-review-tabs .btn[aria-selected="true"], .cda-modes label.selected,
+  .model-picker-option[aria-selected="true"], .storyboard-i2i-asset.is-selected,
+  .vwm-library-item.selected, .vwm-tabs button.active, .vwm-section-tabs button.active,
+  .rhv-manager .rhv-generation-tabs button.active,
+  .vwb-source.selected, .vwb-clip.selected, .vwb-timeline-clip.selected,
+  .h3-prompt-mode-button.active
+) { background: var(--accent-soft); border-color: var(--accent-line); color: var(--accent); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(.result-language-card.active.zh, .result-language-card.active.en) { background: var(--accent-solid); border-color: var(--accent-solid); color: var(--on-accent); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(.result-language-card.zh:disabled, .result-language-card.en:disabled) { background: var(--panel-3); border-color: var(--line); color: var(--faint); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(.model-picker-option:hover, .project-library-item:hover,
+  .reference-image-picker-item:hover, .storyboard-shot-picker-item:hover,
+  .sequence-segment-chip:hover, .entity-chip:hover,
+  .select-chip:hover, .list-item:hover, .vwb-timeline-clip:hover,
+  .compact-option-grid .director-option-card:hover) { background: var(--accent-hover); border-color: var(--accent-line); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(.storyboard-shot-picker-item:has(input:checked) .storyboard-shot-index,
+  .story-reference-subject-chip, .story-reference-subject-chip:hover) { background: var(--accent-soft); color: var(--accent); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .private-profile-asset-note { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-line); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .asset-card.private-profile-asset { border-color: var(--accent-line); }
+
+/* Text inside legacy pastel panels must inherit readable theme colors. */
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(
+  .prompt-copy, .runtime-error-log-detail, .vwm-dialog,
+  .director-result-copy.h3-prompt-copy .h3-prompt-pre,
+  .director-result-copy.h3-prompt-copy .h3-prompt-original,
+  .director-result-copy.h3-prompt-copy .h3-prompt-audio
+) { color: var(--text); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(
+  .update-log-entry-head strong, .chapter-row-main strong,
+  .sequence-control-card > label, .director-style-pane .field > label,
+  .director-style-pane .field-hint, .director-choice-combo select,
+  .tone-style .director-section-title,
+  .director-result-copy.h3-prompt-copy .h3-prompt-legend b,
+  .director-result-copy.h3-prompt-copy .h3-prompt-section-head,
+  .director-result-copy.h3-prompt-copy .h3-prompt-shot-head,
+  .director-result-copy.h3-prompt-copy .h3-prompt-section-head code,
+  .director-result-copy.h3-prompt-copy .h3-prompt-shot-head code,
+  .ui-settings-value, .update-log-trigger,
+  .update-log-version, .badge.violet, .image-canvas-hint,
+  .vwb-timeline-title strong, .vwb-timeline-clip, .vwm-text-button
+) { color: var(--accent); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(.update-log-trigger, .update-log-trigger:hover,
+  .update-log-version, .image-canvas-hint,
+  .director-result-copy.h3-prompt-copy .h3-prompt-section-head,
+  .director-result-copy.h3-prompt-copy .h3-prompt-shot-head) { background: var(--accent-soft); border-color: var(--accent-line); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(
+  .image-output-refined .image-setting-heading h3,
+  .image-output-refined .image-results-heading h3,
+  .image-output-refined .image-upload-field > label,
+  .image-output-refined .field > label,
+  .image-output-refined .image-panel-capability,
+  .image-output-refined .image-generation-quantity-row > label,
+  .runninghub-video-settings .rhv-enable, .runninghub-video-settings .rhv-main-note,
+  .rhv-import-feedback, .rhv-manager .rhv-node-tools span,
+  .rhv-manager .rhv-control-settings > summary, .rhv-manager .rhv-image-slot-heading code,
+  .video-settings-redesign .vgs-summary-tags,
+  .storyboard-i2i-header h4, .storyboard-i2i-header h4 > span,
+  .storyboard-i2i-asset-info > span:last-child, .storyboard-i2i-hint, .storyboard-i2i-empty,
+  .sr-review-detail > strong, .sr-review-speaker, .cda-empty,
+  .vwm-current > span, .vwm-current small,
+  .vwb-help-button, .vwb-empty svg, .vwb-timeline-clip-label small
+) { color: var(--muted); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .image-output-refined .image-generated-output-label { background: var(--panel-3); color: var(--muted); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .vwb-timeline-clip { background: var(--panel-3); border-color: var(--line); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .vwb-export-summary { background: var(--panel-2); color: var(--muted); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(.runninghub-video-settings .rhv-invite-link,
+  .runninghub-video-settings .rhv-invite-link:hover,
+  .vwb-source-selection .vwb-add-selected) { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-line); }
+
+/* Semantic hints retain their purpose in every color theme. */
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(.hint-box, .recommendation-strip, .sequence-analysis-row,
+  .image-api-capability, .video-settings-redesign .vgs-workflow-summary,
+  .vwm-current, .vwm-info, .rhv-manager .rhv-node-tools) { background: var(--info-soft); color: var(--cyan); border-color: color-mix(in srgb, var(--cyan) 32%, var(--line)); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(.sequence-estimate-copy strong, .sequence-estimate-details > summary) { color: var(--cyan); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(
+  .warning-box, .settings-boundary, .credential-book-warning, .grid-director-readiness,
+  .sequence-segment-auto-extension-note, .story-reference-warning,
+  .story-review-pending, .sr-review-stale, .storyboard-i2i-warning,
+  .cda-notice, .chapter-notice, .rhv-manager .rhv-issues, .rhv-manager .rhv-cost-note,
+  .vwm-state.pending
+) { background: var(--warning-soft); color: var(--amber); border-color: color-mix(in srgb, var(--amber) 32%, var(--line)); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(.sequence-plan-warning, .recommendation-warning,
+  .sequence-segment-chip .sequence-segment-auto-extension,
+  .sr-review-advisory, .sr-review-warning-summary > strong,
+  .rhv-manager .rhv-cost-note > strong, .rhv-manager .rhv-cost-note p,
+  .rhv-manager .rhv-extras-range.warning, .vwm-inline-warning,
+  .vwb-footer-notice.warning) { color: var(--amber); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(.badge.green, .prompt-validation.valid,
+  .whole-story-source, .grid-director-readiness.ready, .video-task-batch-counts .succeeded,
+  .vwb-source.checked, .vwb-source.selected.checked, .cda-changed td:last-child) { background: var(--success-soft); color: var(--green); border-color: color-mix(in srgb, var(--green) 32%, var(--line)); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .director-result-copy.h3-prompt-copy .h3-prompt-field-label { color: var(--green); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(
+  .danger-box, .prompt-validation.invalid, .sequence-segment-error,
+  .sequence-planning-error, .runtime-error-log-entry, .sidebar-notice.error,
+  .runtime-error-log-slot.has-errors .runtime-error-log-trigger,
+  .storyboard-i2i-error, .cda-error, .vwm-notice.error,
+  .video-task-batch-counts .failed
+) { background: var(--danger-soft); color: var(--danger); border-color: color-mix(in srgb, var(--danger) 32%, var(--line)); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(
+  .runtime-error-log-entry-head strong, .runtime-error-log-latest,
+  .sequence-segment-error-text, .sequence-segment-chip .sequence-segment-failure,
+  .sequence-planning-error-details > summary, .sequence-planning-error small,
+  .asset-page-grid .asset-info small.asset-regeneration-issue,
+  .asset-video-dialog .asset-video-error, .image-output-size-error,
+  .runninghub-video-settings .rhv-main-note.error, .rhv-import-feedback[role="alert"],
+  .rhv-manager .rhv-slot-warning, .rhv-manager .rhv-extras-error,
+  .vgs-api-dialog > footer p
+) { color: var(--danger); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .asset-missing { color: var(--danger) !important; }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(.sequence-planning-error-details > pre, .task-error-technical pre) { background: var(--panel); color: var(--text); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .video-task-batch-counts .unknown { background: var(--warning-soft); color: var(--amber); border-color: color-mix(in srgb, var(--amber) 32%, var(--line)); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .badge.amber { color: var(--amber); background: var(--warning-soft); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(.badge.pink, .badge.violet) { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-line); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .job-card .badge.pink { color: var(--danger); background: var(--danger-soft); border-color: color-mix(in srgb, var(--danger) 32%, var(--line)); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .sidebar-notice { background: var(--accent-soft); color: var(--accent); border-color: var(--accent-line); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .sidebar-notice.error { background: var(--danger-soft); color: var(--danger); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .runtime-error-log-slot.has-errors .runtime-error-log-count { background: var(--danger-solid); color: #ffffff; }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .runtime-error-log-trigger:hover { background: var(--danger-soft); color: var(--danger); }
+
+/* Dialog shading and scrollbar colors are part of the UI, not image filters. */
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(.modal-backdrop, .vd-modal-backdrop,
+  .asset-video-backdrop, .chapter-backdrop, .cda-backdrop,
+  .model-picker-backdrop, .sr-review-backdrop, .rhv-import-backdrop,
+  .vgs-modal-backdrop, .vwm-backdrop, .vwm-confirm-backdrop, .vwb-modal-backdrop) { background: var(--backdrop); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .save-close-overlay { background: color-mix(in srgb, var(--bg) 90%, transparent); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(.workspace, .scroll, .prompt-copy,
+  .image-task-prompt-content, .vd-batch-list, .vd-batch-preview-text,
+  .vd-batch-controls, .h3-prompt-display-body, .option-card-deck, .story-reference-cards,
+  .story-reference-subject-chips) { scrollbar-color: var(--scroll-thumb) transparent; }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(.workspace, .scroll, .prompt-copy,
+  .option-card-deck, .story-reference-cards, .story-reference-subject-chips,
+  .image-task-prompt-content)::-webkit-scrollbar-thumb { background: var(--scroll-thumb); }
+:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .option-card-deck::-webkit-scrollbar-track { background: var(--panel-3); }
+
+/* New preferences need accents in classic light without defining --accent:
+   old components use that name with historical fallback colors of their own. */
+:root[data-color-theme="classic"][data-color-mode="light"] {
+  color-scheme: light;
+  --appearance-accent: #a83d70;
+  --appearance-solid: #ae326c;
+  --appearance-on-accent: #ffffff;
+  --appearance-soft: #fbeaf2;
+  --appearance-hover: #fff2f7;
+  --appearance-line: #efb1cc;
+}
+
+/* Classic night keeps neutral dark surfaces and restores the original
+   interface's distinct pink, blue, green, violet, cyan and amber accents. */
+:root[data-color-theme="classic"][data-color-mode="dark"] {
+  --pink: #f39cc5;
+  --pink-strong: #ffb4d4;
+  --violet: #b7a8f4;
+  --purple: var(--violet);
+  --classic-violet-solid: #6b4faf;
+  --classic-cyan-solid: #216d7c;
+  --classic-amber-solid: #815921;
+  --classic-blue-solid: #28649e;
+}
+:root[data-color-theme="classic"][data-color-mode="dark"] .nav-item {
+  --nav-accent: var(--pink);
+  --nav-soft: color-mix(in srgb, var(--nav-accent) 11%, var(--panel));
+}
+:root[data-color-theme="classic"][data-color-mode="dark"] :is(.nav-dashboard, .nav-video-workbench) { --nav-accent: var(--blue); }
+:root[data-color-theme="classic"][data-color-mode="dark"] .nav-story { --nav-accent: var(--teal); }
+:root[data-color-theme="classic"][data-color-mode="dark"] .nav-director { --nav-accent: var(--pink); }
+:root[data-color-theme="classic"][data-color-mode="dark"] :is(.nav-storyboard, .nav-rules) { --nav-accent: var(--violet); }
+:root[data-color-theme="classic"][data-color-mode="dark"] .nav-image { --nav-accent: var(--amber); }
+:root[data-color-theme="classic"][data-color-mode="dark"] .nav-assets { --nav-accent: var(--green); }
+:root[data-color-theme="classic"][data-color-mode="dark"] .nav-settings { --nav-accent: var(--cyan); }
+:root[data-color-theme="classic"][data-color-mode="dark"] .nav-item.active { color: var(--nav-accent); background: var(--nav-soft); border-color: color-mix(in srgb, var(--nav-accent) 38%, var(--line)); }
+:root[data-color-theme="classic"][data-color-mode="dark"] .nav-item:hover { background: color-mix(in srgb, var(--nav-accent) 17%, var(--panel)); }
+
+:root[data-color-theme="classic"][data-color-mode="dark"] .btn.top-action-card {
+  --top-action-accent: var(--violet);
+  --top-action-surface: color-mix(in srgb, var(--top-action-accent) 11%, var(--panel));
+  background: var(--top-action-surface);
+  border-color: color-mix(in srgb, var(--top-action-accent) 38%, var(--line));
+}
+:root[data-color-theme="classic"][data-color-mode="dark"] .btn.top-action-library { --top-action-accent: var(--blue); }
+:root[data-color-theme="classic"][data-color-mode="dark"] .btn.top-action-import { --top-action-accent: var(--teal); }
+:root[data-color-theme="classic"][data-color-mode="dark"] .btn.top-action-export { --top-action-accent: var(--amber); }
+:root[data-color-theme="classic"][data-color-mode="dark"] .btn.top-action-settings { --top-action-accent: var(--cyan); }
+:root[data-color-theme="classic"][data-color-mode="dark"] .btn.top-action-recovery.danger { --top-action-accent: var(--danger); }
+:root[data-color-theme="classic"][data-color-mode="dark"] .btn.top-action-card:hover { background: color-mix(in srgb, var(--top-action-accent) 17%, var(--panel)); border-color: var(--top-action-accent); }
+:root[data-color-theme="classic"][data-color-mode="dark"] .ui-settings-trigger { color: var(--cyan); background: var(--info-soft); border-color: color-mix(in srgb, var(--cyan) 38%, var(--line)); }
+:root[data-color-theme="classic"][data-color-mode="dark"] .ui-settings-trigger:hover { background: color-mix(in srgb, var(--cyan) 17%, var(--panel)); }
+
+:root[data-color-theme="classic"][data-color-mode="dark"] :is(.segment.active.violet, .generation-task-tab.active[data-task-category="video"], .result-language-card.active.en) { background: var(--classic-violet-solid); border-color: var(--classic-violet-solid); color: var(--on-accent); }
+:root[data-color-theme="classic"][data-color-mode="dark"] :is(.segment.active.cyan, .generation-task-tab.active[data-task-category="autofill"], .vwm-dialog .btn.primary) { background: var(--classic-cyan-solid); border-color: var(--classic-cyan-solid); color: var(--on-accent); }
+:root[data-color-theme="classic"][data-color-mode="dark"] .segment.active.amber { background: var(--classic-amber-solid); border-color: var(--classic-amber-solid); color: var(--on-accent); }
+:root[data-color-theme="classic"][data-color-mode="dark"] .vwb-tab.active { background: var(--classic-blue-solid); border-color: var(--classic-blue-solid); color: var(--on-accent); }
+:root[data-color-theme="classic"][data-color-mode="dark"] .badge.violet { color: var(--violet); background: color-mix(in srgb, var(--violet) 11%, var(--panel)); border-color: color-mix(in srgb, var(--violet) 35%, var(--line)); }
+:root[data-color-theme="classic"][data-color-mode="dark"] .result-language-card.en { color: var(--violet); background: color-mix(in srgb, var(--violet) 11%, var(--panel)); border-color: color-mix(in srgb, var(--violet) 35%, var(--line)); }
+:root[data-color-theme="classic"][data-color-mode="dark"] .result-language-card.active.en { color: var(--on-accent); background: var(--classic-violet-solid); border-color: var(--classic-violet-solid); }
+:root[data-color-theme="classic"][data-color-mode="dark"] :is(.result-language-card.zh:disabled, .result-language-card.en:disabled) { color: var(--faint); background: var(--panel-3); border-color: var(--line); }
+:root[data-color-theme="classic"][data-color-mode="dark"] :is(.update-log-trigger, .update-log-trigger:hover, .update-log-version) { color: var(--violet); background: color-mix(in srgb, var(--violet) 11%, var(--panel)); border-color: color-mix(in srgb, var(--violet) 35%, var(--line)); }
+:root[data-color-theme="classic"][data-color-mode="dark"] :is(.update-log-entry-head strong, .sequence-control-card > label, .chapter-row-main strong) { color: var(--violet); }
+
+:root[data-color-theme="classic"][data-color-mode="dark"] :is(.api-tone-amber, .api-tone-pink, .api-tone-cyan, .api-tone-violet, .director-setup-section, .timing-parameter-card, .rule-tabs .rule-tab) { --classic-tone: var(--violet); }
+:root[data-color-theme="classic"][data-color-mode="dark"] :is(.api-tone-amber, .director-setup-section.tone-style, .rule-tabs .rule-tab:nth-child(5)) { --classic-tone: var(--amber); }
+:root[data-color-theme="classic"][data-color-mode="dark"] .timing-parameter-card.duration-card { --classic-tone: var(--pink); }
+:root[data-color-theme="classic"][data-color-mode="dark"] :is(.api-tone-pink, .director-setup-section.tone-timing, .rule-tabs .rule-tab:nth-child(4)) { --classic-tone: var(--pink); }
+:root[data-color-theme="classic"][data-color-mode="dark"] :is(.api-tone-cyan, .director-setup-section.tone-motion, .rule-tabs .rule-tab:nth-child(3)) { --classic-tone: var(--cyan); }
+:root[data-color-theme="classic"][data-color-mode="dark"] :is(.timing-parameter-card.seconds-card, .rule-tabs .rule-tab:nth-child(1)) { --classic-tone: var(--blue); }
+:root[data-color-theme="classic"][data-color-mode="dark"] :is(.timing-parameter-card.count-card, .rule-tabs .rule-tab:nth-child(6)) { --classic-tone: var(--teal); }
+:root[data-color-theme="classic"][data-color-mode="dark"] :is(.api-tone-amber, .api-tone-pink, .api-tone-cyan, .api-tone-violet, .director-setup-section, .timing-parameter-card, .rule-tabs .rule-tab) { background: color-mix(in srgb, var(--classic-tone) 5%, var(--panel)); border-color: color-mix(in srgb, var(--classic-tone) 28%, var(--line)); }
+:root[data-color-theme="classic"][data-color-mode="dark"] .rule-tabs .rule-tab.active { color: var(--classic-tone); background: color-mix(in srgb, var(--classic-tone) 11%, var(--panel)); border-color: var(--classic-tone); box-shadow: inset 3px 0 0 var(--classic-tone); }
+:root[data-color-theme="classic"][data-color-mode="dark"] .timing-parameter-card { --timing-accent: var(--classic-tone); --timing-soft: color-mix(in srgb, var(--classic-tone) 8%, var(--panel)); }
+
+:root[data-color-theme="classic"][data-color-mode="dark"] .director-option-card { --option-accent: var(--blue); --option-soft: color-mix(in srgb, var(--option-accent) 10%, var(--panel)); }
+:root[data-color-theme="classic"][data-color-mode="dark"] :is(.director-option-card.tone-orbit, .lighting-option-card.tone-neon) { --option-accent: var(--violet); }
+:root[data-color-theme="classic"][data-color-mode="dark"] :is(.director-option-card.tone-aerial, .lighting-option-card.tone-weather) { --option-accent: var(--cyan); }
+:root[data-color-theme="classic"][data-color-mode="dark"] .director-option-card.tone-follow { --option-accent: var(--teal); }
+:root[data-color-theme="classic"][data-color-mode="dark"] :is(.director-option-card.tone-focus, .lighting-option-card.tone-warm, .lighting-option-card.tone-studio) { --option-accent: var(--amber); }
+:root[data-color-theme="classic"][data-color-mode="dark"] .director-option-card.tone-view { --option-accent: var(--pink); }
+:root[data-color-theme="classic"][data-color-mode="dark"] .director-option-card.tone-camera { --option-accent: var(--muted); }
+:root[data-color-theme="classic"][data-color-mode="dark"] .lighting-option-card.tone-fire { --option-accent: var(--coral); }
+:root[data-color-theme="classic"][data-color-mode="dark"] :is(.director-option-card, .compact-option-grid .director-option-card) { color: var(--option-accent); background: var(--panel); border-color: color-mix(in srgb, var(--option-accent) 28%, var(--line)); }
+:root[data-color-theme="classic"][data-color-mode="dark"] :is(.director-option-card:hover, .compact-option-grid .director-option-card:hover, .director-option-card.selected, .compact-option-grid .director-option-card.selected) { color: var(--option-accent); background: var(--option-soft); border-color: var(--option-accent); }
+:root[data-color-theme="classic"][data-color-mode="dark"] .director-option-card.selected .director-option-check { background: color-mix(in srgb, var(--option-accent) 42%, #10151b); color: var(--on-accent); }
+
+/* Both sequence strips share a legacy white chip background. This dark-only
+   baseline stays below the existing hover/active rules in the cascade. */
+:root[data-color-mode="dark"] .sequence-segment-chip {
+  color: var(--text);
+  background: var(--panel-2);
+  border-color: var(--line);
+}
+
+/* Appearance preferences: small readable choices with a sample palette. */
+.ui-settings-modal { width: min(560px, 100%); max-height: calc(100dvh - 28px); display: flex; flex-direction: column; gap: 10px; overflow-x: hidden; overflow-y: auto; }
+.ui-settings-modal > :is(.ui-settings-head, .ui-appearance-section, .ui-settings-font-group, .ui-settings-footer) { flex: 0 0 auto; }
+.ui-settings-modal .ui-settings-font-group { overflow: visible; gap: 8px; padding: 10px; }
+.ui-settings-modal .ui-settings-footer { padding-top: 9px; }
+.ui-appearance-section { min-width: 0; display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.ui-appearance-section > strong { color: var(--text); }
+.ui-color-mode-options { display: flex; flex-wrap: wrap; gap: 6px; }
+.ui-color-mode-options > button { flex: 1 1 100px; min-width: 0; }
+:root[data-color-mode] .ui-color-mode-options > .btn[aria-pressed="true"] { color: var(--appearance-on-accent, var(--on-accent)); background: var(--appearance-solid, var(--accent-solid)); border-color: var(--appearance-solid, var(--accent-solid)); font-weight: 600; }
+.ui-theme-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; min-width: 0; }
+.ui-theme-choice { position: relative; min-width: 0; display: flex; flex-direction: column; align-items: stretch; justify-content: center; gap: 6px; padding: 7px 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); color: var(--text); text-align: left; font-size: calc(11px * var(--ui-font-scale, 1)); line-height: 1.35; }
+.ui-theme-choice > span:not(.ui-theme-swatch) { padding-right: 18px; overflow-wrap: anywhere; }
+.ui-theme-choice > svg { position: absolute; right: 8px; bottom: 8px; color: var(--appearance-accent, var(--accent)); }
+.ui-theme-choice:hover { border-color: var(--appearance-line, var(--accent-line)); background: var(--appearance-hover, var(--accent-hover)); }
+.ui-theme-choice[aria-pressed="true"] { border-color: var(--appearance-accent, var(--accent)); background: var(--appearance-soft, var(--accent-soft)); box-shadow: inset 0 0 0 1px var(--appearance-accent, var(--accent)); }
+.ui-theme-choice[aria-pressed="true"] > span:not(.ui-theme-swatch) { color: var(--appearance-accent, var(--accent)); font-weight: 600; }
+.ui-theme-swatch { min-width: 0; height: 22px; display: grid; grid-template-columns: 1fr 1fr 1fr; overflow: hidden; border: 1px solid rgb(127 127 127 / 25%); border-radius: 4px; background: var(--theme-preview-bg); }
+.ui-theme-swatch i { display: block; min-width: 0; height: 100%; }
+.ui-theme-swatch i:nth-child(1) { background: var(--theme-preview-bg); }
+.ui-theme-swatch i:nth-child(2) { background: var(--theme-preview-panel); }
+.ui-theme-swatch i:nth-child(3) { background: var(--theme-preview-accent); }
+@media (max-width: 640px) { .ui-theme-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }

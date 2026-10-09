@@ -1402,7 +1402,9 @@ export interface AppSettings {
   assetFilter: ReferenceMediaType | 'all';
   autoBackup: boolean;
   restorePointLimit: number;
-  theme: 'ink' | 'light';
+  /** "ink" is a legacy light appearance, normalized when old settings are read. */
+  theme: 'ink' | import('./appTheme').AppColorMode;
+  themeColor?: import('./appTheme').AppColorTheme;
   /** Global renderer font scale. 100 keeps the original typography size. */
   uiFontScalePercent: number;
 }

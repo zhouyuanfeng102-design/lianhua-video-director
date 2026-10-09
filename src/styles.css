@@ -721,12 +721,20 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
 .image-task-prompt-config strong { color: var(--muted); font-weight: 600; }
 .image-job-summary { min-width: 0; display: flex; align-items: flex-start; gap: 9px; }
 .image-job-preview { width: 56px; height: 56px; flex: 0 0 56px; border-radius: 7px; border: 1px solid var(--line); object-fit: cover; background: #f6f7f9; }
-.regeneratable-image-task > .job-card-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 14px; }
+.regeneratable-image-task { container-type: inline-size; }
+.regeneratable-image-task > .job-card-header { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(220px, 1fr) auto; gap: 10px 14px; }
 .regeneratable-image-task .job-card-actions { display: grid; grid-template-columns: repeat(2, max-content); gap: 6px; justify-self: end; align-content: start; }
 .regeneratable-image-task .image-regenerate-button { grid-column: 1 / -1; justify-self: stretch; }
 .regeneratable-image-task .job-card-copy strong { overflow-wrap: anywhere; }
+.image-task-prompt-panel { min-width: 0; height: 128px; display: grid; grid-template-rows: auto minmax(0, 1fr); overflow: hidden; border: 1px solid var(--line); border-radius: 7px; background: var(--panel-2); }
+.image-task-prompt-title { padding: 6px 9px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: calc(10px * var(--ui-font-scale, 1)); font-weight: 600; }
+.image-task-prompt-content { min-width: 0; min-height: 0; padding: 7px 9px; overflow-y: auto; overflow-x: hidden; overscroll-behavior: contain; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--muted); font-size: calc(10px * var(--ui-font-scale, 1)); line-height: 1.5; }
+.image-task-prompt-content:focus-visible { outline: 2px solid var(--pink); outline-offset: -2px; }
+@container (max-width: 760px) {
+  .regeneratable-image-task > .job-card-header { grid-template-columns: minmax(0, 1fr) minmax(200px, 1fr); }
+  .regeneratable-image-task .job-card-actions { grid-column: 1 / -1; justify-self: start; display: flex; flex-wrap: wrap; justify-content: flex-start; }
+}
 @media (max-width: 900px) {
-  .regeneratable-image-task > .job-card-header { grid-template-columns: minmax(0, 1fr); }
   .generation-task-category-summary { align-items: flex-start; flex-direction: column; }
   .video-task-batch-header { grid-template-columns: minmax(0, 1fr); }
   .video-task-batch-actions { justify-content: flex-start; }
@@ -2579,6 +2587,12 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
 .asset-page-grid .asset-info { padding: 6px 7px; }
 .asset-page-grid .asset-info strong { white-space: normal; overflow-wrap: anywhere; line-height: 1.4; }
 .asset-page-grid .asset-info small { margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.asset-metadata-details { margin-top: 4px; font-size: calc(10px * var(--ui-font-scale, 1)); }
+.asset-metadata-details > summary { padding: 3px 0; color: var(--muted); cursor: pointer; }
+.asset-metadata-details > summary:hover { color: var(--pink-strong); }
+.asset-metadata-details > summary:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; border-radius: 3px; }
+.asset-metadata-content { margin-top: 2px; padding: 2px 7px 5px; border-left: 2px solid var(--line); }
+.asset-page-grid .asset-metadata-content small { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
 .asset-page-grid .asset-info small.asset-regeneration-issue { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; color: #96394a; }
 .asset-page-grid .asset-actions { margin-top: 5px; }
 
