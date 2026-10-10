@@ -3,6 +3,7 @@ import { officialH3ContextForStoryboard } from './officialH3Context';
 import { getOfficialSeedanceSourceFingerprint, type OfficialSeedancePromptInput } from './seedancePrompt';
 import { getVideoPromptInstructionLeak } from './videoPromptInstructionLeak';
 import type { Project, Storyboard } from './types';
+import { buildVideoSceneContext } from './videoSceneContext';
 
 /** Generation, copying and video source selection share this exact evidence snapshot. */
 export const buildOfficialSeedanceInput = (project: Project, board: Storyboard): OfficialSeedancePromptInput => {
@@ -20,6 +21,8 @@ export const buildOfficialSeedanceInput = (project: Project, board: Storyboard):
     resolution: board.promptPlan?.resolution || board.resolution,
     audioMode: board.promptPlan?.audioMode || board.audioMode,
     references,
+    sceneContext: buildVideoSceneContext({ board, locations: context.locations, scenes: project.scenes,
+      assets: context.assets, references, chapterId: board.chapterId }),
     subjectDefinitions: buildOfficialH3SubjectDefinitions(board, context, references),
     shotPrivateDetails: buildOfficialH3CompileInput(board, context).shotPrivateDetails,
     detailMode: 'director', targetId: 'seedance-2.5',

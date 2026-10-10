@@ -1,4 +1,5 @@
 import { SPATIAL_COORDINATE_RULE, SPATIAL_CONTINUITY_REVIEW_RULE, SPATIAL_TRANSLATION_RULE } from './spatialContinuityRules';
+import { VIDEO_INTERACTION_RULES, VIDEO_INTERACTION_TRANSLATION_RULE } from './videoInteractionRules';
 
 /**
  * Request-time directing instructions, shared by planning and AI review.
@@ -11,6 +12,7 @@ export const VIDEO_WORLD_SPACE_CAMERA_RULE = [
   '先区分世界空间与镜头空间，再逐镜落实：世界空间记录起点、当前所在路段、目的地、地标相对位置、人物身体朝向与视线目标；镜头空间记录摄影机相对人物的位置、朝向、运动轨迹、轴线一侧及画面中的运动方向。行进路线和目的地不等于摄影机朝向，也不等于人物背后可见的背景。正面跟拍可以是摄影机位于人物前方并向后退拍，人物继续向目的地前进，不代表人物掉头或倒走；此时背景应来自人物身后、摄影机实际视野所及的路段，不能仅因人物将到达某地就把该目的地凭空换成背后背景。随真实行进、道路转折、空间包围或有交代的机位变化，背景可以合理改变，不把所有背景变化都判成错误。每次切镜核对景别、视线与地标的实际可见性，保持人物世界中的路线和同伴关系，不能只写“轴线一致”而让空间事实互相矛盾。需要变换正背面、机位侧别或屏幕运动方向时，用当前镜头内清楚的机位关系、可见摄影机运动、规划允许的衔接镜头或原文明确的转场建立关系；摄影机换位不等于人物转身，不为修复空间虚构掉头、瞬移、时间跳跃或新路线。未知布局可在规划时合理安排并持续承接，不能声称未知布局来自未见参考图。',
   SPATIAL_COORDINATE_RULE,
   SPATIAL_CONTINUITY_REVIEW_RULE,
+  VIDEO_INTERACTION_RULES,
 ].join('\n\n');
 
 export const VIDEO_AI_SHOT_COVERAGE_RULE = '镜数与覆盖方式由你先分析剧情信息、动作因果、对白回应、空间变化、情绪转折和可用时长后决定，不默认三镜、不为凑固定镜数机械等分，也不因每句对白或每个人物都必须露正脸而切镜。规划阶段在用户指定镜数或允许范围内，选择足以清楚表现当前剧情的镜头数量；自动模式按需要决定镜数与镜长，在规划JSON已有reason（保存后对应shotCountReason）和每镜purpose/transition说明具体依据，不新增JSON属性，也不只复述“电影感”。分段时长窗口不等于一个镜头：15秒可以包含多个有叙事动机的镜头，先安排完整对白区间、换人交接和必要动作，再选择覆盖方式，不先把每段做成一镜后硬塞全部事件。多人轮流接话时明确当前具名发话者和口型可见性，可采用关系构图、说话者中近景或单镜内有动机的关注转移；观察重点须与当前话轮和动作一致，不让后面的亲吻提前成为开场正在执行的焦点。一个连续镜头可以成立，有必要的信息揭示、反应或空间建立也可以拆镜，不为镜头多样性制造事件。选择建立空间、双人关系、侧面行进、背后跟随、主观观察或反应近景等覆盖方式须服务当前情节，不把这些例子变成每段必做清单；对白不自动等于正面面部近景，正面跟拍也不被一律禁止。转换、H3复核和翻译阶段若镜数与时间边界已经确认，则保留既定镜数、顺序和切点，在现有镜头内改善调度，不借自主导演之名重切整段或裁掉对白。';
@@ -26,6 +28,7 @@ export const VIDEO_ACTING_CAMERA_REVIEW_RULE = '提交前由同一AI对照当前
 export const VIDEO_ACTING_CAMERA_TRANSLATION_RULE = [
   '英文翻译与其AI复核以已确认中文H3为唯一执行稿，忠实保留逐镜表演幅度、触发和回落、说话与倾听归属、世界路线、人物朝向、机位视向、可见背景、运镜目的及光源关系。不要把克制译成expressionless/rigid，不把自然回应强化为overacting；准确区分人物向目的地前进与摄影机向后退拍，不把人物前方目的地译为其背后背景。保留中文已经明确的强烈情绪或静止状态，不额外减弱或夸张。只修复翻译遗漏与歧义，不另作镜数、机位、剧情或光影设计，不改变H3 section、参考标签、[Shot N]和At切点，也不新增审核字段。',
   SPATIAL_TRANSLATION_RULE,
+  VIDEO_INTERACTION_TRANSLATION_RULE,
 ].join('\n\n');
 
 /** Translation adds its fidelity rule separately; it does not re-plan shots. */

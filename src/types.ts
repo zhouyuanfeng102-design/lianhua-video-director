@@ -1281,7 +1281,7 @@ export interface ImageApiConfig {
   apiKey: string;
   model: string;
   /** Explicit transport selection for providers exposed through the image API entry. */
-  imageProtocol?: 'openai-compatible' | 'openai-images' | 'gemini' | 'xai';
+  imageProtocol?: 'openai-compatible' | 'openai-images' | 'openai-chat' | 'gemini' | 'xai';
   imageResolutionProfile?: 'auto' | 'pixel-long-edge' | 'gpt-image-legacy' | 'gpt-image-modern' | 'gemini-k' | 'gemini-1k' | 'grok-k';
   imageSupportedResolutions?: Array<'1K' | '2K' | '4K'>;
   imagePixelStep?: number;

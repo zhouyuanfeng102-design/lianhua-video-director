@@ -107,6 +107,8 @@ const translations: ReadonlyArray<readonly [RegExp, string | ((...matches: strin
   [/您的请求无法用于生成图像[。.!！]?\s*该请求可能因安全政策被拦截[，,]?\s*或不适合进行图像生成[。.!！]?/iu,
     '上游图像接口返回了内容安全拒绝（不是本地提交前门禁），请调整提示词或更换支持该内容的图像后端'],
   [/Upstream did not return the expected image\.?/giu, '上游服务未返回预期图像'],
+  [/\bnot supported model for image generation,\s*only imagen models are supported\b\.?(?:\s*\(request[ _-]*id:\s*([A-Za-z0-9._:-]{1,200})\))?/giu,
+    (_whole, requestId) => `当前图片接口不支持该香蕉模型，只支持另一类谷歌生图模型；中转香蕉请选择“聊天生图兼容（香蕉）”协议，谷歌官方服务请选择原生生图协议${requestId ? `（请求编号：${requestId}）` : ''}`],
   // Do not translate the HTTP marker again inside an already Chinese-labelled
   // status such as “请求受到限流（HTTP 429）”. Logs may be formatted twice.
   [/\b(?:request failed with status code\s+(\d{3})|(?<![\u3400-\u9fff]（)HTTP[ /]*(\d{3})(?:\s+(?:Bad Request|Unauthorized|Forbidden|Not Found|Request Timeout|Conflict|Payload Too Large|Unsupported Media Type|Unprocessable Entity|Too Many Requests|Internal Server Error|Bad Gateway|Service Unavailable|Gateway Timeout))?)\b\.?/giu,
@@ -241,6 +243,7 @@ const unknownEnglishIndex = (value: string): number => {
   const schemaAware = /AI交付|本次交付|交付对象|本轮已声明|本地交付数据校验/u.test(value)
     ? value.replace(/\b(?:identityBindings|shotMetadata|shotSourceIds|canonicalPrompt|h3Prompt|metadataPatch|characters)\b(?:\.[A-Za-z_][A-Za-z0-9_]*|\[\d+\])*/gu, blanks) : value;
   const remaining = maskGenerationStructureDiagnostics(maskSemanticSequenceDiagnostics(schemaAware, blanks), blanks)
+    .replace(/（请求编号：[A-Za-z0-9._:-]{1,200}）/gu, blanks)
     .replace(/人物“[^”\r\n]+”的原名或 Subject \/ 声源编号被改变，须保留已确认映射/gu, blanks)
     .replace(/\b(?:RunningHub|ZIP|ZIP64|CRC|CRC32|FFmpeg|FFprobe|MOV|WebM|Deflate)\b/giu, blanks)
     .replace(/\b(?:application|video|audio|text)\/[A-Za-z0-9.+-]+/gu, blanks)

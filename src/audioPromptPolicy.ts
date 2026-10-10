@@ -1,3 +1,5 @@
+import { STORY_SPOKEN_CONTENT_RULE } from './videoInteractionRules';
+
 /** Shared generation rule; this changes sound design, never sampler settings. */
 export const DIALOGUE_LANGUAGE_RULE = '提示词的描述语言不等于人物说话的语言。已有对白保留原字、原语言、原说话人和原顺序；原中文对白不能因为界面选择 English、模型使用英文提示词或要求英文描述就改成英语。原文明确要求某句用英语说、英文对白或其他语种时，必须在该句台词或音效对白的说话人旁紧邻保留语种标注（如“对白语言：英语”），不能丢成没有语种依据的普通台词。未明确要求英文对白时不得擅自改为英文，人物姓名和代号也不作意译。';
 
@@ -18,7 +20,7 @@ export const VISUAL_IDENTITY_SPEECH_SCOPE_RULE = '视觉身份与可发声文本
 
 /** No dialogue is a timed performance constraint, not a request to mute
  * authored effects or freeze natural expressions and mouth movements. */
-export const NO_DIALOGUE_PERFORMANCE_RULE = '无对白必须成为实际交付正文中的全时段表演约束，不能只写一个容易被忽略的“台词：无/Dialogue: none”：某镜无对白时，从该镜起点到镜尾都不说话；整段无对白时，从0秒到该段结束（包括最后几秒）都不说话，不新增喊名、含混交谈、耳语、旁白或说话口型，不能在片尾自行补一句。原剧情只有交谈/催促概述而没有具体原话，不得由此编词或用含混交谈填空；仅当原稿明确要求不可辨词汇的人声，且该区间没有明确要求无对白时，才按原意保留这种声音，不赋予任何可辨词句或姓名。无对白不等于整轨静音：保留原剧情明确的笑声、咳嗽、哭泣等非语言声及必要动作声，不自行补声；没有说话口型不等于嘴唇永久闭合或表情冻结，仍保留剧情合理的微笑、亲吻、进食等非说话动作。无对白约束只覆盖原定无对白区间，不删其它镜头或其它时刻的真实台词。';
+export const NO_DIALOGUE_PERFORMANCE_RULE = '无对白必须成为实际交付正文中的全时段表演约束，不能只写一个容易被忽略的“台词：无/Dialogue: none”：某镜无对白时，从该镜起点到镜尾都不说话；整段无对白时，从0秒到该段结束（包括最后几秒）都不说话，不新增喊名、含混交谈、耳语、旁白或说话口型，不能在片尾自行补一句。逐镜以具名人物和真实行为正向表达沉默：他/她正在看向谁、观察什么、怎样继续防守/躲闪/移动或倾听，在自己的真实发话区间之外保持非说话状态，不把可见正脸、停顿、思考、用力或镜头推近当成开始发话的提示。原文没有该人物台词时，不借情绪、战斗、技能动作或音频参考的音色补可辨词句、拟造外语、持续低语或含混交谈；也不让此人替另一人的台词做口型。沉默人的注意与动作仍随当前事件推进，不写成面向观众等待开口，不强迫全程闭嘴僵住或固定表情。原剧情只有交谈/催促概述而没有具体原话，不得由此编词或用含混交谈填空；仅当原稿明确要求不可辨词汇的人声，且该区间没有明确要求无对白时，才按原意保留这种声音，不赋予任何可辨词句或姓名。无对白不等于整轨静音：保留原剧情明确的笑声、咳嗽、哭泣等非语言声及必要动作声，不自行补声；没有说话口型不等于嘴唇永久闭合或表情冻结，仍保留剧情合理的微笑、亲吻、进食等非说话动作。无对白约束只覆盖原定无对白区间，不删其它镜头或其它时刻的真实台词。';
 
 /** Model-authored staging, not a local duration formula, speech detector or
  * acceptance gate. Planning may allocate time; translation cannot re-plan. */
@@ -27,7 +29,7 @@ export const DIALOGUE_PERFORMANCE_TIMING_RULE = '新剧情规划及获准重新�
 /** Dialogue is authored story data, not a sound-effect summary.  Keep this
  * contract separate so every text-model entry point can carry it without
  * changing the H3 transport shape or adding a local semantic gate. */
-export const DIALOGUE_DELIVERY_RULE = `对白交付必须以完整原剧情为准：逐句保留原话、原语言、原说话人和原顺序，不能把“催促声/回应声/女性声音”等概括改成模型自行编写的台词。每句对白只能归属一个明确说话人（原稿明确齐声时保留其具名声源集合）；该句期间只有对应说话人发声或做对应口型，其他人物只按剧情安排倾听、反应或行动。明确画内、背影、画外、通信或心灵声源；人物不在画面中也不得换成当前主体代说。原文没有可辨识台词时不得补出可辨词句，不新增旁白、画外解释、拟声词或即兴台词；原定无对白区间写“台词：无”或等价无对白指令。只有用户明确授权扩写对白时才由AI补写，并仍标明唯一说话人。${DIALOGUE_PERFORMANCE_TIMING_RULE}${VISUAL_IDENTITY_SPEECH_SCOPE_RULE}${NO_DIALOGUE_PERFORMANCE_RULE}保持原语种，不因 English 提示词翻译中文对白，不把台词改写成音效摘要。由AI在交付前自行核对说话人、台词原字、语种、顺序、时间和口型并修复，不能依赖本地关键词拦截。`;
+export const DIALOGUE_DELIVERY_RULE = `对白交付必须以完整原剧情为准：先理解原文真实发声内容，再逐句保留原话、原语言、原说话人和原顺序，不能把“催促声/回应声/女性声音”等概括改成模型自行编写的台词。${STORY_SPOKEN_CONTENT_RULE}每句对白只能归属一个明确说话人（原稿明确齐声时保留其具名声源集合）；该句期间只有对应说话人发声或做对应口型，其他人物只按剧情安排倾听、反应或行动。明确画内、背影、画外、通信或心灵声源；人物不在画面中也不得换成当前主体代说。原文没有可辨识台词时不得补出可辨词句，不新增旁白、画外解释、拟声词或即兴台词；原定无对白区间写“台词：无”或等价无对白指令。只有用户明确授权扩写对白时才由AI补写，并仍标明唯一说话人。${DIALOGUE_PERFORMANCE_TIMING_RULE}${VISUAL_IDENTITY_SPEECH_SCOPE_RULE}${NO_DIALOGUE_PERFORMANCE_RULE}保持原语种，不因 English 提示词翻译中文对白，不把台词改写成音效摘要。由AI在交付前自行核对说话人、台词原字、语种、顺序、时间和口型并修复，不能依赖本地关键词拦截。`;
 
 /** Final text-model delivery, not an extra section or local semantic gate. */
 export const AUDIO_H3_DELIVERY_RULE = '声音要求必须落实在本次实际交付的正文，不能只留在分析或审核说明里。新生成或主动重新生成时默认仅保留剧情内对白、明确环境声和动作声：non_diegetic_music固定写N/A，并在逐镜声音中明确不自动补背景音乐；不要因为场景、天气、情绪、风格或普通动作自行选择BGM。只有用户在本次请求中明确要求非叙事配乐，才在non_diegetic_music中写具体音乐、适用镜头和极低存在感，并让位于对白与关键动作声。若本次明确是格式修复、参考图更新或上下段衔接修复，才可保留已有确认的配乐选择、声源、音量与进退安排，不重新配乐。H3字段职责必须分开：overall_soundscape只写整段范围的简短剧情内环境/声景摘要，只有有剧情依据的跨镜声床才进入该字段；没有全局声床就写N/A，不把只在某镜或本段后半程出现的环境声提升为全程背景，可保留一句必要的全局“不自动补背景音乐/不添加填充底噪”说明。同一声源不能在镜内和overall_soundscape重复铺设；跨镜声床的全局摘要与镜内变化指向同一声音，不是两层叠加。局部环境声的出现、结束和听觉距离保留在对应镜内，“远处、轻微、低响”不能替代时段与范围；有依据的瀑布、风雨等声音不能因为overall_soundscape=N/A而删除。具体对白原字、唯一说话人、声源编号、逐镜无对白、咳嗽/动作声的镜内时刻、口型与听者、逐镜禁止项全部写在对应[Shot N]的integrated_multimodal_description或full-reference的detailed_description中，不能搬进overall_soundscape。不得在overall_soundscape中列Shot编号、对白复述、声源分配、镜内时序或长篇否定清单。不得新增negative_prompt、negative、反向提示词或其它声音section；non_diegetic_music无用户本次明确授权时固定为N/A。对白必须逐字、唯一说话人、原语言、原顺序和明确声源；“催促声/回应声”不能代替原台词，没有原台词不创造可辨词句，原定无对白区间保持全程无对白，不让视频模型即兴编词。audioMode为none时保持无音轨设计，不添加音乐、对白声或动作声。保持原有H3字段名称与顺序、对白及说话人，镜数与切点保持已确认排程；仅本次指令明确授权taskAuthority=current-segment-staging-replan时，镜数与切点以同时交付的修正canonicalPrompt为准，用户固定段长与exact镜数仍不变。不增加混音章节、增益参数或规则清单；普通六字段输出仍用原音效字段，不改成H3。';

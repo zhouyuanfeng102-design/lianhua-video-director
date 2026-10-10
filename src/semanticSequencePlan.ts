@@ -8,6 +8,7 @@ import type {
 } from './types';
 import { buildVideoCreativeDirection, normalizeVideoCreativeDirection } from './videoCreativeDirection';
 import type { VideoCreativeDirection } from './videoCreativeDirection';
+import type { VideoSceneContext } from './videoSceneContext';
 
 export interface SemanticSequencePlanningInput {
   title: string;
@@ -24,6 +25,8 @@ export interface SemanticSequencePlanningInput {
   /** Original novel paired with this adopted visual-description story. */
   originalSourceContext?: StoryVisualConversionSnapshot;
   sourceSceneIds?: readonly string[];
+  /** Current public layout/reference evidence for this request; not persisted in the plan. */
+  sceneContext?: VideoSceneContext;
   shotMode?: ShotMode;
   shotCount?: number;
 }
@@ -219,6 +222,7 @@ export const copySemanticSequencePlanningInput = (input: SemanticSequencePlannin
     creativeDirection: buildVideoCreativeDirection(input.creativeDirection),
     ...(input.pacing ? { pacing: copyPacing(input.pacing) } : {}),
     characterContinuity: copyCharacters(input.characterContinuity), sourceSceneIds: [...(input.sourceSceneIds ?? [])],
+    ...(input.sceneContext ? { sceneContext: structuredClone(input.sceneContext) } : {}),
     ...(input.originalSourceContext ? { originalSourceContext: normalizeStoryVisualConversionSnapshot(input.originalSourceContext)! } : {}),
     ...(input.shotMode !== undefined ? { shotMode: input.shotMode } : {}),
     ...(input.shotCount !== undefined ? { shotCount: input.shotCount } : {}),
@@ -650,6 +654,7 @@ export interface SemanticSegmentSourceContext {
     sourceStoryContent: string;
     originalSourceContext?: StoryVisualConversionSnapshot;
     characterIdentities: Array<Pick<SemanticSequenceCharacter, 'name' | 'id' | 'aliases'>>;
+    sceneContext?: VideoSceneContext;
     instruction: string;
   };
   /** Explicit user edits take precedence without rewriting original evidence. */
@@ -663,7 +668,7 @@ export interface SemanticSegmentSourceContext {
 
 /** Assigned events/lines are the only performance scope. The full story is
  * separate read-only context for identity and causality, never segment prose. */
-export const semanticSegmentSourceContext = (plan: VideoSequencePlan, segment: VideoSegment): SemanticSegmentSourceContext => {
+export const semanticSegmentSourceContext = (plan: VideoSequencePlan, segment: VideoSegment, sceneContext?: VideoSceneContext): SemanticSegmentSourceContext => {
   if (!isSemanticSequencePlan(plan) || !plan.semanticPlanningSnapshot || !segment.semanticSource
     || !plan.segments.some((item) => item.id === segment.id)) throw new SemanticSequenceTechnicalError(['缺少当前语义片段来源']);
   const snapshot: SemanticSequencePlanningSnapshot = plan.semanticPlanningSnapshot;
@@ -682,6 +687,7 @@ export const semanticSegmentSourceContext = (plan: VideoSequencePlan, segment: V
     storyUnderstandingContext: {
       usage: 'understanding-only', sourceStoryContent: plan.sourceStoryContent,
       ...(matchingOriginal ? { originalSourceContext: matchingOriginal } : {}),
+      ...(sceneContext ? { sceneContext: structuredClone(sceneContext) } : {}),
       characterIdentities: copyCharacters(snapshot.characterContinuity).map((character) => ({
         name: character.name, ...(character.id ? { id: character.id } : {}),
         ...(character.aliases ? { aliases: [...character.aliases] } : {}),

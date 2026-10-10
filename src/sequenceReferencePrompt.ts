@@ -3,6 +3,7 @@ import { generateSingleSegmentPrompt, type SingleSegmentPromptStage, type Single
 import type { ConfirmedMasterSliceSourceContext } from './confirmedMasterSliceSource';
 import type { SequencePromptHandoffContext } from './sequencePromptHandoff';
 import type { SemanticSegmentSourceContext } from './semanticSequencePlan';
+import type { VideoSceneContext } from './videoSceneContext';
 import { semanticSegmentStoryContent } from './semanticSequencePlan';
 import type { ConverterPreset, RuleSet, Storyboard, VideoSegment, VideoShot } from './types';
 
@@ -15,6 +16,7 @@ export interface RegenerateSequenceReferencePromptInput {
   masterSource?: ConfirmedMasterSliceSourceContext;
   sequenceHandoff?: SequencePromptHandoffContext;
   sequenceSegmentContext?: SemanticSegmentSourceContext;
+  sceneContext?: VideoSceneContext;
   context: OfficialH3ProjectContext;
   converter?: ConverterPreset;
   ruleSet?: RuleSet;

@@ -11,10 +11,13 @@ import { assertVideoPromptHasNoInstructionLeak, isInternalVideoPromptConstraint 
 import { SEEDANCE_CHINESE_WRITER_RULE, SEEDANCE_PROMPT_STRATEGY_VERSION } from './seedancePromptRules';
 import type { Seedance25Output } from './types';
 import { maskVideoPictureReferenceLiterals } from './videoPictureReferences';
+import { VIDEO_SCENE_CONTEXT_RULE, type VideoSceneContext } from './videoSceneContext';
 
 export interface OfficialSeedancePromptInput extends PromptAdapterInput {
   /** Complete read-only story/shot evidence used by this exact generation. */
   sourceEvidence?: Readonly<Record<string, unknown>>;
+  /** Request-only understanding material; excluded from saved source identity. */
+  sceneContext?: VideoSceneContext;
 }
 
 export interface Seedance25PromptCompilation {
@@ -349,6 +352,7 @@ export const generateOfficialSeedancePrompt = async ({ input, request, isCurrent
   const evidence = {
     canonicalPrompt: input.canonicalPrompt,
     sourceEvidence: input.sourceEvidence,
+    ...(input.sceneContext ? { sceneContext: structuredClone(input.sceneContext) } : {}),
     specification: { durationSec: metadata.durationSec, aspectRatio: input.aspectRatio, resolution: input.resolution, audioMode: input.audioMode },
     subjectDefinitions: input.subjectDefinitions || [],
     references: input.references || [],
@@ -356,7 +360,7 @@ export const generateOfficialSeedancePrompt = async ({ input, request, isCurrent
     shotPrivateDetails: input.shotPrivateDetails || [],
     constraints: visibleSeedanceConstraints(input.constraints),
   };
-  const response = await request(SEEDANCE_CHINESE_WRITER_RULE,
+  const response = await request(`${SEEDANCE_CHINESE_WRITER_RULE}\n\n${VIDEO_SCENE_CONTEXT_RULE}`,
     `<seedance_source_data>\n${JSON.stringify(evidence, null, 2).replace(/</gu, '\\u003c').replace(/>/gu, '\\u003e')}\n</seedance_source_data>\n依据以上当前证据返回完整 Seedance 中文成稿。`);
   assertSeedanceRequestCurrent(isCurrent);
   const promptZh = cleanSeedancePrompt(response);

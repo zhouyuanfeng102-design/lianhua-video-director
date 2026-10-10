@@ -46,10 +46,12 @@ export default defineConfig({
           ) return 'react-vendor';
           if (normalized.includes('/node_modules/')) return 'vendor';
           if (normalized.endsWith('/src/updateLog.ts')) return 'update-log';
-          // Several eager rule catalogs read these constants at module scope.
-          // Keep them in a dependency-free chunk: the domain fallback imports
-          // those catalogs and would create a startup TDZ through their rules.
-          if (normalized.endsWith('/src/storyCausalityRules.ts')) return 'story-causality';
+          // These catalogs initialize constants from videoInteractionRules at
+          // module scope. Keep both sides of that dependency in the same leaf
+          // chunk; falling back to domain creates a domain -> rules -> domain
+          // cycle and crashes before React can mount its error boundary.
+          if (['storyCausalityRules.ts', 'videoInteractionRules.ts']
+            .some((file) => normalized.endsWith(`/src/${file}`))) return 'story-causality';
           // Size modules read this technical limit during initialization.
           // It has only type imports, so keep it outside domain's runtime cycle.
           if (normalized.endsWith('/src/imageResolution.ts')) return 'image-resolution';
@@ -102,6 +104,10 @@ export default defineConfig({
             'seedancePromptRules.ts',
             'spatialContinuityRules.ts',
             'videoCreativeDirection.ts',
+            // Request-only scene evidence has type imports only. Sharing it
+            // here prevents the LLM and H3/Seedance layers from importing the
+            // renderer/domain chunk merely to read its prompt rule.
+            'videoSceneContext.ts',
             'errorDiagnostics.ts',
             'videoTaskErrorDiagnostics.ts',
             'sequenceDurationContract.ts',

@@ -1,5 +1,7 @@
 import { STORY_CAUSALITY_RULE } from './storyCausalityRules';
 import { VIDEO_ACTION_CAUSALITY_RULE } from './videoActionChoreographyRules';
+import { VIDEO_INTERACTION_RULES } from './videoInteractionRules';
+import { NO_DIALOGUE_PERFORMANCE_RULE } from './audioPromptPolicy';
 
 /** A new strategy expires cached delivery without modifying historical text. */
 export const SEEDANCE_PROMPT_STRATEGY_VERSION = 'seedance-continuous-action-v3';
@@ -9,6 +11,7 @@ export const SEEDANCE_CHINESE_WRITER_RULE = [
   STORY_CAUSALITY_RULE,
   'sourceEvidence.sourceStoryContent 提供当前本段的事件事实，结合当前 canonicalPrompt/confirmed shots 与本段 semanticSource 原文证据理解演出范围。原剧情明确的具名施力者、直接受力物及接触对象、最终具名目标、回应与结果不能被旧稿模糊动作、门口/墙等地标方向或静态构图替代；在本次新稿中将同一事件具体展开，不新增事件。已确认排程仍锁定原起止时间、镜数、顺序和切点，不因补清动作而重排。用户明确编辑、删除或改写的当前剧情优先，包括 contentOverridden=true 的当前正文；旧原文证据不得撤销修改或恢复被删除内容。sourceSceneSnapshots 等只读背景仅用于理解省略施事者、指代和已有因果，不能把其他段事件/对白搬入当前段，不能借背景重排或补演。',
   VIDEO_ACTION_CAUSALITY_RULE,
+  VIDEO_INTERACTION_RULES,
   'SEEDANCE_CONTINUOUS_ACTION_V2：先让施力者、直接受力对象、最终具名目标及接触到运动的因果清楚，再以连贯的整体行动表达持续攻防或连续位移；不能用整体运动概述省略关键肢体作用、实际接触、对象和回应。保留动作需要的支撑、发力、挡闪、重心或位置变化和招式承接，不把每一拳每一步都写成机械的起手—发力—命中—恢复阶段，不用密集子镜、逐秒重复动作配额或大量准备姿态压住持续运动。已有具体关键招式、对象与结果逐项保留，精简的是重复表述，不是剧情和动作。',
   '已确认时间轴是执行依据：保留固定总时长、已有全部镜头起止值、镜数、顺序及原切点，已有小数秒也原值保留，不能四舍五入成整数。整数秒是新规划时可用的时间表达，不是重排当前确认稿的权限。本次只进行目标表达适配，不自动拆段、改时长、删动作或裁对白，不按字数、人物数、动作数限制输出。',
   '只返回六个自然语言章节，顺序为：视频规格、参考素材与职责、主体连续性、一句话概述、连续时间轴、全局约束。不要 JSON、代码围栏、分析、规则正文、审核附录或新的章节。时间轴用源稿的完整起止范围逐镜自然叙述，不新增 H3 的 section、[Shot N]、At 切点、<Subject N>/<Picture N>、<d>、<sound> 或声源编码。源稿已有对白用具名说话人、原语言原字和声音时序自然表述。',
@@ -16,5 +19,6 @@ export const SEEDANCE_CHINESE_WRITER_RULE = [
   'referenceManifest 是本次真实映射。@Image N、@Video N、@Audio N、@Clay Render N 保持其完整类型、空格、编号及对应对象，不改号、不猜号、不补不存在的素材。多人物共用一张图时保持真实绑定，不把人物数当图片数。参考素材与职责逐项写真实 token、名称和简短但准确的职责；长外观、识别证据和详细职责只作为理解材料，避免与主体连续性和时间轴重复。参考图约束身份/服装/场景，不能把静态姿态当动作终点。真实动作视频/音频只按本次确实提供的媒体证据使用；仅有文字标记不证明接口支持上传。',
   '当前镜头原文、已确认进入/退出状态和实际可见范围优先于人物基础 outfit 或静态参考。没有衣物变化依据就保持原有穿着；私密资料只使用本次明确选取且对应镜头需要的必要事实，不把整份档案扩写为画面，不因亲吻、拥抱或隔衣动作补脱衣。',
   '声音服从已确认事件和用户设置，保留每句完整原对白、唯一具名说话人、原语言、順序、发话时段/先后、画内或画外声源、口型和其他人物反应；无对白区间保持，不即兴补词。保持已有环境声和动作声的实际范围、距离及混音，不添加全程填充底噪。无明确本次配乐授权不新增配乐；既有明确配乐保留原范围并让位于对白和动作声。audioMode 为 none 时保留故事及可见口型事实，规格明确无音轨，不创造音轨。',
+  NO_DIALOGUE_PERFORMANCE_RULE,
   '全局约束只写实际画面/连续性/声音要求，不复制内部转换器规则、返回形状或模型指令。在本次已有回答内部核对行动者→动作→对象→回应→接触或落空→位移→承接→结果、原话、时间和真实参考映射后返回最终正文，不追加独立审核调用。',
 ].join('\n\n');

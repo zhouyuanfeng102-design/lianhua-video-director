@@ -2,6 +2,13 @@ import assert from 'node:assert/strict';
 import { SPATIAL_COORDINATE_RULE, SPATIAL_CONTINUITY_REVIEW_RULE, SPATIAL_TRANSLATION_RULE } from '../src/spatialContinuityRules';
 import * as ruleExports from '../src/videoActingCameraRules';
 import {
+  STORY_MOVEMENT_RELATION_RULE, STORY_SPOKEN_CONTENT_RULE,
+  VIDEO_INTERACTION_RULES, VIDEO_INTERACTION_TRANSLATION_RULE,
+} from '../src/videoInteractionRules';
+import { STORY_CAUSALITY_RULE } from '../src/storyCausalityRules';
+import { DIALOGUE_DELIVERY_RULE, NO_DIALOGUE_PERFORMANCE_RULE } from '../src/audioPromptPolicy';
+import { SEEDANCE_CHINESE_WRITER_RULE } from '../src/seedancePromptRules';
+import {
   VIDEO_NATURAL_PERFORMANCE_RULE,
   VIDEO_WORLD_SPACE_CAMERA_RULE,
   VIDEO_AI_SHOT_COVERAGE_RULE,
@@ -189,6 +196,31 @@ test('translation preserves confirmed acting and camera-space distinctions witho
     /不另作镜数、机位、剧情或光影设计/u,
     /不改变H3 section、参考标签、\[Shot N\]和At切点/u,
   ]) assert.match(VIDEO_ACTING_CAMERA_TRANSLATION_RULE, requirement);
+});
+
+test('video and the independent Seedance writer share interaction/distance facts without importing still-frame serialization', () => {
+  for (const bundle of [VIDEO_ACTING_CAMERA_RULES, SEEDANCE_CHINESE_WRITER_RULE]) {
+    assert.equal(bundle.split(VIDEO_INTERACTION_RULES).length - 1, 1);
+    assert.equal(bundle.includes(VIDEO_INTERACTION_TRANSLATION_RULE), false,
+      'new writing receives directing facts rather than a translation-only scope');
+    assert.doesNotMatch(bundle, /静帧只冻结一个动作阶段/u,
+      'continuous video writing must not inherit the still-frame-only contract');
+  }
+  assert.equal(VIDEO_ACTING_CAMERA_TRANSLATION_RULE.split(VIDEO_INTERACTION_TRANSLATION_RULE).length - 1, 1);
+  assert.equal(VIDEO_ACTING_CAMERA_TRANSLATION_RULE.includes(VIDEO_INTERACTION_RULES), false,
+    'translation preserves current staging instead of planning a new layout');
+});
+
+test('source understanding preserves retreat/pursuit and interprets spoken words before literal delivery', () => {
+  assert.ok(STORY_CAUSALITY_RULE.includes(STORY_MOVEMENT_RELATION_RULE));
+  for (const bundle of [STORY_CAUSALITY_RULE, DIALOGUE_DELIVERY_RULE, SEEDANCE_CHINESE_WRITER_RULE]) {
+    assert.ok(bundle.includes(STORY_SPOKEN_CONTENT_RULE),
+      'each source writer distinguishes a spoken spell from its editorial translation');
+  }
+  assert.ok(SEEDANCE_CHINESE_WRITER_RULE.includes(NO_DIALOGUE_PERFORMANCE_RULE),
+    'the independent writer shares positive non-speaking performance and source-grounded sound scope');
+  assert.match(STORY_SPOKEN_CONTENT_RULE, /翻译、参考更新、衔接和纯格式修复保真当前已确认的全部发声原字与归属/u,
+    'new source interpretation must not strip dialogue from existing translation/repair tasks');
 });
 
 for (const { name, run } of tests) {

@@ -307,6 +307,7 @@ import { canonicalCharacterVariantName, characterVariantDisplayName } from "./ch
 import { requestSemanticSequencePlan } from "./services/semanticSequencePlanner";
 import { isSemanticSequencePlan, normalizeSemanticSequenceRequestedTotalDuration, semanticSegmentSourceContext, semanticSequenceSourceFingerprint, semanticSequenceCharacters } from "./semanticSequencePlan";
 import { officialH3ContextForStoryboard } from "./officialH3Context";
+import { buildVideoSceneContext } from "./videoSceneContext";
 import { repairH3IdentityBindings, H3IdentityRepairCancelledError } from "./h3IdentityRepair";
 import { resolvePromptCharacterParticipation, resolveStoryboardCharacterParticipation } from "./characterParticipation";
 import { commitH3IdentityRepair } from "./h3IdentityRepairCommit";
@@ -4014,6 +4015,8 @@ export default function App() {
     const draftIdentity = storyDraftIdentity(storyDraftRef.current);
     const apiIdentity = storyboardRequestApiIdentity(snapshot.settings.textApi);
     const charactersIdentity = sourceContentHash(JSON.stringify(snapshot.project.characters));
+    const planningSceneContext = buildVideoSceneContext({ locations: snapshot.project.locations, chapterId: requestChapterId });
+    const sceneContextIdentity = sourceContentHash(JSON.stringify(planningSceneContext));
     const isCurrent = () => !controller.signal.aborted
       && sequencePlanningOperationRef.current === operation
       && sequencePlanningAbortRef.current === controller
@@ -4022,7 +4025,9 @@ export default function App() {
       && sequencePlanningIdentityRef.current === identity
       && storyDraftIdentity(readProjectStoryDraft(chapterScopeProject(stateRef.current.project, requestChapterId))) === draftIdentity
       && storyboardRequestApiIdentity(stateRef.current.settings.textApi) === apiIdentity
-      && sourceContentHash(JSON.stringify(stateRef.current.project.characters)) === charactersIdentity;
+      && sourceContentHash(JSON.stringify(stateRef.current.project.characters)) === charactersIdentity
+      && sourceContentHash(JSON.stringify(buildVideoSceneContext({ locations: stateRef.current.project.locations,
+        chapterId: requestChapterId }))) === sceneContextIdentity;
     setPlanningBusy("segmenting");
     setSequenceMasterGenerationIssue("");
     try {
@@ -4043,6 +4048,7 @@ export default function App() {
         title: storyName.trim() || "未命名剧情",
         story: sourceStory,
         originalSourceContext: matchingStoryVisualConversion(snapshot.project, requestChapterId, sourceStory),
+        sceneContext: planningSceneContext,
         segmentDurationSec,
         durationMode,
         ...(requestedTotalDurationSec !== undefined ? { requestedTotalDurationSec } : {}),
@@ -6770,6 +6776,14 @@ export default function App() {
     const requestReferenceIds = [...new Set([
       ...(requestMasterBoard?.shots.flatMap((shot) => shot.referenceAssetIds) || []),
     ])];
+    const sceneContextForRequest = (project: Project) => buildVideoSceneContext({
+      locations: project.locations, scenes: project.scenes, assets: project.assets,
+      sourceSceneIds, chapterId: requestChapterId,
+      selectedAssetIds: mergeReferenceAssetIds(chapterStoryReferenceAssetIds, requestReferenceIds,
+        existingSegmentBoard?.globalReferenceAssetIds || [], requestMasterBoard?.globalReferenceAssetIds || []),
+    });
+    const requestSceneContext = sceneContextForRequest(state.project);
+    const requestSceneContextIdentity = sourceContentHash(JSON.stringify(requestSceneContext));
     // Check stateRef as well as render refs: a draft/asset update can land in
     // the same event loop turn as a model response, before React rerenders.
     const currentRequestSourceIdentity = () => storyboardRequestSourceIdentity({
@@ -6801,6 +6815,7 @@ export default function App() {
       if (!handoffSourceIsCurrent()) return false;
       if (requestProjectId !== stateRef.current.project.id
         || storyReferenceFingerprint(stateRef.current.project, requestChapterId) !== requestStoryReferenceFingerprint
+        || sourceContentHash(JSON.stringify(sceneContextForRequest(stateRef.current.project))) !== requestSceneContextIdentity
         || requestSourceIdentity !== currentRequestSourceIdentity()
         || requestApiIdentity !== storyboardRequestApiIdentity(stateRef.current.settings.textApi)) return false;
       if (!segmentForGeneration || !override) {
@@ -6865,7 +6880,7 @@ export default function App() {
           )
         : undefined;
       const semanticContext = segmentForGeneration && isSemanticSequencePlan(sourcePlanForGeneration)
-        ? semanticSegmentSourceContext(sourcePlanForGeneration, segmentForGeneration) : undefined;
+        ? semanticSegmentSourceContext(sourcePlanForGeneration, segmentForGeneration, requestSceneContext) : undefined;
       const semanticSettings = parseDirectorSettingsFingerprint(
         sourcePlanForGeneration?.semanticPlanningSnapshot?.directorSettingsFingerprint,
       );
@@ -7120,6 +7135,7 @@ export default function App() {
               extraRequirement: boardExtraRequirement,
             },
             story: segmentGenerationSource.sourceStoryContent,
+            sceneContext: requestSceneContext,
             ...(semanticContext ? { sequenceSegmentContext: {
               ...semanticContext,
               previousPromptHandoff: requestHandoff?.context,
@@ -7568,6 +7584,9 @@ export default function App() {
         complete = await generateSingleSegmentPrompt({
           sequenceHandoff: requestHandoff?.context,
           sequenceSegmentContext: semanticContext,
+          sceneContext: buildVideoSceneContext({ board: convertedCandidate, locations: state.project.locations,
+            scenes: state.project.scenes, assets: state.project.assets,
+            references: getSingleSegmentReferences(convertedCandidate, singleSegmentContext), chapterId: requestChapterId }),
           reviewWithAi: true,
           onAiTranslationReview: () => { if (isGenerationRequestCurrent()) notify("正在调用同一 API 对照完整中文校验并修复英文，主体与对白交给 AI 复核。"); },
           onQualifiedChinese: fullTimeline && override?.deferCommit ? undefined : async (qualified) => {
@@ -7725,6 +7744,9 @@ export default function App() {
         reviewWithAi: true,
         onAiTranslationReview: () => { if (isCurrent()) notify("正在调用同一 API 对照完整中文校验并修复英文，主体与对白交给 AI 复核。"); },
         board: sourceBoard, context, sequenceHandoff: englishHandoff?.context,
+        sceneContext: buildVideoSceneContext({ board: sourceBoard, locations: snapshot.project.locations,
+          scenes: snapshot.project.scenes, assets: snapshot.project.assets,
+          references: getSingleSegmentReferences(sourceBoard, context), chapterId: sourceBoard.chapterId }),
         mode: mode === "translate-english" ? "translate-english" : "generate",
         purpose: mode === "dialogue-repair" ? "dialogue-repair" : undefined,
         maxOutputTokens: snapshot.settings.textApi.maxTokens,
@@ -7824,6 +7846,9 @@ export default function App() {
     try {
       notify("正在按新人物资料更新本段提示词；保留剧情、台词和镜头排时，并保存旧稿。");
       const result = await generateSingleSegmentPrompt({ board, context, reviewWithAi: true,
+        sceneContext: buildVideoSceneContext({ board, locations: snapshot.project.locations,
+          scenes: snapshot.project.scenes, assets: snapshot.project.assets,
+          references: getSingleSegmentReferences(board, context), chapterId: board.chapterId }),
         purpose: "character-dossier-refresh", mode: "generate", clean: cleanVideoPrompt, isCurrent,
         maxOutputTokens: snapshot.settings.textApi.maxTokens,
         request: (system, user, _stage, transport) => requestTextModel(
@@ -8041,6 +8066,9 @@ export default function App() {
       refreshedOfficialBoard = await regenerateSequenceReferencePrompt({
         sequenceHandoff: requestHandoff?.context,
         sequenceSegmentContext: isSemanticSequencePlan(plan) ? semanticSegmentSourceContext(plan, segment) : undefined,
+        sceneContext: buildVideoSceneContext({ board: sourceBoard, locations: snapshot.project.locations,
+          scenes: snapshot.project.scenes, assets: snapshot.project.assets,
+          references: getSingleSegmentReferences(sourceBoard, sourceContext), chapterId: sourceBoard.chapterId }),
         reviewWithAi: true,
         onAiTranslationReview: () => { if (isRequestCurrent()) notify(`正在调用同一 API 校验并修复第 ${segment.index} 段英文，主体与对白交给 AI 复核。`); },
         mode,
@@ -25066,9 +25094,11 @@ function SettingsView(ctx: AppContext) {
                     onChange={(event) => patchImage({ imageProtocol: event.target.value as ImageApiConfig["imageProtocol"] })}>
                     <option value="openai-compatible">OpenAI 兼容（现有通道）</option>
                     <option value="openai-images">OpenAI 官方 Images</option>
+                    <option value="openai-chat">OpenAI 聊天生图兼容（香蕉）</option>
                     <option value="gemini">Google Gemini 原生</option>
                     <option value="xai">xAI 原生 Images</option>
                   </select>
+                  <div className="field-hint">中转香蕉模型请选择聊天生图兼容，并确认通道支持聊天生图；谷歌官方服务使用 Gemini 原生。保留中转模型完整名称。修改协议后请从工作台创建新任务，旧任务保留原配置。</div>
                 </Field>
                 <Field label="模型分辨率规格">
                   <select value={settings.imageApi.imageResolutionProfile || "auto"}

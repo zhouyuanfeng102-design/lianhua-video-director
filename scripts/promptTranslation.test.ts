@@ -7,6 +7,7 @@ import {
 import { VIDEO_WARDROBE_SCOPE_RULE } from '../src/videoConversionRules';
 import { H3_CLIP_TIME_RULE, H3_FINAL_BODY_FORMAT_RULE, h3DescriptionLanguageRule, readH3PromptProtocol } from '../src/h3PromptProtocol';
 import { VIDEO_ACTING_CAMERA_TRANSLATION_RULE } from '../src/videoActingCameraRules';
+import { withVideoActionChoreographyScope } from '../src/videoActionChoreographyRules';
 import { SPATIAL_COORDINATE_RULE, SPATIAL_TRANSLATION_RULE } from '../src/spatialContinuityRules';
 import { requestTextModel } from '../src/services/llm';
 import type { TextApiConfig } from '../src/types';
@@ -43,7 +44,7 @@ const english = await translateVideoPromptToEnglish({
 
 assert.equal(
   receivedSystemPrompt,
-  `${VIDEO_PROMPT_ENGLISH_TRANSLATION_SYSTEM_PROMPT}\n本次只返回完整提示词正文，不返回JSON。`,
+  withVideoActionChoreographyScope(`${VIDEO_PROMPT_ENGLISH_TRANSLATION_SYSTEM_PROMPT}\n本次只返回完整提示词正文，不返回JSON。`, 'translation'),
   'body-only callers receive the shared translation rules plus one explicit body output contract',
 );
 assert.match(
@@ -347,7 +348,7 @@ for (const characters of [7254, 19281, 25000]) {
     clean: (value) => value.trim(),
     request: async (system, user) => {
       requests += 1;
-      assert.equal(system, `${VIDEO_PROMPT_ENGLISH_TRANSLATION_SYSTEM_PROMPT}\n\n${H3_CLIP_TIME_RULE}\n本次只返回完整提示词正文，不返回JSON。\n\n${h3DescriptionLanguageRule('英文')}`);
+      assert.equal(system, withVideoActionChoreographyScope(`${VIDEO_PROMPT_ENGLISH_TRANSLATION_SYSTEM_PROMPT}\n\n${H3_CLIP_TIME_RULE}\n本次只返回完整提示词正文，不返回JSON。\n\n${h3DescriptionLanguageRule('英文')}`, 'translation'));
       assertH3DescriptionLanguage(system, '英文');
       assert.doesNotMatch(system + user, /7000|字符(?:上限|预算)|精简|unit_\d+|<h3_|"translations"/u);
       return expected;
@@ -393,7 +394,7 @@ const genericWithoutBudget = await translateVideoPromptToEnglish({
   clean: (value) => value.trim(),
   request: async (system, user) => {
     genericCalls += 1;
-    assert.equal(system, `${VIDEO_PROMPT_ENGLISH_TRANSLATION_SYSTEM_PROMPT}\n本次只返回完整提示词正文，不返回JSON。`);
+    assert.equal(system, withVideoActionChoreographyScope(`${VIDEO_PROMPT_ENGLISH_TRANSLATION_SYSTEM_PROMPT}\n本次只返回完整提示词正文，不返回JSON。`, 'translation'));
     assert.equal(user, '普通场景。');
     return 'An ordinary scene. '.repeat(600);
   },
@@ -571,12 +572,12 @@ for (const reviewedName of ['林沐', 'Lin Mu']) {
   });
   assert.equal(aiRequests.length, 2, 'the model, not a regex, must receive a separate review/repair call');
   assert.deepEqual(progressCalls, [1], 'review progress is reported between translation and actual review');
-  assert.equal(aiRequests[0].system, `${VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT}\n\n${H3_CLIP_TIME_RULE}\n本次只返回完整提示词正文，不返回JSON。\n\n${h3DescriptionLanguageRule('英文')}`);
+  assert.equal(aiRequests[0].system, withVideoActionChoreographyScope(`${VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT}\n\n${H3_CLIP_TIME_RULE}\n本次只返回完整提示词正文，不返回JSON。\n\n${h3DescriptionLanguageRule('英文')}`, 'translation'));
   assertH3DescriptionLanguage(aiRequests[0].system, '英文');
   assert.equal(aiRequests[0].user, aiSource, 'translation must receive every original character, name and dialogue');
   assert.match(aiRequests[0].user, /林沐说：“师姐，接招。”/u);
   assert.doesNotMatch(aiRequests[0].user, /__LH_/u, 'live requests must not hide names or dialogue in placeholders');
-  assert.equal(aiRequests[1].system, `${VIDEO_PROMPT_ENGLISH_AI_REVIEW_SYSTEM_PROMPT}\n本次只返回完整提示词正文，不返回JSON。\n\n${h3DescriptionLanguageRule('英文')}`);
+  assert.equal(aiRequests[1].system, withVideoActionChoreographyScope(`${VIDEO_PROMPT_ENGLISH_AI_REVIEW_SYSTEM_PROMPT}\n本次只返回完整提示词正文，不返回JSON。\n\n${h3DescriptionLanguageRule('英文')}`, 'translation'));
   assertH3DescriptionLanguage(aiRequests[1].system, '英文');
   assert.ok(aiRequests[1].system.includes(H3_FINAL_BODY_FORMAT_RULE), 'H3 English review receives the final-body format contract');
   const reviewData = JSON.parse(aiRequests[1].user.match(/<review_data>\n([\s\S]+)\n<\/review_data>/u)![1]);

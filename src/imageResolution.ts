@@ -2,7 +2,7 @@ import type { ImageApiConfig } from './types';
 
 export type ImageResolutionTier = '1K' | '2K' | '4K';
 export type ImageResolutionProfile = 'auto' | 'pixel-long-edge' | 'gpt-image-legacy' | 'gpt-image-modern' | 'gemini-k' | 'gemini-1k' | 'grok-k';
-export type ImageResolutionProtocol = 'openai-compatible' | 'openai-images' | 'gemini' | 'xai';
+export type ImageResolutionProtocol = 'openai-compatible' | 'openai-images' | 'openai-chat' | 'gemini' | 'xai';
 export type ImageResolutionEncoding =
   | { kind: 'width-height'; width: number; height: number }
   | { kind: 'size'; value: string }
@@ -23,7 +23,7 @@ export interface ImageResolutionPlan {
 export const IMAGE_RESOLUTION_TECHNICAL_MAX_SIDE = 16384;
 const TIERS: readonly ImageResolutionTier[] = ['1K', '2K', '4K'];
 const PROFILES: readonly ImageResolutionProfile[] = ['auto', 'pixel-long-edge', 'gpt-image-legacy', 'gpt-image-modern', 'gemini-k', 'gemini-1k', 'grok-k'];
-const PROTOCOLS: readonly ImageResolutionProtocol[] = ['openai-compatible', 'openai-images', 'gemini', 'xai'];
+const PROTOCOLS: readonly ImageResolutionProtocol[] = ['openai-compatible', 'openai-images', 'openai-chat', 'gemini', 'xai'];
 const EDGES = { '1K': 1024, '2K': 2048, '4K': 4096 } as const;
 type ResolutionConfig = Pick<ImageApiConfig, 'backend' | 'model'> & {
   imageProtocol?: ImageResolutionProtocol;
@@ -132,7 +132,8 @@ export const resolveImageResolutionCapabilities = (input: ImageResolutionConfigI
   const note = profile === 'pixel-long-edge'
     ? `本机档位按长边1024/2048/4096映射；${config.backend === 'comfyui' ? '模型支持范围仍由当前工作流决定' : '通道实际支持范围尚未验证'}。`
     : verified ? '按当前模型的原生分辨率规格提交。'
-      : '采用所选模型能力档案；当前通道或模型别名尚未验证，实际尺寸以返回图片为准。';
+      : protocol === 'openai-chat' ? '采用聊天生图兼容通道的比例与档位扩展；支持范围由中转服务决定，实际尺寸以返回图片为准。'
+        : '采用所选模型能力档案；当前通道或模型别名尚未验证，实际尺寸以返回图片为准。';
   return { profile, protocol, pixelStep: step, supportedTiers, verified, note };
 };
 
@@ -191,7 +192,8 @@ export interface ResolveImageResolutionInput {
   config: ImageResolutionConfigInput;
 }
 const dimensionEncoding = (capabilities: ImageResolutionCapabilities, config: ResolutionConfig, width: number, height: number, nativeTier?: ImageResolutionTier): ImageResolutionEncoding => {
-  if ((capabilities.protocol === 'gemini' || capabilities.protocol === 'xai') && nativeTier) return { kind: 'tier', value: nativeTier };
+  if ((capabilities.protocol === 'gemini' || capabilities.protocol === 'xai'
+    || capabilities.protocol === 'openai-chat' && capabilities.profile.startsWith('gemini')) && nativeTier) return { kind: 'tier', value: nativeTier };
   return config.backend === 'openai' ? { kind: 'size', value: `${width}x${height}` } : { kind: 'width-height', width, height };
 };
 
@@ -219,7 +221,9 @@ export const resolveImageResolution = (input: ResolveImageResolutionInput): Reso
         const size = nativeSize(capabilities.profile, tier, aspectLabel);
         return size?.width === width && size.height === height;
       });
-      if (!encodedTier) warnings.push(capabilities.protocol === 'gemini'
+      if (!encodedTier) warnings.push(capabilities.protocol === 'openai-chat'
+        ? '聊天生图兼容通道没有该自定义尺寸的已知档位；自定义像素作为画面要求提交，实际像素以服务返回为准，无法保证精确自定义尺寸。'
+        : capabilities.protocol === 'gemini'
         ? 'Gemini原生接口仅提供档位控制，自定义像素作为画面要求提交，实际像素以服务返回为准，无法保证精确自定义尺寸。'
         : '当前 Gemini 档案没有该自定义尺寸的原生档位；按自定义size像素参数提交，由后端决定是否支持，实际尺寸以返回图片为准。');
       else if (!capabilities.supportedTiers.includes(encodedTier)) warnings.push(`当前模型未声明支持${encodedTier}档位；仍按该自定义尺寸对应的档位提交，由后端决定是否支持。`);
@@ -233,7 +237,9 @@ export const resolveImageResolution = (input: ResolveImageResolutionInput): Reso
         const shortSide = Math.round(longSide / Math.max(aspect.ratio, 1 / aspect.ratio));
         width = aspect.ratio >= 1 ? longSide : shortSide; height = aspect.ratio >= 1 ? shortSide : longSide;
         encodedTier = undefined;
-        warnings.push(capabilities.protocol === 'gemini'
+        warnings.push(capabilities.protocol === 'openai-chat'
+          ? '聊天生图兼容通道没有该画幅的已知原生尺寸；估算像素作为画面要求提交，实际像素以服务返回为准。'
+          : capabilities.protocol === 'gemini'
           ? 'Gemini原生接口仅提供档位控制，该画幅的估算像素作为画面要求提交，实际像素以服务返回为准。'
           : '当前 Gemini 档案没有该画幅的已知原生尺寸；按所选档位估算像素并以size参数提交，由后端决定是否支持。');
       }

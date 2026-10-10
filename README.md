@@ -4,13 +4,13 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的 Windows 桌面工作台。
 
-当前版本：**1.7.8** · 2026-10-10 · Windows 64 位 · 便携运行
+当前版本：**1.8.0** · 2026-10-11 · Windows 64 位 · 便携运行
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows 便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-1.7.8.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-1.8.0.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
 1. 下载上面的 EXE，放在可写入的文件夹里，双击运行，无需安装 Node.js。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
@@ -59,6 +59,10 @@
 1.7.7 改善视频提示词的剧情与动作表达：先明确行动者、直接受力对象和最终目标，再展开起势、发力、接触、连续运动及回应；跨镜继承人物位置与动作阶段，按动作安排可见机位。H3 中文、英文翻译和 Seedance 共同保留动作关系，门、墙等地标不能替代人物目标。主动重新生成视频提示词后应用新规则，详见[本版更新说明](docs/releases/发布说明-1.7.7.md)。
 
 1.7.8 收紧资产库卡片的名称、文字、按钮和间距，缩短预览框，常用桌面窗口优先展示两排图片；超出容量仍可分页，长名称和详细信息按需查看。同时改善本地视频预览的加载与播放稳定性。详见[本版更新说明](docs/releases/发布说明-1.7.8.md)。
+
+1.7.9 将动作对象、人物视线、镜头跟随、场地尺度、距离变化和对白归属贯穿提示词生成。先理解原剧情中的追赶与退避，结合相关场景资料交代真实位移；区分实际台词、心理活动和小说注释，沉默人物以行动表现。普通稿、H3、英文和 Seedance 保留相同关系。历史稿与图片保留，需重新生成提示词及相关首尾帧后应用。详见[本版更新说明](docs/releases/发布说明-1.7.9.md)。
+
+1.8.0 针对生产包启动白屏调整模块分块，并增加显式的聊天兼容生图接口，适用于按该协议提供 Nano Banana 的转发服务；保留模型别名与参考图片，继续支持 Gemini 原生生图，接口类型与模型不匹配时提供明确提示。实际生成结果取决于所配置服务，本版不自动重跑失败任务。详见[本版更新说明](docs/releases/发布说明-1.8.0.md)。
 
 ## 从源码运行
 
