@@ -2798,7 +2798,19 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
 .sequence-text-handoff-details p { line-height: 1.6; margin: 8px 0; }
 .sequence-text-handoff-details pre { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.6; }
 
-/* The library fills its available viewport; additional assets belong on another page. */
+/* Compact library controls leave room for two useful image rows; extra assets use the pager. */
+.assets-fit-view .assets-toolbar-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+.assets-fit-view .assets-toolbar-filters {
+  display: grid;
+  grid-template-columns: 16px minmax(120px, 1fr) minmax(110px, .55fr) minmax(130px, .65fr);
+  gap: 6px;
+}
+.assets-fit-view .assets-toolbar-filters > :is(input, select) {
+  width: 100%; min-width: 0; padding: 5px 7px; font-size: calc(11px * var(--ui-font-scale, 1));
+}
+.assets-fit-view .assets-toolbar-actions { gap: 4px; flex-wrap: nowrap; }
+.assets-fit-view .assets-toolbar-actions .btn { gap: 4px; padding: 4px 6px; }
+.assets-fit-view .assets-toolbar-actions .btn svg { width: 13px; height: 13px; }
 .assets-fit-view .asset-page-grid {
   grid-template-columns: repeat(var(--asset-columns, 4), minmax(0, 1fr));
   grid-template-rows: repeat(var(--asset-rows, 2), minmax(0, 1fr));
@@ -2814,18 +2826,25 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
   align-self: stretch;
 }
 .assets-fit-view .asset-page-grid .asset-thumb { height: auto; min-height: 0; }
-.assets-fit-view .asset-page-grid .asset-info { min-width: 0; padding: 5px 7px; }
+.assets-fit-view .asset-page-grid .asset-info { min-width: 0; padding: 4px 6px; }
 .assets-fit-view .asset-info > strong {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  height: calc(30.8px * var(--ui-font-scale, 1));
+  display: block;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: calc(10px * var(--ui-font-scale, 1));
+  line-height: 1.35;
   overflow: hidden;
 }
-.assets-fit-view .asset-video-check { font-size: calc(11px * var(--ui-font-scale, 1)); margin-bottom: 3px; white-space: nowrap; }
+.assets-fit-view .asset-video-check { gap: 5px; font-size: calc(10px * var(--ui-font-scale, 1)); margin-bottom: 2px; white-space: nowrap; }
+.assets-fit-view .asset-video-check input { flex: 0 0 15px; width: 15px; height: 15px; margin: 0; }
+.assets-fit-view .asset-preview-trigger { grid-template-rows: minmax(0, 1fr) 21px; }
+.assets-fit-view .asset-preview-trigger span { font-size: calc(9px * var(--ui-font-scale, 1)); }
+.assets-fit-view .asset-metadata-details { margin-top: 2px; font-size: calc(9px * var(--ui-font-scale, 1)); }
+.assets-fit-view .asset-metadata-details > summary { padding: 1px 0; }
 .assets-fit-view .private-profile-asset-note { margin-bottom: 3px; padding: 3px 6px; }
-.assets-fit-view .asset-actions { gap: 4px; }
-.assets-fit-view .asset-actions .btn { gap: 4px; padding: 3px 6px; }
+.assets-fit-view .asset-actions { gap: 3px; margin-top: 3px; }
+.assets-fit-view .asset-actions .btn { gap: 3px; padding: 3px 5px; font-size: calc(9.5px * var(--ui-font-scale, 1)); line-height: 1.2; min-height: 24px; }
+.assets-fit-view .asset-actions .btn svg { width: 13px; height: 13px; }
 .assets-fit-view .asset-info > .asset-missing,
 .assets-fit-view .asset-info > .asset-regeneration-issue { white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; }
 .assets-fit-view .asset-metadata-details,
@@ -2859,3 +2878,7 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
   overscroll-behavior: contain;
 }
 .assets-fit-view .asset-card:has(.asset-video-source) { position: relative; }
+@media (max-width: 1100px) {
+  .assets-fit-view .assets-toolbar-row { grid-template-columns: minmax(0, 1fr); gap: 5px; }
+  .assets-fit-view .assets-toolbar-actions { justify-content: flex-end; }
+}

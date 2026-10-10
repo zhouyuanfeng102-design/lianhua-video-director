@@ -28,6 +28,7 @@ const { readProjectLibraryImport } = require(path.join(__dirname, 'projectLibrar
 const { createStatePersistence } = require(path.join(__dirname, 'statePersistence.cjs'));
 const { createStateCloseGuard } = require(path.join(__dirname, 'stateCloseGuard.cjs'));
 const { createRendererCrashRecovery } = require(path.join(__dirname, 'rendererCrashRecovery.cjs'));
+const { createAssetProtocolHandler } = require(path.join(__dirname, 'assetProtocol.cjs'));
 
 const privateIpBlockList = new nodeNet.BlockList();
 privateIpBlockList.addAddress('0.0.0.0', 'ipv4');
@@ -1811,17 +1812,7 @@ app.whenReady().then(() => {
   handleTrustedIpc('lianhua:extract-workbench-frames', (event, payload) => getVideoWorkbench().extractFrames(payload, event.sender.id, workbenchProgressTarget(event)));
   handleTrustedIpc('lianhua:render-workbench-timeline', (event, payload) => getVideoWorkbench().renderTimeline(payload, event.sender.id, workbenchProgressTarget(event)));
   handleTrustedIpc('lianhua:cancel-workbench-job', (event, jobId) => getVideoWorkbench().cancel(jobId, event.sender.id));
-  protocol.handle('lianhua-asset', (request) => {
-    const url = new URL(request.url);
-    const relativePath = url.pathname.split('/').filter(Boolean).map(decodeURIComponent).join('/');
-    try {
-      const filePath = assetPathFromRelative(relativePath);
-      if (!fs.existsSync(filePath)) return new Response('Asset not found', { status: 404 });
-      return net.fetch(pathToFileURL(filePath).toString());
-    } catch {
-      return new Response('Invalid asset path', { status: 400 });
-    }
-  });
+  protocol.handle('lianhua-asset', createAssetProtocolHandler({ assetPathFromRelative }));
 
   handleTrustedIpc('lianhua:open-file', async (_event, filters) => {
     const result = await dialog.showOpenDialog({

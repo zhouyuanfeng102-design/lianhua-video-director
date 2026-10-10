@@ -13,4 +13,6 @@
 .asset-video-dialog h3 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin: 0; }
 .asset-video-dialog p { margin: 4px 0 0; color: var(--muted); font-size: calc(11px * var(--ui-font-scale, 1)); }
 .asset-video-dialog video { display: block; width: 100%; min-height: 0; max-height: calc(100dvh - 150px); object-fit: contain; background: #111; border-radius: 6px; }
-.asset-video-dialog .asset-video-error { flex: 0 0 auto; color: #b42343; }
+.asset-video-dialog .asset-video-error { flex: 0 0 auto; display: flex; align-items: center; gap: 10px; color: #b42343; }
+.asset-video-dialog .asset-video-error > p { flex: 1; color: inherit; }
+.asset-video-dialog .asset-video-error > button { flex: 0 0 auto; }

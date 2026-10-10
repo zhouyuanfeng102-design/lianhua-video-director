@@ -9,6 +9,15 @@ export interface VideoAssetSelection {
   sourceUrl: string;
 }
 
+let playbackAttempt = 0;
+/** A fresh local request avoids Chromium reusing a prior failed media resource. */
+export const videoPlaybackSourceUrl = (sourceUrl: string): string => {
+  if (!sourceUrl.startsWith('lianhua-asset://local/')) return sourceUrl;
+  const url = new URL(sourceUrl);
+  url.searchParams.set('playback', `${Date.now()}-${++playbackAttempt}`);
+  return url.toString();
+};
+
 export const selectVideoAsset = (projectId: string, asset: ReferenceAsset): VideoAssetSelection => ({
   projectId, assetId: asset.id, relativePath: asset.relativePath, checksum: asset.checksum, sourceUrl: assetPreviewUrl(asset),
 });

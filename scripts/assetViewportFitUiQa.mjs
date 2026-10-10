@@ -20,6 +20,7 @@ fs.mkdirSync(output, { recursive: true });
 const selectedCases = new Set((process.env.QA_CASE || 'matrix,capacity,pagination,filters,large-night').split(','));
 const matrixLabels = process.env.QA_MATRIX_LABEL ? new Set(process.env.QA_MATRIX_LABEL.split(',')) : null;
 const nightViewport = process.env.QA_NIGHT_VIEWPORT;
+const compactLabels = process.env.QA_COMPACT_LABEL ? new Set(process.env.QA_COMPACT_LABEL.split(',')) : null;
 const projectId = 'qa-asset-viewport-fit-project';
 const viewports = [
   { width: 1480, height: 900 }, { width: 1280, height: 720 },
@@ -161,6 +162,10 @@ async function resetFilters() {
 async function newFixture() {
   browser = await chromium.launch({ headless: true });
   context = await browser.newContext({ viewport: viewports[0], serviceWorkers: 'block' });
+  if (selectedCases.has('compact')) await context.addInitScript(() => {
+    // Layout-only desktop capabilities: match the file-check and locate controls without touching files.
+    window.lianhuaDesktop = { assetStatus: async () => ({ exists: true }), revealAsset: async () => false };
+  });
   page = await context.newPage(); page.setDefaultTimeout(12000);
   page.on('pageerror', (error) => errors.push(error.message));
   page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
@@ -192,6 +197,7 @@ async function newFixture() {
       paint.fillStyle = '#45505b'; paint.font = '14px sans-serif'; paint.fillText(String(index + 1), width * .45, height * .52);
       return { id: `qa-fit-${String(index + 1).padStart(2, '0')}`, name: index === 3 ? '中性合成图 04 · 这是一张用于验证较长名称显示的图片' : `中性合成图 ${String(index + 1).padStart(2, '0')}`,
         type: 'reference', role: 'composition', referenceRole: 'composition', mediaType: 'image', mimeType: 'image/png', dataUrl: canvas.toDataURL('image/png'),
+        relativePath: `assets/image/qa-fit-${index + 1}.png`,
         chapterId: index % 3 === 0 ? 'qa-fit-chapter-1' : index % 3 === 1 ? 'qa-fit-chapter-2' : undefined,
         width, height, sizeBytes: 1234567 + index, checksum: 'b'.repeat(64), source: 'upload',
         tags: ['纯合成中性图片', index % 2 ? '奇数检索标签' : '偶数检索标签', '资产库视口验证'],
@@ -209,7 +215,7 @@ async function newFixture() {
     localStorage.clear(); sessionStorage.clear(); localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
   }, projectId);
   await page.goto(base, { waitUntil: 'networkidle', timeout: 50000 });
-  assert.equal(await page.evaluate(() => typeof window.lianhuaDesktop), 'undefined');
+  assert.equal(await page.evaluate(() => typeof window.lianhuaDesktop), selectedCases.has('compact') ? 'object' : 'undefined');
   await page.locator('.sidebar').getByRole('button', { name: '资产库', exact: true }).click();
   await page.getByRole('heading', { name: '图片资产库', exact: true }).waitFor();
   await page.locator('.assets-view').evaluate((element) => {
@@ -226,6 +232,45 @@ async function run() {
     try { return (await fetch(base, { signal: AbortSignal.timeout(1000) })).ok; } catch { return false; }
   } });
   await newFixture();
+  if (selectedCases.has('compact')) {
+    currentScope = 'compact';
+    await page.locator('.assets-toolbar').getByRole('button', { name: '检查文件', exact: true }).waitFor();
+    const scenarios = [
+      { width: 1920, height: 1080, font: 125 },
+      { width: 1920, height: 1080, font: 130 }, // Largest font setting supported by the app.
+      { width: 1907, height: 1192, font: 130 }, // Original 2861 x 1788 capture at 150% display scaling.
+      { width: 2861, height: 1788, font: 130 },
+      { width: 1366, height: 768, font: 125 },
+    ];
+    for (const scenario of scenarios) {
+      const label = `compact-${scenario.width}x${scenario.height}-font${scenario.font}`;
+      if (compactLabels && !compactLabels.has(label)) continue;
+      await updateFixture({ count: 11, font: scenario.font });
+      await page.setViewportSize({ width: scenario.width, height: scenario.height });
+      const result = await assertFit(label, { imageCount: 11 });
+      assert.equal(Number(result.gridData.rows), 2, `${label}: ordinary windows must show two compact rows`);
+      assert.equal(result.cards.length, Number(result.gridData.columns) * 2, `${label}: both rows must contain visible cards`);
+      assert.equal(await page.locator('.asset-metadata-details[open]').count(), 0, `${label}: metadata remains collapsed`);
+      await cards().first().getByRole('button', { name: '定位', exact: true }).waitFor();
+      const controls = await cards().first().locator('.asset-actions button').evaluateAll((buttons) => buttons.map((button) => ({
+        height: button.getBoundingClientRect().height, font: Number.parseFloat(getComputedStyle(button).fontSize),
+      })));
+      assert.ok(controls.every((control) => control.height >= 24 && control.font >= 11.5), `${label}: action text remains legible and controls clickable`);
+      await capture(label);
+      if (scenario.width === 1920 && scenario.font === 130) {
+        await cards().first().locator('.asset-metadata-details > summary').click();
+        await assertFit(`${label}-expanded`, { imageCount: 11, openDetails: true });
+        await cards().first().locator('.asset-metadata-details > summary').click();
+      }
+      mark(`${label}: two complete rows, desktop controls present, no outer scrolling, source images contain`);
+    }
+    await updateFixture({ count: 1, font: 125 }); await page.setViewportSize({ width: 1920, height: 1080 });
+    const sparse = await assertFit('compact-single-image-1920x1080', { imageCount: 1 });
+    assert.equal(sparse.cards.length, 1);
+    assert.ok(sparse.cards[0].box.height < sparse.grid.box.height * .55, 'A single asset retains normal card height instead of filling the whole page');
+    await capture('compact-single-image-1920x1080');
+    mark('One asset retains the same compact row height; original full title remains available through its title attribute');
+  }
   if (selectedCases.has('runtime')) {
     currentScope = 'runtime';
     await page.waitForFunction(() => Number(document.querySelector('.asset-page-grid')?.dataset.pageSize) > 0);

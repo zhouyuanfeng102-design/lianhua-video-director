@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import type { ReferenceAsset } from '../src/types';
-import { matchesVideoSelection, releaseVideoElement, selectVideoAsset, videoAssetPoster } from '../src/videoAssetPreview';
+import { matchesVideoSelection, releaseVideoElement, selectVideoAsset, videoAssetPoster, videoPlaybackSourceUrl } from '../src/videoAssetPreview';
 import { IMAGE_VARIANT_OPTIONS, getImageVariantGenerationSpec } from '../src/imageGeneration';
 const video: ReferenceAsset = { id: 'video', name: '视频', type: 'video', mediaType: 'video', role: 'motion', source: 'generated', tags: [],
   url: 'https://example.test/video.mp4', relativePath: 'video/a.mp4', checksum: 'hash-a', createdAt: 1, updatedAt: 1 };
@@ -21,6 +21,12 @@ assert.equal(videoAssetPoster(video, [poster]), '', 'unlinked generation referen
 const operations: string[] = [];
 releaseVideoElement({ pause: () => operations.push('pause'), removeAttribute: (name: string) => operations.push(`remove:${name}`), load: () => operations.push('load') });
 assert.deepEqual(operations, ['pause', 'remove:src', 'load']);
+const localUrl = 'lianhua-asset://local/video/%E4%B8%AD%E6%96%87%20%26%20%25.mov';
+const firstPlayback = videoPlaybackSourceUrl(localUrl); const reopenedPlayback = videoPlaybackSourceUrl(localUrl);
+assert.notEqual(firstPlayback, reopenedPlayback, 'new local attempts must not reuse failed decoder resources');
+assert.equal(new URL(firstPlayback).pathname, new URL(localUrl).pathname, 'the same original local media file is used');
+assert.equal(videoPlaybackSourceUrl('https://example.test/video.mp4?signature=unchanged'), 'https://example.test/video.mp4?signature=unchanged', 'do not alter remote signed video URLs');
+assert.equal(videoPlaybackSourceUrl('data:video/mp4;base64,AAAA'), 'data:video/mp4;base64,AAAA');
 const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
 const assets = app.slice(app.indexOf('function AssetsView('), app.indexOf('function', app.indexOf('function AssetsView(') + 25));
 assert.match(app, /<AssetVideoThumbnail projectId=/u);

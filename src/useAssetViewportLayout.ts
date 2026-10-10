@@ -1,6 +1,6 @@
 import { useLayoutEffect, useState, type CSSProperties } from "react";
 
-/** Reserve room for the real controls, then fit complete cards into the remaining viewport. */
+/** Fit two compact rows when space permits, measuring controls rather than reserving an oversized text block. */
 export function useAssetViewportLayout(enabled: boolean, total: number, fontScalePercent: number) {
   const [element, setElement] = useState<HTMLDivElement | null>(null);
   const [layout, setLayout] = useState({ columns: 4, rows: 2, detailHeight: 120 });
@@ -11,11 +11,11 @@ export function useAssetViewportLayout(enabled: boolean, total: number, fontScal
     const measure = () => {
       const { width, height } = element.getBoundingClientRect();
       const gap = Number.parseFloat(getComputedStyle(element).gap) || 10;
-      const columns = Math.max(1, Math.min(4, Math.floor((width + gap) / (240 * scale + gap))));
-      const infoHeight = Math.max(150 * scale, ...Array.from(element.querySelectorAll<HTMLElement>(".asset-info"),
+      const columns = Math.max(1, Math.min(4, Math.floor((width + gap) / (220 * scale + gap))));
+      const infoHeight = Math.max(100, ...Array.from(element.querySelectorAll<HTMLElement>(".asset-info"),
         (info) => info.getBoundingClientRect().height));
-      const minimumHeight = infoHeight + 86 * scale + 2;
-      const rows = Math.max(1, Math.min(3, Math.ceil(Math.max(1, total) / columns),
+      const minimumHeight = infoHeight + 72 * scale + 2;
+      const rows = Math.max(1, Math.min(2,
         Math.floor((height + gap) / (minimumHeight + gap))));
       const detailHeight = Math.max(40, Math.min(180, Math.floor((height - gap * (rows - 1)) / rows - infoHeight + 24)));
       setLayout((current) => current.columns === columns && current.rows === rows && current.detailHeight === detailHeight

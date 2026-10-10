@@ -4,13 +4,13 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的 Windows 桌面工作台。
 
-当前版本：**1.7.7** · 2026-10-10 · Windows 64 位 · 便携运行
+当前版本：**1.7.8** · 2026-10-10 · Windows 64 位 · 便携运行
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows 便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-1.7.7.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-1.7.8.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
 1. 下载上面的 EXE，放在可写入的文件夹里，双击运行，无需安装 Node.js。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
@@ -57,6 +57,8 @@
 1.7.6 将资产库图片与视频卡片按窗口可用空间自适应布局，预览框随窗口缩放，超出当前页容量时通过分页浏览。图片保持完整展示、不拉伸变形，详细信息仍可展开，原有选图与素材操作入口保留。详见[本版更新说明](docs/releases/发布说明-1.7.6.md)。
 
 1.7.7 改善视频提示词的剧情与动作表达：先明确行动者、直接受力对象和最终目标，再展开起势、发力、接触、连续运动及回应；跨镜继承人物位置与动作阶段，按动作安排可见机位。H3 中文、英文翻译和 Seedance 共同保留动作关系，门、墙等地标不能替代人物目标。主动重新生成视频提示词后应用新规则，详见[本版更新说明](docs/releases/发布说明-1.7.7.md)。
+
+1.7.8 收紧资产库卡片的名称、文字、按钮和间距，缩短预览框，常用桌面窗口优先展示两排图片；超出容量仍可分页，长名称和详细信息按需查看。同时改善本地视频预览的加载与播放稳定性。详见[本版更新说明](docs/releases/发布说明-1.7.8.md)。
 
 ## 从源码运行
 
