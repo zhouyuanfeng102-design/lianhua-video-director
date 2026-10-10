@@ -190,4 +190,86 @@ check('automatic count compatibility preserves completed and in-flight deduplica
   assert.notEqual(videoBatchRequestFingerprint(draft([0, 1, 2, 3, 4, 5]), [], { backend: 'api', api }), fingerprint);
 });
 
+const imageBatchSlotIds = ['28', '273', '285', '436', '462', '463'];
+const imageBatchFixture = (): RunningHubVideoWorkflow => ({
+  ...createRunningHubVideoWorkflow('隔离 ImageBatchMulti 空槽测试'), remoteId: '2103012816681041921',
+  requestTemplate: JSON.stringify({ nodeInfoList: [
+    ...imageBatchSlotIds.map((nodeId, index) => ({ nodeId, fieldName: 'image', fieldValue: index === 0 ? 'selected-sample.jpg' : 'example.png', description: null })),
+    { nodeId: '59', fieldName: 'prompt', fieldValue: 'original prompt' },
+    { nodeId: '291', fieldName: 'value', fieldValue: '35' },
+    { nodeId: '393', fieldName: 'value', fieldValue: 'false' },
+    { nodeId: '426', fieldName: 'aspect_ratio', fieldValue: '16:9 (Widescreen)' },
+    { nodeId: '426', fieldName: 'megapixels', fieldValue: '0.5' },
+    { nodeId: '446', fieldName: 'strength_model', fieldValue: '0.4000000000000001' },
+    { nodeId: '442', fieldName: 'text', fieldValue: 'dynv2,' },
+    { nodeId: 'audio', fieldName: 'audio', fieldValue: 'None' },
+  ], instanceType: 'default', usePersonalQueue: false }),
+  mapping: { prompt: [{ nodeId: '59', inputName: 'prompt' }], images: imageBatchSlotIds.map((nodeId) => ({ nodeId, inputName: 'image' })) },
+});
+
+for (const slots of [[0], [0, 1, 2], [0, 2, 5], [0, 1, 2, 3, 4, 5]]) check(`ImageBatchMulti app preserves documented placeholders and selected slots ${slots.join(',')}`, () => {
+  const workflow = imageBatchFixture(); const before = structuredClone(workflow); const api = compile(workflow);
+  const protocol = resolveRunningHubVideoImageProtocol(workflow);
+  assert.equal(protocol.verifiedProfile, false, 'this app does not enable the other app\'s count adaptation');
+  assert.equal(protocol.imageCount, undefined);
+  assert.deepEqual(protocol.emptyImageValues, ['', ...Array(5).fill('example.png')]);
+  assert.ok(!api.runningHubMappedFields!.some((field) => field.kind === 'image-count'));
+  const selection = draft(slots); const selectedBefore = structuredClone(selection);
+  const body = buildVideoApiBody(api, selection, uploaded(slots));
+  assert.deepEqual(imageBatchSlotIds.map((nodeId, index) => value(body, nodeId)), imageBatchSlotIds.map((nodeId, index) => slots.includes(index) ? `openapi/upload-${index}.png` : 'example.png'));
+  const original = JSON.parse(workflow.requestTemplate);
+  const unrelated = (request: Record<string, unknown>) => (request.nodeInfoList as Node[]).filter((node) => node.fieldName !== 'image' && node.nodeId !== '59');
+  assert.deepEqual(unrelated(body), unrelated(original));
+  assert.equal(value(body, '59'), selection.prompt, 'no unrelated H3 prompt wrapper');
+  assert.equal(body.instanceType, 'default'); assert.equal(body.usePersonalQueue, false);
+  assert.equal((body.nodeInfoList as Node[]).length, original.nodeInfoList.length, 'no guessed inputcount or extra nodes');
+  assert.deepEqual(workflow, before); assert.deepEqual(selection, selectedBefore);
+});
+
+check('ImageBatchMulti app does not infer an empty default for the first image from the selected sample', () => {
+  const workflow = imageBatchFixture(); const body = buildVideoApiBody(compile(workflow), draft([1]), uploaded([1]));
+  assert.equal(value(body, '28'), '');
+  assert.equal(value(body, '273'), 'openapi/upload-1.png');
+  assert.equal(value(body, '285'), 'example.png');
+});
+
+check('ImageBatchMulti correction requires the exact app endpoint and six unique ordered image bindings', () => {
+  const wrongApp = imageBatchFixture(); wrongApp.remoteId = '2103012816681041920';
+  const wrongKind = imageBatchFixture(); wrongKind.runKind = 'workflow';
+  const fewer = imageBatchFixture(); fewer.mapping.images.pop();
+  const reordered = imageBatchFixture(); reordered.mapping.images.reverse();
+  const renamed = imageBatchFixture(); renamed.mapping.images[1].inputName = 'other';
+  const duplicate = imageBatchFixture(); mutateNodes(duplicate, (nodes) => nodes.push({ nodeId: '273', fieldName: 'image', fieldValue: 'example.png' }));
+  for (const workflow of [wrongApp, wrongKind, fewer, reordered, renamed, duplicate]) {
+    assert.ok(!resolveRunningHubVideoImageProtocol(workflow).emptyImageValues.includes('example.png'));
+  }
+});
+
+check('ImageBatchMulti optional defaults override stale empty conventions without changing the first slot', () => {
+  const workflow = imageBatchFixture();
+  mutateNodes(workflow, (nodes) => {
+    nodes.find((node) => node.nodeId === '273')!.fieldValue = 'None';
+    nodes.find((node) => node.nodeId === '285')!.fieldValue = 'old-upload.png';
+  });
+  workflow.nodeCatalog = [{ nodeId: '273', fieldName: 'image', fieldValue: 'None', control: { kind: 'select', options: ['example.png', 'None'] } }];
+  const body = buildVideoApiBody(compile(workflow), draft([0]), uploaded([0]));
+  assert.deepEqual(imageBatchSlotIds.map((nodeId) => value(body, nodeId)), ['openapi/upload-0.png', ...Array(5).fill('example.png')]);
+});
+
+check('old ImageBatchMulti snapshots migrate documented slots on a copy and preserve deduplication', () => {
+  const api = compile(imageBatchFixture()); const old = structuredClone(api);
+  old.runningHubMappedFields!.forEach((field) => { if (field.kind === 'image') field.emptyValue = ''; });
+  const historical = structuredClone(old); const migrated = migrateRunningHubVideoApiImageProtocol(old);
+  assert.notEqual(migrated, old); assert.deepEqual(old, historical);
+  assert.deepEqual(migrated.runningHubMappedFields!.filter((field) => field.kind === 'image').map((field) => field.emptyValue), ['', ...Array(5).fill('example.png')]);
+  assert.equal(migrateRunningHubVideoApiImageProtocol(migrated), migrated, 'idempotent migration');
+  const selection = draft([0, 2]);
+  assert.equal(videoBatchRequestFingerprint(selection, [], { backend: 'api', api: old }), videoBatchRequestFingerprint(selection, [], { backend: 'api', api: migrated }));
+  assert.deepEqual(imageBatchSlotIds.map((nodeId) => value(buildVideoApiBody(migrated, selection, uploaded([0, 2])), nodeId)), ['openapi/upload-0.png', 'example.png', 'openapi/upload-2.png', 'example.png', 'example.png', 'example.png']);
+  const wrongApp = { ...old, runningHubAppId: '2103012816681041920' };
+  const wrongEndpoint = { ...old, endpoint: 'https://runninghub.example.test/openapi/v2/run/workflow/2103012816681041921' };
+  const fewer = structuredClone(old); fewer.runningHubMappedFields = fewer.runningHubMappedFields!.filter((field) => field.nodeId !== '463');
+  for (const untouched of [wrongApp, wrongEndpoint, fewer]) assert.equal(migrateRunningHubVideoApiImageProtocol(untouched), untouched);
+});
+
 console.log(`RunningHub image protocol tests passed: ${checks} checks (synthetic requests only; zero API calls)`);

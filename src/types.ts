@@ -1172,6 +1172,8 @@ export interface ImageGenerationTask extends StoryboardImageFrameMetadata {
   imageVariant: ImageVariant;
   /** Absent for historical tasks; explicit direct mode never invokes the text converter. */
   imageGenerationMode?: 'text-to-image' | 'image-to-image';
+  /** Actual frozen image input choice for display, independent of prompt conversion routing. */
+  imageInputMode?: 'text-to-image' | 'image-to-image';
   /** Structured private-profile routing metadata; labels are not a safety boundary. */
   referenceScope?: 'general' | 'nsfw-private-profile';
   nsfwPrivatePart?: NsfwPrivatePart;

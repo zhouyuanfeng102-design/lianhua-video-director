@@ -4,13 +4,13 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的 Windows 桌面工作台。
 
-当前版本：**1.7.3** · 2026-10-10 · Windows 64 位 · 便携运行
+当前版本：**1.7.6** · 2026-10-10 · Windows 64 位 · 便携运行
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows 便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-1.7.3.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-1.7.6.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
 1. 下载上面的 EXE，放在可写入的文件夹里，双击运行，无需安装 Node.js。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
@@ -49,6 +49,12 @@
 1.7.2 修复提示词导演台横向长剧情分段条在夜间模式下未选中项仍为白底的问题，适用于所有夜间主题；经典原色与日间外观保持原样，显式主题选择继续保留。详见[夜间分段条版本说明](docs/releases/发布说明-1.7.2.md)。
 
 1.7.3 新增多人参考音频，支持项目人物音色预设、逐段沿用、覆盖或明确不用，以及人物、旁白、氛围用途。单段和批量按真实工作流音频槽传入素材，并在本次提示词中表达保留模式，保留音频编号与任务冻结输入；实际音色效果由所用模型与工作流决定。详见[本版更新说明](docs/releases/发布说明-1.7.3.md)。
+
+1.7.4 在生成任务的图片名称旁显示“文生图”或“图生图”，按任务保存的实际输入判定，历史资料不足时显示“方式未记录”。详见[本版更新说明](docs/releases/发布说明-1.7.4.md)。
+
+1.7.5 修复 RunningHub“小白全能版”工作流未选参考图片槽的默认值：按该应用 API 模板保留 `example.png`，避免旧请求将空字符串送入图片合批节点。新提交和明确重试使用修正后的连接副本，历史任务快照保留。详见[本版更新说明](docs/releases/发布说明-1.7.5.md)。
+
+1.7.6 将资产库图片与视频卡片按窗口可用空间自适应布局，预览框随窗口缩放，超出当前页容量时通过分页浏览。图片保持完整展示、不拉伸变形，详细信息仍可展开，原有选图与素材操作入口保留。详见[本版更新说明](docs/releases/发布说明-1.7.6.md)。
 
 ## 从源码运行
 

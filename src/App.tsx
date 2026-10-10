@@ -1,6 +1,7 @@
 import { askChapterEntityResolutions, applyChapterEntityResolutions } from "./components/ChapterEntityConflictDialog";
 import { chapterContentForEntity } from "./chapters";
 import { imageTaskRuleMetadata } from "./imageTaskRuleMetadata";
+import { useAssetViewportLayout } from "./useAssetViewportLayout";
 import { appColorModes, appColorThemes, normalizeAppColorMode, normalizeAppColorTheme, resolveAppColorMode } from "./appTheme";
 ﻿import { activeChapter, chapterScenes, chapterBoards, chapterPlans, chapterScopeProject, chapterWorkspace, withChapterWorkspace, withChapterSelection, migrateProjectChapters, appendChapters, addChapter, archiveChapter, reorderChapters, chapterIdForTask, chapterIdForAsset } from "./chapters";
 import { ChapterManager } from "./components/ChapterManager";
@@ -314,6 +315,7 @@ import packageInfo from "../package.json";
 
 const GITHUB_PROJECT_URL = "https://github.com/zhouyuanfeng102-design/lianhua-video-director";
 import { assetPreviewUrl, createFrameAsset, probeAudioFile, probeVideoFile } from "./media";
+import { imageTaskGenerationMode, imageTaskGenerationModeLabel } from "./imageTaskGenerationMode";
 import { AssetImagePreview } from "./components/AssetImagePreview";
 import { StoryInputModeSwitch, StoryReferencePanel } from "./components/StoryReferencePanel";
 import type { StoryReference, StoryReferenceContext, StoryNarrator } from "./types";
@@ -18592,6 +18594,7 @@ function ImageWorkbenchView(ctx: AppContext) {
       converterSystemPrompt: converterRules,
       referenceAssetIds: [...requestedReferenceAssetIds],
       primaryReferenceAssetIds: [...requestedReferenceAssetIds],
+      imageInputMode: buildImageGenerationReferenceOptions(requestedUseReferenceImage, requestedUploadedPreview).referenceImages?.length ? 'image-to-image' : 'text-to-image',
       ...imagePromptTrace,
     }, createdAt + index, "queued"));
     setState((current: AppState) => applyOwnedProjectUpdate(
@@ -20255,12 +20258,15 @@ function AssetsView(ctx: AppContext) {
         .toLowerCase()
         .includes(assetSearch.toLowerCase()),
   );
-  const assetPageSize = 8;
+  const fitAssetViewport = assetLibrarySection !== "audio";
+  const assetLayout = useAssetViewportLayout(fitAssetViewport, filtered.length, state.settings.uiFontScalePercent);
+  const assetPageSize = assetLayout.pageSize;
   const assetPageCount = Math.max(
     1,
     Math.ceil(filtered.length / assetPageSize),
   );
   const safeAssetPage = Math.min(assetPage, assetPageCount);
+  useEffect(() => { if (assetPage !== safeAssetPage) setAssetPage(safeAssetPage); }, [assetPage, safeAssetPage]);
   const visibleAssetPage = filtered.slice(
     (safeAssetPage - 1) * assetPageSize,
     safeAssetPage * assetPageSize,
@@ -20607,7 +20613,7 @@ function AssetsView(ctx: AppContext) {
     }
   };
   return (
-    <div className="grid assets-view" style={{ gap: 10 }}>
+    <div className={`grid assets-view${fitAssetViewport ? " assets-fit-view" : ""}`} style={{ gap: 10 }}>
       <div className="row asset-library-tabs">
         <Button small variant={assetLibrarySection === "image" ? "primary" : "ghost"} onClick={() => setAssetLibrarySection("image")}>图片资产库</Button>
         <Button small variant={assetLibrarySection === "video" ? "primary" : "ghost"} onClick={() => { ctx.setVideoAssetStoryboardFilter(""); setAssetLibrarySection("video"); }}>视频资产库</Button>
@@ -20754,7 +20760,8 @@ function AssetsView(ctx: AppContext) {
         </div>
       </Card>
       {filtered.length ? (
-        <div className="asset-grid asset-page-grid">
+        <div className="asset-grid asset-page-grid" ref={assetLayout.gridRef} style={assetLayout.style}
+          data-page-size={assetPageSize} data-columns={assetLayout.columns} data-rows={assetLayout.rows}>
           {visibleAssetPage.map((asset: ReferenceAsset) => {
             const mediaType = assetLibraryMediaType(asset);
             const previewUrl = assetPreviewUrl(asset);
@@ -22997,6 +23004,7 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
       }),
       ...(privateRegeneration || landscapeRepair ? { prompt: "" } : {}),
       ...(currentApiSnapshot ? { imageApiSnapshot: currentApiSnapshot } : {}),
+      imageInputMode: source.referenceAssetIds.length || source.primaryReferenceAssetIds.length ? 'image-to-image' as const : 'text-to-image' as const,
       ...trace,
     };
     createdTask = task;
@@ -23759,6 +23767,7 @@ function GenerationTasksView(ctx: AppContext) {
     const previewUrl = resultAsset ? assetPreviewUrl(resultAsset) : task.resultUrl || "";
     const promptConfig = imageTaskRuleMetadata(task, state.imagePromptRules, resultAsset);
     const variantLabel = getImageVariantGenerationSpec(task.imageVariant)?.label || task.imageVariant;
+    const inputMode = imageTaskGenerationMode(task);
     const canRegenerate = canRegenerateImageTask(task, tasks)
       && !storyboardImageBatchLifecycle.isActive(`regenerate:${state.project.id}:${imageRegenerationRootId(task)}`);
     return (
@@ -23776,11 +23785,11 @@ function GenerationTasksView(ctx: AppContext) {
             <div className="job-card-copy">
               <div className="row wrap">
                 <Badge tone="violet">图像</Badge>
-                {task.imageGenerationMode === "image-to-image" && <Badge tone="green">分镜图生图</Badge>}
                 <Badge tone={task.status === "succeeded" ? "green" : task.status === "failed" ? "pink" : "violet"}>
                   {task.status === "queued" && task.preparationStage ? "准备中" : imageGenerationStatusLabel(task.status)}
                 </Badge>
                 <strong>{task.name}</strong>
+                <span className={`badge ${inputMode === 'image-to-image' ? 'green' : inputMode === 'text-to-image' ? 'violet' : ''}`} aria-label={`「${task.name}」的生图方式`} title={inputMode ? '依据本次任务保存的图片输入显示' : '该任务没有保存足够的图片输入信息，无法确定生图方式'}>{imageTaskGenerationModeLabel(inputMode)}</span>
               </div>
               <div className="field-hint task-chapter-label">{taskChapterLabel(task)}</div>
               {task.preparationStage && (task.status === "queued" || task.status === "running") && <div className="field-hint" role="status">

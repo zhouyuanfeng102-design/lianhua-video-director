@@ -2797,3 +2797,65 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
 .sequence-text-handoff-details summary { cursor: pointer; color: var(--violet); }
 .sequence-text-handoff-details p { line-height: 1.6; margin: 8px 0; }
 .sequence-text-handoff-details pre { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.6; }
+
+/* The library fills its available viewport; additional assets belong on another page. */
+.assets-fit-view .asset-page-grid {
+  grid-template-columns: repeat(var(--asset-columns, 4), minmax(0, 1fr));
+  grid-template-rows: repeat(var(--asset-rows, 2), minmax(0, 1fr));
+  grid-auto-rows: 0;
+  align-content: stretch;
+  min-width: 0;
+  height: 100%;
+}
+.assets-fit-view .asset-page-grid .asset-card {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto;
+  min-width: 0;
+  align-self: stretch;
+}
+.assets-fit-view .asset-page-grid .asset-thumb { height: auto; min-height: 0; }
+.assets-fit-view .asset-page-grid .asset-info { min-width: 0; padding: 5px 7px; }
+.assets-fit-view .asset-info > strong {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  height: calc(30.8px * var(--ui-font-scale, 1));
+  overflow: hidden;
+}
+.assets-fit-view .asset-video-check { font-size: calc(11px * var(--ui-font-scale, 1)); margin-bottom: 3px; white-space: nowrap; }
+.assets-fit-view .private-profile-asset-note { margin-bottom: 3px; padding: 3px 6px; }
+.assets-fit-view .asset-actions { gap: 4px; }
+.assets-fit-view .asset-actions .btn { gap: 4px; padding: 3px 6px; }
+.assets-fit-view .asset-info > .asset-missing,
+.assets-fit-view .asset-info > .asset-regeneration-issue { white-space: nowrap !important; overflow: hidden !important; text-overflow: ellipsis !important; }
+.assets-fit-view .asset-metadata-details,
+.assets-fit-view .asset-video-source { position: relative; }
+.assets-fit-view .asset-metadata-content {
+  position: absolute;
+  bottom: calc(100% + 3px);
+  left: 0;
+  right: 0;
+  z-index: 2;
+  max-height: var(--asset-detail-height, 120px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  margin: 0;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  box-shadow: 0 3px 14px #0002;
+}
+.assets-fit-view .asset-video-source[open] {
+  position: absolute;
+  inset: 4px;
+  z-index: 3;
+  margin: 0;
+  padding: 7px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.assets-fit-view .asset-card:has(.asset-video-source) { position: relative; }

@@ -1938,6 +1938,8 @@ const normalizeGenerationTasks = (incoming: unknown, projectId: string): Generat
       imageVariant: imageTaskVariants.has(task.imageVariant) ? task.imageVariant : 'reference',
       ...(task.imageGenerationMode === 'text-to-image' || task.imageGenerationMode === 'image-to-image'
         ? { imageGenerationMode: task.imageGenerationMode } : {}),
+      ...(task.imageInputMode === 'text-to-image' || task.imageInputMode === 'image-to-image'
+        ? { imageInputMode: task.imageInputMode } : {}),
       ...normalizeStoryboardImageFrameMetadata(task),
       ...normalizePrivateReferenceMetadata(task.referenceScope, task.nsfwPrivatePart),
       status,

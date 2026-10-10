@@ -15,6 +15,9 @@ const keyOf = (binding: RunningHubVideoInputBinding) => JSON.stringify([binding.
 const knownImages = ['438', '435', '437', '439', '431', '429'];
 const knownCount = { nodeId: '827', inputName: 'value' };
 const knownAppId = '2104753059472990209';
+const imageBatchAppId = '2103012816681041921';
+const imageBatchImages = ['28', '273', '285', '436', '462', '463'];
+const imageBatchPlaceholderIds = new Set(imageBatchImages.slice(1));
 const isCountValue = (value: unknown): boolean => (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0)
   || (typeof value === 'string' && /^\d+$/u.test(value.trim()) && Number.isSafeInteger(Number(value)));
 
@@ -43,6 +46,17 @@ export const resolveRunningHubVideoImageProtocol = (workflow: RunningHubVideoWor
       return keyOf(workflow.mapping.images[index]) === keyOf(binding)
         && found.length === 1 && typeof found[0].fieldValue === 'string';
     }) && countNodes.length === 1 && isCountValue(countNodes[0].fieldValue);
+  // The supplied API example for this separate AI app (2026-10-10) declares
+  // example.png for its five optional image fields. Clearing those fields can
+  // feed None into ImageBatchMulti. The first image has a selected sample file,
+  // so its empty value is unknown. No image-count field is published here.
+  const imageBatchProfile = workflow.runKind === 'ai-app' && workflow.remoteId.trim() === imageBatchAppId
+    && workflow.mapping.images.length === imageBatchImages.length && imageKeys.size === imageBatchImages.length
+    && imageBatchImages.every((nodeId, index) => {
+      const binding = { nodeId, inputName: 'image' }; const found = matches(binding);
+      return keyOf(workflow.mapping.images[index]) === keyOf(binding)
+        && found.length === 1 && typeof found[0].fieldValue === 'string';
+    });
   const assigned = [...workflow.mapping.prompt, ...workflow.mapping.images, ...Object.values(workflow.mapping.parameters || {})];
   const availableKnownCount = verifiedProfile && !assigned.some((binding) => keyOf(binding) === keyOf(knownCount));
   const imageCount = workflow.mapping.imageCount ?? (workflow.mapping.imageCount !== null && availableKnownCount ? knownCount : undefined);
@@ -54,6 +68,7 @@ export const resolveRunningHubVideoImageProtocol = (workflow: RunningHubVideoWor
     // an empty string reaches BatchImagesNode as a None tensor and reproduces
     // error 805; the web UI's cancel action restores this declared default.
     if (verifiedProfile) return 'example.png';
+    if (imageBatchProfile && imageBatchPlaceholderIds.has(binding.nodeId)) return 'example.png';
     // A field's declared option is stronger evidence than a legacy blank default.
     if (control?.kind === 'select' && control.options?.includes('None')) return 'None';
     if (defaults[index] === '' || defaults[index] === 'None') return defaults[index] as '' | 'None';
@@ -73,18 +88,29 @@ export const resolveRunningHubVideoImageProtocol = (workflow: RunningHubVideoWor
  * unused image fields. Reusing such a failed task would otherwise submit the
  * same invalid payload even after the workflow editor was corrected. The
  * original snapshot is never rewritten; callers receive a shallow config copy
- * with the six exact image slots carrying the published example.png default.
+ * with only the exact app's documented optional slots carrying example.png.
  */
 export const migrateRunningHubVideoApiImageProtocol = <T extends Omit<VideoTaskApiConfig, 'apiKey'>>(config: T): T => {
-  if (config.provider !== 'runninghub' || config.runningHubAppId?.trim() !== knownAppId || !Array.isArray(config.runningHubMappedFields)) return config;
+  if (config.provider !== 'runninghub' || !Array.isArray(config.runningHubMappedFields)) return config;
+  const appId = config.runningHubAppId?.trim();
+  let imageBatchProfile = false;
+  if (appId === imageBatchAppId) {
+    try {
+      imageBatchProfile = new URL(config.endpoint).pathname.replace(/\/+$/u, '') === `/openapi/v2/run/ai-app/${imageBatchAppId}`;
+    } catch { return config; }
+  }
+  if (appId !== knownAppId && !imageBatchProfile) return config;
+  const expectedImages = imageBatchProfile ? imageBatchImages : knownImages;
   const imageFields = config.runningHubMappedFields.filter((field) => field.kind === 'image');
-  const exactProfile = imageFields.length === knownImages.length && knownImages.every((nodeId, index) => {
+  const exactProfile = imageFields.length === expectedImages.length && expectedImages.every((nodeId, index) => {
     const field = imageFields.find((candidate) => candidate.imageIndex === index);
     return field?.nodeId === nodeId && field.fieldName === 'image';
   });
-  if (!exactProfile || !imageFields.some((field) => field.emptyValue !== 'example.png')) return config;
+  const needsPlaceholder = (field: typeof imageFields[number]) => field.kind === 'image'
+    && (!imageBatchProfile || imageBatchPlaceholderIds.has(field.nodeId));
+  if (!exactProfile || !imageFields.some((field) => needsPlaceholder(field) && field.emptyValue !== 'example.png')) return config;
   return {
     ...config,
-    runningHubMappedFields: config.runningHubMappedFields.map((field) => field.kind === 'image' ? { ...field, emptyValue: 'example.png' as const } : field),
+    runningHubMappedFields: config.runningHubMappedFields.map((field) => needsPlaceholder(field) ? { ...field, emptyValue: 'example.png' as const } : field),
   } as T;
 };
