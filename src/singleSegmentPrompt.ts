@@ -261,9 +261,11 @@ export async function generateSingleSegmentPrompt(
       // Final request scope wins over a normal-generation rule embedded in a
       // converter. A converter's own structural repair already carries the
       // preservation contract and must not regain choreography permission here.
+      // Master provenance still locks the confirmed schedule above; it does
+      // not turn an explicit fresh conversion into preservation of old prose.
       scopedSystem = withVideoActionChoreographyScope(scopedSystem, stage === 'translate' ? 'translation'
         : formatOnly || serializationRepair || system.includes(VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE) ? 'format-only'
-          : (!input.purpose || input.purpose === 'initial') && !input.skipConversion && !input.masterSource ? 'generation'
+          : (!input.purpose || input.purpose === 'initial') && !input.skipConversion ? 'generation'
             : 'existing');
       for (;;) {
         const allowance = stage === 'convert' ? undefined : allowances[stage];
