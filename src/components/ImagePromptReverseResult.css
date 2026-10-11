@@ -1,0 +1,12 @@
+.image-prompt-reverse-analysis { display:grid; gap:15px; min-width:0; width:min(900px,100%); }
+.image-prompt-reverse-section { display:grid; gap:7px; min-width:0; }
+.image-prompt-reverse-section h4 { margin:0; font-size:calc(12px * var(--ui-font-scale,1)); color:var(--text); }
+.image-prompt-reverse-text,.image-prompt-reverse-detail { white-space:pre-wrap; overflow-wrap:anywhere; line-height:1.65; font-size:calc(11px * var(--ui-font-scale,1)); }
+.image-prompt-reverse-section:first-child > .image-prompt-reverse-text { padding:10px 12px; border:1px solid var(--line); border-radius:8px; background:var(--panel-2); user-select:text; }
+.image-prompt-reverse-detail { color:var(--muted); }
+.image-prompt-reverse-detail strong { font-weight:600; }
+.image-prompt-reverse-task-details { min-width:0; margin-top:10px; }
+.image-prompt-reverse-task-details > summary { cursor:pointer; color:var(--muted); font-size:calc(11px * var(--ui-font-scale,1)); }
+.image-prompt-reverse-task-details[open] > .image-prompt-reverse-analysis { margin-top:12px; }
+.image-prompt-reverse-task .image-job-preview { object-fit:contain; }
+.image-prompt-reverse-original-placeholder { display:inline-flex; align-items:center; justify-content:center; color:var(--muted); font-size:calc(10px * var(--ui-font-scale,1)); background:var(--panel-2); text-align:center; }

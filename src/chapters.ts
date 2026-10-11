@@ -41,13 +41,18 @@ export const chapterWorkspace = (project: ChapterProject, chapterId = activeChap
 
 export const withChapterWorkspace = <T extends ChapterProject>(project: T, patch: Partial<ChapterWorkspace>, chapterId = activeChapter(project)?.id): T => {
   if (!chapterId || !validChapterId(project, chapterId)) return project;
-  return { ...project, chapterWorkspaces: { ...project.chapterWorkspaces, [chapterId]: { ...chapterWorkspace(project, chapterId), ...patch } } };
+  const workspace = { ...chapterWorkspace(project, chapterId), ...patch };
+  // A cleared image is an explicit edit. Remove the old ID before JSON drops
+  // undefined, so saving or returning to this chapter cannot restore it.
+  if (own(patch, 'directorLookReferenceAssetId') && patch.directorLookReferenceAssetId === undefined) delete workspace.directorLookReferenceAssetId;
+  return { ...project, chapterWorkspaces: { ...project.chapterWorkspaces, [chapterId]: workspace } };
 };
 
-const chapterControls = (project: Pick<Project, 'directorSettingsConfirmedFingerprint' | 'directorSettingsConfirmedAt' | 'directorLookRequirement' | 'directorLookDraft'>): Pick<ChapterWorkspace, 'directorSettingsConfirmedFingerprint' | 'directorSettingsConfirmedAt' | 'directorLookRequirement' | 'directorLookDraft'> => ({
+const chapterControls = (project: Pick<Project, 'directorSettingsConfirmedFingerprint' | 'directorSettingsConfirmedAt' | 'directorLookRequirement' | 'directorLookReferenceAssetId' | 'directorLookDraft'>): Pick<ChapterWorkspace, 'directorSettingsConfirmedFingerprint' | 'directorSettingsConfirmedAt' | 'directorLookRequirement' | 'directorLookReferenceAssetId' | 'directorLookDraft'> => ({
   ...(project.directorSettingsConfirmedFingerprint !== undefined ? { directorSettingsConfirmedFingerprint: project.directorSettingsConfirmedFingerprint } : {}),
   ...(project.directorSettingsConfirmedAt !== undefined ? { directorSettingsConfirmedAt: project.directorSettingsConfirmedAt } : {}),
   ...(project.directorLookRequirement !== undefined ? { directorLookRequirement: project.directorLookRequirement } : {}),
+  ...(project.directorLookReferenceAssetId !== undefined ? { directorLookReferenceAssetId: project.directorLookReferenceAssetId } : {}),
   ...(project.directorLookDraft !== undefined ? { directorLookDraft: project.directorLookDraft } : {}),
 });
 
@@ -56,13 +61,14 @@ export const withChapterSelection = (project: Project, chapterId: string): Proje
   const chapter = project.sourceDocuments.find((item) => item.id === chapterId && !item.archived);
   if (!chapter) return project;
   const previous = activeChapter(project);
-  const saved = previous ? withChapterWorkspace(project, { ...chapterControls(project), storyDraft: project.storyDraft ?? chapterWorkspace(project).storyDraft }, previous.id) : project;
+  const saved = previous ? withChapterWorkspace(project, { ...chapterControls(project), directorLookReferenceAssetId: project.directorLookReferenceAssetId, storyDraft: project.storyDraft ?? chapterWorkspace(project).storyDraft }, previous.id) : project;
   const workspace = chapterWorkspace(saved, chapter.id);
   return {
     ...saved, activeChapterId: chapter.id, storyDraft: workspace.storyDraft,
     directorSettingsConfirmedFingerprint: workspace.directorSettingsConfirmedFingerprint,
     directorSettingsConfirmedAt: workspace.directorSettingsConfirmedAt,
     directorLookRequirement: workspace.directorLookRequirement,
+    directorLookReferenceAssetId: workspace.directorLookReferenceAssetId,
     directorLookDraft: workspace.directorLookDraft,
   };
 };
@@ -125,6 +131,7 @@ export const chapterScopeProject = (project: Project, chapterId = activeChapter(
       directorSettingsConfirmedFingerprint: workspace.directorSettingsConfirmedFingerprint,
       directorSettingsConfirmedAt: workspace.directorSettingsConfirmedAt,
       directorLookRequirement: workspace.directorLookRequirement,
+      directorLookReferenceAssetId: workspace.directorLookReferenceAssetId,
       directorLookDraft: workspace.directorLookDraft,
     }),
   };
@@ -142,6 +149,7 @@ const normalizeWorkspace = (value: unknown): ChapterWorkspace => {
   if (typeof value.directorSettingsConfirmedFingerprint === 'string') workspace.directorSettingsConfirmedFingerprint = value.directorSettingsConfirmedFingerprint;
   if (typeof value.directorSettingsConfirmedAt === 'number' && Number.isFinite(value.directorSettingsConfirmedAt)) workspace.directorSettingsConfirmedAt = value.directorSettingsConfirmedAt;
   if (typeof value.directorLookRequirement === 'string') workspace.directorLookRequirement = value.directorLookRequirement;
+  if (typeof value.directorLookReferenceAssetId === 'string' && value.directorLookReferenceAssetId.trim()) workspace.directorLookReferenceAssetId = value.directorLookReferenceAssetId.trim();
   const lookDraft = normalizeDirectorLookDraft(value.directorLookDraft);
   if (lookDraft) workspace.directorLookDraft = lookDraft;
   return workspace;
@@ -195,13 +203,19 @@ export const migrateProjectChapters = (project: Project): Project => {
     // those keys, so doing so would make the next normalization non-idempotent.
     if (own(project, key) && project[key] !== undefined) Object.assign(workspace, { [key]: project[key] });
   }
+  if (own(project, 'directorLookReferenceAssetId')) {
+    if (typeof project.directorLookReferenceAssetId === 'string' && project.directorLookReferenceAssetId.trim()) workspace.directorLookReferenceAssetId = project.directorLookReferenceAssetId.trim();
+    else delete workspace.directorLookReferenceAssetId;
+  }
   if (project.storyDraft !== undefined) workspace.storyDraft = project.storyDraft;
   const compatibilityControls = chapterControls(workspace);
-  return {
+  const result = {
     ...next, activeChapterId: selected.id, chapterWorkspaces,
     ...(workspace.storyDraft !== undefined ? { storyDraft: workspace.storyDraft } : {}),
     ...compatibilityControls,
   };
+  if (workspace.directorLookReferenceAssetId === undefined) delete result.directorLookReferenceAssetId;
+  return result;
 };
 
 export interface ChapterImportPiece {
@@ -289,13 +303,14 @@ export const archiveChapter = (project: Project, chapterId: string, archived = t
   const previous = activeChapter(project)?.id;
   let next = { ...project, sourceDocuments: project.sourceDocuments.map((chapter) => chapter.id === chapterId ? { ...chapter, archived } : chapter) };
   if (archived && previous === chapterId) {
-    next = withChapterWorkspace(next, { ...chapterControls(project), storyDraft: project.storyDraft ?? chapterWorkspace(project, chapterId).storyDraft }, chapterId);
+    next = withChapterWorkspace(next, { ...chapterControls(project), directorLookReferenceAssetId: project.directorLookReferenceAssetId, storyDraft: project.storyDraft ?? chapterWorkspace(project, chapterId).storyDraft }, chapterId);
     const target = orderedChapters(next)[0];
     const workspace = chapterWorkspace(next, target.id);
     next = { ...next, activeChapterId: target.id, storyDraft: workspace.storyDraft,
       directorSettingsConfirmedFingerprint: workspace.directorSettingsConfirmedFingerprint,
       directorSettingsConfirmedAt: workspace.directorSettingsConfirmedAt,
       directorLookRequirement: workspace.directorLookRequirement,
+      directorLookReferenceAssetId: workspace.directorLookReferenceAssetId,
       directorLookDraft: workspace.directorLookDraft };
   }
   return next;

@@ -1063,6 +1063,8 @@ export interface ChapterWorkspace {
   directorSettingsConfirmedFingerprint?: string;
   directorSettingsConfirmedAt?: number;
   directorLookRequirement?: string;
+  /** Managed style-reference image used only by director/visual AI autofill. */
+  directorLookReferenceAssetId?: string;
   directorLookDraft?: DirectorLookDraft;
 }
 
@@ -1089,6 +1091,8 @@ export interface Project {
   directorSettingsConfirmedAt?: number;
   /** Optional instructions for the director/visual AI autofill only, not a generation parameter. */
   directorLookRequirement?: string;
+  /** Chapter-owned analysis input; never a generation reference selection. */
+  directorLookReferenceAssetId?: string;
   /** Latest explicit editor choices; independent of confirmed generation snapshots. */
   directorLookDraft?: DirectorLookDraft;
   assets: ReferenceAsset[];
@@ -1291,7 +1295,42 @@ export interface AutofillGenerationTask {
   updatedAt: number;
 }
 
-export type GenerationTask = VideoGenerationTask | ImageGenerationTask | AutofillGenerationTask;
+export interface ImagePromptReverseResult {
+  prompt: string;
+  characters: string;
+  objects: string;
+  scene: string;
+  style: string;
+  composition?: string;
+  lighting?: string;
+  colors?: string;
+  readableText?: string;
+  keyPoints?: string;
+  avoid?: string;
+  uncertainties?: string;
+  adjustmentSuggestions?: string;
+}
+
+/** Project-shared text analysis; owns its exact original independently of the asset library. */
+export interface ImagePromptReverseTask {
+  id: string;
+  kind: 'image-prompt-reverse';
+  name: string;
+  status: 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+  referenceAssetId: string;
+  referenceAssetSnapshots: ImageReferenceAssetSnapshot[];
+  customRequirement?: string;
+  model: string;
+  preparationStage?: 'reference';
+  width?: number;
+  height?: number;
+  result?: ImagePromptReverseResult;
+  error?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export type GenerationTask = VideoGenerationTask | ImageGenerationTask | AutofillGenerationTask | ImagePromptReverseTask;
 
 export interface TextApiConfig {
   enabled: boolean;

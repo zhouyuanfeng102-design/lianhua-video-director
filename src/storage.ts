@@ -11,6 +11,7 @@ import { normalizeProjectVoicePresets } from './videoAudioReferences';
   GenerationTask,
   ImageApiConfig,
   ImageApiProfile,
+  ImagePromptReverseResult,
   Location,
   Project,
   Prop,
@@ -1817,10 +1818,55 @@ const videoResultSelectionPersistenceIssue = (task: Record<string, any>, project
   return identity(task.resultAssetId) && ids.includes(task.resultAssetId) ? undefined : invalid;
 };
 
+const normalizeImagePromptReverseResult = (incoming: unknown): ImagePromptReverseResult | undefined => {
+  if (!isRecord(incoming)) return undefined;
+  const required = ['prompt', 'characters', 'objects', 'scene', 'style'] as const;
+  if (!required.every((key) => typeof incoming[key] === 'string' && incoming[key].trim())) return undefined;
+  const optional = ['composition', 'lighting', 'colors', 'readableText', 'keyPoints', 'avoid', 'uncertainties', 'adjustmentSuggestions'] as const;
+  return {
+    ...Object.fromEntries(required.map((key) => [key, incoming[key].trim()])),
+    ...Object.fromEntries(optional.flatMap((key) => typeof incoming[key] === 'string' && incoming[key].trim()
+      ? [[key, incoming[key].trim()]] : [])),
+  } as ImagePromptReverseResult;
+};
+
 const normalizeGenerationTasks = (incoming: unknown, projectId: string): GenerationTask[] => (
   projectArray<GenerationTask>(incoming, []).map((task) => {
     if (!isRecord(task)) return task;
     const loadedAt = now();
+    if (task.kind === 'image-prompt-reverse') {
+      const interrupted = task.status === 'queued' || task.status === 'running';
+      const result = normalizeImagePromptReverseResult(task.result);
+      const status = interrupted || task.status === 'succeeded' && !result
+        ? 'failed'
+        : task.status === 'succeeded' || task.status === 'failed' || task.status === 'cancelled'
+          ? task.status : 'failed';
+      const snapshots = normalizeImageReferenceAssetSnapshots(task.referenceAssetSnapshots);
+      const referenceAssetSnapshots = snapshots.length === 1 ? snapshots : [];
+      return {
+        id: task.id,
+        kind: 'image-prompt-reverse',
+        name: typeof task.name === 'string' && task.name.trim() ? task.name.trim() : '未命名图片反推任务',
+        status,
+        referenceAssetId: typeof task.referenceAssetId === 'string' ? task.referenceAssetId.trim() : '',
+        referenceAssetSnapshots,
+        ...(typeof task.customRequirement === 'string' && task.customRequirement.trim()
+          ? { customRequirement: task.customRequirement.trim() } : {}),
+        model: typeof task.model === 'string' ? task.model : '',
+        ...(typeof task.width === 'number' && Number.isSafeInteger(task.width) && task.width > 0 ? { width: task.width } : {}),
+        ...(typeof task.height === 'number' && Number.isSafeInteger(task.height) && task.height > 0 ? { height: task.height } : {}),
+        ...(result ? { result } : {}),
+        ...(interrupted
+          ? { error: '上次图片反推因应用关闭或刷新而中断，可重试；不会自动再次调用视觉 API。' }
+          : task.status === 'succeeded' && !result
+            ? { error: '图片反推结果不完整，可重试。' }
+            : typeof task.error === 'string' && task.error
+              ? { error: task.error }
+              : status === 'failed' ? { error: '图片反推任务记录不完整，可重试。' } : {}),
+        createdAt: normalizedImageTaskNumber(task.createdAt, loadedAt),
+        updatedAt: interrupted ? loadedAt : normalizedImageTaskNumber(task.updatedAt, loadedAt),
+      } as GenerationTask;
+    }
     if (task.kind === 'autofill') {
       const interrupted = task.status === 'queued' || task.status === 'running';
       const status = interrupted
@@ -2732,6 +2778,11 @@ const normalizePersistedProject = (
   // project's text from an import fallback or coerce malformed saved values.
   if (typeof incoming.directorLookRequirement === 'string') project.directorLookRequirement = incoming.directorLookRequirement;
   else delete project.directorLookRequirement;
+  if (Object.prototype.hasOwnProperty.call(incoming, 'directorLookReferenceAssetId')) {
+    // Keep an explicit clear until chapter normalization removes its mirror.
+    project.directorLookReferenceAssetId = typeof incoming.directorLookReferenceAssetId === 'string' && incoming.directorLookReferenceAssetId.trim()
+      ? incoming.directorLookReferenceAssetId.trim() : undefined;
+  } else delete project.directorLookReferenceAssetId;
   const directorLookDraft = normalizeDirectorLookDraft(incoming.directorLookDraft);
   if (directorLookDraft) project.directorLookDraft = directorLookDraft;
   else delete project.directorLookDraft;

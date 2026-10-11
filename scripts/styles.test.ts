@@ -641,7 +641,7 @@ assert.equal(
 );
 assert.match(
   appSource,
-  /id="director-setup-timing"[\s\S]*id="director-setup-look"[\s\S]*id="director-setup-style"[\s\S]*id="director-setup-motion"/u,
+  /id="director-setup-timing"[\s\S]*id="director-setup-look"[\s\S]*\{renderDirectorLookSection\(\)\}[\s\S]*id="director-setup-motion"/u,
   'director parameters must expose all four groups together in DOM order',
 );
 assert.doesNotMatch(

@@ -2,6 +2,7 @@ import type {
   AutofillGenerationTask,
   GenerationTask,
   ImageGenerationTask,
+  ImagePromptReverseTask,
   VideoGenerationTask,
 } from './types';
 import { applyOwnedProjectUpdate } from './appEffects';
@@ -13,6 +14,7 @@ export {
   isGenerationTaskCancelledError,
   isGenerationTaskRevoked,
   revokeQueuedGenerationTask,
+  revokeImagePromptReverseTask,
 } from './generationTaskCancellation';
 
 type NewImageGenerationTask = Omit<
@@ -46,6 +48,20 @@ type NewAutofillGenerationTask = Omit<
   AutofillGenerationTask,
   'kind' | 'status' | 'result' | 'bindingWarning' | 'error' | 'createdAt' | 'updatedAt'
 >;
+
+type NewImagePromptReverseTask = Omit<
+  ImagePromptReverseTask,
+  'kind' | 'status' | 'result' | 'error' | 'createdAt' | 'updatedAt'
+>;
+
+export type ImagePromptReverseTaskPatch = Partial<Pick<
+  ImagePromptReverseTask,
+  'status' | 'preparationStage' | 'result' | 'error' | 'referenceAssetSnapshots' | 'width' | 'height'
+>>;
+
+export type ImagePromptReverseTaskSettlement = ImagePromptReverseTaskPatch & {
+  status: 'succeeded' | 'failed';
+};
 
 export type AutofillGenerationTaskPatch = Partial<Pick<
   AutofillGenerationTask,
@@ -137,6 +153,10 @@ export const isImageGenerationTask = (
 export const isAutofillGenerationTask = (
   task: GenerationTask,
 ): task is AutofillGenerationTask => task.kind === 'autofill';
+
+export const isImagePromptReverseTask = (
+  task: GenerationTask,
+): task is ImagePromptReverseTask => task.kind === 'image-prompt-reverse';
 
 export const isVideoGenerationTask = (
   task: GenerationTask,
@@ -235,13 +255,13 @@ export const cancelQueuedGenerationTask = (
 ): GenerationTaskCancellationResult => {
   const target = tasks.find((task) => task.id === taskId);
   if (!target) return { tasks, cancelled: false, blocked: false };
-  if ((!isImageGenerationTask(target) && !isAutofillGenerationTask(target)) || target.status !== 'queued') {
+  if ((!isImageGenerationTask(target) && !isAutofillGenerationTask(target) && !isImagePromptReverseTask(target)) || target.status !== 'queued') {
     return { tasks, cancelled: false, blocked: target.status !== 'cancelled' };
   }
   return {
     tasks: tasks.map((task) => task === target ? {
       ...target, status: 'cancelled', error: undefined, bindingWarning: undefined, updatedAt: timestamp,
-      ...(isImageGenerationTask(target) ? { preparationStage: undefined } : {}),
+      ...(isImageGenerationTask(target) || isImagePromptReverseTask(target) ? { preparationStage: undefined } : {}),
     } : task),
     cancelled: true,
     blocked: false,
@@ -260,7 +280,7 @@ export const removeGenerationTask = (
     target.id === activeLocalTaskId
     || (isVideoGenerationTask(target) && target.status === 'submitting')
     || (
-      (isImageGenerationTask(target) || isAutofillGenerationTask(target))
+      (isImageGenerationTask(target) || isAutofillGenerationTask(target) || isImagePromptReverseTask(target))
       && target.status === 'running'
     )
   );
@@ -283,6 +303,80 @@ export const createAutofillGenerationTask = (
   createdAt: timestamp,
   updatedAt: timestamp,
 });
+
+export const createImagePromptReverseTask = (
+  input: NewImagePromptReverseTask,
+  timestamp = Date.now(),
+  status: ImagePromptReverseTask['status'] = 'queued',
+): ImagePromptReverseTask => ({
+  ...input,
+  kind: 'image-prompt-reverse',
+  status,
+  createdAt: timestamp,
+  updatedAt: timestamp,
+});
+
+const completeImagePromptReverseResult = (result: ImagePromptReverseTask['result']): boolean => (
+  Boolean(result && ['prompt', 'characters', 'objects', 'scene', 'style'].every((key) => (
+    typeof result[key as keyof typeof result] === 'string'
+    && String(result[key as keyof typeof result]).trim()
+  )))
+);
+
+const validImagePromptReversePatch = (
+  task: ImagePromptReverseTask,
+  patch: ImagePromptReverseTaskPatch,
+): ImagePromptReverseTaskPatch => patch.status === 'succeeded'
+  && !completeImagePromptReverseResult(patch.result ?? task.result)
+  ? { ...patch, status: 'failed', result: undefined, error: '图片反推结果不完整，请重试。' }
+  : patch;
+
+export const patchImagePromptReverseTask = (
+  tasks: readonly GenerationTask[],
+  taskId: string,
+  patch: ImagePromptReverseTaskPatch,
+  timestamp = Date.now(),
+): GenerationTask[] => tasks.map((task) => (
+  task.id === taskId && isImagePromptReverseTask(task) && task.status !== 'cancelled'
+    ? {
+        ...task,
+        ...validImagePromptReversePatch(task, patch),
+        ...(['succeeded', 'failed', 'cancelled'].includes(patch.status || '') ? { preparationStage: undefined } : {}),
+        id: task.id,
+        kind: 'image-prompt-reverse',
+        createdAt: task.createdAt,
+        updatedAt: timestamp,
+      }
+    : task
+));
+
+/** Analysis results stay with their original project, while stopped/deleted requests stay revoked. */
+export const settleImagePromptReverseTask = (
+  tasks: readonly GenerationTask[],
+  originalTask: ImagePromptReverseTask,
+  patch: ImagePromptReverseTaskSettlement,
+  timestamp = Date.now(),
+  projectId?: string,
+): GenerationTask[] => {
+  if (projectId && isGenerationTaskRevoked(projectId, originalTask)) return [...tasks];
+  const settledTask: ImagePromptReverseTask = {
+    ...originalTask,
+    ...validImagePromptReversePatch(originalTask, patch),
+    preparationStage: undefined,
+    id: originalTask.id,
+    kind: 'image-prompt-reverse',
+    createdAt: originalTask.createdAt,
+    updatedAt: timestamp,
+  };
+  let replaced = false;
+  const nextTasks = tasks.map((task) => {
+    if (task.id !== originalTask.id || !isImagePromptReverseTask(task)) return task;
+    replaced = true;
+    if (task.status === 'cancelled' || task.createdAt !== originalTask.createdAt) return task;
+    return { ...task, ...settledTask, createdAt: task.createdAt };
+  });
+  return replaced ? nextTasks : [settledTask, ...nextTasks];
+};
 
 export const patchAutofillGenerationTask = (
   tasks: readonly GenerationTask[],
@@ -426,6 +520,16 @@ export const autofillGenerationStatusLabel = (
 ): string => ({
   queued: '排队中',
   running: '补齐中',
+  succeeded: '已完成',
+  failed: '失败',
+  cancelled: '已取消',
+})[status];
+
+export const imagePromptReverseStatusLabel = (
+  status: ImagePromptReverseTask['status'],
+): string => ({
+  queued: '排队中',
+  running: '反推中',
   succeeded: '已完成',
   failed: '失败',
   cancelled: '已取消',

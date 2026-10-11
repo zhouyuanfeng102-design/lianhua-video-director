@@ -52,5 +52,5 @@ const requirementControl = app.match(/<textarea\s+className="director-look-requi
 assert.ok(requirementControl);
 assert.doesNotMatch(requirementControl, /disabled=|readOnly=/u, 'the unexecuted requirement draft stays editable while unrelated AI work is busy');
 assert.match(action, /if \(busy \|\| directorLookRequestRef\.current/u, 'the analysis action itself must not apply settings during another foreground job');
-assert.match(app, /disabled=\{busy \|\| directorLookAutofillBusy\}[\s\S]*?onClick=\{analyzeDirectorLookSettings\}/u, 'applying AI settings still waits for the current job to finish');
+assert.match(app, /disabled=\{busy \|\| directorLookAutofillBusy \|\| directorLookUploading\}[\s\S]*?onClick=\{analyzeDirectorLookSettings\}/u, 'applying AI settings waits for foreground work and reference upload to finish');
 console.log('Director look requirements: scope, project persistence, empty defaults and stale-result wiring passed.');

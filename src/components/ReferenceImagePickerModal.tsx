@@ -20,6 +20,9 @@ export interface ReferenceImagePickerModalProps {
   assets: ReferenceAsset[];
   selectedAssetId: string;
   busy?: boolean;
+  title?: string;
+  hint?: string;
+  confirmLabel?: string;
   onClose: () => void;
   onConfirm: (asset: ReferenceAsset) => void;
 }
@@ -101,6 +104,9 @@ export function ReferenceImagePickerModal({
   assets,
   selectedAssetId,
   busy = false,
+  title = '从资产库选择参考图',
+  hint = '选择当前项目中任意一张可用图片。',
+  confirmLabel = '使用所选图片',
   onClose,
   onConfirm,
 }: ReferenceImagePickerModalProps) {
@@ -158,8 +164,8 @@ export function ReferenceImagePickerModal({
       >
         <div className="modal-head reference-image-picker-head">
           <div>
-            <h3 id={titleId}>从资产库选择参考图</h3>
-            <div className="field-hint">选择当前项目中任意一张可用图片。</div>
+            <h3 id={titleId}>{title}</h3>
+            <div className="field-hint">{hint}</div>
           </div>
           <button
             className="btn small ghost"
@@ -237,7 +243,7 @@ export function ReferenceImagePickerModal({
                 if (selectedAsset) onConfirm(selectedAsset);
               }}
             >
-              <span>使用所选图片</span>
+              <span>{confirmLabel}</span>
             </button>
           </div>
         </div>

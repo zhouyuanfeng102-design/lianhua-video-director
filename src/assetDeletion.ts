@@ -111,7 +111,7 @@ export const deleteAssetFromProject = (
     characters: Object.fromEntries(Object.entries(presets.characters).filter(([, preset]) => preset.assetId !== assetId)),
     ...(presets.narrator?.assetId === assetId ? { narrator: undefined } : {}),
   } : presets;
-  return detachDeletedStoryReferenceAsset({
+  const next = detachDeletedStoryReferenceAsset({
     ...project,
     assets: project.assets.filter((asset) => asset.id !== assetId),
     characters: unbindEntities(project.characters),
@@ -123,4 +123,15 @@ export const deleteAssetFromProject = (
     ...(removesVoicePreset ? { voicePresets } : {}),
     updatedAt,
   }, assetId, updatedAt);
+  if (next.directorLookReferenceAssetId === assetId) delete next.directorLookReferenceAssetId;
+  const chapterWorkspaces = next.chapterWorkspaces;
+  if (chapterWorkspaces && Object.values(chapterWorkspaces).some((workspace) => workspace.directorLookReferenceAssetId === assetId)) {
+    next.chapterWorkspaces = Object.fromEntries(Object.entries(chapterWorkspaces).map(([chapterId, workspace]) => {
+      if (workspace.directorLookReferenceAssetId !== assetId) return [chapterId, workspace];
+      const unbound = { ...workspace };
+      delete unbound.directorLookReferenceAssetId;
+      return [chapterId, unbound];
+    }));
+  }
+  return next;
 };

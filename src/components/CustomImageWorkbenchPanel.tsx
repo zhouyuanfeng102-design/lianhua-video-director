@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { BookOpen, ImagePlus, Library, MessageSquare, RefreshCw, Send, Upload, X } from 'lucide-react';
-import type { AppState, CustomImageDraft, ImageGenerationTask, ReferenceAsset } from '../types';
+import { BookOpen, Copy, ImagePlus, Library, MessageSquare, RefreshCw, ScanSearch, Send, Square, Trash2, Upload, X } from 'lucide-react';
+import type { AppState, CustomImageDraft, ImageGenerationTask, ImagePromptReverseTask, ReferenceAsset } from '../types';
 import { applyOwnedProjectUpdate, buildLocalReferenceAsset } from '../appEffects';
 import { createId, readImageAsDataUrl } from '../storage';
 import { assetPreviewUrl } from '../media';
@@ -15,6 +15,8 @@ import { getSafeErrorDiagnostics } from '../errorDiagnostics';
 import { ReferenceImagePickerModal } from './ReferenceImagePickerModal';
 import { ImageOutputSizeControls } from './ImageOutputSizeControls';
 import { AssetImagePreview } from './AssetImagePreview';
+import { submitImagePromptReverse, stopImagePromptReverse, retryImagePromptReverse, imagePromptReverseStatusLabel } from '../imagePromptReverse';
+import { ImagePromptReverseResultView, ImagePromptReverseReferencePreview, formatImagePromptReverseResult } from './ImagePromptReverseResult';
 import '../customImageWorkbench.css';
 
 export const defaultCustomImageDraft = (): CustomImageDraft => ({
@@ -27,12 +29,17 @@ interface Props {
   context: CustomImageGenerationContext;
   onOpenAssets: () => void;
   onManageRules: () => void;
+  focusReverseTaskId?: string;
+  onReverseFocusHandled?: () => void;
 }
 
-export function CustomImageWorkbenchPanel({ state, context, onOpenAssets, onManageRules }: Props) {
+export function CustomImageWorkbenchPanel({ state, context, onOpenAssets, onManageRules, focusReverseTaskId, onReverseFocusHandled }: Props) {
   const projectId = state.project.id;
   const draft = state.project.customImageDraft || defaultCustomImageDraft();
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [reversePickerOpen, setReversePickerOpen] = useState(false);
+  const [reverseSubmitBusy, setReverseSubmitBusy] = useState(false);
+  const [pendingPrompt, setPendingPrompt] = useState('');
   const [uploadBusy, setUploadBusy] = useState(false);
   const [submitBusy, setSubmitBusy] = useState(false);
   const [actionBusy, setActionBusy] = useState('');
@@ -56,13 +63,19 @@ export function CustomImageWorkbenchPanel({ state, context, onOpenAssets, onMana
   const textIssue = draft.promptMode === 'rules' && (!state.settings.textApi.enabled || !state.settings.textApi.model.trim() || !state.settings.textApi.baseUrl.trim())
     ? '使用规则转换需要配置并启用文本 API。' : '';
   const issue = apiIssue || resolvedSize.issue || ruleIssue || textIssue;
-  const allTasks = state.project.generationTasks.filter((task): task is ImageGenerationTask => task.kind === 'image' && task.assetKind === 'custom')
+  const vision = state.settings.visionApi;
+  const reverseIssue = !vision.enabled || !vision.vision || !vision.baseUrl.trim() || !vision.model.trim()
+    ? '请在 API 设置中配置并启用视觉识别 API。' : '';
+  const allTasks = state.project.generationTasks.filter((task): task is ImageGenerationTask | ImagePromptReverseTask =>
+    task.kind === 'image-prompt-reverse' || task.kind === 'image' && task.assetKind === 'custom')
     .slice().sort((a, b) => a.createdAt - b.createdAt);
   const tasks = allTasks.slice(-visibleCount);
   const lastTask = tasks[tasks.length - 1];
   const availableImages = state.project.assets.filter(asset => !asset.missing && asset.mediaType !== 'video' && asset.mediaType !== 'audio'
     && asset.type !== 'video' && asset.type !== 'audio' && Boolean(assetPreviewUrl(asset)));
   const draftAssets = draft.referenceAssetIds.map(id => state.project.assets.find(asset => asset.id === id));
+  const reverseAssets = draftAssets.filter((asset): asset is ReferenceAsset => Boolean(asset && availableImages.some(available => available.id === asset.id)));
+  const reverseActive = allTasks.some(task => task.kind === 'image-prompt-reverse' && (task.status === 'queued' || task.status === 'running'));
 
   function patchDraft(patch: Partial<CustomImageDraft>) {
     context.updateBackground(current => applyOwnedProjectUpdate(current, projectId, project => ({
@@ -72,13 +85,32 @@ export function CustomImageWorkbenchPanel({ state, context, onOpenAssets, onMana
 
   useEffect(() => {
     if (history.current) history.current.scrollTop = history.current.scrollHeight;
-  }, [lastTask?.id, lastTask?.status, lastTask?.resultAssetId]);
+  }, [lastTask?.id, lastTask?.status, lastTask?.kind === 'image' ? lastTask.resultAssetId : undefined]);
+  useEffect(() => {
+    if (!focusReverseTaskId) return;
+    const index = allTasks.findIndex(task => task.kind === 'image-prompt-reverse' && task.id === focusReverseTaskId);
+    if (index < 0) { onReverseFocusHandled?.(); return; }
+    const needed = allTasks.length - index;
+    if (needed > visibleCount) { setVisibleCount(needed); return; }
+    const article = history.current?.querySelector<HTMLElement>(`[data-task-id="${CSS.escape(focusReverseTaskId)}"]`);
+    if (!article) return;
+    article.scrollIntoView({ block: 'center' });
+    article.focus({ preventScroll: true });
+    onReverseFocusHandled?.();
+  }, [focusReverseTaskId, visibleCount, projectId, allTasks, onReverseFocusHandled]);
+  useEffect(() => { setReversePickerOpen(false); setPickerOpen(false); setPendingPrompt(''); }, [projectId]);
   useEffect(() => {
     if (!previewAsset) return;
     const close = (event: KeyboardEvent) => { if (event.key === 'Escape') setPreviewAsset(null); };
     window.addEventListener('keydown', close);
     return () => window.removeEventListener('keydown', close);
   }, [previewAsset]);
+  useEffect(() => {
+    if (!pendingPrompt) return;
+    const close = (event: KeyboardEvent) => { if (event.key === 'Escape') setPendingPrompt(''); };
+    window.addEventListener('keydown', close);
+    return () => window.removeEventListener('keydown', close);
+  }, [pendingPrompt]);
 
   async function uploadReferences(event: ChangeEvent<HTMLInputElement>) {
     const files = Array.from(event.target.files || []);
@@ -142,17 +174,96 @@ export function CustomImageWorkbenchPanel({ state, context, onOpenAssets, onMana
     promptInput.current?.focus();
   }
 
+  async function reverseImage(referenceAssetId: string) {
+    if (reverseSubmitBusy || uploadBusy || reverseActive || reverseIssue) return;
+    setReversePickerOpen(false);
+    setReverseSubmitBusy(true);
+    try { await submitImagePromptReverse(context, { referenceAssetId, customRequirement: draft.userPrompt }); }
+    catch (error) { context.notify(getSafeErrorDiagnostics(error).message, 'error'); }
+    finally { setReverseSubmitBusy(false); }
+  }
+
+  async function reverseAction(task: ImagePromptReverseTask, action: 'stop' | 'retry') {
+    if (actionBusy) return;
+    setActionBusy(task.id);
+    try {
+      if (action === 'stop') await stopImagePromptReverse(context, task);
+      else await retryImagePromptReverse(context, task);
+    } catch (error) { context.notify(getSafeErrorDiagnostics(error).message, 'error'); }
+    finally { setActionBusy(''); }
+  }
+
+  function deleteReverse(task: ImagePromptReverseTask) {
+    context.updateBackground(current => applyOwnedProjectUpdate(current, projectId, project => ({
+      ...project, generationTasks: project.generationTasks.filter(item => item.kind !== 'image-prompt-reverse'
+        || item.id !== task.id || item.status === 'queued' || item.status === 'running'),
+    })));
+  }
+
+  async function copyReverse(value: string) {
+    try { await navigator.clipboard.writeText(value); context.notify('已复制。'); }
+    catch { context.notify('复制失败，请选中分析内容手动复制。', 'error'); }
+  }
+
+  function fillPrompt(value: string) {
+    const latest = context.getState();
+    const project = latest.project.id === projectId ? latest.project : latest.projects.find(item => item.id === projectId);
+    if (project?.customImageDraft?.userPrompt.trim()) { setPendingPrompt(value); return; }
+    patchDraft({ userPrompt: value });
+    promptInput.current?.focus();
+  }
+
+  function applyPendingPrompt(append: boolean) {
+    context.updateBackground(current => applyOwnedProjectUpdate(current, projectId, project => {
+      const currentDraft = project.customImageDraft || defaultCustomImageDraft();
+      return { ...project, customImageDraft: { ...currentDraft,
+        userPrompt: append && currentDraft.userPrompt.trim() ? `${currentDraft.userPrompt}\n\n${pendingPrompt}` : pendingPrompt } };
+    }));
+    setPendingPrompt('');
+    promptInput.current?.focus();
+  }
+
   return <div className="custom-image-panel">
-    <div className="custom-image-history" ref={history} role="log" aria-label="自定义生图记录" aria-live="polite" aria-relevant="additions">
-      {!tasks.length && <div className="custom-image-empty"><MessageSquare size={28} /><strong>描述你想生成的图片</strong><span>可以上传参考图，也可以只输入文字。生成结果自动保存到资产库。</span></div>}
+    <div className="custom-image-history" ref={history} role="log" aria-label="自定义生图与图片反推记录" aria-live="polite" aria-relevant="additions">
+      {!tasks.length && <div className="custom-image-empty"><MessageSquare size={28} /><strong>描述你想生成的图片，或上传图片反推提示词</strong><span>生图结果自动保存到资产库，反推分析会显示在这里和资料任务中。</span></div>}
       {allTasks.length > visibleCount && <button className="btn small ghost" onClick={() => setVisibleCount(count => count + 30)}>显示更早的记录</button>}
       {tasks.map(task => {
+        if (task.kind === 'image-prompt-reverse') {
+          const snapshots = task.referenceAssetSnapshots.length ? imageReferenceSnapshotAssets(task.referenceAssetSnapshots) : [];
+          const reference = snapshots.find(asset => asset.id === task.referenceAssetId)
+            || state.project.assets.find(asset => asset.id === task.referenceAssetId);
+          const active = task.status === 'queued' || task.status === 'running';
+          return <article className="custom-image-turn custom-image-reverse-turn" key={task.id} data-task-id={task.id} tabIndex={-1}>
+            <div className="custom-image-user">
+              <div className="custom-image-user-text">反推图片提示词{task.customRequirement ? `\n关注要求：${task.customRequirement}` : ''}</div>
+              <div className="custom-image-message-references"><ImagePromptReverseReferencePreview asset={reference}
+                readManagedImageDataUrl={context.loader.readManagedImageDataUrl} onPreview={setPreviewAsset} /></div>
+              <div className="custom-image-meta">视觉识别 · {task.model}{task.width && task.height ? ` · 原图 ${task.width}×${task.height}` : ''}</div>
+            </div>
+            <div className="custom-image-result">
+              <div className={`custom-image-status ${task.status === 'failed' ? 'failed' : task.status === 'succeeded' ? 'succeeded' : ''}`}>
+                {task.preparationStage === 'reference' && active ? '正在读取反推原图…' : imagePromptReverseStatusLabel(task.status)}
+                <span className="custom-image-meta">{task.name}</span>
+              </div>
+              {task.result && <ImagePromptReverseResultView result={task.result} />}
+              {task.error && <div className="custom-image-error" role="alert">{task.error}</div>}
+              <div className="row wrap custom-image-result-actions">
+                {task.result && <><button className="btn small" onClick={() => void copyReverse(task.result!.prompt)}><Copy size={14} />复制提示词</button>
+                  <button className="btn small ghost" onClick={() => void copyReverse(formatImagePromptReverseResult(task.result!))}>复制全部</button>
+                  <button className="btn small" onClick={() => fillPrompt(task.result!.prompt)}>填入自定义要求</button></>}
+                {active ? <button className="btn small ghost" disabled={Boolean(actionBusy)} onClick={() => void reverseAction(task, 'stop')}><Square size={13} />停止分析</button>
+                  : <>{(task.status === 'failed' || task.status === 'cancelled') && <button className="btn small" disabled={Boolean(actionBusy) || reverseActive} onClick={() => void reverseAction(task, 'retry')}><RefreshCw size={14} />重试反推</button>}
+                    <button className="btn small ghost" disabled={Boolean(actionBusy)} onClick={() => deleteReverse(task)}><Trash2 size={14} />删除记录</button></>}
+              </div>
+            </div>
+          </article>;
+        }
         const result = state.project.assets.find(asset => asset.id === task.resultAssetId);
         const preview = result ? assetPreviewUrl(result) : task.customImageSavePending ? task.resultUrl : '';
         const snapshots = task.referenceAssetSnapshots?.length ? imageReferenceSnapshotAssets(task.referenceAssetSnapshots) : [];
         const referenceAssets = (task.referenceAssetIds || []).map(id => state.project.assets.find(asset => asset.id === id) || snapshots.find(asset => asset.id === id));
         const active = task.status === 'queued' || task.status === 'running';
-        const familyActive = allTasks.some(item => (item.regenerationRootTaskId || item.id) === (task.regenerationRootTaskId || task.id)
+        const familyActive = allTasks.some(item => item.kind === 'image' && (item.regenerationRootTaskId || item.id) === (task.regenerationRootTaskId || task.id)
           && (item.status === 'queued' || item.status === 'running'));
         return <article className="custom-image-turn" key={task.id} data-task-id={task.id}>
           <div className="custom-image-user">
@@ -192,10 +303,13 @@ export function CustomImageWorkbenchPanel({ state, context, onOpenAssets, onMana
         <button aria-label={`移除参考图${index + 1}`} onClick={() => patchDraft({ referenceAssetIds: draft.referenceAssetIds.filter((_, offset) => offset !== index) })}><X size={13} /></button>
       </div>)}</div>}
       <label htmlFor={`custom-image-prompt-${projectId}`}>自定义要求</label>
-      <textarea id={`custom-image-prompt-${projectId}`} ref={promptInput} value={draft.userPrompt} aria-label="自定义生图要求" placeholder="直接描述想生成什么，或上传图片后描述修改要求。Ctrl+Enter 发送。"
+      <textarea id={`custom-image-prompt-${projectId}`} ref={promptInput} value={draft.userPrompt} aria-label="自定义生图要求" placeholder="描述生图或修改要求；反推时可填写关注重点，也可留空。Ctrl+Enter 发送并生图。"
         onChange={event => patchDraft({ userPrompt: event.target.value })} onKeyDown={event => { if (event.ctrlKey && event.key === 'Enter') { event.preventDefault(); void send(); } }} />
-      <div className="row wrap"><button className="btn small" disabled={uploadBusy} onClick={() => fileInput.current?.click()}><Upload size={14} />{uploadBusy ? '正在上传…' : '上传参考图'}</button>
+      <div className="row wrap custom-image-reference-actions"><button className="btn small" disabled={uploadBusy} onClick={() => fileInput.current?.click()}><Upload size={14} />{uploadBusy ? '正在上传…' : '上传参考图'}</button>
         <button className="btn small" disabled={uploadBusy} onClick={() => setPickerOpen(true)}><Library size={14} />从资产库选择</button>
+        <button className="btn small" disabled={uploadBusy || reverseSubmitBusy || reverseActive || !reverseAssets.length || Boolean(reverseIssue)}
+          title={!draft.referenceAssetIds.length ? '请先上传或选择参考图。' : !reverseAssets.length ? '参考图已删除或不可用，请重新选择。' : reverseIssue || (reverseActive ? '当前图片反推正在进行，可在聊天区或资料任务中停止。' : '使用视觉 API 详细识别选中的原图。')}
+          onClick={() => { if (reverseAssets.length === 1) void reverseImage(reverseAssets[0].id); else setReversePickerOpen(true); }}><ScanSearch size={14} />{reverseSubmitBusy ? '正在提交…' : '反推图片提示词'}</button>
         <span className="field-hint">本次参考图 {draft.referenceAssetIds.length} 张 · 每次生成 1 张</span>
         <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/webp" multiple hidden aria-label="上传自定义生图参考图" onChange={event => void uploadReferences(event)} />
       </div>
@@ -219,8 +333,20 @@ export function CustomImageWorkbenchPanel({ state, context, onOpenAssets, onMana
       </div>
       {issue && <div className="custom-image-error" role="alert">{issue}</div>}
     </div>
+    <ReferenceImagePickerModal open={reversePickerOpen} assets={reverseAssets} selectedAssetId={reverseAssets[0]?.id || ''}
+      busy={reverseSubmitBusy} title="选择要反推的图片" hint="从本次参考图中选择一张，识别结果将显示在聊天区和资料任务中。" confirmLabel="反推所选图片"
+      onClose={() => setReversePickerOpen(false)} onConfirm={asset => void reverseImage(asset.id)} />
     <ReferenceImagePickerModal open={pickerOpen} assets={availableImages} selectedAssetId="" onClose={() => setPickerOpen(false)} onConfirm={asset => { patchDraft({ referenceAssetIds: [...new Set([...draft.referenceAssetIds, asset.id])] }); setPickerOpen(false); }} />
-    {previewAsset && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setPreviewAsset(null); }}><div className="modal asset-preview-modal" role="dialog" aria-modal="true" aria-label="自定义生成图片预览">
+    {pendingPrompt && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setPendingPrompt(''); }}>
+      <div className="modal custom-image-fill-modal" role="dialog" aria-modal="true" aria-label="填入反推提示词">
+        <div className="modal-head"><h3>填入反推提示词</h3><button className="btn small ghost" onClick={() => setPendingPrompt('')}>关闭</button></div>
+        <p>自定义要求中已有草稿，请选择如何填入。</p>
+        <div className="row wrap"><button className="btn primary" onClick={() => applyPendingPrompt(true)}>追加到现有要求</button>
+          <button className="btn" onClick={() => applyPendingPrompt(false)}>替换现有要求</button>
+          <button className="btn ghost" onClick={() => setPendingPrompt('')}>取消</button></div>
+      </div>
+    </div>}
+    {previewAsset && <div className="modal-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setPreviewAsset(null); }}><div className="modal asset-preview-modal" role="dialog" aria-modal="true" aria-label="自定义生图与反推原图预览">
       <div className="modal-head"><h3>{previewAsset.name}</h3><button className="btn small ghost" onClick={() => setPreviewAsset(null)}>关闭</button></div><AssetImagePreview src={assetPreviewUrl(previewAsset)} alt={previewAsset.name} />
     </div></div>}
   </div>;

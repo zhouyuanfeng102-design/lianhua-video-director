@@ -584,6 +584,29 @@ export const applyVisualStyleSelection = (
   };
 };
 
+/** Keep reference-specific detail while selecting a compatible catalog basis.
+ * Unknown looks prefer a neutral preset so an old unrelated style is not injected. */
+export const applyReferenceVisualStyleSelection = (
+  value: string,
+  baseVisualStyle: string | undefined,
+  availablePresetIds: readonly string[],
+  currentPresetId: string,
+): { visualStyle: string; stylePresetId: string; matched: boolean } => {
+  const definition = [value, baseVisualStyle || '']
+    .map(findVisualStyleDefinition)
+    .find((candidate) => candidate && availablePresetIds.includes(candidate.stylePresetId));
+  const fallbackPresetId = availablePresetIds.includes('style_neutral')
+    ? 'style_neutral'
+    : availablePresetIds.includes(currentPresetId)
+      ? currentPresetId
+      : availablePresetIds[0] ?? currentPresetId;
+  return {
+    visualStyle: value,
+    stylePresetId: definition?.stylePresetId || fallbackPresetId,
+    matched: Boolean(definition),
+  };
+};
+
 export const createBuiltInVisualStylePresets = (timestamp: number): StylePreset[] =>
   visualStyleDefinitions.map(({ stylePresetId, name, category, preset }) => ({
     id: stylePresetId,

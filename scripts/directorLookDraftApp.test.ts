@@ -8,6 +8,10 @@ import { normalizeDirectorLookDraft, type DirectorLookDraft } from '../src/direc
 import { normalizeGridDirectorInputMode } from '../src/gridDirectorWorkflow';
 import { activeDirectorWorkflow } from '../src/gridRetirement';
 import { formatDirectorStyleSummary, resolveDirectorStylePreset } from '../src/directorStyles';
+import { chapterScopeProject, chapterWorkspace } from '../src/chapters';
+import { sequencePlanReviewFingerprint } from '../src/sequencePlan';
+import { sequencePlanMasterConfirmationIssue, sequencePlanMasterDirectorSettingsIssue } from '../src/storySegmentation';
+import { readSequencePlanDurationEstimate } from '../src/storyPacingEstimate';
 import type { AppState, Project, Storyboard } from '../src/types';
 
 // Execute the actual App transactions, not a second hand-written version of
@@ -17,6 +21,7 @@ const source = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
 const ast = ts.createSourceFile('App.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const names = [
   'withProjectLibrary', 'parseDirectorSettingsFingerprint',
+  'durationPresetForSeconds', 'restoreChapterUiState',
   'commitState', 'updateDirectorLookDraft', 'syncWorkspaceUiState', 'restoreSequenceDirectorSettings',
 ] as const;
 const declarations = new Map<string, ts.VariableDeclaration>();
@@ -97,6 +102,8 @@ const probe = (initial: AppState) => {
       directorLookDraftEpoch: workspaceEpochRef.current,
       activeSequencePlan: undefined, activeDirectorWorkflow, normalizeGridDirectorInputMode,
       normalizeDirectorLookDraft, resolveDirectorStylePreset, formatDirectorStyleSummary,
+      chapterScopeProject, chapterWorkspace, sequencePlanReviewFingerprint,
+      sequencePlanMasterConfirmationIssue, sequencePlanMasterDirectorSettingsIssue, readSequencePlanDurationEstimate,
       createEmptyAssetForm: () => ({}), useCallback: (callback: unknown) => callback,
       setBackgroundState: (update: AppState | ((current: AppState) => AppState)) => {
         const previous = stateRef.current;

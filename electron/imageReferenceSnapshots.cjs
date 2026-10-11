@@ -15,7 +15,8 @@ const collectImageReferenceSnapshotsForExport = (state) => {
   for (const project of projects) {
     const sources = [
       ...(Array.isArray(project?.generationTasks) ? project.generationTasks : [])
-        .filter((task) => task?.kind === 'image' && (task.imageGenerationMode === 'image-to-image' || task.assetKind === 'custom')),
+        .filter((task) => task?.kind === 'image-prompt-reverse'
+          || task?.kind === 'image' && (task.imageGenerationMode === 'image-to-image' || task.assetKind === 'custom')),
       ...(Array.isArray(project?.assets) ? project.assets : [])
         .filter((asset) => asset?.imageRegenerationSnapshot?.version === 1
           && (asset.imageGenerationMode === 'image-to-image' || asset.imageRegenerationSnapshot.sourceKind === 'custom'))

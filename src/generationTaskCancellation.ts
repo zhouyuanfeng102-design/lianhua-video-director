@@ -11,8 +11,16 @@ const taskInstanceKey = (projectId: string, task: TaskIdentity): string => JSON.
 ]);
 
 export const revokeQueuedGenerationTask = (projectId: string, task: GenerationTask): boolean => {
-  if (!projectId || !task.id || (task.kind !== 'image' && task.kind !== 'autofill')
+  if (!projectId || !task.id || (task.kind !== 'image' && task.kind !== 'autofill' && task.kind !== 'image-prompt-reverse')
     || (task.status !== 'queued' && task.status !== 'cancelled')) return false;
+  revokedTaskInstances.add(taskInstanceKey(projectId, task));
+  return true;
+};
+
+/** Vision analysis can be stopped while running; its late response must remain revoked through undo/redo. */
+export const revokeImagePromptReverseTask = (projectId: string, task: GenerationTask): boolean => {
+  if (!projectId || !task.id || task.kind !== 'image-prompt-reverse'
+    || !['queued', 'running', 'cancelled'].includes(task.status)) return false;
   revokedTaskInstances.add(taskInstanceKey(projectId, task));
   return true;
 };

@@ -168,7 +168,7 @@ const mapProjectMedia = (project, transform) => {
     ? replaceProperty(snapshot, 'referenceAssetSnapshots', mapChanged(snapshot.referenceAssetSnapshots, transform)) : snapshot;
   const mapTask = (task) => {
     if (!isRecord(task)) return task;
-    let next = task.kind === 'image' ? mapSnapshot(task) : task;
+    let next = task.kind === 'image' || task.kind === 'image-prompt-reverse' ? mapSnapshot(task) : task;
     const job = task.videoJob;
     if (isRecord(job)) {
       let nextJob = job;

@@ -90,7 +90,7 @@ const remapMediaRecords = (state, replacements) => {
     if (Array.isArray(snapshot?.referenceAssetSnapshots)) snapshot.referenceAssetSnapshots.forEach(media);
   };
   const task = (value) => {
-    if (value?.kind === 'image') imageSnapshot(value);
+    if (value?.kind === 'image' || value?.kind === 'image-prompt-reverse') imageSnapshot(value);
     if (Array.isArray(value?.videoJob?.snapshot?.images)) value.videoJob.snapshot.images.forEach(media);
     media(value?.videoJob?.tailPreparation?.selection?.frame);
     const preparation = value?.videoJob?.tailPreparation;

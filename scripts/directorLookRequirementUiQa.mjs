@@ -334,7 +334,7 @@ export async function runDirectorLookRequirementLayoutQa(page, outputDirectory) 
       const layout = await page.locator('#director-setup-style').evaluate((section) => {
         const rect = (element) => { const r = element.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height, right: r.right, bottom: r.bottom }; };
         const row = section.querySelector('.director-look-analysis-row');
-        const title = row.querySelector('span'); const textarea = row.querySelector('textarea'); const button = row.querySelector('button');
+        const title = row.querySelector('span'); const textarea = row.querySelector('textarea'); const button = row.querySelector('button[aria-label="AI 分析填写"], button[aria-label="AI 分析中…"]');
         const controlCard = section.closest('.director-control-card');
         if (!controlCard) throw new Error('Director control card missing from layout fixture');
         const targets = [title, ...controlCard.querySelectorAll('input,textarea,select,button')].filter((element) => {

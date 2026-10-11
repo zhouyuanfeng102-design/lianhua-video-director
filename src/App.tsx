@@ -2,6 +2,8 @@ import { askChapterEntityResolutions, applyChapterEntityResolutions } from "./co
 import { chapterContentForEntity } from "./chapters";
 import { imageTaskRuleMetadata } from "./imageTaskRuleMetadata";
 import { CustomImageWorkbenchPanel } from "./components/CustomImageWorkbenchPanel";
+import { ImagePromptReverseReferencePreview, ImagePromptReverseResultView } from "./components/ImagePromptReverseResult";
+import { retryImagePromptReverse, stopImagePromptReverse, imagePromptReverseStatusLabel } from "./imagePromptReverse";
 import { retryCustomImageTask, retryCustomImageSave, type CustomImageGenerationContext } from "./customImageGeneration";
 import { useAssetViewportLayout } from "./useAssetViewportLayout";
 import { appColorModes, appColorThemes, normalizeAppColorMode, normalizeAppColorTheme, resolveAppColorMode } from "./appTheme";
@@ -98,6 +100,7 @@ import type {
   DurationPreset,
   InputMode,
   ImageGenerationTask,
+  ImagePromptReverseTask,
   ImageVariant,
   Location,
   NsfwPrivatePart,
@@ -154,6 +157,7 @@ import { isVideoDirectorImage } from "./videoDirectorDraft";
 import { assetReferenceCharacterOwners, bindAssetCharacter, isAssetCharacterBindingImage } from "./assetCharacterBinding";
 import { directorLookSource } from "./directorLookSource";
 import { normalizeDirectorLookDraft, type DirectorLookDraft } from "./directorLookDraft";
+import { DirectorLookReferenceButton } from "./components/DirectorLookReferenceButton";
 import { storyboardH3DeliveryWarnings } from "./h3DeliveryWarnings";
 import { AutoFitSidebarNav } from "./components/AutoFitSidebarNav";
 import { AssetVideoThumbnail } from "./components/AssetVideoThumbnail";
@@ -210,6 +214,7 @@ import { generateSingleSegmentPrompt, getSingleSegmentReferences } from "./singl
 import { listModelProfiles, type PromptDetailMode } from "./modelProfiles";
 import {
   applyVisualStyleSelection,
+  applyReferenceVisualStyleSelection,
   resolveVisualStylePrompt,
   resolveVisualStyleSelectDisplay,
   visualStyleDefinitions,
@@ -360,6 +365,7 @@ import {
   isGenerationTaskCancelledError,
   isGenerationTaskRevoked,
   isImageGenerationTask,
+  isImagePromptReverseTask,
   isVideoGenerationTask,
   isVisibleGenerationTask,
   patchImageGenerationTask,
@@ -1866,6 +1872,7 @@ export default function App() {
   const undoStack = useRef<AppState[]>([]);
   const redoStack = useRef<AppState[]>([]);
   const workspaceEpochRef = useRef(0);
+  const directorLookNavigationRevisionRef = useRef(0);
   const backgroundChapterRef = useRef<{ projectId: string; chapterId: string }>();
   const chapterWorkerInBackground = () => Boolean(backgroundChapterRef.current
     && backgroundChapterRef.current.projectId === stateRef.current.project.id
@@ -1941,6 +1948,7 @@ export default function App() {
   );
   const getCurrentProjectId = useCallback(() => stateRef.current.project.id, []);
   const getCurrentState = useCallback(() => stateRef.current, []);
+  const getCurrentDirectorLookNavigationRevision = useCallback(() => directorLookNavigationRevisionRef.current, []);
   const getCurrentProjectImageContext = useCallback((): StoryboardImageBuildContext => {
     const project = stateRef.current.project;
     return {
@@ -2252,6 +2260,8 @@ export default function App() {
   const [assetKind, setAssetKind] = useState<
     "character" | "location" | "prop" | "grid"
   >("character");
+  const [imagePromptReverseFocusTaskId, setImagePromptReverseFocusTaskId] = useState("");
+  useEffect(() => { setImagePromptReverseFocusTaskId(""); }, [state.project.id]);
   const [assetForm, setAssetForm] = useState<Record<string, string>>(() =>
     ({
       ...createEmptyAssetForm(),
@@ -5682,6 +5692,7 @@ export default function App() {
     const project = change(source.project);
     if (project === source.project) return;
     const switched = activeChapter(project)?.id !== activeChapter(source.project)?.id;
+    if (switched) directorLookNavigationRevisionRef.current += 1;
     const next = { ...source, project };
     setState(next);
     if (switched) {
@@ -9164,6 +9175,7 @@ export default function App() {
       chapterId: activeChapter(stateRef.current.project)?.id || "",
     }),
     getCurrentState,
+    getCurrentDirectorLookNavigationRevision,
     getCurrentProjectImageContext,
     getCurrentStoryboardOperationIdentity,
     setActiveStoryboardId,
@@ -9334,6 +9346,8 @@ export default function App() {
     setSelectedAssetIds,
     assetKind,
     setAssetKind,
+    imagePromptReverseFocusTaskId,
+    setImagePromptReverseFocusTaskId,
     assetForm,
     setAssetForm,
     assetFormStyleSource,
@@ -10372,6 +10386,7 @@ interface AppContext {
   getCurrentWorkspaceIdentity: () => { projectId: string; workspaceEpoch: number; chapterId: string };
   getCurrentProjectImageContext: () => StoryboardImageBuildContext;
   getCurrentState: () => AppState;
+  getCurrentDirectorLookNavigationRevision: () => number;
   getCurrentStoryboardOperationIdentity: () => {
     workspaceEpoch: number;
     projectId: string;
@@ -10558,6 +10573,8 @@ interface AppContext {
   selectedAssetIds: string[];
   setSelectedAssetIds: React.Dispatch<React.SetStateAction<string[]>>;
   assetKind: "grid" | "character" | "location" | "prop";
+  imagePromptReverseFocusTaskId: string;
+  setImagePromptReverseFocusTaskId: React.Dispatch<React.SetStateAction<string>>;
   setAssetKind: React.Dispatch<
     React.SetStateAction<"grid" | "character" | "location" | "prop">
   >;
@@ -12694,6 +12711,7 @@ function DirectorView(ctx: AppContext) {
     activeStoryboard: rootActiveStoryboard,
     getCurrentWorkspaceIdentity,
     getCurrentStoryboardOperationIdentity,
+    getCurrentDirectorLookNavigationRevision,
     buildStoryboard,
     regenerateStoryboardEnglish,
     busy,
@@ -12789,7 +12807,50 @@ function DirectorView(ctx: AppContext) {
     } }));
   };
   const [directorLookAutofillBusy, setDirectorLookAutofillBusy] = useState(false);
+  const [directorLookUploading, setDirectorLookUploading] = useState(false);
+  const directorLookUploadRevisionRef = useRef(0);
   const directorLookRequirement = state.project.directorLookRequirement || "";
+  const directorLookChapterId = activeChapter(state.project)?.id;
+  const directorLookReferenceAssetId = state.project.directorLookReferenceAssetId;
+  const directorLookReferenceAsset = state.project.assets.find((asset) => asset.id === directorLookReferenceAssetId);
+  const directorLookReferenceFingerprint = useMemo(() => JSON.stringify([
+    directorLookReferenceAssetId, directorLookReferenceAsset?.checksum,
+    directorLookReferenceAsset?.relativePath, directorLookReferenceAsset?.updatedAt,
+    directorLookReferenceAsset?.missing,
+    directorLookReferenceAsset?.dataUrl ? sourceContentHash(directorLookReferenceAsset.dataUrl) : "",
+  ]), [directorLookReferenceAssetId, directorLookReferenceAsset?.checksum,
+    directorLookReferenceAsset?.relativePath, directorLookReferenceAsset?.updatedAt,
+    directorLookReferenceAsset?.missing, directorLookReferenceAsset?.dataUrl]);
+  const directorLookNavigationRevision = getCurrentDirectorLookNavigationRevision();
+  const directorLookReferenceOwner = JSON.stringify([state.project.id, directorLookChapterId,
+    getCurrentStoryboardOperationIdentity().workspaceEpoch, directorLookNavigationRevision]);
+  const directorLookReferencePreviewKey = `${directorLookReferenceOwner}:${directorLookReferenceFingerprint}`;
+  const directorLookPreviewCacheRef = useRef<{ key: string; url: string }>();
+  const [directorLookPreview, setDirectorLookPreview] = useState<{ key: string; url: string }>();
+  const directorLookReferencePreviewUrl = directorLookPreview?.key === directorLookReferencePreviewKey ? directorLookPreview.url : "";
+  useEffect(() => {
+    directorLookUploadRevisionRef.current += 1;
+    setDirectorLookUploading(false);
+  }, [directorLookReferenceOwner]);
+  useEffect(() => {
+    if (!directorLookReferenceAsset || directorLookReferenceAsset.missing) {
+      setDirectorLookPreview(undefined);
+      return;
+    }
+    if (directorLookPreviewCacheRef.current?.key === directorLookReferencePreviewKey) {
+      setDirectorLookPreview(directorLookPreviewCacheRef.current);
+      return;
+    }
+    let disposed = false;
+    setDirectorLookPreview(undefined);
+    void loadVideoPromptReferenceImages([directorLookReferenceAsset.id], [directorLookReferenceAsset]).then(([url]) => {
+      if (disposed) return;
+      const preview = { key: directorLookReferencePreviewKey, url };
+      directorLookPreviewCacheRef.current = preview;
+      setDirectorLookPreview(preview);
+    }).catch(() => { if (!disposed) setDirectorLookPreview(undefined); });
+    return () => { disposed = true; };
+  }, [directorLookReferencePreviewKey]);
   const lookSource = directorLookSource({
     productionMode, sequenceSettingsOpen, plan: activeSequencePlan,
     segment: activeSequenceSegment, sourceScenes: directorSourceScenes,
@@ -12797,10 +12858,11 @@ function DirectorView(ctx: AppContext) {
   });
   const directorLookInputIdentity = JSON.stringify([
     state.project.id, productionMode, sequenceStage, sequenceSettingsOpen, lookSource,
+    directorLookChapterId, directorLookNavigationRevision, directorLookReferenceFingerprint,
     storyInput, storyName, busy,
     directorWorkflow, directorInputMode, directorLookRequirement, extraRequirement,
     directorCategory, directorStyleName, directorStyleSummary, visualStyle, styleId,
-    sourceContentHash(JSON.stringify(state.settings.textApi)),
+    sourceContentHash(JSON.stringify(directorLookReferenceAssetId ? state.settings.visionApi : state.settings.textApi)),
   ]);
   const directorLookIdentityRef = useRef(directorLookInputIdentity);
   directorLookIdentityRef.current = directorLookInputIdentity;
@@ -12818,6 +12880,7 @@ function DirectorView(ctx: AppContext) {
     if (directorLookRequestRef.current?.identity !== directorLookInputIdentity) cancelDirectorLookRequest();
   }, [directorLookInputIdentity, cancelDirectorLookRequest]);
   useEffect(() => () => {
+    directorLookUploadRevisionRef.current += 1;
     directorLookRequestRef.current?.controller.abort();
     directorLookRequestRef.current = undefined;
   }, []);
@@ -12828,6 +12891,75 @@ function DirectorView(ctx: AppContext) {
       ...current,
       project: { ...current.project, directorLookRequirement: value, updatedAt: Date.now() },
     }));
+  };
+  const uploadDirectorLookReference = async (file: File): Promise<void> => {
+    if (busy || directorLookUploading) return;
+    cancelDirectorLookRequest();
+    const projectId = state.project.id;
+    const chapterId = directorLookChapterId;
+    const epoch = getCurrentStoryboardOperationIdentity().workspaceEpoch;
+    const navigationRevision = directorLookNavigationRevision;
+    const revision = ++directorLookUploadRevisionRef.current;
+    const isCurrent = () => revision === directorLookUploadRevisionRef.current
+      && getCurrentStoryboardOperationIdentity().workspaceEpoch === epoch && getCurrentProjectId() === projectId
+      && getCurrentDirectorLookNavigationRevision() === navigationRevision
+      && activeChapter(getCurrentState().project)?.id === chapterId;
+    setDirectorLookUploading(true);
+    try {
+      if (!file.size) throw new Error("图片文件为空，请重新选择。");
+      if (file.size > 32 * 1024 * 1024) throw new Error("参考图片超过 32 MB 上限。");
+      if (!/^image\/(?:png|jpeg|webp)$/iu.test(file.type) && !/\.(png|jpe?g|webp)$/iu.test(file.name)) {
+        throw new Error("请选择 PNG、JPEG 或 WebP 图片。");
+      }
+      const bridge = desktopBridge();
+      const managed = bridge?.importMedia ? await bridge.importMedia(file) : null;
+      const dataUrl = managed ? undefined : await readImageAsDataUrl(file, Number.POSITIVE_INFINITY);
+      if (!isCurrent()) return;
+      const now = Date.now();
+      const asset: ReferenceAsset = {
+        id: createId("asset"), name: file.name, fileName: file.name,
+        type: "reference", role: "style", mediaType: "image", referenceRole: "style", source: "upload",
+        dataUrl, url: managed?.url, relativePath: managed?.relativePath, checksum: managed?.checksum,
+        sizeBytes: managed?.sizeBytes || file.size, managed: Boolean(managed?.managed), missing: false,
+        mimeType: managed?.mimeType || (dataUrl ? referenceImageMimeType(dataUrl) : file.type),
+        tags: ["风格参考图", "用户上传"], importedAt: now, createdAt: now, updatedAt: now,
+      };
+      const [url] = await loadVideoPromptReferenceImages([asset.id], [asset]);
+      if (!isCurrent()) return;
+      const duplicate = getCurrentState().project.assets.find((item) => item.role === "style" && !item.missing
+        && (asset.checksum ? item.checksum === asset.checksum : dataUrl && item.dataUrl === dataUrl));
+      const reference = duplicate || asset;
+      const fingerprint = JSON.stringify([reference.id, reference.checksum, reference.relativePath, reference.updatedAt,
+        reference.missing, reference.dataUrl ? sourceContentHash(reference.dataUrl) : ""]);
+      directorLookPreviewCacheRef.current = { key: `${directorLookReferenceOwner}:${fingerprint}`, url };
+      setState((current) => {
+        if (!isCurrent() || current.project.id !== projectId || activeChapter(current.project)?.id !== chapterId) return current;
+        const project = withChapterWorkspace({ ...current.project,
+          assets: duplicate ? current.project.assets : [asset, ...current.project.assets],
+          directorLookReferenceAssetId: reference.id, updatedAt: now,
+        }, { directorLookReferenceAssetId: reference.id }, chapterId);
+        return { ...current, project };
+      });
+      notify("风格参考图已上传，点击 AI 分析填写识别风格。");
+    } catch (error) {
+      if (isCurrent()) notify(error instanceof Error ? error.message : "风格参考图上传失败。", "error");
+    } finally {
+      if (revision === directorLookUploadRevisionRef.current) setDirectorLookUploading(false);
+    }
+  };
+  const removeDirectorLookReference = () => {
+    cancelDirectorLookRequest();
+    directorLookUploadRevisionRef.current += 1;
+    setDirectorLookUploading(false);
+    const projectId = state.project.id;
+    const chapterId = directorLookChapterId;
+    setState((current) => current.project.id !== projectId || activeChapter(current.project)?.id !== chapterId ? current : ({
+      ...current, project: withChapterWorkspace({ ...current.project,
+        directorLookReferenceAssetId: undefined, updatedAt: Date.now(),
+      }, { directorLookReferenceAssetId: undefined }, chapterId),
+    }));
+    directorLookPreviewCacheRef.current = undefined;
+    setDirectorLookPreview(undefined);
   };
   const [directorPane, setDirectorPane] = useState<"references" | "result">("result");
   const officialPromptContext = useMemo<OfficialH3ProjectContext | undefined>(() => {
@@ -13101,19 +13233,29 @@ function DirectorView(ctx: AppContext) {
     updateDirectorLookDraft({ visualStyle: selection.visualStyle, styleId: selection.stylePresetId });
   };
   const analyzeDirectorLookSettings = async () => {
-    if (busy || directorLookRequestRef.current || directorLookAutofillBusy) return;
+    if (busy || directorLookRequestRef.current || directorLookAutofillBusy || directorLookUploading) return;
     const textApi = state.settings.textApi;
-    if (!textApi.enabled || !textApi.baseUrl.trim() || !textApi.model.trim()) {
+    const hasReferenceImage = Boolean(directorLookReferenceAssetId);
+    const analysisApi = hasReferenceImage ? state.settings.visionApi : textApi;
+    if (hasReferenceImage && (!analysisApi.enabled || !analysisApi.vision || !analysisApi.baseUrl.trim() || !analysisApi.model.trim())) {
+      notify("参考图分析需要视觉 API。请先在 API 设置中启用视觉模型并填写地址、模型。", "error");
+      setView("settings");
+      return;
+    }
+    if (!hasReferenceImage && (!textApi.enabled || !textApi.baseUrl.trim() || !textApi.model.trim())) {
       notify("AI 分析填写需要文本 API。请先在 API 设置中启用文本模型并填写地址、模型。", "error");
       setView("settings");
       return;
     }
     const sourceStory = lookSource.story;
-    if (!sourceStory.trim() && !extraRequirement.trim() && !directorLookRequirement.trim()) {
+    if (!hasReferenceImage && !sourceStory.trim() && !extraRequirement.trim() && !directorLookRequirement.trim()) {
       notify("请先填写剧情、自定义要求或额外要求，再让 AI 分析导演与视觉风格。", "error");
       return;
     }
     const requestProjectId = state.project.id;
+    const requestChapterId = directorLookChapterId;
+    const requestReferenceAssetId = directorLookReferenceAssetId;
+    const requestNavigationRevision = directorLookNavigationRevision;
     const request = {
       controller: new AbortController(), identity: directorLookInputIdentity,
       workspaceEpoch: getCurrentStoryboardOperationIdentity().workspaceEpoch,
@@ -13123,14 +13265,26 @@ function DirectorView(ctx: AppContext) {
       && !request.controller.signal.aborted
       && directorLookIdentityRef.current === request.identity
       && getCurrentProjectId() === requestProjectId
+      && getCurrentDirectorLookNavigationRevision() === requestNavigationRevision
+      && activeChapter(getCurrentState().project)?.id === requestChapterId
+      && getCurrentState().project.directorLookReferenceAssetId === requestReferenceAssetId
       && getCurrentStoryboardOperationIdentity().workspaceEpoch === request.workspaceEpoch;
     setDirectorLookAutofillBusy(true);
     try {
-      const result = await requestDirectorLookAutofill(textApi, {
+      let referenceImages: string[] | undefined;
+      if (hasReferenceImage) {
+        if (!directorLookReferenceAsset || directorLookReferenceAsset.missing) {
+          throw new Error("风格参考图已丢失，请移除后重新上传。");
+        }
+        referenceImages = await loadVideoPromptReferenceImages([directorLookReferenceAsset.id], state.project.assets);
+        if (!isCurrent()) return;
+      }
+      const result = await requestDirectorLookAutofill(analysisApi, {
         title: lookSource.title,
         story: sourceStory,
         extraRequirement,
         customRequirement: directorLookRequirement,
+        ...(referenceImages ? { referenceImages } : {}),
         current: {
           directorCategory,
           directorStyle: directorStyleName,
@@ -13151,7 +13305,10 @@ function DirectorView(ctx: AppContext) {
         })),
       }, request.controller.signal);
       if (!isCurrent()) return;
-      const selection = applyVisualStyleSelection(result.visualStyle, state.stylePresets.map((preset) => preset.id), styleId);
+      const availablePresetIds = state.stylePresets.map((preset) => preset.id);
+      const selection = hasReferenceImage
+        ? applyReferenceVisualStyleSelection(result.visualStyle, result.baseVisualStyle, availablePresetIds, styleId)
+        : applyVisualStyleSelection(result.visualStyle, availablePresetIds, styleId);
       updateDirectorLookDraft({
         ...directorStyleFieldsForInput(result.directorStyle),
         directorCategory: result.directorCategory,
@@ -13922,6 +14079,123 @@ function DirectorView(ctx: AppContext) {
       setStoryboardImagePreparation((current) => current === imagePreparation ? undefined : current);
     }
   };
+  const renderDirectorLookSection = () => (
+                <section
+                  id="director-setup-style"
+                  aria-labelledby="director-setup-style-title"
+                  className="director-setup-section tone-style"
+                >
+                  <div className="director-section-title director-look-analysis-row" id="director-setup-style-title">
+                    <span>
+                      <Sparkles size={14} />
+                      导演与视觉
+                    </span>
+                    <textarea
+                      className="director-look-requirement"
+                      aria-label="导演与视觉自定义要求"
+                      title="只用于此处 AI 分析填写；留空沿用原来的剧情分析，不影响下方额外要求。"
+                      placeholder="自定义要求（可选，留空按原分析）"
+                      rows={1}
+                      value={directorLookRequirement}
+                      onChange={(event) => changeDirectorLookRequirement(event.target.value)}
+                    />
+                    <DirectorLookReferenceButton
+                      key={directorLookReferenceOwner}
+                      asset={directorLookReferenceAsset || (directorLookReferenceAssetId ? {
+                        id: directorLookReferenceAssetId, name: "参考图已丢失", type: "reference", role: "style",
+                        missing: true, tags: [], createdAt: 0, updatedAt: 0,
+                      } : undefined)}
+                      previewUrl={directorLookReferencePreviewUrl}
+                      busy={busy}
+                      uploading={directorLookUploading}
+                      onUpload={uploadDirectorLookReference}
+                      onRemove={removeDirectorLookReference}
+                    />
+                    <Button
+                      small
+                      variant="ghost"
+                      icon={<WandSparkles size={12} />}
+                      disabled={busy || directorLookAutofillBusy || directorLookUploading}
+                      ariaLabel={directorLookAutofillBusy ? "AI 分析中…" : "AI 分析填写"}
+                      title={busy ? "当前任务进行中，可先输入要求；任务结束后再点击分析填写。" : directorLookReferenceAssetId ? "使用视觉 API，结合参考图、剧情和自定义要求填写导演与视觉。" : "根据剧情和自定义要求分析并填写导演与视觉；留空沿用原分析。"}
+                      onClick={analyzeDirectorLookSettings}
+                    >
+                      {directorLookAutofillBusy ? "AI 分析中…" : "AI 分析填写"}
+                    </Button>
+                  </div>
+                  <div className="grid grid-3 compact-director-fields director-style-pane">
+                    <Field label="导演分类" hint={knownDirectorCategory === "全部" ? "可自写" : "可选可改"}>
+                      <div className="director-choice-combo">
+                        <input
+                          value={directorCategory}
+                          onChange={(event) => handleDirectorCategoryInput(event.target.value)}
+                          placeholder="例如：海岛动漫"
+                        />
+                        <select
+                          aria-label="选择导演分类"
+                          value=""
+                          onChange={(event) => {
+                            if (event.target.value) handleDirectorCategoryInput(event.target.value);
+                          }}
+                        >
+                          <option value="">选择</option>
+                          {directorStyleCategories.map((item) => (
+                            <option key={item} value={item}>
+                              {item}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </Field>
+                    <Field label="导演风格" hint={directorStyleSummary || "可自写调度风格"}>
+                      <div className="director-choice-combo">
+                        <input
+                          value={directorStyleName}
+                          onChange={(event) => handleDirectorStyleInput(event.target.value)}
+                          placeholder="例如：清亮夏日番剧式轻喜导演"
+                        />
+                        <select
+                          aria-label="选择导演风格"
+                          value=""
+                          onChange={(event) => {
+                            if (event.target.value) applyDirectorStylePresetToControls(event.target.value);
+                          }}
+                        >
+                          <option value="">选择</option>
+                          {filteredDirectorStyles.map((item) => (
+                            <option key={item.id} value={item.id}>
+                              {item.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </Field>
+                    <Field label="视觉风格" hint={visualStyleSelectDisplay.compatibility ? "自定义视觉风格" : "可选可改"}>
+                      <div className="director-choice-combo">
+                        <input
+                          value={visualStyleSelectDisplay.value}
+                          onChange={(event) => handleVisualStyleSelection(event.target.value)}
+                          placeholder="例如：2D 动漫海边清透风"
+                        />
+                        <select
+                          aria-label="选择视觉风格"
+                          value=""
+                          onChange={(event) => {
+                            if (event.target.value) handleVisualStyleSelection(event.target.value);
+                          }}
+                        >
+                          <option value="">选择</option>
+                          {visualStyleDefinitions.map((item) => (
+                            <option key={item.id} value={item.id}>
+                              {item.name}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </Field>
+                  </div>
+                </section>
+  );
   return (
     <div className="grid director-view" style={{ gap: 10 }}>
       {activeStoryboard && <Card className="soft prompt-video-links">
@@ -13950,6 +14224,9 @@ function DirectorView(ctx: AppContext) {
               </div>
             }
           />
+          <div className="director-control-card director-empty-look-card">
+            {renderDirectorLookSection()}
+          </div>
         </Card>
       ) : (
         <>
@@ -14518,109 +14795,7 @@ function DirectorView(ctx: AppContext) {
                     </Field>
                   </div>
                 </section>
-                <section
-                  id="director-setup-style"
-                  aria-labelledby="director-setup-style-title"
-                  className="director-setup-section tone-style"
-                >
-                  <div className="director-section-title director-look-analysis-row" id="director-setup-style-title">
-                    <span>
-                      <Sparkles size={14} />
-                      导演与视觉
-                    </span>
-                    <textarea
-                      className="director-look-requirement"
-                      aria-label="导演与视觉自定义要求"
-                      title="只用于此处 AI 分析填写；留空沿用原来的剧情分析，不影响下方额外要求。"
-                      placeholder="自定义要求（可选，留空按原分析）"
-                      rows={1}
-                      value={directorLookRequirement}
-                      onChange={(event) => changeDirectorLookRequirement(event.target.value)}
-                    />
-                    <Button
-                      small
-                      variant="ghost"
-                      icon={<WandSparkles size={12} />}
-                      disabled={busy || directorLookAutofillBusy}
-                      ariaLabel={directorLookAutofillBusy ? "AI 分析中…" : "AI 分析填写"}
-                      title={busy ? "当前任务进行中，可先输入要求；任务结束后再点击分析填写。" : "根据剧情和自定义要求分析并填写导演与视觉；留空沿用原分析。"}
-                      onClick={analyzeDirectorLookSettings}
-                    >
-                      {directorLookAutofillBusy ? "AI 分析中…" : "AI 分析填写"}
-                    </Button>
-                  </div>
-                  <div className="grid grid-3 compact-director-fields director-style-pane">
-                    <Field label="导演分类" hint={knownDirectorCategory === "全部" ? "可自写" : "可选可改"}>
-                      <div className="director-choice-combo">
-                        <input
-                          value={directorCategory}
-                          onChange={(event) => handleDirectorCategoryInput(event.target.value)}
-                          placeholder="例如：海岛动漫"
-                        />
-                        <select
-                          aria-label="选择导演分类"
-                          value=""
-                          onChange={(event) => {
-                            if (event.target.value) handleDirectorCategoryInput(event.target.value);
-                          }}
-                        >
-                          <option value="">选择</option>
-                          {directorStyleCategories.map((item) => (
-                            <option key={item} value={item}>
-                              {item}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </Field>
-                    <Field label="导演风格" hint={directorStyleSummary || "可自写调度风格"}>
-                      <div className="director-choice-combo">
-                        <input
-                          value={directorStyleName}
-                          onChange={(event) => handleDirectorStyleInput(event.target.value)}
-                          placeholder="例如：清亮夏日番剧式轻喜导演"
-                        />
-                        <select
-                          aria-label="选择导演风格"
-                          value=""
-                          onChange={(event) => {
-                            if (event.target.value) applyDirectorStylePresetToControls(event.target.value);
-                          }}
-                        >
-                          <option value="">选择</option>
-                          {filteredDirectorStyles.map((item) => (
-                            <option key={item.id} value={item.id}>
-                              {item.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </Field>
-                    <Field label="视觉风格" hint={visualStyleSelectDisplay.compatibility ? "自定义视觉风格" : "可选可改"}>
-                      <div className="director-choice-combo">
-                        <input
-                          value={visualStyleSelectDisplay.value}
-                          onChange={(event) => handleVisualStyleSelection(event.target.value)}
-                          placeholder="例如：2D 动漫海边清透风"
-                        />
-                        <select
-                          aria-label="选择视觉风格"
-                          value=""
-                          onChange={(event) => {
-                            if (event.target.value) handleVisualStyleSelection(event.target.value);
-                          }}
-                        >
-                          <option value="">选择</option>
-                          {visualStyleDefinitions.map((item) => (
-                            <option key={item.id} value={item.id}>
-                              {item.name}
-                            </option>
-                          ))}
-                        </select>
-                      </div>
-                    </Field>
-                  </div>
-                </section>
+                {renderDirectorLookSection()}
                 <section
                   id="director-setup-motion"
                   aria-labelledby="director-setup-motion-title"
@@ -16851,7 +17026,12 @@ function ImageWorkbenchView(ctx: AppContext) {
   } = ctx;
   type ImageWorkbenchAssetKind = ImageAssetKind | "storyboard" | "custom";
   const assetKind = activeImageAssetKind(storedAssetKind);
-  const [storedWorkbenchAssetKind, setWorkbenchAssetKind] = useState<ImageWorkbenchAssetKind>(assetKind);
+  const [storedWorkbenchAssetKind, setWorkbenchAssetKind] = useState<ImageWorkbenchAssetKind>(
+    ctx.imagePromptReverseFocusTaskId ? "custom" : assetKind,
+  );
+  useEffect(() => {
+    if (ctx.imagePromptReverseFocusTaskId) setWorkbenchAssetKind("custom");
+  }, [ctx.imagePromptReverseFocusTaskId]);
   const workbenchAssetKind = storedWorkbenchAssetKind === "storyboard" || storedWorkbenchAssetKind === "custom" ? storedWorkbenchAssetKind : activeImageAssetKind(storedWorkbenchAssetKind);
   const isStoryboardMode = workbenchAssetKind === "storyboard";
   const isCustomMode = workbenchAssetKind === "custom";
@@ -16877,8 +17057,8 @@ function ImageWorkbenchView(ctx: AppContext) {
     setSelectedStoryboardShotIds((current) => current.filter((id) => selectedStoryboard.shots.some((shot) => shot.id === id)));
   }, [selectedStoryboard?.id, selectedStoryboard?.shots]);
   useEffect(() => {
-    if (!isStoryboardMode && !isCustomMode) setWorkbenchAssetKind(assetKind);
-  }, [assetKind, isStoryboardMode, isCustomMode]);
+    if (!ctx.imagePromptReverseFocusTaskId && !isStoryboardMode && !isCustomMode) setWorkbenchAssetKind(assetKind);
+  }, [assetKind, isStoryboardMode, isCustomMode, ctx.imagePromptReverseFocusTaskId]);
   type ImageGenerationMode = "ordinary" | "private";
   type ImageGenerationOutputPane = "prompt" | "preview";
   interface ImageGenerationLaneState {
@@ -19482,7 +19662,7 @@ function ImageWorkbenchView(ctx: AppContext) {
             <div className="card-title">
               <div>
                 <h2>资产类型</h2>
-                <p>{isCustomMode ? "上传参考图与自定义要求，生成结果自动保存到资产库" : "选择项目实体或手动填写参考资产"}</p>
+                <p>{isCustomMode ? "上传参考图生成图片或反推提示词，分析结果同步显示在聊天和资料任务" : "选择项目实体或手动填写参考资产"}</p>
               </div>
               <ImageIcon size={20} color="var(--pink)" />
             </div>
@@ -19567,7 +19747,7 @@ function ImageWorkbenchView(ctx: AppContext) {
                   ) : item === "custom" ? (
                     <>
                       <MessageSquare size={14} />
-                      自定义生图
+                      自定义生图+反推图片提示词
                     </>
                   ) : (
                     <>
@@ -19580,6 +19760,8 @@ function ImageWorkbenchView(ctx: AppContext) {
             )}
           </div>
           {isCustomMode && <CustomImageWorkbenchPanel key={state.project.id} state={state} context={customImageGenerationContext(ctx)}
+            focusReverseTaskId={ctx.imagePromptReverseFocusTaskId}
+            onReverseFocusHandled={() => ctx.setImagePromptReverseFocusTaskId("")}
             onOpenAssets={() => { ctx.setAssetLibrarySection("image"); ctx.setVideoAssetStoryboardFilter(""); setView("assets"); }}
             onManageRules={() => { ctx.setRuleTab("image-rules"); setView("rules"); }} />}
           {isStoryboardMode && (
@@ -23358,14 +23540,17 @@ function GenerationTasksView(ctx: AppContext) {
   type TaskCategory = "image" | "video" | "autofill";
   const imageTasks = chapterFilteredTasks.filter(isImageGenerationTask);
   const videoTasks = chapterFilteredTasks.filter(isVideoGenerationTask);
-  const autofillTasks = chapterFilteredTasks.filter(isAutofillGenerationTask);
+  const autofillTasks = chapterFilteredTasks.filter((task): task is AutofillGenerationTask | ImagePromptReverseTask => (
+    isAutofillGenerationTask(task) || isImagePromptReverseTask(task)
+  ));
   const [activeTaskCategory, setActiveTaskCategory] = useState<TaskCategory>(() => {
     const newestTask = tasks[0];
     if (newestTask && isImageGenerationTask(newestTask)) return "image";
-    if (newestTask && isAutofillGenerationTask(newestTask)) return "autofill";
+    if (newestTask && (isAutofillGenerationTask(newestTask) || isImagePromptReverseTask(newestTask))) return "autofill";
     return newestTask ? "video" : "image";
   });
   const [expandedVideoBatches, setExpandedVideoBatches] = useState<Set<string>>(() => new Set());
+  const [reverseActionBusy, setReverseActionBusy] = useState("");
   const [stoppingVideoBatchId, setStoppingVideoBatchId] = useState("");
   const [resumingVideoBatchId, setResumingVideoBatchId] = useState("");
   const [continuingVideoBatchId, setContinuingVideoBatchId] = useState("");
@@ -23405,11 +23590,11 @@ function GenerationTasksView(ctx: AppContext) {
     autofill: {
       label: "资料任务",
       count: autofillTasks.length,
-      title: "资料任务在后台完成补齐",
-      description: "人物、地点、道具和九宫格的 AI 资料补齐状态统一在这里查看。",
-      actionLabel: "打开资料补充",
+      title: "资料补齐与图片反推",
+      description: "统一查看 AI 资料补齐和图片提示词反推的进度与结果。",
+      actionLabel: "打开图像工作台",
       emptyTitle: "暂无资料任务",
-      emptyDescription: "在图像工作台点击资料补充后，补齐进度和结果会显示在这里。",
+      emptyDescription: "在图像工作台提交资料补齐或图片提示词反推后，进度和结果会显示在这里。",
     },
   } as const;
   const activeTaskMeta = taskCategoryMeta[activeTaskCategory];
@@ -23427,7 +23612,7 @@ function GenerationTasksView(ctx: AppContext) {
     const owner = currentState.project.id === projectId
       ? currentState.project : currentState.projects.find((project) => project.id === projectId);
     const task = owner?.generationTasks.find((candidate) => candidate.id === id);
-    if (!task || !owner || (!isImageGenerationTask(task) && !isAutofillGenerationTask(task))) return;
+    if (!task || !owner || (!isImageGenerationTask(task) && !isAutofillGenerationTask(task) && !isImagePromptReverseTask(task))) return;
     const result = cancelQueuedGenerationTask(owner.generationTasks, id);
     if (!result.cancelled) {
       notify(task.status === "cancelled" ? "此任务已取消。" : "任务已经开始或状态已变化，没有取消已发出的请求。");
@@ -23456,7 +23641,7 @@ function GenerationTasksView(ctx: AppContext) {
     const task = currentProject?.generationTasks.find((candidate) => candidate.id === id);
     if (!task || !currentProject) return;
     const queuedVideoDeletion = isVideoGenerationTask(task) && isUnsubmittedVideoTask(task);
-    if ((isImageGenerationTask(task) || isAutofillGenerationTask(task)) && task.status === "queued") {
+    if ((isImageGenerationTask(task) || isAutofillGenerationTask(task) || isImagePromptReverseTask(task)) && task.status === "queued") {
       revokeQueuedGenerationTask(currentProject.id, task);
       ctx.setBackgroundState((current) => applyOwnedProjectUpdate(current, currentProject.id, (project) => {
         const live = project.generationTasks.find((candidate) => candidate.id === id);
@@ -23511,7 +23696,9 @@ function GenerationTasksView(ctx: AppContext) {
     if (preview.blocked) {
       const latestTask = latestTasks.find((candidate) => candidate.id === id);
       notify(
-        latestTask && isAutofillGenerationTask(latestTask)
+        latestTask && isImagePromptReverseTask(latestTask)
+          ? "图片反推仍在运行，请先停止分析再删除。"
+          : latestTask && isAutofillGenerationTask(latestTask)
           ? "AI 补齐任务仍在运行，完成或失败后才能删除。"
           : latestTask && isVideoGenerationTask(latestTask)
             ? latestTask.status === "submitting"
@@ -24025,6 +24212,77 @@ function GenerationTasksView(ctx: AppContext) {
       </Card>
     );
   };
+  const renderImagePromptReverseTaskCard = (task: ImagePromptReverseTask) => {
+    const reference = (task.referenceAssetSnapshots.length ? imageReferenceSnapshotAssets(task.referenceAssetSnapshots)[0] : undefined)
+      || state.project.assets.find((asset) => asset.id === task.referenceAssetId);
+    const active = task.status === "queued" || task.status === "running";
+    const anotherActive = state.project.generationTasks.some((candidate) => isImagePromptReverseTask(candidate)
+      && candidate.id !== task.id && (candidate.status === "queued" || candidate.status === "running"));
+    const openChat = () => {
+      ctx.setImagePromptReverseFocusTaskId(task.id);
+      setView("image");
+    };
+    return <Card key={task.id} id={`image-prompt-reverse-task-${task.id}`}
+      className="job-card image-job-card regeneratable-image-task image-prompt-reverse-task">
+      <div className="row-between job-card-header">
+        <div className="image-job-summary">
+          <ImagePromptReverseReferencePreview asset={reference}
+            readManagedImageDataUrl={window.lianhuaDesktop?.readManagedImageDataUrl} className="image-job-preview" />
+          <div className="job-card-copy">
+            <div className="row wrap">
+              <Badge tone="violet">图片反推</Badge>
+              <Badge tone={task.status === "succeeded" ? "green" : task.status === "failed" ? "pink" : "violet"}>
+                {imagePromptReverseStatusLabel(task.status)}
+              </Badge>
+              <strong>{task.name}</strong>
+            </div>
+            <div className="field-hint task-chapter-label">{taskChapterLabel(task)}</div>
+            <div className="field-hint">{reference?.name || "原参考图"}{task.width && task.height ? ` · ${task.width}×${task.height}` : ""}
+              {` · ${task.model || "未记录模型"} · ${new Date(task.updatedAt).toLocaleString()}`}</div>
+            {task.customRequirement && <div className="field-hint job-prompt" title={task.customRequirement}>反推关注要求：{task.customRequirement}</div>}
+          </div>
+        </div>
+        <div className="image-task-prompt-panel">
+          <span className="image-task-prompt-title">反推提示词</span>
+          <div className="image-task-prompt-content" role="region" aria-label={`「${task.name}」的反推提示词`} tabIndex={0}>
+            {task.result?.prompt || (active ? task.preparationStage === "reference" ? "正在读取并保存原图…" : "正在识别图片细节…" : "本次反推没有得到完整提示词。")}
+          </div>
+        </div>
+        <div className="row wrap job-card-actions">
+          <Button small icon={<Copy size={13} />} disabled={!task.result?.prompt}
+            ariaLabel={`复制「${task.name}」的反推提示词`} title="复制完整反推提示词，不受预览框高度影响"
+            onClick={async () => {
+              if (!task.result?.prompt) return;
+              let copied = false;
+              try { copied = await copyText(task.result.prompt); } catch { /* Report clipboard failure without changing the task. */ }
+              notify(copied ? "已复制完整反推提示词。" : "复制失败，请重试或在文本框中选择复制。", copied ? "normal" : "error");
+            }}>复制提示词</Button>
+          <Button small variant="ghost" icon={<MessageSquare size={13} />} onClick={openChat}>打开聊天记录</Button>
+          {active && <Button small variant="danger" icon={<X size={13} />}
+            onClick={() => stopImagePromptReverse(customImageGenerationContext(ctx), task)}>
+            {task.status === "queued" ? "取消任务" : "停止分析"}</Button>}
+          {(task.status === "failed" || task.status === "cancelled") && <Button small variant="ghost" icon={<RefreshCw size={13} />}
+            disabled={Boolean(reverseActionBusy) || anotherActive}
+            title="使用原图快照与原关注要求创建新任务，调用当前视觉 API，保留本条记录"
+            onClick={async () => {
+              if (reverseActionBusy) return;
+              setReverseActionBusy(task.id);
+              try { await retryImagePromptReverse(customImageGenerationContext(ctx), task); }
+              catch (error) { notify(getSafeErrorDiagnostics(error).message, "error"); }
+              finally { setReverseActionBusy(""); }
+            }}>{reverseActionBusy === task.id ? "正在提交…" : "重试反推"}</Button>}
+          <Button small variant="danger" icon={<Trash2 size={13} />} disabled={active}
+            title={active ? "请先停止分析再删除" : "删除反推任务和对应聊天记录，保留原图及已生成图片"}
+            onClick={() => void removeTask(task.id)}>删除</Button>
+        </div>
+      </div>
+      {task.result && <details className="image-prompt-reverse-task-details"><summary>查看全部分析</summary>
+        <ImagePromptReverseResultView result={task.result} />
+      </details>}
+      {task.error && <TaskErrorDetails error={task.error} className="prompt-validation invalid"
+        knownSecrets={taskErrorKnownSecrets} sensitiveTexts={[task.customRequirement || ""]} />}
+    </Card>;
+  };
   const renderAutofillTaskCard = (task: AutofillGenerationTask) => {
     const completedFieldCount = Object.keys(task.result || {}).length;
     return (
@@ -24147,7 +24405,8 @@ function GenerationTasksView(ctx: AppContext) {
         {activeTaskCategory === "video" && <VideoExecutionControls settings={state.settings}
           onChange={(patch) => setState((current: AppState) => ({ ...current, settings: { ...current.settings, ...patch } }))} />}
         {activeTaskCategory === "image" && imageTasks.map(renderImageTaskCard)}
-        {activeTaskCategory === "autofill" && autofillTasks.map(renderAutofillTaskCard)}
+        {activeTaskCategory === "autofill" && autofillTasks.map((task) => isImagePromptReverseTask(task)
+          ? renderImagePromptReverseTaskCard(task) : renderAutofillTaskCard(task))}
         {activeTaskCategory === "video" && videoTaskGroups.map(renderVideoTaskGroup)}
         {!activeTaskMeta.count && (
           <Card>

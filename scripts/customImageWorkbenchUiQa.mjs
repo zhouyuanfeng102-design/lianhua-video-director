@@ -138,7 +138,7 @@ const settle = async (count) => {
 };
 const nav = (name) => page.locator('.sidebar').getByRole('button', { name, exact: true }).click();
 const openCustom = async () => {
-  await nav('图像工作台'); await page.getByRole('button', { name: '自定义生图', exact: true }).click();
+  await nav('图像工作台'); await page.getByRole('button', { name: '自定义生图+反推图片提示词', exact: true }).click();
   await page.locator('.custom-image-composer').waitFor();
 };
 const controlsFit = async () => {
