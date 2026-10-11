@@ -10,8 +10,20 @@ import { VIDEO_ACTION_CHOREOGRAPHY_RULE, VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_
   VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE, withVideoActionChoreographyScope,
   LEGACY_VIDEO_ACTION_CHOREOGRAPHY_RULE_V1_8_1, LEGACY_VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE_V1_8_1,
   LEGACY_VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE_V1_8_1, LEGACY_VIDEO_ACTION_CAUSALITY_RULE_V1_8_1,
-  LEGACY_VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE_V1_8_1 } from '../src/videoActionChoreographyRules';
-import { LEGACY_VIDEO_INTERACTION_RULES_V1_8_1, LEGACY_VIDEO_INTERACTION_TRANSLATION_RULE_V1_8_1 } from '../src/videoInteractionRules';
+  LEGACY_VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE_V1_8_1,
+  LEGACY_VIDEO_ACTION_CHOREOGRAPHY_RULE_V1_8_8, LEGACY_VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE_V1_8_8,
+  LEGACY_VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE_V1_8_8, LEGACY_VIDEO_ACTION_CAUSALITY_RULE_V1_8_8,
+  LEGACY_VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE_V1_8_8 } from '../src/videoActionChoreographyRules';
+import { VIDEO_INTERACTION_RULES, VIDEO_INTERACTION_DIRECTION_RULE, VIDEO_PHYSICAL_DISTANCE_RULE,
+  VIDEO_INTERACTION_TRANSLATION_RULE, stripLegacyVideoInteractionRules,
+  LEGACY_VIDEO_INTERACTION_RULES_V1_8_1, LEGACY_VIDEO_INTERACTION_TRANSLATION_RULE_V1_8_1,
+  LEGACY_VIDEO_INTERACTION_RULES_V1_8_8, LEGACY_VIDEO_INTERACTION_DIRECTION_RULE_V1_8_8,
+  LEGACY_VIDEO_PHYSICAL_DISTANCE_RULE_V1_8_8, LEGACY_VIDEO_INTERACTION_TRANSLATION_RULE_V1_8_8 } from '../src/videoInteractionRules';
+import { VIDEO_ACTING_CAMERA_RULES, VIDEO_ACTING_CAMERA_TRANSLATION_RULE, VIDEO_WORLD_SPACE_CAMERA_RULE,
+  stripLegacyVideoActingCameraRules, LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_1,
+  LEGACY_VIDEO_ACTING_CAMERA_TRANSLATION_RULE_V1_8_1, LEGACY_VIDEO_WORLD_SPACE_CAMERA_RULE_V1_8_1,
+  LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_8, LEGACY_VIDEO_ACTING_CAMERA_TRANSLATION_RULE_V1_8_8,
+  LEGACY_VIDEO_WORLD_SPACE_CAMERA_RULE_V1_8_8 } from '../src/videoActingCameraRules';
 import { generateSeedanceBilingualOutput, getOfficialSeedanceSourceFingerprint } from '../src/seedancePrompt';
 import { regenerateSequenceReferencePrompt } from '../src/sequenceReferencePrompt';
 import { resolveConfirmedMasterSliceSource } from '../src/confirmedMasterSliceSource';
@@ -32,11 +44,21 @@ const legacy181Blocks = [LEGACY_VIDEO_ACTION_CHOREOGRAPHY_RULE_V1_8_1,
   LEGACY_VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE_V1_8_1,
   LEGACY_VIDEO_ACTION_CAUSALITY_RULE_V1_8_1, LEGACY_VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE_V1_8_1,
   LEGACY_VIDEO_INTERACTION_RULES_V1_8_1, LEGACY_VIDEO_INTERACTION_TRANSLATION_RULE_V1_8_1];
+const legacy188ActionBlocks = [LEGACY_VIDEO_ACTION_CHOREOGRAPHY_RULE_V1_8_8,
+  LEGACY_VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE_V1_8_8,
+  LEGACY_VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE_V1_8_8,
+  LEGACY_VIDEO_ACTION_CAUSALITY_RULE_V1_8_8, LEGACY_VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE_V1_8_8];
+const legacy188InteractionBlocks = [LEGACY_VIDEO_INTERACTION_RULES_V1_8_8,
+  LEGACY_VIDEO_INTERACTION_DIRECTION_RULE_V1_8_8, LEGACY_VIDEO_PHYSICAL_DISTANCE_RULE_V1_8_8,
+  LEGACY_VIDEO_INTERACTION_TRANSLATION_RULE_V1_8_8];
 const assertScope = (system: string, scope: Scope): void => {
   const selected = rules[scope === 'generation' ? 0 : scope === 'existing' ? 1 : 2];
   for (const rule of rules) assert.equal(system.split(rule).length - 1, rule === selected ? 1 : 0,
     `request receives only the ${scope} action authority, once`);
   for (const legacy of legacy181Blocks) assert.ok(!system.includes(legacy), 'retired complete rules cannot retain competing request authority');
+  const withoutSelectedAuthority = system.split(selected).join('');
+  for (const legacy of legacy188ActionBlocks) assert.ok(!withoutSelectedAuthority.includes(legacy),
+    'retired action blocks cannot survive outside the selected complete current contract');
 };
 const block = (user: string, tag: string): any => {
   const match = user.match(new RegExp(`<${tag}>\\s*([\\s\\S]*?)\\s*</${tag}>`, 'u'));
@@ -529,8 +551,10 @@ try {
   // untouched, even if they mention the same marker as on-screen subject text.
   const custom = '用户自定义：屏幕上显示 VIDEO_ACTION_CHOREOGRAPHY_V1；保留我的构图。';
   const mixed = [custom, ...rules, VIDEO_ACTION_CHOREOGRAPHY_RULE, VIDEO_ACTION_CAUSALITY_RULE,
-    VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE, legacyGenerationRule, ...legacy181Blocks, custom].join('\n\n');
+    VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE, legacyGenerationRule, ...legacy181Blocks,
+    ...legacy188ActionBlocks, ...legacy188InteractionBlocks, custom].join('\n\n');
   const mixedBefore = mixed;
+  const nonemptyLines = (value: string): string[] => value.split('\n').filter((line) => line.trim());
   for (const scope of ['planning', 'generation', 'existing', 'format-only', 'translation'] as const) {
     const scoped = withVideoActionChoreographyScope(mixed, scope);
     const expected = scope === 'planning' || scope === 'generation' ? 'generation'
@@ -540,6 +564,9 @@ try {
     assert.ok(!scoped.includes(legacyGenerationRule));
     assert.ok(!scoped.includes(VIDEO_ACTION_CAUSALITY_RULE));
     assert.ok(!scoped.includes(VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE));
+    const selected = rules[expected === 'generation' ? 0 : expected === 'existing' ? 1 : 2];
+    assert.deepEqual(nonemptyLines(scoped.split(selected).join('')), [custom, custom],
+      'mixed historical blocks leave only custom prose outside the selected current action contract');
   }
   const seedanceScoped = withVideoActionChoreographyScope(mixed, 'translation', 'seedance');
   assert.equal(seedanceScoped.split(VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE).length - 1, 1);
@@ -547,7 +574,45 @@ try {
     assert.ok(!seedanceScoped.includes(rule), 'Seedance English receives only its preservation/translation format authority');
   }
   assert.equal(seedanceScoped.split(custom).length - 1, 2);
+  assert.deepEqual(nonemptyLines(seedanceScoped.split(VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE).join('')), [custom, custom],
+    'Seedance strips complete shared-prefix legacy blocks without leaving old authority fragments');
   assert.equal(mixed, mixedBefore, 'scope selection never mutates the authored preset');
+  // These production helpers must consume a complete current aggregate before
+  // considering the exact 1.8.8 paragraphs nested inside it. Partial custom
+  // quotations are prose, while complete retired combinations are replaceable.
+  const quotedCustom = `用户自定义：引用“${LEGACY_VIDEO_INTERACTION_DIRECTION_RULE_V1_8_8.slice(0, 40)}……”作为画内文字，保留这句话。`;
+  const currentInteractionBlocks = [VIDEO_INTERACTION_RULES, VIDEO_INTERACTION_DIRECTION_RULE,
+    VIDEO_PHYSICAL_DISTANCE_RULE, VIDEO_INTERACTION_TRANSLATION_RULE];
+  const retiredInteractionBlocks = [...legacy188InteractionBlocks,
+    LEGACY_VIDEO_INTERACTION_RULES_V1_8_1, LEGACY_VIDEO_INTERACTION_TRANSLATION_RULE_V1_8_1];
+  const interactionMix = [quotedCustom, ...retiredInteractionBlocks, ...currentInteractionBlocks,
+    ...retiredInteractionBlocks, custom].join('');
+  assert.equal(stripLegacyVideoInteractionRules(interactionMix),
+    [quotedCustom, ...currentInteractionBlocks, custom].join(''),
+    'interaction stripping preserves complete current contracts and literal custom prefixes byte-for-byte');
+  const currentCameraBlocks = [VIDEO_ACTING_CAMERA_RULES, VIDEO_WORLD_SPACE_CAMERA_RULE, VIDEO_ACTING_CAMERA_TRANSLATION_RULE];
+  const retiredCameraBlocks = [LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_8,
+    LEGACY_VIDEO_WORLD_SPACE_CAMERA_RULE_V1_8_8, LEGACY_VIDEO_ACTING_CAMERA_TRANSLATION_RULE_V1_8_8,
+    LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_1, LEGACY_VIDEO_WORLD_SPACE_CAMERA_RULE_V1_8_1,
+    LEGACY_VIDEO_ACTING_CAMERA_TRANSLATION_RULE_V1_8_1];
+  const cameraMix = [custom, ...retiredCameraBlocks, ...currentCameraBlocks, ...retiredCameraBlocks, quotedCustom].join('');
+  assert.equal(stripLegacyVideoActingCameraRules(cameraMix),
+    [custom, ...currentCameraBlocks, quotedCustom].join(''),
+    'acting/camera stripping preserves current aggregates containing shared interaction paragraphs');
+  const retainedContracts = [custom, ...currentCameraBlocks, ...currentInteractionBlocks, quotedCustom].join('\n\n');
+  const combinedHistorical = [custom, ...retiredCameraBlocks, ...legacy188ActionBlocks,
+    ...retiredInteractionBlocks, ...currentCameraBlocks, ...currentInteractionBlocks, quotedCustom].join('\n\n');
+  const cleanedRequest = stripLegacyVideoActingCameraRules(combinedHistorical);
+  for (const scope of ['generation', 'existing', 'translation'] as const) {
+    const scoped = withVideoActionChoreographyScope(cleanedRequest, scope);
+    assertScope(scoped, scope);
+    const selected = rules[scope === 'generation' ? 0 : scope === 'existing' ? 1 : 2];
+    assert.deepEqual(nonemptyLines(scoped.split(selected).join('')), nonemptyLines(retainedContracts),
+      'production helper composition replaces old authority while retaining current camera/interaction and custom instructions');
+  }
+  assert.equal(stripLegacyVideoActingCameraRules(retainedContracts), retainedContracts,
+    'a request carrying only current complete contracts is unchanged');
+  groups++;
   // Frozen v2 fingerprint for these exact request facts. Merely observing
   // freshness cannot rewrite old derived text or trigger another model call.
   const cacheInput = { targetId: 'seedance-2.5', canonicalPrompt: '【0s-8s】沈衡将布袋抛给陆青，陆青接稳。',

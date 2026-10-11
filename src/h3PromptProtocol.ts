@@ -1,4 +1,4 @@
-import { AUDIO_EXISTING_SCOPE_RULE, AUDIO_TRANSLATION_SCOPE_RULE, DIALOGUE_DELIVERY_RULE } from './audioPromptPolicy';
+import { AUDIO_EXISTING_SCOPE_RULE, AUDIO_TRANSLATION_SCOPE_RULE, DIALOGUE_DELIVERY_RULE, DIALOGUE_VOICE_IDENTITY_RULE } from './audioPromptPolicy';
 import { getH3IdentityBindingIssues, h3IdentityBindingRetentionIssue, H3_IDENTITY_BINDINGS_RULE, readH3DeliveryEnvelope, type H3IdentityCharacter } from './h3IdentityBindings';
 import { CHARACTER_PARTICIPATION_RULE, characterParticipationCoverageIssues, characterParticipationIssues } from './characterParticipation';
 import type { H3IdentityBindings, PromptCharacterParticipation } from './types';
@@ -22,6 +22,8 @@ export const H3_DIALOGUE_FORMAT_RULE = [
   'MiniMax H3具体对白、发话动作和时序写在现有integrated_multimodal_description或full-reference的detailed_description逐镜正文内部，不增加section、镜数、At切点或参考图标签。实际说话、歌唱或发出画外人声的声源使用稳定(S1)、(S2)等编号；它们是声源ID，不是稳定性等级、图片槽位或人物重要性。不发声的人物不分配声源ID。同一声源跨镜保持同一编号；原稿明确同声说话的已编号声源可合用(S1,S2)，不把原来的轮流说话改成齐声。full-reference中编号按目标视频全局发声顺序建立，subject_definitions已有Subject/Audio声源引用一致复用同一声源ID，不各自重新编号或新增无依据的音频参考。',
   '中文H3最终复核根据完整原稿将已有具体台词整理成官方<d>[Language] 逐字台词</d>语法；中文原话使用<d>[Chinese] 原话</d>。标签内只放语言标注和原台词，逐字保留原字与标点，不翻译、不润色、不替换成“催促声/交谈声”。人物身份、声线（仅有事实依据时）、声源ID、动作、发话时刻、语气和口型安排全部写在<d>之外，并明确唯一发声者及非说话人的聆听/无说话口型状态。“台词：无/Dialogue: none/None/N/A”是无台词状态，不是可朗读内容，不能写成<d>None</d>或给无对白镜头分配新的讲话声源。视觉身份、姓名和参考职责保留在原有视觉描述或定义中，不转入<d>或旁白；原剧情真实呼喊姓名的台词仍逐字保留。普通画外人物发声照原场景保留；原稿确属旁白时使用says in an off-screen voiceover，并在该<d>后明确对应画内人物没有说话口型，保留原剧情非说话动作，不能把旁白改成另一人物张口代说。',
   '多人交接对白时，在每句<d>紧邻的镜内正文中写出确定的完整姓名与同一声源ID，以及本段视频时间的完整发话区间、面向谁、画内或画外状态；必要时复用已有的简短可辨识外貌或人物参考身份，不只写“她/另一人/左边的人”，也不只在遥远的开场定义一次说话人。保留经本次有权排程阶段确认的完整发话区间和口部动作先后：亲吻接触结束、离开后才张口说话，不把“之后/then/after”合成“同时/while”；倾听者不代说，但不冻结自然表情。Picture图片编号、Subject人物编号与S声源编号互相独立，不能按相同数字互换；同一人物的身份、声源和台词始终对应，未发声人物不因上传了参考图就增加声音。',
+  DIALOGUE_VOICE_IDENTITY_RULE,
+  'H3中每句<d>之外紧邻完整姓名与本段同一声源ID，并简短保留有依据的基本音高(pitch)、音色(timbre)及本句情绪表演关系；声音身份不因切镜、动作强弱或紧张程度变化，已确认特殊声线不因人物生理性别改变。没有已确认音高或音色时不补造，只有已知身份时保留该身份及其一致指代，不把外貌或S编号当成音色。声线描述不放进<d>，不搬到overall_soundscape，也不增加音频标签或章节。已有确认稿的翻译、参考更新、衔接和纯格式修复只维护已有姓名、映射、身份与声线，不补写原稿没有的声音内容。',
   '同一句原话跨越既有切镜时，在前后两部分连接处都使用<scenetrans>并明确音频连续、同一声源ID不变；完整原话按真实接续位置写在两镜，不重复起句、不漏字，不新增切点。不得为适应时长编造<cutoff>截断完整台词；原文确实在片尾中断时才如实表达，普通跨镜不是片尾截断。原稿只有催促/交谈概述而没有可辨原话时，不造<d>内容、不让视频模型即兴编词或喊名，也不自行用含混交谈填空；只有原稿明确要求的不可辨词汇人声且不与该区间无对白要求冲突时才如实保留。明确无对白的区间从开始到结束都无讲话、旁白或说话口型，但保留原剧情明确的非语言声与非说话表情动作。',
   '翻译、英文复核和英文格式修复只保真已确认中文sourcePrompt：保留(S1)/(S2)映射、<d>、原语言标注、逐字台词、<scenetrans>和音频连续安排，不重新分配说话人、不翻译中文台词、不从旧shots重编声音；中文源稿尚为普通对白写法时，英文阶段保持该写法，不擅自新增声源ID或改写正文。中文格式修复只恢复已经复核的对白语法及本次结构处理造成的遗漏。此规则不适用于普通六字段转换输出，不把H3声音标签强加进六字段。',
 ].join('\n');

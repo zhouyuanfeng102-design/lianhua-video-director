@@ -1,4 +1,4 @@
-import { AUDIO_TRANSLATION_SCOPE_RULE, DIALOGUE_DELIVERY_RULE } from './audioPromptPolicy';
+import { AUDIO_TRANSLATION_SCOPE_RULE, DIALOGUE_DELIVERY_RULE, DIALOGUE_VOICE_IDENTITY_TRANSLATION_RULE } from './audioPromptPolicy';
 import { buildPromptDialogueProtection, getPromptSpeakerNames } from './promptDialogueLanguage';
 import { VIDEO_DIALOGUE_STAGING_RULE, VIDEO_SPATIAL_CONTINUITY_RULE, VIDEO_STAGING_REVIEW_RULE, VIDEO_WARDROBE_SCOPE_RULE } from './videoConversionRules';
 import {
@@ -51,6 +51,7 @@ const VIDEO_PROMPT_ENGLISH_TRANSLATION_RULES = [
   '声音只忠实翻译现有事件，不把“无”、N/A、安静背景或声音间隙扩写成连续底噪、room tone、hiss或持续风声/水声；不得自行补配乐。原文明确要求的背景音乐必须保留，并忠实保留低音量、让位于对白和动作声的混音要求。',
   '以下共享声音规则只用于保持源稿已有声源、时序和混音意图，不授权翻译阶段新增原稿没有的动作或声音。',
   AUDIO_TRANSLATION_SCOPE_RULE,
+  DIALOGUE_VOICE_IDENTITY_TRANSLATION_RULE,
   DIALOGUE_DELIVERY_RULE,
   H3_DIALOGUE_FORMAT_RULE,
   '上述对白规则在翻译与翻译复核中只维护sourcePrompt已确认的每句原话、唯一说话人、语言、顺序、原时间轴与非说话人的聆听/口型安排，不重新给中文稿定台词。H3源稿中的本段绝对秒数原值保留，不当镜内时间再次加startSec；普通六字段的镜内相对时间仍原样保持。视觉姓名、人物资料和参考职责只翻译其说明并保留身份，不转成可说词句；原剧情真实呼名台词仍逐字保留。原有无对白区间必须保留完整起止范围，整段无对白包括最后几秒，不弱化成murmur/chatter、含混交谈或自由说话；保留原稿明确的非语言声与非说话动作，不扩大成整轨静音或冻结表情。只有源稿明确要求不可辨词汇的人声且不与该区间无对白要求冲突时才如实翻译，不把交谈/催促概述扩成新对白，不让视频模型自由编词；源稿已有具体原话时不得弱化为urging sounds/conversation等概述。',
@@ -239,6 +240,7 @@ export const translateVideoPromptToEnglish = async ({
       // Preserve confirmed body-side / screen-side relationships on retries too.
       if (!scopedSystem.includes(VIDEO_ACTING_CAMERA_TRANSLATION_RULE)) scopedSystem += `\n\n${VIDEO_ACTING_CAMERA_TRANSLATION_RULE}`;
       if (!scopedSystem.includes(AUDIO_TRANSLATION_SCOPE_RULE)) scopedSystem += `\n\n${AUDIO_TRANSLATION_SCOPE_RULE}`;
+      if (!scopedSystem.includes(DIALOGUE_VOICE_IDENTITY_TRANSLATION_RULE)) scopedSystem += `\n\n${DIALOGUE_VOICE_IDENTITY_TRANSLATION_RULE}`;
       if (!scopedSystem.includes(DIALOGUE_DELIVERY_RULE)) scopedSystem += `\n\n${DIALOGUE_DELIVERY_RULE}`;
       if (sourceIsH3 && !scopedSystem.includes(H3_CLIP_TIME_RULE)) scopedSystem += `\n\n${H3_CLIP_TIME_RULE}`;
       if (withIdentityEnvelope) scopedSystem += `\n\n${H3_IDENTITY_TRANSLATION_DELIVERY_RULE}`;

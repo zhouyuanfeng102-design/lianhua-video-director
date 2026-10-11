@@ -10,6 +10,7 @@ import {
   VIDEO_CONVERSION_EXAMPLE, VIDEO_LOCAL_TIME_RULE,
   LEGACY_DEFAULT_VIDEO_CONVERSION_OUTPUT_V1_4_0, LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_3_0,
   LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_4_0, VIDEO_DIALOGUE_STAGING_RULE,
+  LEGACY_VIDEO_DIALOGUE_STAGING_RULE_V1_7_0,
   LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_7_0,
   VIDEO_SPATIAL_CONTINUITY_RULE, VIDEO_STAGING_REVIEW_RULE, VIDEO_PROMPT_FOCUS_RULE,
   VIDEO_CAUSALITY_OUTPUT_RULE,
@@ -66,7 +67,9 @@ const legacyQuietMusicAudioRule = LEGACY_AUDIO_PROMPT_RULE_V0_6_3.replace(
 // shipping these duplicate historical prompt bodies in the app bundle.
 const legacyTimelineV140 = {
   ...clone(timeline),
-  outputRules: timeline.outputRules.replace(AUDIO_PROMPT_RULE, legacyQuietMusicAudioRule),
+  outputRules: timeline.outputRules
+    .replace(AUDIO_PROMPT_RULE, legacyQuietMusicAudioRule)
+    .replace(VIDEO_DIALOGUE_STAGING_RULE, LEGACY_VIDEO_DIALOGUE_STAGING_RULE_V1_7_0),
   version: '1.4.0',
   updatedAt: 0,
 };
@@ -100,7 +103,7 @@ assert.ok(legacyConverterV150, 'the shipped v1.5.0 converter remains an exact mi
 assert.ok(legacyConverterV160, 'the shipped V0.6.7 v1.6.0 converter remains an exact migration fixture');
 assert.equal(
   legacyTimelineV130.outputRules,
-  [VIDEO_DIALOGUE_RULE, VIDEO_DIALOGUE_STAGING_RULE, LEGACY_AUDIO_PROMPT_RULE_V0_6_3, VIDEO_STAGING_REVIEW_RULE, VIDEO_PROMPT_FOCUS_RULE].join('\n'),
+  [VIDEO_DIALOGUE_RULE, LEGACY_VIDEO_DIALOGUE_STAGING_RULE_V1_7_0, LEGACY_AUDIO_PROMPT_RULE_V0_6_3, VIDEO_STAGING_REVIEW_RULE, VIDEO_PROMPT_FOCUS_RULE].join('\n'),
   'the V0.6.3 timeline fixture is frozen independently of the live audio rule',
 );
 assert.equal(
@@ -168,10 +171,10 @@ assert.equal(legacyConverterV130.outputRules, LEGACY_DEFAULT_VIDEO_CONVERSION_OU
   'v1.3.0 output remains the old format/example, not the newly expanded live output');
 const storyPreparation = defaultStoryExpansionPresets[0];
 assert.ok(storyPreparation, 'the app must expose a default story-preparation preset');
-assert.equal(storyPreparation.version, '1.4.4');
+assert.equal(storyPreparation.version, '1.5.0');
 assert.ok(
   storyPreparation.systemPrompt.includes(MOSE_JIANGHU_NSFW_DETAIL_RULES),
-  'the active v1.4.4 story-preparation preset must preserve the existing complete rule block',
+  'the active v1.5.0 story-preparation preset must preserve the existing complete rule block',
 );
 assert.ok(storyPreparation.systemPrompt.includes(STORY_CAUSALITY_RULE));
 const legacyStoryPreparationV140WithoutAge = {
@@ -191,7 +194,7 @@ const migratedV130 = normalizeState({
 });
 assert.equal(migratedV130.converterPresets[0].version, converter.version);
 assert.equal(migratedV130.converterPresets[0].systemPrompt, converter.systemPrompt);
-assert.equal(migratedV130.storyExpansionPresets[0].version, '1.4.4');
+assert.equal(migratedV130.storyExpansionPresets[0].version, '1.5.0');
 assert.equal(migratedV130.storyExpansionPresets[0].systemPrompt, storyPreparation.systemPrompt);
 assert.deepEqual(migratedV130.project, projectBefore, 'v1.3.0 prompt migration must not rewrite project content');
 assert.deepEqual(migratedV130.settings, settingsBefore, 'v1.3.0 prompt migration must not change user settings');
@@ -199,7 +202,7 @@ assert.deepEqual(normalizeState(migratedV130), migratedV130, 'v1.3.0 prompt migr
 
 for (const historicStory of [legacyStoryPreparationV140WithoutAge, legacyStoryPreparationV140]) {
   const migrated = normalizeState({ ...clone(initial), storyExpansionPresets: [clone(historicStory)] });
-  assert.equal(migrated.storyExpansionPresets[0].version, '1.4.4', 'both shipped 1.4.0 layouts upgrade');
+  assert.equal(migrated.storyExpansionPresets[0].version, '1.5.0', 'both shipped 1.4.0 layouts upgrade');
   assert.equal(migrated.storyExpansionPresets[0].name, storyPreparation.name);
   assert.equal(migrated.storyExpansionPresets[0].systemPrompt, storyPreparation.systemPrompt);
   assert.equal(migrated.storyExpansionPresets[0].outputRules, storyPreparation.outputRules);

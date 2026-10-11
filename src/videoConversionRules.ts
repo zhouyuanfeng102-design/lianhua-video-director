@@ -1,4 +1,4 @@
-import { AUDIO_PROMPT_RULE, DIALOGUE_DELIVERY_RULE, DIALOGUE_LANGUAGE_RULE } from './audioPromptPolicy';
+import { AUDIO_PROMPT_RULE, DIALOGUE_DELIVERY_RULE, DIALOGUE_LANGUAGE_RULE, DIALOGUE_VOICE_IDENTITY_RULE } from './audioPromptPolicy';
 import { MOSE_JIANGHU_NSFW_DETAIL_RULES } from './nsfwPromptRules';
 import { STORY_CAUSALITY_RULE } from './storyCausalityRules';
 import { VIDEO_ACTION_CHOREOGRAPHY_RULE } from './videoActionChoreographyRules';
@@ -11,8 +11,11 @@ export const LEGACY_VIDEO_DIALOGUE_RULE = '先依据 requiredDialogues 安排完
 
 export const VIDEO_DIALOGUE_RULE = '先阅读 sourceStoryContent 完整剧情，由你自行识别真实对白、说话人、画外音或通信，并区分标牌文字、内心叙述和说话语气；再安排相应画面、回应和停顿。逐句保留原话、原语言和说话人；同一句在原文真实说了两次就保留两次，重复的原文摘录不是新增播放次数。允许在自然停顿处跨相邻镜头接续一句，也允许边行动边说话，不得按固定字数/秒、固定开口留白或镜头动作数量裁句、删后半句、改成旁白摘要。某镜没有分配对白可写“台词：无”，不能理解为每镜必须重复全部对白。局部草稿遗漏时以完整原剧情为准，在本次回答内自检并修正后返回完整正文；不依赖本地预先抽取的发言名单。';
 
+/** Exact former wording for historical factory-preset fingerprints only. */
+export const LEGACY_VIDEO_DIALOGUE_STAGING_RULE_V1_7_0 = '逐句把声音与画面绑定：写明可复用的说话人名称、依据已知人物设定的声线、本镜内的发话起止时刻或清楚的先后关系，以及画内发声、画外发声、通信或心灵交流方式。画内发声时，让口型确实属于该说话人；能看到其面部时交代可辨的说话口型。真实的背影、远景或画外发声照常保留，并说明声源所在位置与方向，不强迫人物为说话转身或走到前景，不把画外音改成旁人台词。说话期间同镜其他人物保持各自的倾听、行动或反应，未分配该句的人不替说、不随这句张口；若原文确有接话、插话或重叠发声，分别标明归属与时序。人物称谓或画面前后顺序不能替代声源归属；不得只因男性在近景、女性在远景，就把女性对白交给男性。保留原话、语言及原有情绪，未知声线不得凭名字擅自编造。';
+
 /** Shared AI instructions: these describe staging, never local semantic acceptance gates. */
-export const VIDEO_DIALOGUE_STAGING_RULE = '逐句把声音与画面绑定：写明可复用的说话人名称、依据已知人物设定的声线、本镜内的发话起止时刻或清楚的先后关系，以及画内发声、画外发声、通信或心灵交流方式。画内发声时，让口型确实属于该说话人；能看到其面部时交代可辨的说话口型。真实的背影、远景或画外发声照常保留，并说明声源所在位置与方向，不强迫人物为说话转身或走到前景，不把画外音改成旁人台词。说话期间同镜其他人物保持各自的倾听、行动或反应，未分配该句的人不替说、不随这句张口；若原文确有接话、插话或重叠发声，分别标明归属与时序。人物称谓或画面前后顺序不能替代声源归属；不得只因男性在近景、女性在远景，就把女性对白交给男性。保留原话、语言及原有情绪，未知声线不得凭名字擅自编造。';
+export const VIDEO_DIALOGUE_STAGING_RULE = `${LEGACY_VIDEO_DIALOGUE_STAGING_RULE_V1_7_0}${DIALOGUE_VOICE_IDENTITY_RULE}`;
 
 export const VIDEO_SPATIAL_CONTINUITY_RULE = '每镜分别保留朝向、空间关系与镜首镜尾状态：用已知地标和实际目的地说明世界中的行进方向，区分人物朝向、画面中的左右/远近运动与摄影机所在位置和轴线一侧，写清同伴前后关系、视线目标及必要的入画出画位置。相邻镜头逐项承接前镜结尾，不能只在第1镜交代空间、后续镜头丢掉方向。同一路径上的正面与背面改变、运动方向改变或越轴，须由可见转身、已交代的摄影机换位/运动、过渡镜头或剧情明确的时间跳跃解释；摄影机换位不等于人物掉头。既定剧情没有转身时保持已确认的行进目标，不为补救冲突虚构掉头、瞬移或新事件。只使用原剧情、已确认分镜与可见参考图提供的事实；未知站位可由规划AI在不改变剧情的前提下明确安排，并持续承接，转换阶段不得把缺失信息当成已观察到的事实。';
 
@@ -65,13 +68,13 @@ export const LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_7_0 = [
   LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_4_0,
   STORY_CAUSALITY_RULE,
   DIALOGUE_DELIVERY_RULE,
-  VIDEO_DIALOGUE_STAGING_RULE,
+  LEGACY_VIDEO_DIALOGUE_STAGING_RULE_V1_7_0,
   VIDEO_SPATIAL_CONTINUITY_RULE,
   VIDEO_STAGING_REVIEW_RULE,
   VIDEO_PROMPT_FOCUS_RULE,
 ].join('\n\n');
 export const DEFAULT_VIDEO_CONVERSION_SYSTEM = [
-  LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_7_0,
+  LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_7_0.replace(LEGACY_VIDEO_DIALOGUE_STAGING_RULE_V1_7_0, VIDEO_DIALOGUE_STAGING_RULE),
   VIDEO_ACTION_CHOREOGRAPHY_RULE,
 ].join('\n\n');
 export const VIDEO_CAUSALITY_OUTPUT_RULE = '结合本段原文与只读理解上下文核对行动者→动作→对象→结果，保留有依据的攻击来源和具名目标；反应特写也不能让攻击因果消失，不把比喻变成新能力。中文与英文保持同一因果。';
