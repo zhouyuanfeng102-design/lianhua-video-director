@@ -130,10 +130,10 @@ export function ComfyUISettings({
         commitWorkflows([workflow], workflow.id);
       }
       setImportMessage(
-        `导入成功：正面提示词 ${imported.positiveCount} 个，负面提示词 ${imported.negativeCount} 个，尺寸字段 ${imported.widthCount + imported.heightCount + imported.targetWidthCount + imported.targetHeightCount} 个，可用参考图节点 ${imported.referenceImageCount} 个。`,
+        `导入成功${imported.sourceFormat === 'canvas' ? '（画布 JSON 已转换）' : ''}：正面提示词 ${imported.positiveCount} 个，负面提示词 ${imported.negativeCount} 个，尺寸字段 ${imported.widthCount + imported.heightCount + imported.targetWidthCount + imported.targetHeightCount} 个，可用参考图节点 ${imported.referenceImageCount} 个。`,
       );
     } catch (error) {
-      setImportError(error instanceof Error ? error.message : 'ComfyUI API JSON 导入失败。');
+      setImportError(error instanceof Error ? error.message : 'ComfyUI Workflow JSON 导入失败。');
     }
   };
 
@@ -203,7 +203,7 @@ export function ComfyUISettings({
               className="btn small"
               onClick={() => fileInputRef.current?.click()}
             >
-              导入 API JSON
+              导入 JSON（画布 / API）
             </button>
             <button type="button" className="btn small" onClick={() => setManagerOpen(true)}>
               管理 Workflow
@@ -244,7 +244,7 @@ export function ComfyUISettings({
           <div className="modal-head">
             <div>
               <h3>ComfyUI Workflow 管理</h3>
-              <div className="field-hint">保存多个 API Workflow，并明确选择当前实际生效项。</div>
+              <div className="field-hint">支持画布和 API JSON 导入，保存多个 Workflow，并明确选择当前实际生效项。</div>
             </div>
             <button type="button" className="btn small" onClick={() => setManagerOpen(false)}>
               关闭
@@ -294,7 +294,7 @@ export function ComfyUISettings({
                 className="btn small"
                 onClick={() => fileInputRef.current?.click()}
               >
-                导入 API JSON
+                导入 JSON（画布 / API）
               </button>
             </div>
 
@@ -311,13 +311,13 @@ export function ComfyUISettings({
                 value={activeWorkflow?.workflowJson ?? ''}
                 disabled={!activeWorkflow}
                 onChange={(event) => updateActiveWorkflow({ workflowJson: event.target.value || '{}' })}
-                placeholder="请导入 ComfyUI 的 API 格式 JSON，或在此粘贴。"
+                placeholder="可导入或粘贴 ComfyUI 画布 JSON、API JSON。"
                 spellCheck={false}
               />
             </label>
 
             <div className="hint-box">
-              导入 API JSON 时会识别正负提示词，仅为唯一生成画布及匹配的尺寸条件绑定宽高；缩放、裁剪、参考图预处理与其他阶段尺寸保留原值。明确尺寸标记优先，不会同时扩大前面的画布。直接粘贴原始 API JSON 时，生成前也会按此规则转换。采样参数和 Seed 默认保留 Workflow 原值，只有明确写入下列占位符时才替换：
+              画布 JSON 会先转换为执行工作流，保留参数与有效连线，排除关闭节点并处理旁路；无法可靠转换的节点会明确提示。支持 Lazy 合并工作台的提示词和参考图链。导入时识别正负提示词，仅为唯一生成画布及匹配的尺寸条件绑定宽高；缩放、裁剪、参考图预处理与其他阶段尺寸保留原值。明确尺寸标记优先，不会同时扩大前面的画布。直接粘贴原始 JSON 时，生成前也会按此规则转换。采样参数和 Seed 默认保留 Workflow 原值，只有明确写入下列占位符时才替换：
               <code>__PROMPT__</code> 正面提示词、
               <code>__NEGATIVE_PROMPT__</code> 负面提示词、
               <code>__WIDTH__</code> 宽度、

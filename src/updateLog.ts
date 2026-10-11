@@ -11,6 +11,16 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "1.8.8",
+    releasedAt: "2026-10-11",
+    title: "ComfyUI 画布导入与 Lazy 参考图兼容",
+    highlights: [
+      "图片 ComfyUI 设置可直接导入画布 JSON，自动转换为执行工作流；保留原参数、有效连线及关闭／旁路状态，API JSON 继续可用。",
+      "识别 Lazy 合并工作台的参考图生成链和提示词入口，当前请求按顺序替换真实上传图片，并同步更新工作台备用提示词。",
+      "无法可靠映射的特殊节点会明确指出节点并提示导出 API 格式；历史工作流、项目及交付文件继续保留。",
+    ],
+  },
+  {
     version: "1.8.7",
     releasedAt: "2026-10-11",
     title: "自定义生图、可选规则转换与结果自动入库",

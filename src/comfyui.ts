@@ -1,4 +1,5 @@
 import type { ComfyUIWorkflowPreset, ImageApiConfig } from './types';
+import { convertComfyUICanvasWorkflow, isComfyUICanvasWorkflow } from './comfyuiCanvas';
 
 export type ComfyUIWorkflowEntry = ComfyUIWorkflowPreset;
 
@@ -10,6 +11,7 @@ export interface ComfyUIImageConfigFields {
 }
 
 export interface ComfyUIWorkflowImportResult {
+  sourceFormat: 'api' | 'canvas';
   workflowJson: string;
   positiveCount: number;
   negativeCount: number;
@@ -45,14 +47,10 @@ const isPlainObject = (value: unknown): value is JsonObject => (
   Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 );
 
-const isCanvasWorkflow = (value: JsonObject): boolean => (
-  Array.isArray(value.nodes) || Array.isArray(value.links)
-);
-
-const parseWorkflowJson = (text: string): JsonObject => {
+const parseWorkflowDocument = (text: string): { workflow: JsonObject; sourceFormat: 'api' | 'canvas' } => {
   const trimmed = (text || '').trim();
   if (!trimmed) {
-    throw new Error('ComfyUI 缺少 API workflow JSON。');
+    throw new Error('ComfyUI 缺少 workflow JSON。');
   }
 
   let parsed: unknown;
@@ -60,22 +58,21 @@ const parseWorkflowJson = (text: string): JsonObject => {
     parsed = JSON.parse(trimmed) as unknown;
   } catch (error) {
     const detail = error instanceof Error ? error.message : '格式错误';
-    throw new Error(`ComfyUI API workflow JSON 解析失败：${detail}`);
+    throw new Error(`ComfyUI workflow JSON 解析失败：${detail}`);
   }
 
   if (!isPlainObject(parsed)) {
-    throw new Error('ComfyUI API workflow 必须是 JSON 对象。');
-  }
-  if (isCanvasWorkflow(parsed)) {
-    throw new Error('该文件是 ComfyUI 画布 workflow，不是可执行的 API workflow。请从 ComfyUI 导出 API 格式。');
+    throw new Error('ComfyUI workflow 必须是 JSON 对象。');
   }
 
   const workflow = isPlainObject(parsed.prompt) ? parsed.prompt : parsed;
-  if (isCanvasWorkflow(workflow)) {
-    throw new Error('该文件是 ComfyUI 画布 workflow，不是可执行的 API workflow。请从 ComfyUI 导出 API 格式。');
+  if (isComfyUICanvasWorkflow(workflow)) {
+    return { workflow: convertComfyUICanvasWorkflow(workflow), sourceFormat: 'canvas' };
   }
-  return workflow;
+  return { workflow, sourceFormat: 'api' };
 };
+
+const parseWorkflowJson = (text: string): JsonObject => parseWorkflowDocument(text).workflow;
 
 const cloneJsonObject = (value: JsonObject): JsonObject => (
   JSON.parse(JSON.stringify(value)) as JsonObject
@@ -131,7 +128,8 @@ const isImageOutputNode = (node: unknown): boolean => (
 );
 
 const isReferenceInfluenceNode = (node: unknown): boolean => (
-  /(?:sampler|ipadapter|controlnet|vaeencode|latent(?:composite|blend|upscale)|reactor|faceswap|faceid|instantid|pulid|photomaker|stylemodel|applystyle|referenceattention|inpaint|outpaint|img2img|imageblend|imagecomposite|compositeimage)/u
+  normalizedClassType(node) === 'lazymergegenerate'
+  || /(?:sampler|ipadapter|controlnet|vaeencode|latent(?:composite|blend|upscale)|reactor|faceswap|faceid|instantid|pulid|photomaker|stylemodel|applystyle|referenceattention|inpaint|outpaint|img2img|imageblend|imagecomposite|compositeimage)/u
     .test(normalizedClassType(node))
 );
 
@@ -238,14 +236,14 @@ const collectUpstreamTextNodes = (
 };
 
 /**
- * Imports a ComfyUI API workflow and converts its runtime inputs to placeholders.
- * Both a raw API node map and the `{ prompt: nodeMap }` request shape are accepted.
+ * Imports API node maps or converts a saved canvas before binding runtime inputs.
  */
 export const importComfyUIApiWorkflow = (
   text: string,
   options: { preserveImageSize?: boolean } = {},
 ): ComfyUIWorkflowImportResult => {
-  const workflow = cloneJsonObject(parseWorkflowJson(text));
+  const document = parseWorkflowDocument(text);
+  const workflow = cloneJsonObject(document.workflow);
   const textNodeIds = new Set(
     Object.entries(workflow)
       .filter(([, node]) => isPromptTextNode(node))
@@ -253,6 +251,53 @@ export const importComfyUIApiWorkflow = (
   );
   const positiveNodeIds = new Set<string>();
   const negativeNodeIds = new Set<string>();
+  const promptFieldsByNode = new Map<string, string[]>();
+  textNodeIds.forEach((nodeId) => {
+    const inputs = nodeInputs(workflow[nodeId])!;
+    promptFieldsByNode.set(nodeId, ['text', 'text_g', 'text_l'].filter((field) => typeof inputs[field] === 'string'));
+  });
+
+  // Lazy performs text encoding inside its generator. Only bind string sources
+  // reached through an active workbench's prompt socket; unrelated notes and
+  // string widgets must not become task prompts.
+  const downstream = downstreamNodeIds(workflow);
+  const lazyTextCandidates = new Set(textNodeIds);
+  Object.entries(workflow).forEach(([nodeId, node]) => {
+    const inputs = nodeInputs(node);
+    if (normalizedClassType(node) === 'easystringjoinlines' && typeof inputs?.string === 'string'
+      || inputs && Object.values(inputs).some((value) => typeof value === 'string'
+        && (value.includes('__PROMPT__') || value.includes('{{prompt}}')))) {
+      lazyTextCandidates.add(nodeId);
+    }
+  });
+  Object.entries(workflow).forEach(([nodeId, node]) => {
+    const inputs = nodeInputs(node);
+    if (!inputs || normalizedClassType(node) !== 'lazymergeworkbench'
+      || !reachesGeneratedImageOutput(workflow, downstream, nodeId)) return;
+    const promptRoot = readConnectionNodeId(inputs['提示词']);
+    if (promptRoot) {
+      const sources = collectUpstreamTextNodes(workflow, promptRoot, lazyTextCandidates);
+      if (!sources.size) {
+        throw new Error(`Lazy 工作台 ${nodeId} 的提示词来源无法自动识别。请在 API JSON 的目标输入填写 __PROMPT__ 后重新导入。`);
+      }
+      sources.forEach((sourceId) => {
+        positiveNodeIds.add(sourceId);
+        if (normalizedClassType(workflow[sourceId]) === 'easystringjoinlines') promptFieldsByNode.set(sourceId, ['string']);
+      });
+      // The saved canvas can also contain an old fallback prompt. Keep both
+      // inputs current so custom-node fallback behavior cannot reuse that text.
+      if (typeof inputs['提示词文本'] === 'string') {
+        positiveNodeIds.add(nodeId);
+        promptFieldsByNode.set(nodeId, ['提示词文本']);
+      }
+    } else {
+      const promptField = ['提示词', '提示词文本'].find((field) => typeof inputs[field] === 'string');
+      if (promptField) {
+        positiveNodeIds.add(nodeId);
+        promptFieldsByNode.set(nodeId, [promptField]);
+      }
+    }
+  });
 
   Object.values(workflow).forEach((node) => {
     const inputs = nodeInputs(node);
@@ -308,7 +353,7 @@ export const importComfyUIApiWorkflow = (
     const inputs = nodeInputs(node);
     if (!inputs) return;
 
-    const textFields = ['text', 'text_g', 'text_l'].filter((field) => typeof inputs[field] === 'string');
+    const textFields = promptFieldsByNode.get(nodeId) || [];
     if (textFields.length) {
       if (negativeNodeIds.has(nodeId)) {
         textFields.forEach((field) => { inputs[field] = '__NEGATIVE_PROMPT__'; });
@@ -317,6 +362,11 @@ export const importComfyUIApiWorkflow = (
         textFields.forEach((field) => { inputs[field] = '__PROMPT__'; });
         positiveCount += 1;
       }
+    } else {
+      const values = Object.values(inputs).filter((value): value is string => typeof value === 'string');
+      if (values.some((value) => value.includes('__PROMPT__') || value.includes('{{prompt}}'))) positiveCount += 1;
+      if (values.some((value) => value.includes('__NEGATIVE_PROMPT__')
+        || value.includes('{{negative_prompt}}') || value.includes('{{negativePrompt}}'))) negativeCount += 1;
     }
 
     const dimensions = dimensionInputsByNode.get(nodeId);
@@ -339,10 +389,11 @@ export const importComfyUIApiWorkflow = (
   });
 
   if (positiveCount === 0) {
-    throw new Error('没有识别到正面提示词节点，请确认文件是 ComfyUI 导出的 API workflow JSON。');
+    throw new Error('没有识别到正面提示词入口。请检查工作流的文本编码或 Lazy 工作台提示词连线，也可在 API JSON 的目标输入填写 __PROMPT__。');
   }
 
   return {
+    sourceFormat: document.sourceFormat,
     workflowJson: JSON.stringify(workflow, null, 2),
     positiveCount,
     negativeCount,
@@ -751,7 +802,7 @@ export const bindComfyUIReferenceImagesWithResult = (
     // the user. Explicit primary references still fail below instead of being
     // silently ignored.
     if (primaryReferenceImageCount === 0) return { workflow, boundReferenceImageCount: 0 };
-    throw new Error('当前 ComfyUI Workflow 没有连接到输出的 LoadImage 参考图节点。请导入带 LoadImage/IPAdapter 或图生图链路的 API Workflow。');
+    throw new Error('当前 ComfyUI Workflow 没有连接到输出的 LoadImage 参考图节点。请检查参考图是否启用，并接入 IPAdapter、Lazy 生成或图生图链路。');
   }
   if (primaryReferenceImageCount > targetIds.length) {
     throw new Error(`当前 ComfyUI Workflow 只有 ${targetIds.length} 个可用参考图节点，无法接入本次 ${primaryReferenceImageCount} 张主参考图。`);

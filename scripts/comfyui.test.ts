@@ -147,8 +147,8 @@ assert.deepEqual(importedWorkflow['5'].inputs.seed, ['seed-provider', 0]);
 
 assert.throws(
   () => comfy.importComfyUIApiWorkflow!(JSON.stringify({ nodes: [{ id: 1, type: 'CLIPTextEncode' }] })),
-  /API workflow|正面提示词/u,
-  'the regular canvas workflow format must not be accepted as an executable API workflow',
+  /画布|正面提示词/u,
+  'an incomplete canvas must fail conversion rather than become an invalid API workflow',
 );
 
 const built = comfy.buildComfyUIWorkflow!(imported.workflowJson, {
@@ -421,5 +421,33 @@ const switched = comfy.synchronizeComfyUIWorkflows!([
 ], 'wf-b');
 assert.equal(switched.activeComfyuiWorkflowId, 'wf-b');
 assert.equal(switched.workflowJson, '{"b":2}');
+
+const lazyApi = {
+  ref: { class_type: 'LoadImage', inputs: { image: 'old-reference.png' } },
+  text: { class_type: 'easy stringJoinLines', inputs: { string: 'old task prompt', delimiter: ' ' } },
+  bench: { class_type: 'LazyMergeWorkbench', inputs: { '图像1': ['ref', 0], '提示词': ['text', 0], '提示词文本': 'old fallback' } },
+  generate: { class_type: 'LazyMergeGenerate', inputs: { '工作台包': ['bench', 0], 'Krea步数': 8 } },
+  save: { class_type: 'SaveImage', inputs: { images: ['generate', 0] } },
+};
+const lazyImport = comfy.importComfyUIApiWorkflow!(JSON.stringify(lazyApi));
+assert.equal(lazyImport.referenceImageCount, 1);
+const lazyBuilt = comfy.buildComfyUIWorkflow!(lazyImport.workflowJson, {
+  prompt: 'current task', negativePrompt: '', width: 1024, height: 768,
+}) as Record<string, any>;
+assert.equal(lazyBuilt.text.inputs.string, 'current task');
+assert.equal(lazyBuilt.bench.inputs['提示词文本'], 'current task', 'old fallback prompt must not survive a new request');
+assert.equal(lazyBuilt.generate.inputs['Krea步数'], 8);
+assert.deepEqual(comfy.assertComfyUIWorkflowCanBindReferenceImages!(JSON.stringify(lazyApi), 1), {
+  referenceImageCount: 1, requiredPrimaryReferenceImageCount: 1,
+});
+assert.throws(() => comfy.bindComfyUIReferenceImages!({
+  ...lazyApi, generate: { class_type: 'PreviewImage', inputs: { images: ['bench', 0] } },
+}, ['current-reference.png']), /没有连接到输出/u, 'a workbench without the Lazy generator is not a generated reference chain');
+assert.throws(() => comfy.importComfyUIApiWorkflow!(JSON.stringify({
+  ...lazyApi, text: { class_type: 'UnknownTextNode', inputs: { value: 'old unknown prompt' } },
+})), /提示词来源无法自动识别/u, 'an unknown linked prompt must not silently reuse the old task');
+const explicitImport = comfy.importComfyUIApiWorkflow!(customPlaceholderWorkflow);
+assert.equal(explicitImport.positiveCount, 1);
+assert.equal(JSON.parse(explicitImport.workflowJson).custom.inputs.prompt, '自定义节点::__PROMPT__', 'explicit custom input markers retain their prefix');
 
 console.log('ComfyUI workflow import, migration, switching, and placeholder checks passed');
