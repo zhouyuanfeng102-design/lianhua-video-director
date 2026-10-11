@@ -6,7 +6,7 @@ import {
   resolveImagePromptSelection,
 } from '../src/imagePromptRules';
 import { requestImagePromptConverter } from '../src/services/llm';
-import { DIRECTED_ACTION_RELATION_RULE, STORYBOARD_FRAME_VISIBILITY_RULE } from '../src/spatialContinuityRules';
+import { DIRECTED_ACTION_RELATION_RULE, IMAGE_STORY_SPATIAL_STATE_RULE, STORYBOARD_FRAME_VISIBILITY_RULE } from '../src/spatialContinuityRules';
 import type { TextApiConfig } from '../src/types';
 
 // Only synthetic source and stubbed text transport. No image API, user data,
@@ -21,13 +21,14 @@ for (const format of ['natural-language', 'sd-tags', 'nai-tags'] as const) {
     ...legacyPreset, ruleSet: { ...legacyPreset.ruleSet, format },
   });
   assert.ok(system.includes(STORYBOARD_FRAME_VISIBILITY_RULE));
+  assert.ok(system.includes(IMAGE_STORY_SPATIAL_STATE_RULE), 'each output format keeps world distance before camera crop and identity detail');
   assert.ok(system.indexOf(STORYBOARD_FRAME_VISIBILITY_RULE) > system.indexOf(legacyPreset.preset.outputRules),
     'current shot crop and gaze rules override old display-oriented presets for every output format');
-  assert.match(system, /尾帧保留结束时刻的机位与取景/u);
+  assert.match(system, /尾帧以该镜动作产生的退出状态为依据，保留结束时刻的世界位置、剩余空间、机位与取景/u);
   assert.match(system, /背面不补正脸，单眼侧脸不强求双眼，手脚特写不拉远补脸/u);
   assert.match(system, /目标主观视角/u);
   assert.match(system, /合理回头/u);
-  assert.match(system, /具名人物之间的动作与视线关系 → 当前可见身份细节/u);
+  assert.match(system, /所选时刻及对应动作阶段 → 同一镜头在该时刻的双方世界站位、距离[\s\S]*摄影机位置与朝向[\s\S]*当前可见身份细节/u);
 }
 assert.doesNotMatch(IMAGE_PROMPT_PROPORTION_CONTRACT, /构图以完整主体和自然留白为先/u);
 assert.match(IMAGE_PROMPT_PROPORTION_CONTRACT, /局部特写沿用局部取景/u);
@@ -41,6 +42,14 @@ assert.equal(characterSystem.includes(STORYBOARD_FRAME_VISIBILITY_RULE), false,
 assert.match(characterSystem, /必须执行全身构图合同/u);
 
 const fixtures = [
+  {
+    source: '首帧先近拍微开的门缝与门外明川，寝宫内青岚距门槛约四米，明川到门槛的距离没有给出。随后后拉才揭示青岚的侧肩，再下一镜她才冲向明川；本张保持第一镜起始时刻。',
+    result: '门缝近景，明川仍站在门外向内注视。青岚保持寝宫内距门槛约四米的画外位置，两者之间的连续室内地面尚未被跨越；起始裁切没有她的侧肩。',
+  },
+  {
+    source: '越肩观察同一走廊，青岚在近处，明川位于走廊另一端、尚未进入短剑可及范围。原文未给米数；青岚尚未开始向明川接近，双方之间的通道没有被堵住。',
+    result: '同一走廊的越肩画面，青岚位于近处，明川仍在走廊另一端、短剑可及范围之外；两人之间的通道保持可行进，尚未发生接近。',
+  },
   {
     source: '两名成年战士在门廊对峙。摄影机在青岚左侧后方，青岚身体侧向明川，眼睛看明川的持刀手；刀横握尚未出招。',
     result: '门廊侧后方中景，青岚呈自然侧背面，躯干侧向画面右侧的明川，侧脸可见的一只眼注视明川持刀的手，刀横握在腰侧。明川位于门廊另一端。',
@@ -95,4 +104,4 @@ try {
   if (originalWindow === undefined) Reflect.deleteProperty(globalThis, 'window');
   else Object.defineProperty(globalThis, 'window', { configurable: true, writable: true, value: originalWindow });
 }
-console.log('Storyboard gaze/framing: crop-first contracts, all output formats, side/back view, final close-up, natural head turn, POV, and single-call transport passed.');
+console.log('Storyboard gaze/framing: world-state-first contracts, all output formats, off-screen entry distance, late reveal, side/back view, final close-up, natural head turn, POV, and single-call transport passed.');

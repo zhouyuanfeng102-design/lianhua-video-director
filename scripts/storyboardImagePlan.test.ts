@@ -365,6 +365,32 @@ test('two video shots select four stills from final H3 staging without inventing
   assert.equal(JSON.stringify(storyboard), before);
 });
 
+test('still planning keeps landmark distance endpoints and later reveal timing in the first source request', async () => {
+  const storyboard = makeBoard();
+  const h3Shot = '[Shot 1] 阿莲静立寝宫中央，距门槛约四米；守卫站在门外。门槛至阿莲之间保留连续空地。起始机位近景聚焦门外守卫，随后后拉才揭示阿莲侧肩；阿莲之后沿空地走近守卫。';
+  storyboard.officialPromptZh = `integrated_multimodal_description: ${h3Shot}\noverall_soundscape: N/A\nnon_diegetic_music: N/A`;
+  storyboard.finalPrompt = '旧稿把阿莲与守卫并排放在门边。';
+  const before = JSON.stringify(storyboard);
+  const selected = { sourceShotId: 'shot-1', timeSec: 0, description: '开始边界，守卫在门外近景；阿莲在画外寝宫中央，距门槛约四米，尚未走近。' };
+  let requests = 0;
+  const result = await requestStoryboardImageFramePlan({
+    storyboard, count: 1,
+    request: async (system, user) => {
+      requests += 1;
+      const payload = JSON.parse(user);
+      assert.equal(payload.source.confirmedH3.shots[0], h3Shot, 'distance and the full original motion reach the same initial planning request intact');
+      assert.match(system, /距离必须保留原值、参照对象和准确端点/u);
+      assert.match(system, /description 先明确.*具名人物的世界位置.*距离端点.*然后确定摄影机/u);
+      assert.match(system, /随后后拉才揭示的侧肩.*不默认提前合入起始静帧/u);
+      assert.match(system, /未来剧情只用于理解开始时.*不提前执行动作/u);
+      return JSON.stringify({ frames: [selected] });
+    },
+  });
+  assert.equal(requests, 1, 'spatial construction does not add a review or retry request');
+  assert.deepEqual(result, [selected], 'the parser keeps the AI-selected moment and distance semantics without local geometry rewriting');
+  assert.equal(JSON.stringify(storyboard), before);
+});
+
 test('invalid H3 remains raw source but is not falsely promoted to confirmed staging', async () => {
   const storyboard = makeBoard();
   storyboard.officialPromptZh = 'invalid H3 text';

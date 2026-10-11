@@ -13498,12 +13498,12 @@ function DirectorView(ctx: AppContext) {
     const imagePromptConverterRules = buildImagePromptConverterSystemPrompt(
       imagePromptSelection,
       [
-        "分镜图片只能表现一个明确可见的静止瞬间，使用一个景别、一个机位和一套光线。",
+        "分镜图片先锁定所选时刻的人物世界位置、真实间距、门内外关系和行动通路，再按该时刻的一个景别、一个机位和一套光线表现静止瞬间；不能用近景或越肩构图拉近实际站位。",
         gptImage25MicroNsfwConverterExtraRule(imagePromptSelection, "storyboard", "storyboard-frame"),
         requestedImageCount !== undefined ? "本批次为用户自定义数量的分镜静帧。‘AI 选定的本张静帧’只选择原镜允许的时刻和裁切；最终 H3 明确的机位、具名站位、身体侧别和画外状态始终优先，不能被自定义静帧的构图覆盖，也不强迫原镜全部动作阶段或镜尾结果同时入画。" : "",
         "只描述画面里真实可见的主体、动作或状态、地点、空间层次、固定道具、构图、光线、风格和连续性锚点。",
         "被分析、被寻找、被定位、被谈论或可能存在的对象不等于实际出镜主体；原文未明确可见时不得让其出镜。",
-        "不得输出剧情原文、字段标题、时间戳、音效、台词、镜头切换、运镜过程、模板占位词、Markdown、解释或制作过程。",
+        "不得输出剧情原文、字段标题、时间戳、音效、台词、镜头切换、运镜过程、模板占位词、Markdown、解释或制作过程；已给出的距离及其测量端点、地标内外关系和可行动间隔是画面事实，必须写入最终正文。",
       ].join("\n"),
       "storyboard-frame",
       { width: requestedStoryboardOutputSize.width, height: requestedStoryboardOutputSize.height, aspectRatio: requestedStoryboardOutputSize.resolutionPlan?.logicalAspectRatio || sourceBoard.aspectRatio, resolution: requestedStoryboardOutputSize.resolutionPlan?.tier },
@@ -19309,9 +19309,9 @@ function ImageWorkbenchView(ctx: AppContext) {
       const imagePromptConverterRules = buildImagePromptConverterSystemPrompt(
         imagePromptSelection,
         [
-          "分镜图片只能表现一个明确可见的静止瞬间，保持人物、场景、道具和画风连续。",
+          "分镜图片先锁定所选瞬间的人物世界位置、距离及测量端点、地标关系和行动通路，再按当时机位与裁切表现一个静止瞬间，保持人物、场景、道具和画风连续。",
           gptImage25MicroNsfwConverterExtraRule(imagePromptSelection, "storyboard", "storyboard-frame"),
-          "不得输出剧情原文、时间戳、音效、台词、运镜过程、字段标题、Markdown 或制作说明。",
+          "不得输出剧情原文、时间戳、音效、台词、运镜过程、字段标题、Markdown 或制作说明；距离、地标内外关系和可行动间隔直接保留在最终正向正文，不能随过程说明删除。",
         ].join("\n"),
         "storyboard-frame",
         { width: requestedStoryboardOutputSize.width, height: requestedStoryboardOutputSize.height, aspectRatio: requestedStoryboardOutputSize.resolutionPlan?.logicalAspectRatio || sourceBoard.aspectRatio, resolution: requestedStoryboardOutputSize.resolutionPlan?.tier },

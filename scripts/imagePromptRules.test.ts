@@ -3,6 +3,8 @@ import * as imagePromptRuleHelpers from '../src/imagePromptRules';
 import {
   BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS,
   BUILT_IN_IMAGE_PROMPT_RULE_SETS,
+  LEGACY_IMAGE_PROMPT_CATEGORY_PRESETS_V19,
+  LEGACY_IMAGE_PROMPT_RULE_SETS_V19,
   FIVE_VIEW_IMAGE_PRESET_IDS,
   IMAGE_PROMPT_RULE_CATALOG_VERSION,
   IMAGE_PROMPT_CURRENT_LAYOUT_CONTRACT,
@@ -17,6 +19,7 @@ import {
   migrateImagePromptRulesState,
   getImagePromptCategoryPresetFormat,
   isImagePromptPresetCompatibleWithRule,
+  isNarrativeImageRequest,
   normalizeImagePromptCategoryPreset,
   normalizeImagePromptRuleSet,
   normalizeImagePromptRulesState,
@@ -44,6 +47,7 @@ import {
   privateImageVariantRepairRule,
 } from '../src/imageGeneration';
 import { buildImagePrompt } from '../src/promptEngine';
+import { IMAGE_STORY_SPATIAL_STATE_RULE } from '../src/spatialContinuityRules';
 
 const tests: Array<{ name: string; run: () => void | Promise<void> }> = [];
 const test = (name: string, run: () => void | Promise<void>): void => {
@@ -367,11 +371,11 @@ test('catalog-v16 refreshes untouched GPT2.5 micro NSFW light-clothing rules wit
   const text = JSON.stringify({ microRule, microCharacter, microStoryboard, microFiveView });
 
   assert.equal(migrated.catalogVersion, IMAGE_PROMPT_RULE_CATALOG_VERSION);
-  assert.equal(microRule.version, '1.1.0');
+  assert.equal(microRule.version, BUILT_IN_IMAGE_PROMPT_RULE_SETS.find((rule) => rule.id === microRuleId)!.version);
   assert.equal(microRule.enabled, false);
   assert.equal(microCharacter.version, '1.1.0');
   assert.equal(microCharacter.enabled, false);
-  assert.equal(microStoryboard.version, '1.1.0');
+  assert.equal(microStoryboard.version, BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS.find((preset) => preset.id === microStoryboardId)!.version);
   assert.equal(microFiveView.version, '1.2.0');
   assert.match(text, /厚重外袍|轻罗裙|湿润内衬|轻薄衣料/u);
   assert.match(text, /不通过放大胸胯腿|横向拉伸|左右保留雨雾/u);
@@ -526,19 +530,21 @@ test('compatible fallback cannot silently opt into five-view or micro when ordin
 });
 
 test('catalog eleven adds five-view presets once without rebinding any sheet default', () => {
-  const input = { ...withoutFiveViewModelPresets(normalizeImagePromptRulesState(undefined)), catalogVersion: 11 };
+  const factory19 = { ...normalizeImagePromptRulesState(undefined),
+    ruleSets: structuredClone([...LEGACY_IMAGE_PROMPT_RULE_SETS_V19]),
+    categoryPresets: structuredClone([...LEGACY_IMAGE_PROMPT_CATEGORY_PRESETS_V19]),
+  };
+  const input = { ...withoutFiveViewModelPresets(factory19), catalogVersion: 11 };
   const before = structuredClone(input);
   const migrated = migrateImagePromptRulesState(input);
   assert.equal(migrated.catalogVersion, IMAGE_PROMPT_RULE_CATALOG_VERSION);
-  assert.deepEqual(migrated.categoryPresets.slice(0, before.categoryPresets.length), before.categoryPresets);
+  assert.deepEqual(migrated.categoryPresets.slice(0, before.categoryPresets.length), before.categoryPresets.map((preset) =>
+    BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS.find((current) => current.id === preset.id)!));
   assert.deepEqual(migrated.categoryPresets.slice(before.categoryPresets.length).map((preset) => preset.id), fiveViewPresetIds);
   for (const previous of before.ruleSets) {
     const next = migrated.ruleSets.find((rule) => rule.id === previous.id)!;
-    const expected = Object.entries(fiveViewRuleRecommendations).find(([ruleId]) => ruleId === previous.id)?.[1];
-    assert.deepEqual(next, expected ? {
-      ...previous,
-      categoryPresetIds: [...previous.categoryPresetIds, ...fiveViewPresetIds],
-    } : previous);
+    assert.deepEqual(next, BUILT_IN_IMAGE_PROMPT_RULE_SETS.find((current) => current.id === previous.id));
+    assert.deepEqual(next.defaultPresetByAssetKind, previous.defaultPresetByAssetKind);
   }
   assert.deepEqual(migrated.defaultRuleSetByBackend, before.defaultRuleSetByBackend);
   assert.deepEqual(input, before, 'saved libraries and frozen task snapshots are never mutated in place');
@@ -1147,7 +1153,7 @@ test('Krea-2 private multi-region requests use the private preset and current la
 test('Krea-2 protects single-subject framing while Krea and ComfyUI keep multi-person binding presets', () => {
   const state = normalizeImagePromptRulesState(undefined);
   const krea = state.ruleSets.find((rule) => rule.id === 'image-rule-krea-2')!;
-  assert.equal(krea.version, '1.3.0');
+  assert.equal(krea.version, BUILT_IN_IMAGE_PROMPT_RULE_SETS.find((rule) => rule.id === krea.id)!.version);
   assert.match(krea.description, /单主体稳定.*多人物/u);
   assert.match(krea.systemPrompt, /只有一个实际主体[\s\S]{0,160}连续背景[\s\S]{0,160}左右保留连续背景/u);
   assert.match(krea.systemPrompt, /两个或更多实际出镜主体[\s\S]{0,80}多人空间锚点/u);
@@ -1159,7 +1165,7 @@ test('Krea-2 protects single-subject framing while Krea and ComfyUI keep multi-p
   });
 
   const comfyui = state.ruleSets.find((rule) => rule.id === 'image-rule-comfyui')!;
-  assert.equal(comfyui.version, '1.1.0');
+  assert.equal(comfyui.version, BUILT_IN_IMAGE_PROMPT_RULE_SETS.find((rule) => rule.id === comfyui.id)!.version);
   assert.equal(comfyui.format, 'sd-tags');
   assert.match(comfyui.systemPrompt, /BREAK/u);
   assert.match(comfyui.systemPrompt, /left character|right character|foreground character|background character/u);
@@ -1475,9 +1481,13 @@ const withoutNovelAiCategoryCatalog = (state: ImagePromptRulesState): ImagePromp
 });
 
 const catalogV1ImageRuleLibrary = (): ImagePromptRulesState => {
+  const factory19 = { ...normalizeImagePromptRulesState(undefined),
+    ruleSets: structuredClone([...LEGACY_IMAGE_PROMPT_RULE_SETS_V19]),
+    categoryPresets: structuredClone([...LEGACY_IMAGE_PROMPT_CATEGORY_PRESETS_V19]),
+  };
   const state = withoutMultiPersonBindingCatalog(
     withoutGptImage25MicroNsfwCatalog(
-      withoutPrivateCharacterCatalog(withoutNovelAiCategoryCatalog(withoutFiveViewModelPresets(withoutModelFamilyCatalog(normalizeImagePromptRulesState(undefined))))),
+      withoutPrivateCharacterCatalog(withoutNovelAiCategoryCatalog(withoutFiveViewModelPresets(withoutModelFamilyCatalog(factory19)))),
     ),
   );
   return {
@@ -1500,7 +1510,9 @@ const legacyImageRuleLibrary = () => {
 };
 
 test('catalog six gains NAI choices once while preserving existing default, disabled, renamed and colliding user records', () => {
-  const state = withoutNovelAiCategoryCatalog(normalizeImagePromptRulesState(undefined));
+  const current = normalizeImagePromptRulesState(undefined);
+  const state = withoutNovelAiCategoryCatalog({ ...current, ruleSets: current.ruleSets.map((rule) => rule.id === 'image-rule-novelai'
+    ? structuredClone(LEGACY_IMAGE_PROMPT_RULE_SETS_V19.find((factory) => factory.id === rule.id)!) : rule) });
   state.catalogVersion = 6;
   const nai = state.ruleSets.find((rule) => rule.id === 'image-rule-novelai')!;
   nai.name = '我的 NAI 规则名称';
@@ -1579,18 +1591,21 @@ test('legacy nine-rule libraries gain Krea and the private character catalog onc
       ? ['image-preset-character-private', ...comfyuiMultiPersonBindingPresetIds]
       : ['image-preset-character-private', ...(beforeRule.id === 'image-rule-novelai' ? novelAiPresetIds : []),
           ...(beforeRule.id === 'image-rule-openai-gpt-image' ? fiveViewPresetIds : [])];
-    assert.deepEqual(afterRule, {
+    const preservedRule = {
       ...beforeRule,
       categoryPresetIds: [...beforeRule.categoryPresetIds, ...expectedAddedPresetIds],
       defaultPresetByAssetKind: {
         ...beforeRule.defaultPresetByAssetKind,
         'character-private': 'image-preset-character-private',
       },
-    }, `migration rewrote user fields on ${beforeRule.id}`);
+    };
+    const factory = BUILT_IN_IMAGE_PROMPT_RULE_SETS.find((rule) => rule.id === beforeRule.id)!;
+    assert.deepEqual(afterRule, ['image-rule-generic', 'image-rule-novelai'].includes(beforeRule.id)
+      ? preservedRule : factory, `migration rewrote user fields or missed a factory upgrade on ${beforeRule.id}`);
   }
   assert.deepEqual(
     migrated.categoryPresets.slice(0, before.categoryPresets.length),
-    before.categoryPresets,
+    before.categoryPresets.map((preset) => BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS.find((current) => current.id === preset.id)!),
   );
   assert.deepEqual(
     migrated.categoryPresets.slice(before.categoryPresets.length),
@@ -1831,7 +1846,7 @@ test('catalog-v9 upgrades untouched Krea and private presets to single-subject f
   const migrated = migrateImagePromptRulesState(legacy);
   assert.equal(migrated.catalogVersion, IMAGE_PROMPT_RULE_CATALOG_VERSION);
   const krea = migrated.ruleSets.find((rule) => rule.id === 'image-rule-krea-2')!;
-  assert.equal(krea.version, '1.3.0');
+  assert.equal(krea.version, BUILT_IN_IMAGE_PROMPT_RULE_SETS.find((rule) => rule.id === krea.id)!.version);
   assert.match(krea.systemPrompt, /只有一个实际主体.*连续背景/u);
   migrated.categoryPresets.filter((preset) => preset.assetKind === 'character-private').forEach((preset) => {
     assert.equal(preset.version, '1.7.0');
@@ -1858,7 +1873,8 @@ test('catalog migration adds only missing Krea dependencies, private, GPT Image 
   legacy.categoryPresets = legacy.categoryPresets.filter((preset) => preset.id !== 'image-preset-prop');
   const before = structuredClone(legacy.categoryPresets);
   const migrated = migrateImagePromptRulesState(legacy);
-  assert.deepEqual(migrated.categoryPresets.slice(0, before.length), before);
+  assert.deepEqual(migrated.categoryPresets.slice(0, before.length), before.map((preset) => preset.id === existingPreset.id
+    ? preset : BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS.find((current) => current.id === preset.id)!));
   assert.deepEqual(
     migrated.categoryPresets.slice(before.length).map((preset) => preset.id),
     [
@@ -2483,6 +2499,103 @@ test('catalog v19 updates only exact factory private output text and preserves u
   assert.deepEqual(frozenTask, savedTask);
   assert.deepEqual(migrated.defaultRuleSetByBackend, legacy.defaultRuleSetByBackend);
   assert.deepEqual(migrateImagePromptRulesState(migrated), migrated);
+});
+
+test('narrative image purposes carry world-state rules after custom presets without changing identity or environment scope', () => {
+  for (const format of ['natural-language', 'sd-tags', 'nai-tags'] as const) {
+    for (const [assetKind, imageVariant] of [
+      ['storyboard', 'first-frame'], ['storyboard', 'last-frame'],
+      ['grid', 'grid'], ['location', 'snapshot'], ['location', 'first-frame'],
+    ] as const) {
+      assert.equal(isNarrativeImageRequest(assetKind, imageVariant), true);
+      const selection = resolveImagePromptSelection({ backend: 'openai', assetKind });
+      const system = buildImagePromptConverterSystemPrompt({ ...selection,
+        ruleSet: { ...selection.ruleSet, format, systemPrompt: 'USER_RULE_WORLD_SENTINEL' },
+        preset: { ...selection.preset, systemPrompt: 'USER_PRESET_WORLD_SENTINEL' },
+      }, 'USER_EXTRA_WORLD_SENTINEL', imageVariant);
+      assert.ok(system.includes(IMAGE_STORY_SPATIAL_STATE_RULE));
+      assert.ok(system.lastIndexOf(IMAGE_STORY_SPATIAL_STATE_RULE) > system.indexOf('USER_EXTRA_WORLD_SENTINEL'));
+      assert.match(system, /距离必须保留原值、参照对象和准确端点/u);
+      assert.match(system, /不能提前补入或搬到门边/u);
+      if (assetKind === 'grid') assert.match(system, /空间与动作规则逐格应用/u);
+    }
+  }
+  for (const [assetKind, imageVariant] of [
+    ['character', 'full-body'], ['character-sheet', 'five-view'],
+    ['character-private', 'private-close-up'], ['location', 'landscape'], ['prop', 'showcase'],
+  ] as const) {
+    assert.equal(isNarrativeImageRequest(assetKind, imageVariant), false);
+    const selection = resolveImagePromptSelection({ backend: 'openai', assetKind, imageVariant });
+    const system = buildImagePromptConverterSystemPrompt({ ...selection,
+      preset: { ...selection.preset, systemPrompt: 'CURRENT_NON_NARRATIVE_TARGET' },
+    }, '', imageVariant);
+    assert.equal(system.includes(IMAGE_STORY_SPATIAL_STATE_RULE), false);
+  }
+});
+
+test('catalog twenty updates complete untouched factory values and protects edits, disabled choices, deletions and frozen tasks', () => {
+  const legacy: ImagePromptRulesState = {
+    schemaVersion: 1, catalogVersion: 19,
+    ruleSets: structuredClone([...LEGACY_IMAGE_PROMPT_RULE_SETS_V19]),
+    categoryPresets: structuredClone([...LEGACY_IMAGE_PROMPT_CATEGORY_PRESETS_V19]),
+    defaultRuleSetByBackend: { openai: 'image-rule-generic', comfyui: 'image-rule-comfyui' },
+  };
+  const factoryBefore = structuredClone({ rules: LEGACY_IMAGE_PROMPT_RULE_SETS_V19, presets: LEGACY_IMAGE_PROMPT_CATEGORY_PRESETS_V19 });
+  const task = { converterSystemPrompt: 'FROZEN_V19_RULE', prompt: 'FROZEN_DISTANCE_TEXT', conversionSource: '甲距门四米，乙在门外。' };
+  const before = structuredClone(legacy);
+  const migrated = migrateImagePromptRulesState({ ...legacy, generationTasks: [task] });
+  assert.equal(migrated.catalogVersion, 20);
+  assert.deepEqual(migrated.ruleSets, BUILT_IN_IMAGE_PROMPT_RULE_SETS);
+  assert.deepEqual(migrated.categoryPresets, BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS);
+  assert.deepEqual(migrated.defaultRuleSetByBackend, legacy.defaultRuleSetByBackend);
+  assert.deepEqual(legacy, before);
+  assert.deepEqual(task, { converterSystemPrompt: 'FROZEN_V19_RULE', prompt: 'FROZEN_DISTANCE_TEXT', conversionSource: '甲距门四米，乙在门外。' });
+  assert.deepEqual({ rules: LEGACY_IMAGE_PROMPT_RULE_SETS_V19, presets: LEGACY_IMAGE_PROMPT_CATEGORY_PRESETS_V19 }, factoryBefore);
+  assert.deepEqual(migrateImagePromptRulesState(migrated), migrated);
+
+  const originalRule = legacy.ruleSets.find((rule) => rule.id === 'image-rule-openai-gpt-image')!;
+  const originalPreset = legacy.categoryPresets.find((preset) => preset.id === 'image-preset-storyboard')!;
+  for (const patch of [
+    { name: '用户名称' }, { description: '用户说明' }, { systemPrompt: `${originalRule.systemPrompt}\n用户规则` },
+    { outputRules: `${originalRule.outputRules} 用户输出` }, { negativePrompt: 'USER_NEGATIVE' },
+    { version: '9.0.0' }, { updatedAt: 123 }, { backend: 'all' as const }, { format: 'sd-tags' as const },
+    { categoryPresetIds: [...originalRule.categoryPresetIds, 'user-preset'] },
+    { defaultPresetByAssetKind: { ...originalRule.defaultPresetByAssetKind, storyboard: 'image-preset-character' } },
+  ]) {
+    const edited = { ...originalRule, ...patch };
+    const input = { ...legacy, ruleSets: legacy.ruleSets.map((rule) => rule.id === edited.id ? edited : rule) };
+    assert.deepEqual(migrateImagePromptRulesState(input).ruleSets.find((rule) => rule.id === edited.id), edited);
+  }
+  for (const patch of [
+    { name: '用户名称' }, { description: '用户说明' }, { systemPrompt: `${originalPreset.systemPrompt}\n用户规则` },
+    { outputRules: `${originalPreset.outputRules} 用户输出` }, { negativePrompt: 'USER_NEGATIVE' },
+    { version: '9.0.0' }, { updatedAt: 123 }, { format: 'sd-tags' as const },
+  ]) {
+    const edited = { ...originalPreset, ...patch };
+    const input = { ...legacy, categoryPresets: legacy.categoryPresets.map((preset) => preset.id === edited.id ? edited : preset) };
+    assert.deepEqual(migrateImagePromptRulesState(input).categoryPresets.find((preset) => preset.id === edited.id), edited);
+  }
+  const disabled = migrateImagePromptRulesState({ ...legacy,
+    ruleSets: [{ ...originalRule, enabled: false }], categoryPresets: [{ ...originalPreset, enabled: false }],
+  });
+  assert.equal(disabled.ruleSets[0].enabled, false);
+  assert.equal(disabled.categoryPresets[0].enabled, false);
+  assert.equal(disabled.ruleSets[0].systemPrompt, BUILT_IN_IMAGE_PROMPT_RULE_SETS.find((rule) => rule.id === originalRule.id)!.systemPrompt);
+  assert.equal(disabled.categoryPresets[0].systemPrompt, BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS.find((preset) => preset.id === originalPreset.id)!.systemPrompt);
+  const empty = { ...legacy, ruleSets: [], categoryPresets: [], defaultRuleSetByBackend: {} };
+  assert.deepEqual(migrateImagePromptRulesState(empty), { ...empty, catalogVersion: 20 });
+});
+
+test('every active image rule keeps source distance endpoints and every narrative preset preserves action space', () => {
+  for (const rule of BUILT_IN_IMAGE_PROMPT_RULE_SETS) {
+    assert.match(rule.systemPrompt, /距离.*端点/u, rule.id);
+    assert.match(rule.systemPrompt, /地标.*通路/u, rule.id);
+    assert.match(rule.outputRules, /最终.*正文/u, rule.id);
+  }
+  for (const preset of BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS.filter((preset) => ['storyboard', 'grid', 'location'].includes(preset.assetKind))) {
+    assert.ok(preset.systemPrompt.includes(IMAGE_STORY_SPATIAL_STATE_RULE), preset.id);
+    assert.match(preset.outputRules, /距离.*端点|距离两端/u, preset.id);
+  }
 });
 
 let passed = 0;

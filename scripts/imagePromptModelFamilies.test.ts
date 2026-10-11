@@ -15,9 +15,12 @@ import {
   MODEL_FAMILY_CATEGORY_PRESETS,
   MODEL_FAMILY_FIVE_VIEW_PRESET_IDS,
   MODEL_FAMILY_RULE_SETS,
+  LEGACY_MODEL_FAMILY_CATEGORY_PRESETS_V19,
+  LEGACY_MODEL_FAMILY_RULE_SETS_V19,
   isGoogleNanoBananaImageModel,
   isGrokImagineImageModel,
 } from '../src/imagePromptModelFamilies';
+import { IMAGE_STORY_SPATIAL_STATE_RULE } from '../src/spatialContinuityRules';
 
 const tests: Array<{ name: string; run: () => void | Promise<void> }> = [];
 const test = (name: string, run: () => void | Promise<void>): void => {
@@ -350,6 +353,25 @@ test('empty and custom-only libraries do not receive unsolicited model families'
   }
   const future = { ...legacy, catalogVersion: 99 };
   assert.deepEqual(migrateImagePromptRulesState(future), future);
+});
+
+test('both model families preserve story space before framing and retain exact previous factory evidence', () => {
+  for (const rule of MODEL_FAMILY_RULE_SETS) {
+    assert.match(rule.systemPrompt, /剧情画面先.*动作阶段.*世界站位.*距离端点.*地标.*通路/u);
+    assert.match(rule.outputRules, /距离两端.*空余通路/u);
+    const legacy = LEGACY_MODEL_FAMILY_RULE_SETS_V19.find((previous) => previous.id === rule.id)!;
+    assert.equal(legacy.version, '1.0.0');
+    assert.notEqual(rule.systemPrompt, legacy.systemPrompt);
+    assert.equal(legacy.systemPrompt.includes(IMAGE_STORY_SPATIAL_STATE_RULE), false);
+  }
+  for (const preset of MODEL_FAMILY_CATEGORY_PRESETS.filter((preset) => ['storyboard', 'grid', 'location'].includes(preset.assetKind))) {
+    assert.ok(preset.systemPrompt.includes(IMAGE_STORY_SPATIAL_STATE_RULE), preset.id);
+    assert.match(preset.outputRules, /世界位置、距离两端、地标及空余通路/u);
+    assert.doesNotMatch(preset.systemPrompt, /只冻结当前选定时刻，依次落实当时的机位/u);
+    const legacy = LEGACY_MODEL_FAMILY_CATEGORY_PRESETS_V19.find((previous) => previous.id === preset.id)!;
+    assert.equal(legacy.version, '1.0.0');
+    assert.equal(legacy.systemPrompt.includes(IMAGE_STORY_SPATIAL_STATE_RULE), false);
+  }
 });
 
 let passed = 0;

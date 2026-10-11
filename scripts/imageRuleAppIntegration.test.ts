@@ -59,15 +59,19 @@ assert.ok(
 const selectedStoryboardLeaseStart = selectedStoryboardBatch.indexOf('storyboardImageBatchLifecycle.begin(');
 const selectedStoryboardRejectedLease = selectedStoryboardBatch.indexOf('if (!lease)', selectedStoryboardLeaseStart);
 const selectedStoryboardRejectedReturn = selectedStoryboardBatch.indexOf('return;', selectedStoryboardRejectedLease);
+const selectedStoryboardPreparationCreation = selectedStoryboardBatch.indexOf('reserveStoryboardImagePreparationTasks(');
+const selectedStoryboardPreparationInsertion = selectedStoryboardBatch.indexOf('generationTasks: [...preparationTasks,');
 const selectedStoryboardTaskCreation = selectedStoryboardBatch.indexOf('createImageGenerationTask(');
-const selectedStoryboardTaskInsertion = selectedStoryboardBatch.indexOf('generationTasks: [...tasks,');
+const selectedStoryboardTaskPromotion = selectedStoryboardBatch.indexOf('generationTasks: updateImagePreparationTasks(');
 assert.ok(
   selectedStoryboardLeaseStart >= 0
     && selectedStoryboardRejectedLease > selectedStoryboardLeaseStart
     && selectedStoryboardRejectedReturn > selectedStoryboardRejectedLease
-    && selectedStoryboardTaskCreation > selectedStoryboardRejectedReturn
-    && selectedStoryboardTaskInsertion > selectedStoryboardTaskCreation,
-  'a rejected selected-shot batch lease must return before creating or inserting queued tasks',
+    && selectedStoryboardPreparationCreation > selectedStoryboardRejectedReturn
+    && selectedStoryboardPreparationInsertion > selectedStoryboardPreparationCreation
+    && selectedStoryboardTaskCreation > selectedStoryboardPreparationInsertion
+    && selectedStoryboardTaskPromotion > selectedStoryboardTaskCreation,
+  'a rejected selected-shot batch lease must return before registering planning slots or promoting them into queued image tasks',
 );
 const selectedBindingReducerStart = selectedStoryboardBatch.indexOf('const currentBoard = project.storyboards.find(');
 const selectedBindingReducerEnd = selectedStoryboardBatch.indexOf('return asset;', selectedBindingReducerStart);
@@ -281,8 +285,8 @@ assert.match(
 );
 assert.match(
   imageWorkbench,
-  /buildImagePrompt\(\s*requestedAssetKind,\s*requestedAssetForm,\s*requestedImageVariant,\s*requestedNsfwPrivatePart,?\s*\)/u,
-  'the deterministic conversion source must receive the selected private part',
+  /buildImagePrompt\(\s*requestedAssetKind,\s*requestedAssetForm,\s*requestedImageVariant,\s*requestedNsfwPrivatePart,\s*requestedOutputSpecification,?\s*\)/u,
+  'the deterministic conversion source must receive the selected private part and frozen output specification',
 );
 assert.match(
   imageWorkbench,
@@ -291,12 +295,12 @@ assert.match(
 );
 assert.match(
   imageWorkbench,
-  /privateImageVariantConverterRule\(requestedImageVariant, requestedNsfwPrivatePart\)/u,
+  /privateImageVariantConverterRule\(requestedImageVariant, requestedNsfwPrivatePart, requestedOutputSpecification\)/u,
   'private converter rules must come from the variant-exclusive shared contract',
 );
 assert.match(
   imageWorkbench,
-  /privateImageVariantRepairRule\(requestedImageVariant, requestedNsfwPrivatePart\)/u,
+  /privateImageVariantRepairRule\(requestedImageVariant, requestedNsfwPrivatePart, requestedOutputSpecification\)/u,
   'private repair must restate only the requested positive target instead of echoing rejected layout names',
 );
 assert.match(
@@ -316,7 +320,7 @@ assert.match(
 );
 assert.match(
   createPromptAsset,
-  /ordinaryImageVariantConverterRule\(requestedImageVariant\)/u,
+  /ordinaryImageVariantConverterRule\(requestedImageVariant, requestedOutputSpecification\)/u,
   'ordinary image conversion must carry the selected layout contract into the AI converter',
 );
 assert.match(
@@ -379,7 +383,7 @@ const imagePanelReferences = imagePanelSection('<section className="image-settin
 const imagePanelSpecification = imagePanelSection('<section className="image-setting-section image-setting-spec"', '<div className="image-generate-row image-setting-section"');
 const imagePanelActions = imagePanelSection('<div className="image-generate-row image-setting-section"', '<ReferenceImagePickerModal');
 const imagePanelHeading = imagePanelSection('<div className="row-between image-output-head">', '<div className="row-between image-generation-mode-bar">');
-assert.match(imageWorkbench, /!isStoryboardMode && \(\s*<Card className=\{`image-output-card image-output-refined/u, 'the refined settings panel must remain absent in the independent storyboard-image workflow');
+assert.match(imageWorkbench, /!isStoryboardMode && !isCustomMode && \(\s*<Card className=\{`image-output-card image-output-refined/u, 'the refined settings panel must remain absent in the independent storyboard-image and custom-image workflows');
 assert.match(imageWorkbench, /className="image-generation-controls" key=\{`image-generation-controls-\$\{imageGenerationMode\}`\}/u, 'ordinary/private controls must retain their lane-specific remount key');
 assert.match(imagePanelRules, /value=\{activeImagePromptRuleSetId\}[\s\S]*?selectImagePromptRuleSet\(event\.target\.value\)/u, 'regrouped rules must retain the active rule binding and handler');
 assert.match(imagePanelRules, /value=\{activeImagePromptPresetId\}[\s\S]*?selectImagePromptPreset\(event\.target\.value\)/u, 'regrouped presets must retain the active preset binding and handler');
@@ -533,12 +537,12 @@ assert.match(
 );
 assert.match(
   source,
-  /const requiresPromptConversion = privateRegeneration \|\| landscapeRepair \|\| !originalTask\.prompt\.trim\(\);[\s\S]*?privateImageVariantConverterRule\(originalTask\.imageVariant, privateRegenerationPart\)[\s\S]*?privateRegeneration \|\| landscapeRepair \? \{ prompt: "" \} : \{\}/u,
+  /const requiresPromptConversion = privateRegeneration \|\| landscapeRepair \|\| !effectiveTask\.prompt\.trim\(\);[\s\S]*?privateImageVariantConverterRule\(originalTask\.imageVariant, privateRegenerationPart, \{ width: effectiveTask\.width, height: effectiveTask\.height,[\s\S]*?privateRegeneration \|\| landscapeRepair \? \{ prompt: "" \} : \{\}/u,
   'private regeneration must discard stale final prompts and rebuild them with the current exclusive target rule',
 );
 assert.match(
   source,
-  /privateImageVariantRepairRule\(task\.imageVariant, privateRegenerationPart\)[\s\S]*?privateImagePromptProblem\(task\.imageVariant, prompt, privateRegenerationPart\)/u,
+  /privateImageVariantRepairRule\(task\.imageVariant, privateRegenerationPart, \{ width: task\.width, height: task\.height,[\s\S]*?privateImagePromptProblem\(task\.imageVariant, prompt, privateRegenerationPart\)/u,
   'private regeneration must run the same validation and positive repair path as a new private request',
 );
 assert.match(

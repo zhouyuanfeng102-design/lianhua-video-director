@@ -189,12 +189,12 @@ try {
   assert.equal(success.conversions.length, 4, 'every ordinary reference-image shot executes its selected text converter before image submission');
   assert.ok(success.conversions.every((call) => call.kind === 'storyboard' && call.format === 'natural-language'));
   assert.ok(success.calls.every((call, index) => call.input.prompt.includes(success.conversions[index].prompt)));
-  assert.ok(success.imageTasks().every((task) => task.imagePromptRuleSetId === 'image-rule-openai-gpt-image'
-    && task.imagePromptPresetId === 'image-preset-storyboard' && task.imagePromptRuleSetName && task.imagePromptPresetName
-    && task.imagePromptRuleSetVersion === '1.0.0' && task.imagePromptPresetVersion === '1.0.0'
-    && task.converterSystemPrompt && task.imagePromptFormat === 'natural-language'));
   const ordinarySelection = resolveImagePromptSelection({ backend: 'openai', model: 'fixture-image-model', assetKind: 'storyboard',
     manualRuleSetId: 'image-rule-openai-gpt-image', manualPresetId: 'image-preset-storyboard', state: success.getState().imagePromptRules });
+  assert.ok(success.imageTasks().every((task) => task.imagePromptRuleSetId === 'image-rule-openai-gpt-image'
+    && task.imagePromptPresetId === 'image-preset-storyboard' && task.imagePromptRuleSetName && task.imagePromptPresetName
+    && task.imagePromptRuleSetVersion === ordinarySelection.ruleSet.version && task.imagePromptPresetVersion === ordinarySelection.preset.version
+    && task.converterSystemPrompt && task.imagePromptFormat === 'natural-language'));
   const ordinaryNegative = sanitizeFinalImagePrompt([ordinarySelection.ruleSet.negativePrompt, ordinarySelection.preset.negativePrompt].filter(Boolean).join(', '), ordinarySelection.ruleSet.format);
   assert.ok(success.calls.every((call) => call.input.negativePrompt === ordinaryNegative), 'the selected rule and single-frame preset both contribute the submitted negative prompt');
   assert.ok(success.imageTasks().every((task) => task.negativePrompt === ordinaryNegative));

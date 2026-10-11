@@ -1687,6 +1687,7 @@ assert.deepEqual(restoredSettledTask[0], {
   status: 'succeeded',
   resultAssetId: 'asset-after-undo',
   bindingWarning: '撤销后完成，未自动绑定',
+  preparationStage: undefined,
   updatedAt: 360,
 });
 

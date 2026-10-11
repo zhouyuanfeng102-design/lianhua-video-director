@@ -286,7 +286,7 @@ assert.equal(new Set(customShared.map((request) => request.name)).size, 9);
 assert.match(customShared[0].name, /第 1\/9 张分镜图片/u);
 assert.match(customShared[8].name, /第 9\/9 张分镜图片/u);
 assert.match(customShared[0].directPrompt, /已选定的本张静帧：原机位下的独立动作瞬间 1/u);
-assert.match(customShared[0].directPrompt, /不能把多个时刻拼在一张图里/u);
+assert.match(customShared[0].directPrompt, /不能把后续位移、接触或入画局部提前拼进本张/u);
 assert.match(customShared[0].directPrompt, /本段画面时刻：3 秒/u);
 assert.match(customShared[0].directPrompt, /在画面右侧，右手抬起/u);
 assert.doesNotMatch(customShared[0].directPrompt, /原H3第四镜|请把|Shot 99|<d>|不应发送/u);
@@ -337,7 +337,7 @@ for (const field of ['purpose', 'imageVariant', 'assetType', 'assetRole', 'refer
   assert.deepEqual(sharedBoundary.map((request) => request[field]), ['first-frame', 'last-frame']);
 }
 assert.deepEqual(sharedBoundary.map((request) => request.referenceAssetIds), [['b', 'a'], ['b', 'a']]);
-assert.match(sharedBoundary[0].directPrompt, /第一镜的开始或动作刚开始的状态/u);
+assert.match(sharedBoundary[0].directPrompt, /第一镜的开始边界与入口状态/u);
 assert.match(sharedBoundary[0].directPrompt, /原H3第一镜/u);
 assert.doesNotMatch(sharedBoundary[0].directPrompt, /原H3第四镜/u);
 assert.match(sharedBoundary[1].directPrompt, /最后一镜结束时的最终可见状态/u);
@@ -388,6 +388,36 @@ assert.equal(customFingerprint, directStoryboardImageSourceFingerprint(sharedBoa
 assert.notEqual(directStoryboardImageSourceFingerprint(singleShotBoard, singleBoundary[0], context),
   directStoryboardImageSourceFingerprint(singleShotBoard, singleBoundary[1], context));
 assert.equal(JSON.stringify(sharedBoard), sharedOriginal);
+
+// This fixture follows the reported door/room failure. The source is retained
+// as timing evidence; the builder does not infer or rewrite a character pose.
+const roomEntryText = '阿莲静立寝宫中央，距门槛约四米；守卫站在门外。门槛至阿莲之间保留连续空地。起始机位近景聚焦门外守卫，随后后拉才揭示阿莲侧肩；阿莲之后走近守卫。';
+const roomExitText = '后续镜头已经走近：阿莲与守卫在门槛旁接触。';
+const roomBoard: Storyboard = {
+  ...board, id: 'room-entry-board', durationSec: 6, shotCount: 2,
+  shots: [shot(1), shot(2)],
+  officialPromptZh: `integrated_multimodal_description: [Shot 1] ${roomEntryText}\n[Shot 2] At 00:03.000, ${roomExitText}\noverall_soundscape: N/A\nnon_diegetic_music: N/A`,
+};
+const roomBefore = JSON.stringify(roomBoard);
+const [roomFirst, roomLast] = buildDirectStoryboardImageBatchRequests(roomBoard, {
+  mode: 'boundary-frames', referenceAssetIds: ['a'],
+}, context);
+assert.ok(roomFirst.conversionSource.includes(roomEntryText), 'the source preserves a character-to-door distance without substituting character-to-character distance');
+assert.ok(!roomFirst.conversionSource.includes(roomExitText), 'a later shot never becomes the first-frame target');
+assert.match(roomFirst.conversionSource, /随后后拉才揭示的侧肩.*不默认合入首帧/u);
+assert.match(roomFirst.conversionSource, /未来剧情只解释起始空间余量/u);
+assert.match(roomFirst.conversionSource, /完整时序资料，按本张时刻取状态/u);
+assert.match(roomFirst.conversionSource, /真实距离及准确参照端点/u);
+assert.ok(roomLast.conversionSource.includes(roomExitText));
+assert.match(roomLast.conversionSource, /先承接具名世界位置、距离端点.*再按结束机位取景/u);
+const [roomCustom] = buildDirectStoryboardImageBatchRequests(roomBoard, {
+  mode: 'storyboard-shots', referenceAssetIds: ['a'],
+  frames: [{ sourceShotId: 'shot-1', timeSec: 0, description: '守卫在门外近景；阿莲在画外寝宫中央，距门槛约四米，尚未走近。' }],
+}, context);
+assert.ok(roomCustom.conversionSource.includes(roomEntryText));
+assert.equal(roomCustom.imageFrameTimeSec, 0);
+assert.match(roomCustom.conversionSource, /不能把后续位移、接触或入画局部提前拼进本张/u);
+assert.equal(JSON.stringify(roomBoard), roomBefore, 'still sources do not change saved H3, video shots or distance facts');
 
 const baseApi: ImageApiConfig = { enabled: true, backend: 'openai', baseUrl: 'https://example.invalid/v1', apiKey: '', model: 'images' };
 assert.doesNotThrow(() => assertDirectStoryboardImageApiSupport(baseApi, 2));

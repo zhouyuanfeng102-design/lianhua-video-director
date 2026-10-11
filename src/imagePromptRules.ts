@@ -4,10 +4,11 @@ import {
 import { FULL_BODY_LAYOUT_RULE, imagePromptOutputSpecificationRule, type ImagePromptOutputSpecification } from './imageGeneration';
 import type { ImageVariant } from './types';
 import { IMAGE_PROMPT_LANDSCAPE_SCOPE_CONTRACT, isLandscapeImageRequest } from './imageLocationScope';
-import { DIRECTED_ACTION_RELATION_RULE, STORYBOARD_FRAME_VISIBILITY_RULE } from './spatialContinuityRules';
+import { DIRECTED_ACTION_RELATION_RULE, IMAGE_STORY_SPATIAL_STATE_RULE, STORYBOARD_FRAME_VISIBILITY_RULE } from './spatialContinuityRules';
 import {
   GOOGLE_NANO_BANANA_RULE_ID, GROK_IMAGINE_RULE_ID,
   MODEL_FAMILY_CATEGORY_PRESETS, MODEL_FAMILY_RULE_SETS, MODEL_FAMILY_FIVE_VIEW_PRESET_IDS,
+  LEGACY_MODEL_FAMILY_CATEGORY_PRESETS_V19, LEGACY_MODEL_FAMILY_RULE_SETS_V19,
   isGoogleNanoBananaImageModel, isGrokImagineImageModel,
 } from './imagePromptModelFamilies';
 
@@ -106,7 +107,7 @@ export interface SanitizedImagePromptSections {
 }
 
 export const IMAGE_PROMPT_RULES_SCHEMA_VERSION = 1;
-export const IMAGE_PROMPT_RULE_CATALOG_VERSION = 19;
+export const IMAGE_PROMPT_RULE_CATALOG_VERSION = 20;
 const GPT_IMAGE_RULE_ID = 'image-rule-openai-gpt-image';
 const KREA_RULE_ID = 'image-rule-krea-2';
 const COMFYUI_RULE_ID = 'image-rule-comfyui';
@@ -128,6 +129,7 @@ const GPT_IMAGE_25_MICRO_NSFW_LIGHT_CLOTHING_CATALOG_VERSION = 16;
 const PRIVATE_MULTI_REGION_LAYOUT_CATALOG_VERSION = 17;
 const GOOGLE_GROK_MODEL_CATALOG_VERSION = 18;
 const IMAGE_RESOLUTION_LAYOUT_CATALOG_VERSION = 19;
+const STORY_SPATIAL_STATE_CATALOG_VERSION = 20;
 const NOVELAI_RULE_ID = 'image-rule-novelai';
 
 export const NOVELAI_IMAGE_PRESET_IDS = {
@@ -585,14 +587,16 @@ const themedImagePromptCategoryPresets = (): ImagePromptCategoryPreset[] => (
   })
 );
 
-export const BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS: readonly ImagePromptCategoryPreset[] = [
+/** Complete catalog-19 factory values are retained for exact migration
+ * comparison. They are not selected for new conversions. */
+export const LEGACY_IMAGE_PROMPT_CATEGORY_PRESETS_V19: readonly ImagePromptCategoryPreset[] = [
   ...BASE_IMAGE_PROMPT_CATEGORY_PRESETS,
   ...GPT_IMAGE_25_MICRO_NSFW_CATEGORY_PRESETS,
   ...FIVE_VIEW_MODEL_CATEGORY_PRESETS,
   ...MULTI_PERSON_BINDING_CATEGORY_PRESETS,
   ...NOVELAI_IMAGE_CATEGORY_PRESETS,
   ...themedImagePromptCategoryPresets(),
-  ...MODEL_FAMILY_CATEGORY_PRESETS,
+  ...LEGACY_MODEL_FAMILY_CATEGORY_PRESETS_V19,
 ];
 
 const builtInRule = (
@@ -606,7 +610,7 @@ const builtInRule = (
   updatedAt: 0,
 });
 
-export const BUILT_IN_IMAGE_PROMPT_RULE_SETS: readonly ImagePromptRuleSet[] = [
+export const LEGACY_IMAGE_PROMPT_RULE_SETS_V19: readonly ImagePromptRuleSet[] = [
   builtInRule({
     id: 'image-rule-generic',
     name: '通用生图规则',
@@ -670,7 +674,7 @@ export const BUILT_IN_IMAGE_PROMPT_RULE_SETS: readonly ImagePromptRuleSet[] = [
     defaultPresetByAssetKind: allCategoryBindings(),
     version: '1.3.0',
   },
-  ...MODEL_FAMILY_RULE_SETS,
+  ...LEGACY_MODEL_FAMILY_RULE_SETS_V19,
   builtInRule({
     id: 'image-rule-sd-webui',
     name: 'SD WebUI 标签生图规则',
@@ -750,6 +754,77 @@ export const BUILT_IN_IMAGE_PROMPT_RULE_SETS: readonly ImagePromptRuleSet[] = [
     outputRules: '主体动作和攻防方向必须清楚；避免普通漫展摄影、比例失控、皮套细节漂移、无依据巨大化和遮住主体的爆炸。',
   }),
 ];
+
+const SOURCE_SPATIAL_FACT_RULE = '当前画面明确包含剧情或多人空间关系时，先确定所选动作阶段、具名主体与固定地标的世界位置、真实距离及准确端点、人物到入口或障碍的关系、尚未走完的通路与行动空间，再写摄影机与景别，最后展开本次可见身份。资料已给的距离和地点关系必须直接保留在最终正向正文；画面左右、前后、主体大小或镜头距离不能替代人物彼此或人物与地标的间距。缺少精确数值时，用有依据的相对尺度与可达范围，不编造米数或步数。构图和身份参考不能让尚未接近的双方同时挤到门口，也不能把后续接触站位提前用在动作前的首帧。普通身份设定图、角色私密资料图与无人环境图只落实本次目标，不从背景剧情增加人物、行动场景或重演事件。';
+
+/** Replace conflicting first-party ordering in the active factory only;
+ * the complete catalog-19 values above remain exact migration evidence. */
+const spatialFactoryText = (value: string): string => [
+  ['组织主体、外观或空间、动作状态、构图、机位', '剧情画面先组织动作阶段、世界站位、距离端点、地标与通路，再组织主体可见外观、构图与机位'],
+  ['先锁定主体与不可变化事实，再写动作状态、空间、构图、镜头、光影、材质和风格。', '先锁定不可变化事实；剧情画面先写动作阶段、世界站位、距离端点、地标与通路，再写主体可见外观、构图、镜头、光影、材质和风格。'],
+  ['先说明实际主体数量、场景和唯一画面时刻，再补充构图、镜头距离、光线', '先说明实际主体数量、所选画面时刻与动作阶段、场景中的世界站位、距离端点、地标及通路，再确定构图、摄影机到主体的距离、光线'],
+  ['按质量与媒介、主体、身份外观、动作、环境、构图镜头、光影色彩、材质细节排列', '剧情画面先在共享场景段保留动作阶段、世界站位、距离端点、地标与通路，再组织质量与媒介、主体可见身份外观、动作、构图镜头、光影色彩和材质细节'],
+  ['先锁定主体与连续性，再写动作、空间、构图、光影、材质和风格', '先锁定所选动作阶段与连续世界状态，保留距离端点、地标和通路，再写主体、构图、光影、材质和风格'],
+  ['基础段依次组织质量、媒介画风、场景、构图、镜头、光影、色彩和材质', '剧情画面的基础段先写动作阶段、世界站位、距离端点、地标和通路，再组织质量、媒介画风、构图、镜头、光影、色彩和材质'],
+  ['优先写全身或半身画面、整体轮廓、布料厚薄、湿度、贴合区域、光线方向、遮挡层次和电影摄影质感', '普通人物身份参考可写全身或半身画面；剧情静帧先保留动作阶段、世界站位、距离端点、地标、通路及既定取景，再写整体可见轮廓、布料厚薄、湿度、贴合区域、光线方向、遮挡层次和电影摄影质感'],
+  ['锁定实际出镜主体、动作状态、空间方位、关键道具、唯一景别机位', '先锁定所选动作阶段、世界站位、距离端点、固定地标和行动通路，再确定实际出镜主体、动作状态、关键道具及唯一景别机位'],
+  ['先锁定镜头中的空间布局：', '先锁定当前动作阶段、世界站位、距离端点、固定地标和行动通路，再确定镜头中的空间投影：'],
+  ['基础段只写质量、媒介、场景、机位、光线和整体风格', '基础段先写当前动作阶段、世界站位、距离端点、地标与通路，再写质量、媒介、机位、光线和整体风格'],
+  ['基础段写场景、构图、景别、空间、光线与可见物件状态', '基础段先写当前动作阶段、世界站位、距离端点、地标与通路，再写构图、景别、光线与可见物件状态'],
+].reduce((result, [legacy, current]) => result.split(legacy).join(current), value);
+
+const sourceSpatialOutputRule = (format?: ImagePromptFormat): string => {
+  const placement = format === 'nai-tags'
+    ? 'NAI基础段保留距离端点、固定地标及通路，各角色段绑定本人站位和当前动作阶段'
+    : format === 'sd-tags'
+      ? 'SD共享场景段保留距离端点、固定地标及通路，各角色标签块绑定本人站位和当前动作阶段'
+      : '自然语言先写本张必要的世界站位、距离端点、固定地标及通路，再写相机、可见动作和人物细节';
+  return `当前要求剧情或多人空间关系时，${placement}。空间事实须进入最终生图正文，不能只留在分析或说明中；近景保留实际裁切与必要画外定位，不强制双方全身，不为双人同框缩短距离或消耗随后动作需要的空段。`;
+};
+
+const nextSpatialRuleVersion = (version: string): string => {
+  const [major = 1, minor = 0] = version.split('.').map(Number);
+  return `${major + (minor === 9 ? 1 : 0)}.${minor === 9 ? 0 : minor + 1}.0`;
+};
+
+const currentModelFamilyPresets = new Map(MODEL_FAMILY_CATEGORY_PRESETS.map((preset) => [preset.id, preset]));
+const currentModelFamilyRules = new Map(MODEL_FAMILY_RULE_SETS.map((rule) => [rule.id, rule]));
+
+export const BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS: readonly ImagePromptCategoryPreset[] = LEGACY_IMAGE_PROMPT_CATEGORY_PRESETS_V19.map((preset) => {
+  const familyPreset = currentModelFamilyPresets.get(preset.id);
+  if (familyPreset) return { ...familyPreset };
+  const narrative = ['storyboard', 'grid', 'location'].includes(preset.assetKind);
+  const multiCharacter = preset.assetKind === 'character' && preset.id.includes('multi-person');
+  if (!narrative && !multiCharacter) return { ...preset };
+  const scope = preset.assetKind === 'location'
+    ? '仅在当前明确选择剧情快照或分镜首帧时应用以下剧情空间规则；无人风景继续只提取静态环境：'
+    : preset.assetKind === 'grid'
+      ? '每个画格独立确定所选时刻与动作阶段，并继承同一场景的空间状态：'
+      : '';
+  return {
+    ...preset,
+    systemPrompt: [
+      spatialFactoryText(preset.systemPrompt),
+      SOURCE_SPATIAL_FACT_RULE,
+      narrative ? [scope, IMAGE_STORY_SPATIAL_STATE_RULE].filter(Boolean).join('\n') : '',
+    ].filter(Boolean).join('\n'),
+    outputRules: [preset.outputRules, sourceSpatialOutputRule(preset.format)].join('\n'),
+    version: nextSpatialRuleVersion(preset.version),
+  };
+});
+
+export const BUILT_IN_IMAGE_PROMPT_RULE_SETS: readonly ImagePromptRuleSet[] = LEGACY_IMAGE_PROMPT_RULE_SETS_V19.map((rule) => {
+  const familyRule = currentModelFamilyRules.get(rule.id);
+  if (familyRule) return { ...familyRule, categoryPresetIds: [...familyRule.categoryPresetIds], defaultPresetByAssetKind: { ...familyRule.defaultPresetByAssetKind } };
+  return {
+    ...rule,
+    categoryPresetIds: [...rule.categoryPresetIds],
+    defaultPresetByAssetKind: { ...rule.defaultPresetByAssetKind },
+    systemPrompt: [spatialFactoryText(rule.systemPrompt), SOURCE_SPATIAL_FACT_RULE].join('\n'),
+    outputRules: [rule.outputRules, sourceSpatialOutputRule(rule.format)].join('\n'),
+    version: nextSpatialRuleVersion(rule.version),
+  };
+});
 
 const BUILT_IN_DEFAULT_RULE_SET_BY_BACKEND: Readonly<Partial<Record<ImagePromptBackend, string>>> = {
   all: 'image-rule-generic',
@@ -1208,9 +1283,18 @@ export const normalizeImagePromptRulesState = (value: unknown): ImagePromptRules
   };
 };
 
-export const migrateImagePromptRulesState = (value: unknown): ImagePromptRulesState => {
+/** Run earlier migrations against the catalog they originally shipped with.
+ * New factory prose must not change their exact old-text comparisons. */
+const migrateCatalog19ImagePromptRulesState = (value: unknown): ImagePromptRulesState => {
+  const BUILT_IN_IMAGE_PROMPT_RULE_SETS = LEGACY_IMAGE_PROMPT_RULE_SETS_V19;
+  const BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS = LEGACY_IMAGE_PROMPT_CATEGORY_PRESETS_V19;
+  const MODEL_FAMILY_RULE_SETS = LEGACY_MODEL_FAMILY_RULE_SETS_V19;
+  const MODEL_FAMILY_CATEGORY_PRESETS = LEGACY_MODEL_FAMILY_CATEGORY_PRESETS_V19;
+  const currentBuiltInRule = (id: string): ImagePromptRuleSet => (
+    BUILT_IN_IMAGE_PROMPT_RULE_SETS.find((rule) => rule.id === id)!
+  );
   const normalized = normalizeImagePromptRulesState(value);
-  if ((normalized.catalogVersion || 0) >= IMAGE_PROMPT_RULE_CATALOG_VERSION) return normalized;
+  if ((normalized.catalogVersion || 0) >= IMAGE_RESOLUTION_LAYOUT_CATALOG_VERSION) return normalized;
 
   let state = normalized;
   if ((state.catalogVersion || 0) < KREA_CATALOG_VERSION) {
@@ -1692,6 +1776,36 @@ export const migrateImagePromptRulesState = (value: unknown): ImagePromptRulesSt
   return state;
 };
 
+export const migrateImagePromptRulesState = (value: unknown): ImagePromptRulesState => {
+  const normalized = normalizeImagePromptRulesState(value);
+  if ((normalized.catalogVersion || 0) >= IMAGE_PROMPT_RULE_CATALOG_VERSION) return normalized;
+  const state = migrateCatalog19ImagePromptRulesState(normalized);
+  const legacyRules = new Map(LEGACY_IMAGE_PROMPT_RULE_SETS_V19.map((rule) => [rule.id, rule]));
+  const legacyPresets = new Map(LEGACY_IMAGE_PROMPT_CATEGORY_PRESETS_V19.map((preset) => [preset.id, preset]));
+  const currentRules = new Map(BUILT_IN_IMAGE_PROMPT_RULE_SETS.map((rule) => [rule.id, rule]));
+  const currentPresets = new Map(BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS.map((preset) => [preset.id, preset]));
+  return {
+    ...state,
+    catalogVersion: STORY_SPATIAL_STATE_CATALOG_VERSION,
+    // Only exact untouched factory values advance. Do not add deleted entries,
+    // change saved defaults, rewrite user edits, or traverse task snapshots.
+    ruleSets: state.ruleSets.map((rule) => {
+      const legacy = legacyRules.get(rule.id);
+      const current = currentRules.get(rule.id);
+      return legacy && current && isUnchangedFactoryRule({ ...rule, enabled: true }, legacy)
+        ? { ...cloneRuleSet(current), enabled: rule.enabled }
+        : rule;
+    }),
+    categoryPresets: state.categoryPresets.map((preset) => {
+      const legacy = legacyPresets.get(preset.id);
+      const current = currentPresets.get(preset.id);
+      return legacy && current && isUnchangedFactoryPreset({ ...preset, enabled: true }, legacy)
+        ? { ...cloneCategoryPreset(current), enabled: preset.enabled }
+        : preset;
+    }),
+  };
+};
+
 /** Protocol declarations are narrow. Unspecified custom/general presets stay
  * usable across formats; legacy built-in protocol presets are recognized only
  * while their actual prompt text still matches the shipped definition. */
@@ -2022,6 +2136,15 @@ export const IMAGE_PROMPT_FULL_BODY_LAYOUT_CONTRACT = [
   '该全身合同优先于预设中“优先全身、膝上或半身”等宽泛取景描述；最终提示词只能描述头顶（或最高点）到脚底/最低附肢端点完整入画的单一主体。',
 ].join('\n');
 
+/** Narrative location variants and grids need the same world-state contract
+ * as storyboard frames; environment and identity assets keep their own scope. */
+export const isNarrativeImageRequest = (
+  kind: ImagePromptAssetKind,
+  imageVariant?: ImageVariant,
+): boolean => kind === 'storyboard'
+  || kind === 'grid'
+  || kind === 'location' && (imageVariant === 'snapshot' || imageVariant === 'first-frame');
+
 export const buildImagePromptConverterSystemPrompt = (
   selection: ResolvedImagePromptSelection,
   extraRules = '',
@@ -2029,6 +2152,7 @@ export const buildImagePromptConverterSystemPrompt = (
   outputSpecification?: ImagePromptOutputSpecification,
 ): string => {
   const landscape = isLandscapeImageRequest(selection.assetKind, imageVariant);
+  const narrative = isNarrativeImageRequest(selection.assetKind, imageVariant);
   return [
   '你是独立生图提示词转换器。必须把输入资料重新组织为最终生图提示词，不能照搬字段、复述规则或输出制作过程。',
   landscape ? '' : '输入出现性别、gender、雄性、雌性或自定义性别时，它是不可改写的主体身份事实：最终提示词必须保留准确语义，不得遗漏、反转或强制二元化；目标格式为英文标签时应转换为该后端能够识别且语义等价的主体标签。',
@@ -2056,9 +2180,11 @@ export const buildImagePromptConverterSystemPrompt = (
     ? IMAGE_PROMPT_PROPORTION_CONTRACT
     : '',
   landscape ? '' : IMAGE_PROMPT_PROP_SCOPE_CONTRACT,
-  selection.assetKind === 'storyboard' ? IMAGE_PROMPT_DIRECTED_ACTION_CONTRACT : '',
+  selection.assetKind === 'grid' ? '以下剧情静帧空间与动作规则逐格应用；每格一个所选时刻，画布保留当前要求的全部画格，不把整张多宫格改成单帧。' : '',
+  narrative ? IMAGE_PROMPT_DIRECTED_ACTION_CONTRACT : '',
   landscape ? '' : IMAGE_PROMPT_NAMED_IDENTITY_CONTRACT,
   selection.assetKind === 'storyboard' ? STORYBOARD_FRAME_VISIBILITY_RULE : '',
+  narrative && selection.assetKind !== 'storyboard' ? IMAGE_STORY_SPATIAL_STATE_RULE : '',
   landscape ? IMAGE_PROMPT_LANDSCAPE_SCOPE_CONTRACT : '',
   imagePromptOutputSpecificationRule(outputSpecification, imageVariant),
   '只返回最终提示词，不要复述以上规则。',

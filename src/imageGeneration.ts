@@ -11,6 +11,7 @@ import {
 } from './characterMorphology';
 import { characterVariantDisplayName } from './characterVariants';
 import { normalizeFemaleCharacterVocabularyRecord } from './characterVocabulary';
+import { IMAGE_STORY_SPATIAL_STATE_RULE } from './spatialContinuityRules';
 
 export type ImageAssetKind = 'character' | 'location' | 'prop' | 'grid';
 export type ImageEntityKind = Exclude<ImageAssetKind, 'grid'>;
@@ -888,25 +889,25 @@ const IMAGE_VARIANT_SPECS: Readonly<Record<ImageVariant, ImageVariantGenerationS
   snapshot: {
     id: 'snapshot',
     label: '故事快照',
-    direction: '剧情发生瞬间的故事快照，主体动作和环境关系清晰。',
+    direction: '剧情发生瞬间的故事快照，主体动作和环境关系清晰；保留该时刻人物世界位置、真实间距、地标内外关系和行动通路，再确定机位与可见动作。',
     canvas: SQUARE_CANVAS,
   },
   'first-frame': {
     id: 'first-frame',
     label: '分镜首帧',
-    direction: '视频分镜首帧，明确初始构图、人物站位和主光源。',
+    direction: '视频分镜首帧，明确初始构图、人物站位和主光源；保留动作起始时刻的世界位置、真实距离、行动空间和初始机位，随后走近或运镜才出现的状态不提前入画。',
     canvas: SQUARE_CANVAS,
   },
   'last-frame': {
     id: 'last-frame',
     label: '分镜尾帧',
-    direction: '视频分镜尾帧，明确动作完成后的可见结果、最终构图和人物状态。',
+    direction: '视频分镜尾帧，保留该镜结束时已实际发生的移动结果、人物世界位置和距离，再按结束机位呈现可见结果，不提前接续下一动作。',
     canvas: LANDSCAPE_CANVAS,
   },
   'storyboard-frame': {
     id: 'storyboard-frame',
     label: '分镜图片',
-    direction: '单镜头剧情分镜图片，严格表现该镜主体、动作、构图、光线和结果。',
+    direction: '单镜头剧情分镜图片，先选择一个时刻，保留该阶段的人物世界位置、距离及行动通路，再表现当前机位可见的主体、动作状态和光线；不将整镜过程与结果同时入画。',
     canvas: LANDSCAPE_CANVAS,
   },
   icon: {
@@ -969,6 +970,10 @@ export const ordinaryImageVariantConverterRule = (
     imageVariantLayoutForOutput(rule, outputSpecification), imagePromptOutputSpecificationRule(outputSpecification, variant),
   ].filter(Boolean).join('\n');
   if (variant === 'landscape') return withOutputSpecification(IMAGE_PROMPT_LANDSCAPE_SCOPE_CONTRACT);
+  if (variant === 'snapshot' || variant === 'first-frame' || variant === 'last-frame'
+    || variant === 'storyboard-frame' || variant === 'grid') {
+    return withOutputSpecification([IMAGE_VARIANT_SPECS[variant].direction, IMAGE_STORY_SPATIAL_STATE_RULE].join('\n'));
+  }
   if (variant === 'full-body') {
     return withOutputSpecification(`当前目标是普通人物单幅全身参考图。${FULL_BODY_LAYOUT_RULE}优先服从当前全身画面规格，再组织角色身份、物种结构、服装、道具和风格；不要把全身目标改成半身、膝上、下半身或局部特写。`);
   }

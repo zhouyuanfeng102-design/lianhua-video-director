@@ -193,7 +193,7 @@ customFrameRequests.forEach((request, offset) => {
   assert.ok(request.conversionSource.includes(customFramePlans[offset].description));
   assert.match(request.conversionSource, /^当前图片规划优先：只表现 AI 选定的本张静帧中实际可见的人物、局部与单个瞬间/u);
   assert.match(request.conversionSource, /完整人物名单、动作过程和结束状态不要求全部入画/u);
-  assert.match(request.conversionSource, /最终 H3 明确的站位、机位、身体侧别与在画\/画外状态始终有效/u);
+  assert.match(request.conversionSource, /最终 H3 明确的站位、距离、机位、身体侧别与在画\/画外状态始终有效/u);
   assert.match(request.name, new RegExp(`第 ${offset + 1}/5 张分镜图片$`, 'u'));
   assert.match(request.conversionSource, /来源镜头.*连续性背景/u);
   assert.equal(
@@ -239,8 +239,8 @@ assert.notEqual(
   'a frozen frame descriptor must not conceal edits to its underlying source shot',
 );
 assert.equal(shotRequests.length, storyboard.shots.length, 'one storyboard image is required for every actual generated shot');
-assert.match(shotRequests[0].conversionSource, /^当前镜事实优先：先确定本张时刻的机位、取景与可见范围/u,
-  'ordinary one-frame-per-shot generation resolves framing before visible identity detail');
+assert.match(shotRequests[0].conversionSource, /^当前镜事实优先：先确定本张时刻和动作阶段，再保留具名世界位置、距离端点、阻隔与可通行路径，然后由当时机位确定取景与实际可见集合，最后锁定/u,
+  'ordinary one-frame-per-shot generation resolves world-space facts before framing and visible identity detail');
 shotRequests.forEach((request, offset) => {
   const shot = storyboard.shots[offset];
   assert.equal(request.purpose, 'storyboard-shot');
@@ -2263,6 +2263,21 @@ for (const fallbackBoard of [
   assert.equal(storyboardImageHelpers.readStoryboardImageH3Source(fallbackBoard), undefined);
   assert.match(buildStoryboardImageRequests(fallbackBoard, 'storyboard-shots')[0].conversionSource, /旧 canonical 第一镜空间/u);
 }
+const canonicalRoomEntry = '【0s-3s】主体：阿莲与守卫；空间：阿莲在寝宫中央，距门槛约四米，守卫在门外，之间保留连续空地；镜头：起始近景只聚焦守卫，随后后拉才揭示阿莲侧肩。';
+const canonicalRoomExit = '【3s-6s】主体：阿莲已走到门槛与守卫接触；空间：后续才成立的贴近状态。';
+const canonicalRoomBoard = {
+  ...spatialBoard, officialPromptZh: undefined,
+  finalPrompt: `${canonicalRoomEntry}\n${canonicalRoomExit}`,
+};
+const canonicalRoomBefore = JSON.stringify(canonicalRoomBoard);
+const [canonicalRoomFirst] = buildStoryboardImageRequests(canonicalRoomBoard, 'boundary-frames');
+assert.ok(canonicalRoomFirst.conversionSource.includes(canonicalRoomEntry),
+  'a first frame without usable H3 still receives final canonical distance and initial camera evidence');
+assert.ok(!canonicalRoomFirst.conversionSource.includes(canonicalRoomExit), 'later canonical shots are not first-frame targets');
+assert.match(canonicalRoomFirst.conversionSource, /首镜权威画面原文（仅入口状态用于当前首帧）/u);
+assert.match(canonicalRoomFirst.conversionSource, /随后后拉才揭示的侧肩.*不默认属于起始可见集合/u);
+assert.match(canonicalRoomFirst.conversionSource, /未来动作只解释起始空间余量/u);
+assert.equal(JSON.stringify(canonicalRoomBoard), canonicalRoomBefore);
 const fullReferenceH3 = `subject_definitions: <Subject 1> 阿莲；<Subject 2> 守卫\nsummary: 交接\nretention_analysis: 保留“[Shot 99]”的字面字条内容\ndetailed_description: Soft moonlight with a steady camera.\n${h3SpatialTexts.join('\n')}\noverall_soundscape: N/A\nnon_diegetic_music: N/A`;
 const fullReferenceBoard = { ...spatialBoard, officialPromptZh: fullReferenceH3 };
 assert.deepEqual(storyboardImageHelpers.readStoryboardImageH3Source(fullReferenceBoard)?.shots, h3SpatialTexts);
@@ -2293,7 +2308,7 @@ assert.equal(boundaryRequests[0]?.assetType, 'first-frame');
 assert.equal(boundaryRequests[0]?.assetRole, 'first-frame');
 assert.equal(boundaryRequests[0]?.imageVariant, 'first-frame');
 assert.equal(boundaryRequests[0]?.shotId, storyboard.shots[0]?.id);
-assert.match(boundaryRequests[0]?.conversionSource || '', /动作起始状态/u);
+assert.match(boundaryRequests[0]?.conversionSource || '', /第一镜开始边界的入口状态/u);
 assert.match(boundaryRequests[0]?.conversionSource || '', new RegExp(storyboard.shots[0]?.action || '', 'u'));
 assert.doesNotMatch(boundaryRequests[0]?.conversionSource || '', new RegExp(storyboard.shots.at(-1)?.result || '', 'u'));
 assert.equal(boundaryRequests[1]?.purpose, 'last-frame');

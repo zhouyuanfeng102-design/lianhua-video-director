@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { buildCustomStoryboardImageRequests, buildStoryboardImageRequests, mergeStoryboardReferenceInputs, resolveStoryboardReferenceInputs } from '../src/storyboardImages';
 import { buildDirectStoryboardImageBatchRequests } from '../src/storyboardImageToImage';
-import { buildStoryboardImagePromptWithReferences, storyboardReferenceCharacters } from '../src/storyboardImageReferences';
+import { buildStoryboardImagePromptWithReferences, storyboardImageFramingInstruction, storyboardReferenceCharacters } from '../src/storyboardImageReferences';
 import type { Character, ReferenceAsset, Storyboard, VideoShot } from '../src/types';
 
 const character = (id: string, name: string): Character => ({
@@ -62,6 +62,26 @@ test('tail target uses terminal camera crop while start target uses entry crop, 
   assert.match(tail.conversionSource, /只呈现该局部，其他人物即使仍在场也可在画外/u);
   assert.ok(tail.conversionSource.includes(shot.action));
   assert.ok(tail.conversionSource.includes(shot.camera));
+});
+
+test('boundary framing keeps entry distance and late reveal while reference appearances cannot compress the action space', () => {
+  const first = storyboardImageFramingInstruction('first-frame');
+  const last = storyboardImageFramingInstruction('last-frame');
+  const middle = storyboardImageFramingInstruction('storyboard-shot');
+  assert.match(first, /世界位置、已确认距离与行动通路/u);
+  assert.match(first, /后拉之后才揭示的人物在首帧保持画外世界位置/u);
+  assert.match(first, /后续接近、投掷或冲刺不能提前消耗入口间距与行动空间/u);
+  assert.match(last, /退出位置、距离及剩余空间/u);
+  assert.match(middle, /唯一时刻及动作阶段的世界位置、距离、地标和行动通路/u);
+
+  const body = '青岚在寝宫内中央，距门槛约四米；明川仍在门外。门槛到青岚之间保留连续可行走地面，摄影机近拍门缝，青岚保持画外。';
+  const locationImage = image('narrow-door', { role: 'scene', prompt: '旧图：两人紧贴站在门边' });
+  const submitted = buildStoryboardImagePromptWithReferences(body, [portrait, locationImage], context);
+  assert.ok(submitted.startsWith(`${body}\n\n`), 'reference metadata preserves the authored endpoint distance and visibility byte-for-byte');
+  assert.match(submitted, /不把参考图的合照间距当成本镜间距/u);
+  assert.match(submitted, /不覆盖本镜已确认的距离端点、地标内外关系、可通行路径及动作起始所需空间/u);
+  assert.match(submitted, /没有可靠比例尺不推定精确米数/u);
+  assert.doesNotMatch(submitted, /旧图：两人紧贴站在门边/u, 'reference appearance does not become a historical staging command');
 });
 
 test('actual pixel order and prompt bindings remain aligned after primary-first duplicate removal', async () => {

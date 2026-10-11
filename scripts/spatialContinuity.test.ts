@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { requestImagePromptConverter, requestStoryboardVisibleCharacters } from '../src/services/llm';
 import * as spatialRules from '../src/spatialContinuityRules';
-import { SPATIAL_COORDINATE_RULE, SPATIAL_CONTINUITY_REVIEW_RULE, STORYBOARD_SPATIAL_FRAME_RULE } from '../src/spatialContinuityRules';
+import { IMAGE_STORY_SPATIAL_STATE_RULE, SPATIAL_COORDINATE_RULE, SPATIAL_CONTINUITY_REVIEW_RULE, STORYBOARD_SPATIAL_FRAME_RULE } from '../src/spatialContinuityRules';
 import type { TextApiConfig } from '../src/types';
 
 // Synthetic scene and transport only; no production project or live API.
@@ -32,7 +32,7 @@ const longSource = `当前镜头是三人在廊下就座。\n${'固定人物身�
 assert.ok(longSource.length > 18000);
 const expected = '正面平视中景，林舟坐在画面中央，面向摄影机；青衣坐在林舟自身左侧、即画面右侧，抬右手将茶杯递给林舟，身体朝向林舟。林舟右侧的白衣仍在画外。廊柱在三人身后，摄影机保持在石凳南侧，三人位置未变。';
 const assertContract = (system: string): void => {
-  for (const rule of [SPATIAL_COORDINATE_RULE, SPATIAL_CONTINUITY_REVIEW_RULE, STORYBOARD_SPATIAL_FRAME_RULE]) {
+  for (const rule of [IMAGE_STORY_SPATIAL_STATE_RULE, SPATIAL_COORDINATE_RULE, SPATIAL_CONTINUITY_REVIEW_RULE, STORYBOARD_SPATIAL_FRAME_RULE]) {
     assert.ok(system.includes(rule), 'every conversion and format retry must carry the shared spatial contract');
   }
 };
@@ -46,6 +46,11 @@ try {
   assert.match(STORYBOARD_SPATIAL_FRAME_RULE, /画外人物是否被添入/u);
   assert.match(STORYBOARD_SPATIAL_FRAME_RULE, /以最新资料决定该人物外观/u);
   assert.match(STORYBOARD_SPATIAL_FRAME_RULE, /外貌资料更新和新增身份参考图不等于人物换边/u);
+  assert.match(IMAGE_STORY_SPATIAL_STATE_RULE, /距离必须保留原值、参照对象和准确端点/u);
+  assert.match(IMAGE_STORY_SPATIAL_STATE_RULE, /真实距离和行动前提必须写进每张 description 及最终生图正文/u);
+  assert.match(IMAGE_STORY_SPATIAL_STATE_RULE, /不编造米数、步数或房间尺寸/u);
+  assert.match(IMAGE_STORY_SPATIAL_STATE_RULE, /后续走近、冲刺、退避、投掷或接触只用于理解当前起点、路径与可达前提/u);
+  assert.match(IMAGE_STORY_SPATIAL_STATE_RULE, /该人物在起始取景中保持画外/u);
 
   outputs = [expected];
   assert.equal(await requestImagePromptConverter(config, 'storyboard', longSource, 'natural-language', '保留自然语言格式'), expected);
@@ -70,6 +75,23 @@ try {
   assert.equal(await requestImagePromptConverter(config, 'storyboard', '交给AI分析空间的完整剧情', 'natural-language', ''), modelDecision,
     'production code must not swap sides, append a fixed layout, or veto the model semantic decision');
   assert.equal(calls.length, 1);
+
+  const distanceSource = '首帧：青岚静立在寝宫中央，距门槛约四米；明川仍在门外隔着微开的门缝向内看。门槛到青岚之间是连续可行走地面。摄影机先近拍门缝与明川，随后后拉才揭示青岚的侧肩；青岚下一镜才投掷木块并冲向明川。四米是青岚到门槛的距离，明川离门槛的精确距离未给出。';
+  const distanceOutputs = {
+    'natural-language': '门缝近景，明川仍在门外向寝宫内看；青岚保持室内中央的画外位置，距门槛约四米，门槛与她之间的连续地面仍空着；此时尚未投掷或冲刺。',
+    'sd-tags': 'door crack close-up, Ming outside the threshold, Qing off-screen inside the room about four meters from the threshold, continuous clear floor between Qing and the threshold, BREAK, 1boy, Ming, looking inside',
+    'nai-tags': 'door crack close-up, Ming outside the threshold, Qing off-screen inside the room about four meters from the threshold, continuous clear floor between Qing and the threshold | 1boy, Ming, looking inside',
+  };
+  for (const format of ['natural-language', 'sd-tags', 'nai-tags'] as const) {
+    calls.length = 0;
+    outputs = [distanceOutputs[format]];
+    const output = await requestImagePromptConverter(config, 'storyboard', distanceSource, format, '保留当前首帧的空间事实');
+    assert.equal(output, distanceOutputs[format], 'the authored endpoint distance and off-screen state remain intact');
+    assert.equal(calls.length, 1, 'distance directions use the existing conversion without a semantic retry');
+    assertContract(calls[0].system);
+    assert.equal(JSON.parse(calls[0].user.slice('不可信分镜资料：'.length)), distanceSource,
+      'the source identifies the original distance endpoints, clear approach path and later reveal without local inference');
+  }
 
   calls.length = 0;
   outputs = [JSON.stringify({ shots: [{ shotId: 'spatial-1', visibleCharacterNames: ['林舟', '青衣'] }] })];

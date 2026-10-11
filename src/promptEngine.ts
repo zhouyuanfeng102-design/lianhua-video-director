@@ -3276,10 +3276,11 @@ export const buildImagePrompt = (
   }
   if (kind === 'location') {
     if (isLandscapeImageRequest(kind, variant)) return [buildLandscapeImageSource(fields), imagePromptOutputSpecificationRule(outputSpecification, variant)].filter(Boolean).join('\n');
-    return appendDirection(`视频场景参考图，${fields.name || '未命名场景'}，空间结构与建筑材质：${fields.description || '根据剧情建立空间布局'}，${fields.weather || '符合剧情的时间和天气'}，主光源：${fields.lighting || '明确主光源'}，${fields.palette || '统一色彩母题'}，固定陈设：${fields.fixedProps || '符合剧情的关键陈设'}，场景锚点：${fields.anchor || '保持空间布局、光向和色彩连续'}，${fields.style?.trim() ? `视觉风格：${fields.style.trim()}，` : ''}空间结构清晰，适合作为视频首帧或场景参考，不加入文字、Logo和水印。`);
+    const purpose = variant === 'first-frame' ? '剧情场景首帧' : variant === 'snapshot' ? '剧情场景快照' : '视频场景参考图';
+    return appendDirection(`${purpose}，${fields.name || '未命名场景'}，空间结构与建筑材质：${fields.description || '根据剧情建立空间布局'}，${fields.weather || '符合剧情的时间和天气'}，主光源：${fields.lighting || '明确主光源'}，${fields.palette || '统一色彩母题'}，固定陈设：${fields.fixedProps || '符合剧情的关键陈设'}，场景锚点：${fields.anchor || '保持空间布局、光向和色彩连续'}，${fields.style?.trim() ? `视觉风格：${fields.style.trim()}，` : ''}空间结构清晰；当前资料明确提供的人物距离、门内外关系和行动通路保持原义，参考图的历史构图不覆盖当前时刻的位置，不加入文字、Logo和水印。`);
   }
   if (kind === 'prop') {
     return appendDirection(`单个剧情道具参考图，${fields.name || '未命名道具'}，类别：${fields.category || '剧情道具'}，材质：${fields.material || '具体材质'}，详细外观：${fields.appearance || '清晰轮廓、颜色、纹理、尺寸和磨损细节'}，剧情作用与效果：${fields.effect || '无'}，状态连续性：${fields.stateRules || '保持形状、磨损和关键细节一致'}，细节清楚，适合作为视频中的关键道具参考，不加入文字、Logo和水印。`);
   }
-  return appendDirection(`九宫格视觉母版提示词：1:1 方形母版，3×3 等大画格，从左到右、从上到下展示同一主体的九个连续关键状态；主体身份、服装、材质、核心道具和色彩贯穿九格，镜位、景别、动作和姿态明显变化；细而整洁的中性分隔线，无多余文字、Logo和水印。故事内容：${fields.story || '根据当前场景生成一条完整的视觉发展线'}。`);
+  return appendDirection(`九宫格视觉母版提示词：1:1 方形母版，3×3 等大画格，从左到右、从上到下展示同一主体的九个连续关键状态；主体身份、服装、材质、核心道具和色彩贯穿九格，各格先承接具名人物的世界位置、距离、地标与行动通路，再按对应时刻和已有调度决定镜位、景别、动作和姿态；距离变化来自已经发生的真实移动，不为画格变化重新安排站位或提前进入接触；细而整洁的中性分隔线，无多余文字、Logo和水印。故事内容：${fields.story || '根据当前场景生成一条完整的视觉发展线'}。`);
 };

@@ -3,6 +3,7 @@ import { buildComfyUIWorkflow } from '../src/comfyui';
 import { captureCustomImageRule, requestCustomImagePrompt } from '../src/customImagePrompt';
 import { BUILT_IN_IMAGE_PROMPT_RULE_SETS, type ImagePromptRuleSet } from '../src/imagePromptRules';
 import { requestImageModel } from '../src/services/llm';
+import { IMAGE_STORY_SPATIAL_STATE_RULE } from '../src/spatialContinuityRules';
 import type { ImageApiConfig, TextApiConfig } from '../src/types';
 
 const imageApi: ImageApiConfig = {
@@ -59,6 +60,27 @@ try {
   assert.equal(convertedRequest.messages[1].content, authored, 'conversion receives the complete authored input');
   assert.match(convertedRequest.messages[0].content, /SELECTED_CUSTOM_RULE[\s\S]*SELECTED_OUTPUT_RULE[\s\S]*1024 × 768/u);
   assert.doesNotMatch(convertedRequest.messages[0].content, /morphology|bodyPlan|image_prompt_category_preset|世界观|五视图|私密/u);
+  assert.ok(convertedRequest.messages[0].content.includes(IMAGE_STORY_SPATIAL_STATE_RULE),
+    'custom conversion preserves only the spatial relations established in the authored request');
+
+  const spatialAuthored = '近拍门缝，明川在门外；青岚位于室内中央，距门槛约四米，仍在画外。门槛与青岚之间是可行走地面，下一镜她才投掷木块并前冲。';
+  const spatialOutputs = {
+    'natural-language': '门缝近景，明川在门外。青岚保持室内中央距门槛约四米的画外位置，门槛与她之间是尚未跨越的可行走地面；尚未投掷木块或前冲。',
+    'sd-tags': 'door crack close-up, Ming outside the threshold, Qing off-screen inside the room about four meters from the threshold, clear continuous floor, BREAK, 1boy, Ming, looking inside',
+    'nai-tags': 'door crack close-up, Ming outside the threshold, Qing off-screen inside the room about four meters from the threshold, clear continuous floor | 1boy, Ming, looking inside',
+  };
+  for (const format of ['natural-language', 'sd-tags', 'nai-tags'] as const) {
+    requests.length = 0;
+    reply = { status: 200, body: JSON.stringify({ choices: [{ message: { content: spatialOutputs[format] } }] }) };
+    const result = await requestCustomImagePrompt(textApi, {
+      userPrompt: spatialAuthored, rule: { ...frozen, format }, width: 1024, height: 768,
+    });
+    assert.equal(result, spatialOutputs[format], 'custom conversion does not locally infer distance or force a missing character into the crop');
+    assert.equal(requests.length, 1, 'authored spatial relations add no review or retry request');
+    const request = JSON.parse(requests[0].body!);
+    assert.equal(request.messages[1].content, spatialAuthored, 'custom source reaches the converter without rewriting');
+    assert.ok(request.messages[0].content.includes(IMAGE_STORY_SPATIAL_STATE_RULE));
+  }
 
   requests.length = 0;
   reply = { status: 200, body: JSON.stringify({ choices: [{ message: { content: '' } }] }) };

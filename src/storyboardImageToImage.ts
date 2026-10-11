@@ -113,7 +113,7 @@ const directVisualSource = (storyboard: Storyboard, shot: VideoShot): {
     body: [
       line('原稿主体定义（只作身份文字说明，不是本次上传图片编号）', imageExcerpt(h3.subjectDefinitions)),
       line('已确认整体视觉', imageExcerpt(h3.visualPreamble)),
-      line('当前镜头已确认画面原文', imageExcerpt(h3Shot)),
+      line('当前镜头已确认画面原文（完整时序资料，按本张时刻取状态）', imageExcerpt(h3Shot)),
     ].filter(Boolean).join('\n'),
   };
   // VideoShot.prompt may contain the entire video protocol, voices or dialogue.
@@ -121,9 +121,9 @@ const directVisualSource = (storyboard: Storyboard, shot: VideoShot): {
   return {
     source: 'shot-visual',
     body: [
-      line('画面主体', shot.subject), line('空间', shot.space), line('动作', shot.action),
+      line('画面主体（出镜以本张时刻和机位为准）', shot.subject), line('世界空间与距离依据', shot.space), line('动作原文（完整过程，只取本张时刻）', shot.action),
       line('表演', shot.performance), line('朝向', shot.direction), line('机位与景别', shot.camera),
-      line('光线', shot.lighting), line('可见结果', shot.result), line('画面风格', storyboard.visualStyle),
+      line('光线', shot.lighting), line('镜尾结果（仅本张已到该状态时适用）', shot.result), line('画面风格', storyboard.visualStyle),
     ].filter(Boolean).join('\n'),
   };
 };
@@ -136,7 +136,7 @@ const fnv1a = (value: string): string => {
 
 const directPromptReferenceLines = (): string[] => [
   '根据实际随请求上传的参考图片生成当前目标分镜的一张独立静帧，不生成拼图或多格分镜。',
-  '参考图提供对应人物身份、外貌或场景外观；当前镜头画面描述决定本镜动作、衣着状态、站位、机位和构图，不照搬参考图中的临时持物、姿态或背景。',
+  '参考图提供对应人物身份、外貌或场景外观；当前镜头在所选时刻的世界位置、距离端点、通路、动作和衣着状态先成立，再决定机位、裁切和可见身份，不照搬参考图中的临时持物、姿态或背景。',
   '只采用下面当前镜头的可见画面；声音和发话文字不是画面文字，不增加字幕、对话气泡或协议标签。原稿中的 Subject/Picture/Video 标签只属于原视频描述，不能按编号匹配本次上传图片。',
 ];
 
@@ -268,12 +268,12 @@ export const buildDirectStoryboardImageBatchRequests = (
   return moments.map(({ shotId, purpose, frame }) => {
     const template = templates.get(shotId)!;
     const momentLines = purpose === 'first-frame' ? [
-      '本张是视频首帧：只表现第一镜的开始或动作刚开始的状态。原镜完整动作描述只用于理解空间与身份，之后的动作结果、镜尾状态和后续事件尚未发生，不能提前画入首帧。',
+      '本张是视频首帧：只表现第一镜的开始边界与入口状态；原稿从动作进行中开始时，只取该起始瞬间。先保留具名世界位置、人物间及人物到固定地标的距离端点、阻隔与可通行间隔，再按起始机位确定实际可见集合。随后后拉才揭示的侧肩、走近才成立的接触与后续入画者，不默认合入首帧，也不能把画外的人移到门边凑同框。原镜完整动作与未来剧情只解释起始空间余量和身份，之后的动作结果、镜尾状态和后续事件尚未发生，不能提前画入首帧。',
     ] : purpose === 'last-frame' ? [
-      '本张是视频尾帧：只表现最后一镜结束时的最终可见状态，保持原镜人物、衣着、物件、空间和机位；不自行续写下一动作或下一事件。',
+      '本张是视频尾帧：只表现最后一镜结束时的最终可见状态，先承接具名世界位置、距离端点、阻隔与通路，再按结束机位取景；保留原镜人物、衣着、物件和实际可见集合，人物间距只能随既有动作变化，不因机位或裁切改变。不自行续写下一动作或下一事件。',
     ] : frame ? [
       `本张是本段自定义 ${frame.imageFrameCount} 张分镜图片中的第 ${frame.imageFrameIndex} 张，只生成下面已选定的一张独立静帧。`,
-      '已选静帧决定本张具体时刻；原镜完整过程和结果仅作为连续性背景，不能把多个时刻拼在一张图里。已确认 H3 的身份、空间、站位、朝向和机位事实仍然有效，不改写视频镜头、时长或对白。',
+      '已选静帧决定本张具体时刻；先保留具名世界位置、人物间及人物到固定地标的距离端点、阻隔与通路，再按当时机位确定裁切和实际可见集合。原镜完整过程、未来剧情和镜尾结果仅解释连续性及空间余量，不能把后续位移、接触或入画局部提前拼进本张。已确认 H3 的身份、空间、站位、距离、朝向和机位事实仍然有效，不改写视频镜头、时长或对白。',
       line('已选定的本张静帧', imageExcerpt(frame.imageFrameDescription || '')),
       ...(frame.imageFrameTimeSec === undefined ? [] : [`本段画面时刻：${frame.imageFrameTimeSec} 秒，仅作静帧定位，不渲染时间文字。`]),
     ] : [];

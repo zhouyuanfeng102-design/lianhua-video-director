@@ -8,6 +8,7 @@ import {
   type ImagePromptFormat,
 } from '../src/imagePromptRules';
 import { IMAGE_PROMPT_LANDSCAPE_SCOPE_CONTRACT, LANDSCAPE_IMAGE_NEGATIVE_PROMPT } from '../src/imageLocationScope';
+import { IMAGE_STORY_SPATIAL_STATE_RULE } from '../src/spatialContinuityRules';
 import {
   buildImageRegenerationTask,
   executeImageRegeneration,
@@ -133,7 +134,26 @@ for (const variant of ['snapshot', 'first-frame'] as const) {
     assert.match(calls[0].user, /独立身份来源资料/u);
     assert.ok(calls[0].system.includes(IMAGE_PROMPT_NAMED_IDENTITY_CONTRACT));
     assert.ok(calls[0].system.includes(IMAGE_PROMPT_VISIBLE_CHARACTER_IDENTITY_CONTRACT));
+    assert.ok(calls[0].system.includes(IMAGE_STORY_SPATIAL_STATE_RULE));
     assert.doesNotMatch(calls[0].system, /\[LANDSCAPE_ENVIRONMENT_V1\]/u);
+  });
+}
+
+for (const [kind, variant] of [['location', 'snapshot'], ['location', 'first-frame'], ['grid', 'grid']] as const) {
+  test(`${kind}/${variant} sends distant spatial facts intact in one conversion`, async () => {
+    const spatialTail = '青岚位于寝宫中央，距门槛约四米；明川位于门外门廊。两人之间的室内地面保留投掷与后续接近的空间，起始尚未移动。';
+    const source = `当前画面来源：${'已知环境材质和角色资料。'.repeat(2000)}\n${spatialTail}`;
+    assert.ok(source.length > 18000);
+    const expected = 'Qing Lan remains in the room center four meters from the threshold; Ming Chuan is outside the door. The intervening room depth remains open, neither has approached.';
+    const selection = resolveImagePromptSelection({ backend: 'openai', assetKind: kind, imageVariant: variant });
+    reset(expected);
+    const converted = await requestImagePromptConverter(textConfig, kind, source, 'natural-language',
+      buildImagePromptConverterSystemPrompt(selection, '', variant), '', variant);
+    assert.equal(converted, expected, 'the authored output is neither locally repositioned nor augmented');
+    assert.equal(calls.length, 1, 'no spatial audit or retry is added');
+    assert.ok(calls[0].system.includes(IMAGE_STORY_SPATIAL_STATE_RULE));
+    assert.equal(JSON.parse(calls[0].user.slice('不可信生图资料：'.length)), source,
+      'space at the end of a long scene remains available to the same conversion');
   });
 }
 

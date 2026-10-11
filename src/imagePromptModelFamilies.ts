@@ -1,4 +1,5 @@
 import type { ImagePromptCategoryPreset, ImagePromptRuleSet } from './imagePromptRules';
+import { IMAGE_STORY_SPATIAL_STATE_RULE } from './spatialContinuityRules';
 
 export const GOOGLE_NANO_BANANA_RULE_ID = 'image-rule-google-nano-banana';
 export const GROK_IMAGINE_RULE_ID = 'image-rule-grok-imagine';
@@ -140,7 +141,8 @@ const presetId = (family: ModelFamilyDefinition, template: CategoryTemplate): st
     : `image-preset-${family.prefix}-${template.suffix}`
 );
 
-export const MODEL_FAMILY_CATEGORY_PRESETS: ImagePromptCategoryPreset[] = MODEL_FAMILIES.flatMap(
+/** Full catalog-19 factory values are migration evidence, never live rules. */
+export const LEGACY_MODEL_FAMILY_CATEGORY_PRESETS_V19: readonly ImagePromptCategoryPreset[] = MODEL_FAMILIES.flatMap(
   (family) => CATEGORY_TEMPLATES.map((template) => ({
     id: presetId(family, template),
     name: `${family.label} · ${template.name}`,
@@ -155,7 +157,7 @@ export const MODEL_FAMILY_CATEGORY_PRESETS: ImagePromptCategoryPreset[] = MODEL_
   })),
 );
 
-export const MODEL_FAMILY_RULE_SETS: ImagePromptRuleSet[] = MODEL_FAMILIES.map((family) => ({
+export const LEGACY_MODEL_FAMILY_RULE_SETS_V19: readonly ImagePromptRuleSet[] = MODEL_FAMILIES.map((family) => ({
   id: family.ruleId,
   name: `${family.label} 自然语言生图规则`,
   backend: 'openai',
@@ -175,6 +177,40 @@ export const MODEL_FAMILY_RULE_SETS: ImagePromptRuleSet[] = MODEL_FAMILIES.map((
   enabled: true,
   version: '1.0.0',
   updatedAt: 0,
+}));
+
+const SOURCE_SPATIAL_RULE = '本次画面明确包含剧情或多人空间关系时，先落实所选动作阶段、具名主体与固定地标的世界位置、距离两端、人物到入口或障碍的距离及尚未走完的通路，再描述摄影机、取景和可见身份。资料已给的距离及其端点直接保留在最终正文，不以左/右、前/后或近景代替，不把相机距离当人物间距离；未给精确数值时表达有依据的相对尺度和移动空间，不编造米数。身份参考和旧图构图仅承担指定参考职责，不能把尚未接近的人物挪到同一门口。';
+const SPATIAL_OUTPUT_RULE = '最终正向正文先写支撑本图的世界位置、距离两端、地标及空余通路，再写该时刻允许的机位、可见动作和身份细节。空间事实不能只留在说明或隐藏规划中；近景沿用实际裁切与画外关系，不为展示双方而缩短距离或提前完成下一步动作。';
+
+const spatialFamilyText = (value: string): string => value
+  .split(STORYBOARD_MOMENT_RULE).join(IMAGE_STORY_SPATIAL_STATE_RULE)
+  .replace('再描述主体、动作或状态、环境与空间关系、构图、光线、材质及用户选择的风格。', '剧情画面先描述所选动作阶段、世界站位、距离端点、地标与通路，再描述实际可见主体、摄影机与构图、光线、材质及用户选择的风格；普通身份与无人环境目标按各自用途组织。')
+  .replace('先突出关键内容与空间关系，再补充服务画面的细节；', '剧情画面先突出所选动作阶段、世界站位、距离端点、地标与通路，再确定相机、可见主体及服务画面的细节；')
+  .replace('再逐格描述一个时刻的事件、机位、实际主体和动作关系。', '再逐格先写一个时刻的动作阶段、世界站位、距离端点、固定地标和通路，再写机位、实际主体和动作关系。');
+
+export const MODEL_FAMILY_CATEGORY_PRESETS: ImagePromptCategoryPreset[] = LEGACY_MODEL_FAMILY_CATEGORY_PRESETS_V19.map((preset) => {
+  const narrative = ['storyboard', 'grid', 'location'].includes(preset.assetKind);
+  const multiCharacter = preset.assetKind === 'character' && preset.id.includes('multi-person');
+  const systemPrompt = spatialFamilyText(preset.systemPrompt);
+  return {
+    ...preset,
+    systemPrompt: [systemPrompt, SOURCE_SPATIAL_RULE,
+      narrative && preset.assetKind !== 'storyboard'
+        ? `${preset.assetKind === 'location' ? '仅在当前明确选择剧情快照或分镜首帧时应用以下剧情空间规则；无人风景继续只提取静态环境：\n' : '每个画格分别应用以下剧情空间规则：\n'}${IMAGE_STORY_SPATIAL_STATE_RULE}`
+        : '',
+    ].filter(Boolean).join('\n'),
+    outputRules: [preset.outputRules, narrative || multiCharacter ? SPATIAL_OUTPUT_RULE : ''].filter(Boolean).join('\n'),
+    version: '1.1.0',
+  };
+});
+
+export const MODEL_FAMILY_RULE_SETS: ImagePromptRuleSet[] = LEGACY_MODEL_FAMILY_RULE_SETS_V19.map((rule) => ({
+  ...rule,
+  categoryPresetIds: [...rule.categoryPresetIds],
+  defaultPresetByAssetKind: { ...rule.defaultPresetByAssetKind },
+  systemPrompt: [spatialFamilyText(rule.systemPrompt), SOURCE_SPATIAL_RULE].join('\n'),
+  outputRules: [rule.outputRules, `仅在当前画面要求剧情或多人空间关系时：${SPATIAL_OUTPUT_RULE}`].join('\n'),
+  version: '1.1.0',
 }));
 
 const normalizedModelName = (model: string): string => model.trim().toLowerCase().replace(/[\s_]+/gu, '-');

@@ -1,5 +1,6 @@
 import { assertValidFinalImagePrompt, type ImagePromptRuleSet } from './imagePromptRules';
 import { requestTextModel } from './services/llm';
+import { IMAGE_STORY_SPATIAL_STATE_RULE } from './spatialContinuityRules';
 import type { CustomImageRuleSnapshot, ImageApiConfig, TextApiConfig } from './types';
 
 const validRuleFormat = (format: unknown): format is CustomImageRuleSnapshot['format'] => (
@@ -37,7 +38,8 @@ export interface CustomImagePromptInput {
   signal?: AbortSignal;
 }
 
-/** One explicit conversion, without project/category/identity rules or automatic fallback. */
+/** One explicit conversion, preserving authored spatial facts without importing
+ * project/category/identity data or adding an automatic fallback. */
 export const requestCustomImagePrompt = async (
   apiText: TextApiConfig,
   input: CustomImagePromptInput,
@@ -61,6 +63,7 @@ export const requestCustomImagePrompt = async (
   const systemPrompt = [
     '你是自定义生图提示词转换器。保留用户本次要求，仅按本次明确选择的规则转换为可直接生图的最终提示词。',
     `<selected_image_rule>\n${input.rule.systemPrompt}\n${input.rule.outputRules}\n</selected_image_rule>`,
+    IMAGE_STORY_SPATIAL_STATE_RULE,
     `本次输出格式：${format}。`,
     `本次输出尺寸：${input.width} × ${input.height} 像素。`,
     '只返回最终生图提示词文本，不要解释、代码块或 JSON。',
