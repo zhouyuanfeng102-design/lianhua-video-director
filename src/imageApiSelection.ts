@@ -1,4 +1,5 @@
 import type { AppSettings, ImageApiConfig, ImageApiExecutionSnapshot, ImageApiProfile } from './types';
+import { resolveImageProtocol, type ResolvedImageProtocol } from './imageProtocol';
 
 type ImageApiSettings = Pick<AppSettings, 'imageApi' | 'imageApiProfiles' | 'activeImageApiProfileId' | 'privateImageApiProfileId'>;
 type WorkbenchMode = 'ordinary' | 'private';
@@ -71,7 +72,7 @@ const executionConfigurationKey = (config: ImageApiConfig): string => {
   if (cached !== undefined) return cached;
   const result = JSON.stringify(canonical(
     Object.fromEntries(Object.entries(config).filter(([key]) => ![
-      'id', 'name', 'createdAt', 'updatedAt', 'apiKey', 'baseUrl', 'model', 'enabled',
+      'id', 'name', 'createdAt', 'updatedAt', 'apiKey', 'baseUrl', 'model', 'enabled', 'imageProtocolRuntime',
     ].includes(key))),
   ));
   executionKeyCache.set(config as object, result);
@@ -87,10 +88,12 @@ export const captureImageApiSnapshot = async (config: ImageApiConfig, profileId:
   return {
     version: 1, profileId, connectionFingerprint: connection, executionFingerprint: execution,
     config: { enabled: frozen.enabled, backend: frozen.backend, model: frozen.model },
+    ...(frozen.backend === 'openai' ? { resolvedImageProtocol: resolveImageProtocol(frozen) } : {}),
   };
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value && typeof value === 'object' && !Array.isArray(value));
+const frozenProtocols: readonly ResolvedImageProtocol[] = ['openai-compatible', 'openai-images', 'openai-chat', 'gemini', 'xai'];
 
 /** Invalid snapshots remain a closed, unavailable snapshot, never a legacy fallback. */
 export const normalizeImageApiSnapshot = (value: unknown): ImageApiExecutionSnapshot | undefined => {
@@ -104,12 +107,29 @@ export const normalizeImageApiSnapshot = (value: unknown): ImageApiExecutionSnap
     || !['openai', 'sd_webui', 'comfyui', 'novelai'].includes(String(config.backend))
     || typeof config.model !== 'string'
     || typeof value.connectionFingerprint !== 'string' || !/^[a-f0-9]{64}$/u.test(value.connectionFingerprint)
-    || typeof value.executionFingerprint !== 'string' || !/^[a-f0-9]{64}$/u.test(value.executionFingerprint)) return invalid();
+    || typeof value.executionFingerprint !== 'string' || !/^[a-f0-9]{64}$/u.test(value.executionFingerprint)
+    || value.resolvedImageProtocol !== undefined && !frozenProtocols.includes(value.resolvedImageProtocol as ResolvedImageProtocol)) return invalid();
   return {
     version: 1, profileId: value.profileId as string | null, connectionFingerprint: value.connectionFingerprint,
     executionFingerprint: value.executionFingerprint,
     config: { enabled: config.enabled, backend: config.backend as ImageApiConfig['backend'], model: config.model },
+    ...(value.resolvedImageProtocol !== undefined ? { resolvedImageProtocol: value.resolvedImageProtocol as ResolvedImageProtocol } : {}),
   };
+};
+
+// Tasks created before automatic routing used the configured explicit route,
+// or the compatible Images route when that setting was absent. A retry must
+// preserve those request facts even though live configurations now use auto.
+const legacyImageProtocol = (config: ImageApiConfig): ResolvedImageProtocol => (
+  frozenProtocols.includes(config.imageProtocol as ResolvedImageProtocol)
+    ? config.imageProtocol as ResolvedImageProtocol : 'openai-compatible'
+);
+const pinImageProtocol = (config: ImageApiConfig, protocol: ResolvedImageProtocol): ImageApiConfig => {
+  if (config.backend !== 'openai') return config;
+  const pinned = clone(config);
+  delete pinned.imageProtocolRuntime;
+  if (resolveImageProtocol(pinned) !== protocol) pinned.imageProtocolRuntime = protocol;
+  return pinned;
 };
 
 /** A retry reuses the original endpoint/model/workflow, not the workbench's later choice. */
@@ -117,7 +137,7 @@ export const resolveImageApiForRegeneration = async (
   settings: ImageApiSettings,
   snapshot?: ImageApiExecutionSnapshot,
 ): Promise<ImageApiConfig> => {
-  if (snapshot === undefined) return clone(settings.imageApi); // Legacy tasks retain their established behavior.
+  if (snapshot === undefined) return pinImageProtocol(clone(settings.imageApi), legacyImageProtocol(settings.imageApi));
   const normalized = normalizeImageApiSnapshot(snapshot)!;
   if (!normalized.config.enabled || !normalized.connectionFingerprint) {
     throw new Error('原任务的生图 API 快照不可用，请返回工作台选择配置后创建新任务；不会自动改用其他配置。');
@@ -133,7 +153,8 @@ export const resolveImageApiForRegeneration = async (
   if (await executionFingerprint(credentialSource) !== normalized.executionFingerprint) {
     throw new Error('原任务的生图执行参数或工作流已改变，请恢复原配置后重试，或在工作台按新配置创建任务；不会自动使用新参数。');
   }
-  return { ...clone(credentialSource), ...normalized.config };
+  return pinImageProtocol({ ...clone(credentialSource), ...normalized.config },
+    normalized.resolvedImageProtocol || legacyImageProtocol(credentialSource));
 };
 
 /** In-memory only. Never log or serialize this value: it can contain credentials. */

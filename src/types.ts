@@ -15,6 +15,7 @@ import type { MorphologyKind } from './characterMorphology';
 import type { VideoWorkbenchDraft, VideoWorkbenchState } from './videoWorkbench';
 import type { ImageOutputSizePreferences } from './imageOutputSize';
 import type { ImageResolutionPlan } from './imageResolution';
+import type { ImageProtocolSetting, ResolvedImageProtocol } from './imageProtocol';
 import type { StoryboardImageOutputSizePreference } from './storyboardImageOutputSize';
 import type { SequenceDurationEstimateSnapshot } from './storyPacingEstimate';
 import type { VideoCreativeDirection } from './videoCreativeDirection';
@@ -1280,8 +1281,10 @@ export interface ImageApiConfig {
   baseUrl: string;
   apiKey: string;
   model: string;
-  /** Explicit transport selection for providers exposed through the image API entry. */
-  imageProtocol?: 'openai-compatible' | 'openai-images' | 'openai-chat' | 'gemini' | 'xai';
+  /** Automatic transport inference, with an optional manual override. */
+  imageProtocol?: ImageProtocolSetting;
+  /** In-memory only: preserve a saved task's resolved transport on retry. */
+  imageProtocolRuntime?: ResolvedImageProtocol;
   imageResolutionProfile?: 'auto' | 'pixel-long-edge' | 'gpt-image-legacy' | 'gpt-image-modern' | 'gemini-k' | 'gemini-1k' | 'grok-k';
   imageSupportedResolutions?: Array<'1K' | '2K' | '4K'>;
   imagePixelStep?: number;
@@ -1300,6 +1303,8 @@ export interface ImageApiExecutionSnapshot {
   /** Digests only: URLs and workflows can contain embedded credentials. */
   connectionFingerprint: string;
   executionFingerprint: string;
+  /** Non-secret execution fact; older snapshots retain their former transport. */
+  resolvedImageProtocol?: ResolvedImageProtocol;
   config: Pick<ImageApiConfig, 'enabled' | 'backend' | 'model'>;
 }
 

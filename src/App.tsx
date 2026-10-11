@@ -131,6 +131,7 @@ import { VideoExecutionControls } from "./components/VideoExecutionControls";
 import { isUnsubmittedVideoTask, videoTaskHasUnresolvedSubmission } from "./videoGenerationQueue";
 import { defaultImageOutputSize, resolveImageOutputSize, imageReturnedSizeWarning, type ImageOutputSizePreference } from "./imageOutputSize";
 import { assertImageResolutionPlanForConfig, imageResolutionAspectRatio, resolveImageResolutionCapabilities } from "./imageResolution";
+import { inspectImageProtocol } from "./imageProtocol";
 import type { ImageApiConfig } from "./types";
 import { defaultStoryboardImageOutputSize, resolveStoryboardImageOutputSize, type StoryboardImageOutputSizePreference } from "./storyboardImageOutputSize";
 import { StoryboardImageOutputSizeControls } from "./components/StoryboardImageOutputSizeControls";
@@ -24099,6 +24100,14 @@ function SettingsView(ctx: AppContext) {
     image: state.settings.apiCredentialBook[0]?.id || "",
   }));
   const settings: AppState["settings"] = state.settings;
+  const imageProtocolDecision = inspectImageProtocol(settings.imageApi);
+  const imageProtocolLabels = {
+    "openai-compatible": "Images 兼容",
+    "openai-images": "OpenAI 官方 Images",
+    "openai-chat": "聊天生图兼容（香蕉）",
+    gemini: "Google Gemini 原生",
+    xai: "xAI 原生 Images",
+  };
   const modelConnectionKey = (target: ApiTarget, source: AppState["settings"] = settings): string => {
     const api = target === "text" ? source.textApi : target === "vision" ? source.visionApi : source.imageApi;
     return JSON.stringify([
@@ -25016,177 +25025,171 @@ function SettingsView(ctx: AppContext) {
 
         {settingsPanel === "image" && (
           <Card className="api-card image-api-card api-tone-violet">
-            <div className="card-title">
+            <div className="card-title image-api-heading">
               <div>
                 <h2>图像生成 API</h2>
                 <p>生成人物、场景、物品与九宫格视觉母版。</p>
               </div>
-              <ImageIcon size={19} color="var(--violet)" />
+              <label className="check-row image-api-enable">
+                <input
+                  type="checkbox"
+                  checked={settings.imageApi.enabled}
+                  onChange={(event) =>
+                    patchImage({ enabled: event.target.checked })
+                  }
+                />
+                启用图像生成接口
+              </label>
             </div>
             {renderProfileTools("image")}
             {settings.imageApi.backend !== "comfyui" && renderCredentialFill("image")}
-            <label className="check-row">
-              <input
-                type="checkbox"
-                checked={settings.imageApi.enabled}
-                onChange={(event) =>
-                  patchImage({ enabled: event.target.checked })
-                }
-              />
-              启用图像生成接口
-            </label>
-            <div className={`api-fields-two ${settings.imageApi.backend === "comfyui" ? "comfyui-backend-row" : ""}`}>
-              <Field label="后端">
-                <select
-                  value={settings.imageApi.backend}
-                  onChange={(event) =>
-                    patchImage({
-                      backend: event.target
-                        .value as AppState["settings"]["imageApi"]["backend"],
-                      imageResolutionProfile: "auto",
-                      imageProtocol: "openai-compatible",
-                      imageSupportedResolutions: undefined,
-                      imagePixelStep: undefined,
-                    })
-                  }
-                >
-                  <option value="openai">OpenAI 兼容</option>
-                  <option value="sd_webui">Stable Diffusion WebUI</option>
-                  <option value="comfyui">ComfyUI</option>
-                  <option value="novelai">NovelAI</option>
-                </select>
-              </Field>
-              {settings.imageApi.backend !== "comfyui" && <Field label="模型 / 工作流">
-                <div className="model-control">
-                  <input
-                    value={settings.imageApi.model}
+            <div className="image-api-form">
+              <section className="image-api-section image-api-connection" aria-labelledby="image-api-connection-heading">
+                <h3 id="image-api-connection-heading">接口连接</h3>
+                <Field label="后端">
+                  <select
+                    value={settings.imageApi.backend}
                     onChange={(event) =>
-                      patchImage({ model: event.target.value })
+                      patchImage({
+                        backend: event.target
+                          .value as AppState["settings"]["imageApi"]["backend"],
+                        imageResolutionProfile: "auto",
+                        imageProtocol: "auto",
+                        imageSupportedResolutions: undefined,
+                        imagePixelStep: undefined,
+                      })
                     }
-                    placeholder={
-                      settings.imageApi.backend === "sd_webui"
-                        ? "SD WebUI 可留空"
-                        : "可手动输入或获取列表"
-                    }
-                  />
-                  <Button small className="model-picker-trigger" icon={<ChevronDown size={13} />}
-                    title={`选择图像模型（${modelsFor("image").length} 个）`}
-                    disabled={!modelsFor("image").length || loadingModels !== null || settings.imageApi.backend !== "openai" || settings.imageApi.imageProtocol === "gemini"}
-                    onClick={() => openModelPicker("image")} />
-                  <Button
-                    small
-                    icon={<RefreshCw size={13} />}
-                    disabled={
-                      loadingModels !== null ||
-                      settings.imageApi.backend !== "openai" || settings.imageApi.imageProtocol === "gemini"
-                    }
-                    onClick={() => handleFetchModels("image")}
                   >
-                    {loadingModels === "image" ? "获取中" : "获取模型"}
-                  </Button>
-                </div>
-              </Field>}
-            </div>
-            {settings.imageApi.backend === "openai" && (
-              <div className="api-fields-two">
-                <Field label="生图协议">
-                  <select value={settings.imageApi.imageProtocol || "openai-compatible"}
-                    onChange={(event) => patchImage({ imageProtocol: event.target.value as ImageApiConfig["imageProtocol"] })}>
-                    <option value="openai-compatible">OpenAI 兼容（现有通道）</option>
-                    <option value="openai-images">OpenAI 官方 Images</option>
-                    <option value="openai-chat">OpenAI 聊天生图兼容（香蕉）</option>
-                    <option value="gemini">Google Gemini 原生</option>
-                    <option value="xai">xAI 原生 Images</option>
-                  </select>
-                  <div className="field-hint">中转香蕉模型请选择聊天生图兼容，并确认通道支持聊天生图；谷歌官方服务使用 Gemini 原生。保留中转模型完整名称。修改协议后请从工作台创建新任务，旧任务保留原配置。</div>
-                </Field>
-                <Field label="模型分辨率规格">
-                  <select value={settings.imageApi.imageResolutionProfile || "auto"}
-                    onChange={(event) => patchImage({ imageResolutionProfile: event.target.value as ImageApiConfig["imageResolutionProfile"], imageSupportedResolutions: undefined })}>
-                    <option value="auto">按模型名称识别</option>
-                    <option value="pixel-long-edge">通用宽高（通道需支持）</option>
-                    <option value="gpt-image-legacy">GPT Image 1／1.5 固定尺寸</option>
-                    <option value="gpt-image-modern">GPT Image 2／2.5 尺寸约束</option>
-                    <option value="gemini-k">Gemini 原生 1K／2K／4K</option>
-                    <option value="gemini-1k">Gemini 2.5 Flash Image（1K）</option>
-                    <option value="grok-k">Grok Image（1K／2K）</option>
+                    <option value="openai">OpenAI 兼容</option>
+                    <option value="sd_webui">Stable Diffusion WebUI</option>
+                    <option value="comfyui">ComfyUI</option>
+                    <option value="novelai">NovelAI</option>
                   </select>
                 </Field>
-              </div>
-            )}
-            <Field label="已确认的模型／工作流原生生图档位">
-              <div className="api-fields-two">
-                <div className="check-row">
-                  {(["1K", "2K", "4K"] as const).map((tier) => {
-                    const supported = settings.imageApi.imageSupportedResolutions
-                      || resolveImageResolutionCapabilities(settings.imageApi).supportedTiers;
-                    return <label className="check-row" key={tier}>
-                      <input type="checkbox" checked={supported.includes(tier)}
-                        onChange={(event) => patchImage({ imageSupportedResolutions: event.target.checked
-                          ? Array.from(new Set([...supported, tier]))
-                          : supported.filter((value) => value !== tier) })} />{tier}
-                    </label>;
-                  })}
-                </div>
-                {settings.imageApi.imageSupportedResolutions !== undefined && <Button small onClick={() => patchImage({ imageSupportedResolutions: undefined })}>恢复模型默认</Button>}
-              </div>
-              <div className="field-hint">{resolveImageResolutionCapabilities(settings.imageApi).note} 本机工作流默认只启用1K；确认当前模型和工作流支持原生2K／4K后再勾选。勾选不会安装模型、添加放大节点或改变工作流。</div>
-            </Field>
-            {settings.imageApi.backend !== "openai" && <Field label="宽高像素步长">
-              <input type="number" min={1} max={1024} step={1}
-                value={settings.imageApi.imagePixelStep ?? (settings.imageApi.backend === "novelai" ? 64 : 8)}
-                onChange={(event) => patchImage({ imagePixelStep: Number(event.target.value) })} />
-            </Field>}
-            {settings.imageApi.backend === "comfyui" ? (
-              <>
-                <div className="api-fields-two comfyui-connection-fields">
-                  <Field label="ComfyUI API 根地址">
-                    <input
-                      value={settings.imageApi.baseUrl}
-                      onChange={(event) => patchImage({ baseUrl: event.target.value })}
-                      placeholder="http://127.0.0.1:8188"
-                    />
-                  </Field>
-                  <Field label="API 密钥（可选）">
-                    <input
-                      type="password"
-                      value={settings.imageApi.apiKey}
-                      onChange={(event) => patchImage({ apiKey: event.target.value })}
-                    />
-                  </Field>
-                </div>
-                <ComfyUISettings
-                  config={settings.imageApi}
-                  allowPrivateNetwork={Boolean(ctx.recoveryStatus?.recovery.allowPrivateNetwork)}
-                  onChange={patchImage}
-                  onPrivateNetworkChange={(allowed) => void updatePrivateNetworkAccess(allowed)}
-                />
-              </>
-            ) : (
-              <>
-                <Field label="API 地址">
+                <Field label={settings.imageApi.backend === "comfyui" ? "ComfyUI API 根地址" : "API 地址"}>
                   <input
                     value={settings.imageApi.baseUrl}
                     onChange={(event) => patchImage({ baseUrl: event.target.value })}
-                    placeholder={
-                      settings.imageApi.backend === "novelai"
+                    placeholder={settings.imageApi.backend === "comfyui"
+                      ? "http://127.0.0.1:8188"
+                      : settings.imageApi.backend === "novelai"
                         ? "NovelAI 官方根地址或完整 /ai/generate-image 端点"
-                        : "例如 https://api.example.com/v1"
-                    }
+                        : "例如 https://api.example.com/v1"}
                   />
                 </Field>
-                <Field label="API 密钥">
+                <Field label={settings.imageApi.backend === "comfyui" ? "API 密钥（可选）" : "API 密钥"}>
                   <input
                     type="password"
                     value={settings.imageApi.apiKey}
                     onChange={(event) => patchImage({ apiKey: event.target.value })}
                   />
                 </Field>
-                <div className="field-hint">
-                  生图协议决定请求格式，模型分辨率规格决定可用尺寸。第三方兼容通道与模型别名需要按服务商能力配置；实际结果尺寸会单独显示，不自动改档或放大。NovelAI沿用原生标签与V4角色提示结构。
+              </section>
+              <section className="image-api-section image-api-generation" aria-labelledby="image-api-generation-heading">
+                <h3 id="image-api-generation-heading">模型与输出</h3>
+                {settings.imageApi.backend !== "comfyui" && <Field label="模型 / 工作流">
+                  <div className="model-control">
+                    <input
+                      value={settings.imageApi.model}
+                      onChange={(event) =>
+                        patchImage({ model: event.target.value })
+                      }
+                      placeholder={
+                        settings.imageApi.backend === "sd_webui"
+                          ? "SD WebUI 可留空"
+                          : "可手动输入或获取列表"
+                      }
+                    />
+                    <Button small className="model-picker-trigger" icon={<ChevronDown size={13} />}
+                      title={`选择图像模型（${modelsFor("image").length} 个）`}
+                      disabled={!modelsFor("image").length || loadingModels !== null || settings.imageApi.backend !== "openai" || imageProtocolDecision.protocol === "gemini"}
+                      onClick={() => openModelPicker("image")} />
+                    <Button
+                      small
+                      icon={<RefreshCw size={13} />}
+                      disabled={
+                        loadingModels !== null ||
+                        settings.imageApi.backend !== "openai" || imageProtocolDecision.protocol === "gemini"
+                      }
+                      onClick={() => handleFetchModels("image")}
+                    >
+                      {loadingModels === "image" ? "获取中" : "获取模型"}
+                    </Button>
+                  </div>
+                </Field>}
+              {settings.imageApi.backend === "openai" && (
+                <div className="api-fields-two image-api-protocol-fields">
+                  <Field label="生图协议">
+                    <select value={!settings.imageApi.imageProtocol || settings.imageApi.imageProtocol === "openai-compatible" ? "auto" : settings.imageApi.imageProtocol}
+                      onChange={(event) => patchImage({ imageProtocol: event.target.value as ImageApiConfig["imageProtocol"] })}>
+                      <option value="auto">自动识别（推荐）</option>
+                      <option value="openai-compatible-manual">Images 兼容（手动指定）</option>
+                      <option value="openai-images">OpenAI 官方 Images（手动指定）</option>
+                      <option value="openai-chat">聊天生图兼容／香蕉（手动指定）</option>
+                      <option value="gemini">Google Gemini 原生（手动指定）</option>
+                      <option value="xai">xAI 原生 Images（手动指定）</option>
+                    </select>
+                    <div className="field-hint" data-image-protocol={imageProtocolDecision.protocol} title={imageProtocolDecision.reason}>
+                      {imageProtocolDecision.automatic ? "已自动识别：" : "当前使用："}{imageProtocolLabels[imageProtocolDecision.protocol]}。
+                      {imageProtocolDecision.automatic ? "修改地址或模型会自动更新。" : "可切回自动识别。"}
+                    </div>
+                  </Field>
+                  <Field label="模型分辨率规格">
+                    <select value={settings.imageApi.imageResolutionProfile || "auto"}
+                      onChange={(event) => patchImage({ imageResolutionProfile: event.target.value as ImageApiConfig["imageResolutionProfile"], imageSupportedResolutions: undefined })}>
+                      <option value="auto">按模型名称识别</option>
+                      <option value="pixel-long-edge">通用宽高（通道需支持）</option>
+                      <option value="gpt-image-legacy">GPT Image 1／1.5 固定尺寸</option>
+                      <option value="gpt-image-modern">GPT Image 2／2.5 尺寸约束</option>
+                      <option value="gemini-k">Gemini 原生 1K／2K／4K</option>
+                      <option value="gemini-1k">Gemini 2.5 Flash Image（1K）</option>
+                      <option value="grok-k">Grok Image（1K／2K）</option>
+                    </select>
+                  </Field>
                 </div>
-              </>
-            )}
+              )}
+              <Field label="已确认的模型／工作流原生生图档位">
+                <div className="image-api-resolution-row">
+                  <div className="image-api-resolution-options">
+                    {(["1K", "2K", "4K"] as const).map((tier) => {
+                      const supported = settings.imageApi.imageSupportedResolutions
+                        || resolveImageResolutionCapabilities(settings.imageApi).supportedTiers;
+                      return <label className="check-row" key={tier}>
+                        <input type="checkbox" checked={supported.includes(tier)}
+                          onChange={(event) => patchImage({ imageSupportedResolutions: event.target.checked
+                            ? Array.from(new Set([...supported, tier]))
+                            : supported.filter((value) => value !== tier) })} />{tier}
+                      </label>;
+                    })}
+                  </div>
+                  {settings.imageApi.imageSupportedResolutions !== undefined && <Button small onClick={() => patchImage({ imageSupportedResolutions: undefined })}>恢复模型默认</Button>}
+                </div>
+                <div className="field-hint">{resolveImageResolutionCapabilities(settings.imageApi).note}</div>
+                {settings.imageApi.backend !== "openai" && <div className="field-hint">本机工作流默认只启用1K；确认模型和工作流支持原生2K／4K后再勾选。勾选不会安装模型、添加放大节点或改变工作流。</div>}
+              </Field>
+              {settings.imageApi.backend !== "openai" && <Field label="宽高像素步长">
+                <input type="number" min={1} max={1024} step={1}
+                  value={settings.imageApi.imagePixelStep ?? (settings.imageApi.backend === "novelai" ? 64 : 8)}
+                  onChange={(event) => patchImage({ imagePixelStep: Number(event.target.value) })} />
+              </Field>}
+              {settings.imageApi.backend === "comfyui" ? (
+                  <ComfyUISettings
+                    config={settings.imageApi}
+                    allowPrivateNetwork={Boolean(ctx.recoveryStatus?.recovery.allowPrivateNetwork)}
+                    onChange={patchImage}
+                    onPrivateNetworkChange={(allowed) => void updatePrivateNetworkAccess(allowed)}
+                  />
+              ) : (
+                  <div className="field-hint">
+                    {settings.imageApi.backend === "openai"
+                      ? "生图协议决定请求格式，分辨率规格决定可用尺寸；第三方通道与模型别名请按服务商能力配置。实际尺寸会单独显示，不自动改档或放大。"
+                      : settings.imageApi.backend === "novelai"
+                        ? "NovelAI沿用原生标签与V4角色提示结构。实际尺寸会单独显示，不自动改档或放大。"
+                        : "实际尺寸会单独显示，不自动改档或放大。"}
+                  </div>
+              )}
+              </section>
+            </div>
           </Card>
         )}
       </div>

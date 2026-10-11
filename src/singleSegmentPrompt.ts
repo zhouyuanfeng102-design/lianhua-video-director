@@ -34,7 +34,7 @@ import {
   VIDEO_CREATIVE_DIRECTION_TRANSLATION_DATA_RULE,
   videoCreativeDirectionForBoard,
 } from './videoCreativeDirection';
-import { VIDEO_ACTING_CAMERA_RULES, VIDEO_ACTING_CAMERA_TRANSLATION_RULE } from './videoActingCameraRules';
+import { VIDEO_ACTING_CAMERA_RULES, VIDEO_ACTING_CAMERA_TRANSLATION_RULE, stripLegacyVideoActingCameraRules } from './videoActingCameraRules';
 import { buildVideoSceneContext, VIDEO_SCENE_CONTEXT_RULE, type VideoSceneContext } from './videoSceneContext';
 import { VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE, withVideoActionChoreographyScope } from './videoActionChoreographyRules';
 import { STORY_CAUSALITY_RULE, STORY_CAUSALITY_TRANSLATION_RULE, STORY_UNDERSTANDING_CONTEXT_RULE } from './storyCausalityRules';
@@ -209,9 +209,10 @@ export async function generateSingleSegmentPrompt(
     try {
       // Apply the same scope contract to conversion, independent review,
       // translation and AI-only H3 protocol repair without local prose edits.
-      let scopedSystem = system.includes(VIDEO_WARDROBE_SCOPE_RULE)
-        ? system
-        : `${system}\n\n${VIDEO_WARDROBE_SCOPE_RULE}`;
+      const currentSystem = stripLegacyVideoActingCameraRules(system);
+      let scopedSystem = currentSystem.includes(VIDEO_WARDROBE_SCOPE_RULE)
+        ? currentSystem
+        : `${currentSystem}\n\n${VIDEO_WARDROBE_SCOPE_RULE}`;
       const creativeScopeRule = stage === 'translate'
         ? VIDEO_CREATIVE_DIRECTION_TRANSLATION_DATA_RULE : VIDEO_CREATIVE_DIRECTION_DATA_RULE;
       if (!scopedSystem.includes(creativeScopeRule)) scopedSystem += `\n\n${creativeScopeRule}`;
@@ -359,6 +360,7 @@ export async function generateSingleSegmentPrompt(
       H3_FINAL_BODY_FORMAT_RULE,
       ...(input.sequenceSegmentContext ? [] : [SAVED_STAGING_SOURCE_POSITION_RULE]),
       'sourceStoryContent是剧情依据，shots是原始镜头计划，canonicalPrompt是转换后的逐镜正文；原始计划不是本地允许名单，发现矛盾由你结合完整剧情判断。candidatePrompt是待交付H3稿，检查每句台词的声源、可见口型与听者，及每次切镜的人物位置、朝向、运动目标、机位和镜尾承接是否仍明确。',
+      '把中文执行稿已经展开的同一动作链逐镜写入H3现有正文：双方进入关系、实际进退、具名攻击目标、对方同步回应、接触或落空、速度变化和双方末态一起表达；不要序列化成一个人摆姿势、对手在背后静止或只剩运镜词。canonicalPrompt和H3保持同一攻防顺序、场地与连续状态，首尾画面来自这条事件链。新稿范围内需要补足时同步两稿；已确认稿、参考更新、格式修复与英译只传递已有展开，不另编打法或改变切点。',
       `creativeDirection保留完整的用户导演、视觉、运镜、光影与额外要求。逐镜核对这些要求是否在适用范围得到具体落实；可以修复本镜实际表演、景别/机位/运镜和光影表达，${canReplanStaging ? '本次未确认排程按taskAuthority同步修正，两份交付一致，exact镜数不变' : '但不更换已经确认的镜数、顺序、时长边界'}，不为套用偏好新增剧情。英文阶段以本次最终中文为准，不能再次按偏好另编。`,
       ...(canReplanStaging ? [H3_STAGING_DELIVERY_RULE, H3_IDENTITY_BINDINGS_RULE] : [
         `源头分镜已给出的每句完整发话起止、具名说话人及口部动作先后是本次转换依据。不要把“亲吻结束后开口”改写成“亲吻同时清晰说话”，也不要在人物介绍、动作正文和结果摘要重复执行同一次亲吻。保留已确认发话区间，不因镜头构图、参考图更新或翻译擅自转交台词、缩短长句时间、移入相邻段或增加镜头；${input.sequenceSegmentContext ? '跨段事件与时长重新分配只属于重新AI语义分段，当前阶段不得重分段。' : '全片事件与时长重新分配只属于重新生成总稿的源头规划。'}`,

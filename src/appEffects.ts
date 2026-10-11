@@ -37,7 +37,7 @@ import {
 } from './nsfwPromptRules';
 import { hasNsfwDetailSignal } from './promptConstraints';
 import { VIDEO_CREATIVE_DIRECTION_DATA_RULE, videoCreativeDirectionForBoard } from './videoCreativeDirection';
-import { VIDEO_ACTING_CAMERA_RULES } from './videoActingCameraRules';
+import { VIDEO_ACTING_CAMERA_RULES, stripLegacyVideoActingCameraRules } from './videoActingCameraRules';
 import { VIDEO_ACTION_CHOREOGRAPHY_RULE, VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE,
   VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE, withVideoActionChoreographyScope } from './videoActionChoreographyRules';
 import { STORY_CAUSALITY_RULE } from './storyCausalityRules';
@@ -532,7 +532,7 @@ export const convertStoryboardDraftToFinal = async (
     input.ruleSet?.baseRules, input.ruleSet?.continuityRules, input.ruleSet?.outputRules,
     input.converter.systemPrompt, input.converter.outputRules,
   ].filter((value): value is string => Boolean(value)).map((value) => sharedRules.reduce(
-    (text, rule) => text.split(rule).join(''), stripLegacyVideoQuotaRules(value),
+    (text, rule) => text.split(rule).join(''), stripLegacyVideoActingCameraRules(stripLegacyVideoQuotaRules(value)),
   ).trim()).filter(Boolean))].join('\n\n');
   const hardContract = [
     '以下为当前输出约定；旧预设中的裁句、固定字秒/动作阶段配额和强制换词要求不适用。',
@@ -546,7 +546,8 @@ export const convertStoryboardDraftToFinal = async (
     ...(input.sequenceHandoff ? [VIDEO_SEQUENCE_TEXT_HANDOFF_RULE] : []),
     '保持给定镜数和时间边界，不重新规划全片。先阅读 sourceStoryContent 全文，再由你自行识别人物本名、别名、代词指向、画面主体、画外说话人及完整对白。plannedSubject 是先前计划，不是允许名单；若计划与原剧情不符，由你依据全文纠正，不能因名称不在项目人物表中拒绝结果。',
     'characterIdentityFacts 和 globalContinuityFacts 是项目已保存的性别、物种、外观等资料，audioLedgerFacts 是已保存的声源、台词、时刻及声音备注，需结合全文理解并保持一致；资料缺失不能靠固定人类模板补写，未知声线不凭名字或画面前后顺序推断，画外说话人无需改成画面主体。',
-    'shotEvidence 的 plannedSpace/plannedDirection/plannedCamera/plannedDialogue/plannedPerformance/plannedResult/plannedSound 与 previousShot/nextShot 均为逐镜已保存计划原值；previousShot.plannedResult 是前镜结果依据，不是本地推测的新状态。请结合全文与 continuityContext 逐镜检查声源、口型、听者、行进目标、机位及镜首镜尾承接；这些计划存在遗漏或矛盾时由你修正，不把它们当人物、台词或朝向允许名单。',
+    'shotEvidence 的 plannedSpace/plannedDirection/plannedCamera/plannedDialogue/plannedPerformance/plannedResult/plannedSound 与 previousShot/nextShot 均为逐镜已保存计划原值；previousShot.plannedResult 是前镜结果依据，不是本地推测的新状态。本次获准中文新稿先理解完整剧情，再在每镜主体/空间和动作正文表达双方进入关系、实际接近或退避、具名攻击目标、对方同步回应、接触或落空及双方退出状态；连续招式从前一招末态展开。保留或修正计划需依据原剧情和当前权限，不能照搬缺少过程的小说概述或把计划当允许名单。已确认稿的参考更新与纯格式修复只保留这些已有关系，不补新编动作。',
+    '镜头字段依据该镜已经明确的交互设计：写摄影机相对双方轴线的侧别、观察对象和跟随轨迹，使视线与武器仍针对具名对手。空间/动作正文继续承担真实距离、进退和武器接触，不能把镜头推近写成人物瞬间靠近，或把跟拍写成角色转身追着摄影机打斗。每镜写出下一镜所需末态，不仅在全局声明轴线连续。身份资料只在需要辨认人物时简述，避免每镜重复整份外貌挤掉攻防过程。',
     ...(input.sequenceHandoff ? ['首镜 previousShot.evidenceKind=previous-segment-final-prompt 时，它提供上段最终执行稿和末镜原文，不是本段旧canonical镜头计划。优先按该最终文字场面落实开场视觉动作重合，再推进sourceStoryContent中的本段新剧情；不要把前稿的对白、标签编号或时码作为本段输出合同。'] : []),
     'referenceBindings 和每镜 referenceAssetIds 只说明已有引用关系，实际用途以提供的 currentReferences 名称、角色和责任说明为准；没有真实像素时不能声称看到了人物站位、口型或朝向，参考图缺少某人物不能证明该人物不存在。不得为适配参考图改变原故事说话人或凭空添加转身。',
     '在本次回答内完成内容自检和必要修正：检查是否误认人物、遗漏情节或对白、改变说话者、违背物种外貌或声音情绪；以完整剧情为准修正后只返回最终逐镜正文，不另行输出审核说明。不会由本地词面匹配决定内容正误。',

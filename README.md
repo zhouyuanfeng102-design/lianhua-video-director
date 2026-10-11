@@ -4,13 +4,13 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的 Windows 桌面工作台。
 
-当前版本：**1.8.0** · 2026-10-11 · Windows 64 位 · 便携运行
+当前版本：**1.8.3** · 2026-10-11 · Windows 64 位 · 便携运行
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows 便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-1.8.0.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-1.8.3.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
 1. 下载上面的 EXE，放在可写入的文件夹里，双击运行，无需安装 Node.js。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
@@ -63,6 +63,12 @@
 1.7.9 将动作对象、人物视线、镜头跟随、场地尺度、距离变化和对白归属贯穿提示词生成。先理解原剧情中的追赶与退避，结合相关场景资料交代真实位移；区分实际台词、心理活动和小说注释，沉默人物以行动表现。普通稿、H3、英文和 Seedance 保留相同关系。历史稿与图片保留，需重新生成提示词及相关首尾帧后应用。详见[本版更新说明](docs/releases/发布说明-1.7.9.md)。
 
 1.8.0 针对生产包启动白屏调整模块分块，并增加显式的聊天兼容生图接口，适用于按该协议提供 Nano Banana 的转发服务；保留模型别名与参考图片，继续支持 Gemini 原生生图，接口类型与模型不匹配时提供明确提示。实际生成结果取决于所配置服务，本版不自动重跑失败任务。详见[本版更新说明](docs/releases/发布说明-1.8.0.md)。
+
+1.8.1 的生图协议默认自动识别，按服务地址和模型名称选择请求接口，并显示识别结果；保留手动指定。识别在本地完成，不发送试探生图请求、不在失败后改用另一接口重扣费，已保存任务保持原协议。详见[本版更新说明](docs/releases/发布说明-1.8.1.md)。
+
+1.8.2 从视频提示词规则改善连续攻防：在剧情事实内展开出招、挡闪、接触、受力和回应，写清每镜双方站位、朝向、距离与实际出入，摄影随动作移动取景。中文源稿、H3、英文与相关首尾帧使用一致的动作和空间关系；保留旧稿，需主动重新生成源中文，再更新英文、首尾帧及视频。详见[本版更新说明](docs/releases/发布说明-1.8.2.md)。
+
+1.8.3 整理图片 API 设置：左侧集中连接配置，右侧集中模型与生图规格，统一字段对齐与控件高度，避免长说明拉伸输入框和下拉框；启用开关移到标题旁。现有配置与生成行为保留。详见[本版更新说明](docs/releases/发布说明-1.8.3.md)。
 
 ## 从源码运行
 

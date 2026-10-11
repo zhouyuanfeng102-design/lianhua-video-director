@@ -9,6 +9,7 @@ import { normalizeProjectVoicePresets } from './videoAudioReferences';
   ComfyUIWorkflowPreset,
   ConverterPreset,
   GenerationTask,
+  ImageApiConfig,
   ImageApiProfile,
   Location,
   Project,
@@ -3012,6 +3013,12 @@ const normalizeLibraryProject = (
   }, fallback, emptyProjectCollectionFallbacks(), settings, normalizedRuleSets, migrateAutomaticExtraRequirement), migratedConverterIds);
 };
 
+const withoutImageProtocolRuntime = <T extends ImageApiConfig>(config: T): T => {
+  const stored = { ...config };
+  delete stored.imageProtocolRuntime;
+  return stored;
+};
+
 export const normalizeState = (raw: unknown): AppState => {
   const fallback = createInitialState();
   if (!isRecord(raw)) return fallback;
@@ -3023,10 +3030,10 @@ export const normalizeState = (raw: unknown): AppState => {
   const incomingSettings = isRecord(source.settings) ? source.settings : {};
   const textApi = mergeDefined(fallback.settings.textApi, incomingSettings.textApi);
   const visionApi = mergeDefined(fallback.settings.visionApi, incomingSettings.visionApi);
-  const imageApi = normalizeComfyUIImageConfig(
+  const imageApi = withoutImageProtocolRuntime(normalizeComfyUIImageConfig(
     mergeDefined(fallback.settings.imageApi, incomingSettings.imageApi),
     0,
-  );
+  ));
   const videoTaskApi = mergeDefined(fallback.settings.videoTaskApi, incomingSettings.videoTaskApi);
   const comfyuiVideo = mergeDefined(defaultComfyVideoConfig, incomingSettings.comfyuiVideo);
   comfyuiVideo.workflows = Array.isArray(comfyuiVideo.workflows) ? comfyuiVideo.workflows : [];
@@ -3069,12 +3076,12 @@ export const normalizeState = (raw: unknown): AppState => {
       fallback.settings.imageApi,
       profile,
     ) as ImageApiProfile;
-    return normalizeComfyUIImageConfig(
+    return withoutImageProtocolRuntime(normalizeComfyUIImageConfig(
       withImageDefaults,
       typeof profile.createdAt === 'number' && Number.isFinite(profile.createdAt) && profile.createdAt >= 0
         ? profile.createdAt
         : 0,
-    );
+    ));
   });
   const activeProfileId = (requested: unknown, profiles: Array<{ id: string }>): string | null => {
     if (requested === null) return null;

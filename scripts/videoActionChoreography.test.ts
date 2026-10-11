@@ -7,7 +7,11 @@ import { getH3PromptProtocolIssue, readH3PromptProtocol, repairH3PromptProtocolW
 import { hasCurrentOfficialH3Prompt } from '../src/officialPrompt';
 import { VIDEO_ACTION_CHOREOGRAPHY_RULE, VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE,
   VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE, VIDEO_ACTION_CAUSALITY_RULE,
-  VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE, withVideoActionChoreographyScope } from '../src/videoActionChoreographyRules';
+  VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE, withVideoActionChoreographyScope,
+  LEGACY_VIDEO_ACTION_CHOREOGRAPHY_RULE_V1_8_1, LEGACY_VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE_V1_8_1,
+  LEGACY_VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE_V1_8_1, LEGACY_VIDEO_ACTION_CAUSALITY_RULE_V1_8_1,
+  LEGACY_VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE_V1_8_1 } from '../src/videoActionChoreographyRules';
+import { LEGACY_VIDEO_INTERACTION_RULES_V1_8_1, LEGACY_VIDEO_INTERACTION_TRANSLATION_RULE_V1_8_1 } from '../src/videoInteractionRules';
 import { generateSeedanceBilingualOutput, getOfficialSeedanceSourceFingerprint } from '../src/seedancePrompt';
 import { regenerateSequenceReferencePrompt } from '../src/sequenceReferencePrompt';
 import { resolveConfirmedMasterSliceSource } from '../src/confirmedMasterSliceSource';
@@ -23,10 +27,16 @@ import type { AiStoryboardShotPlan, Character, ConverterPreset, ReferenceAsset, 
 type Scope = 'generation' | 'existing' | 'translation';
 const rules = [VIDEO_ACTION_CHOREOGRAPHY_RULE, VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE,
   VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE];
+const legacy181Blocks = [LEGACY_VIDEO_ACTION_CHOREOGRAPHY_RULE_V1_8_1,
+  LEGACY_VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE_V1_8_1,
+  LEGACY_VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE_V1_8_1,
+  LEGACY_VIDEO_ACTION_CAUSALITY_RULE_V1_8_1, LEGACY_VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE_V1_8_1,
+  LEGACY_VIDEO_INTERACTION_RULES_V1_8_1, LEGACY_VIDEO_INTERACTION_TRANSLATION_RULE_V1_8_1];
 const assertScope = (system: string, scope: Scope): void => {
   const selected = rules[scope === 'generation' ? 0 : scope === 'existing' ? 1 : 2];
   for (const rule of rules) assert.equal(system.split(rule).length - 1, rule === selected ? 1 : 0,
     `request receives only the ${scope} action authority, once`);
+  for (const legacy of legacy181Blocks) assert.ok(!system.includes(legacy), 'retired complete rules cannot retain competing request authority');
 };
 const block = (user: string, tag: string): any => {
   const match = user.match(new RegExp(`<${tag}>\\s*([\\s\\S]*?)\\s*</${tag}>`, 'u'));
@@ -132,11 +142,14 @@ const eventCases = [{
 }];
 const eventTimes = [0, 6, 11, 16, 22, 29, 35];
 const assertEventDirection = (system: string, translation = false): void => {
-  for (const concept of [/直接受力对象/u, /最终具名目标/u, /支撑.*发力/u, /接触.*运动/u, /世界站位|世界关系/u]) {
-    assert.match(system, concept, 'the existing writer receives explicit actor/object/target and causal motion direction');
+  assert.ok(translation
+    ? system.includes(VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE) || system.includes(VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE)
+    : system.includes(VIDEO_ACTION_CHOREOGRAPHY_RULE) || system.includes(VIDEO_ACTION_CAUSALITY_RULE),
+  'the production request contains the complete instruction for its current writing authority');
+  if (translation) {
+    assert.ok(!system.includes(VIDEO_ACTION_CHOREOGRAPHY_RULE));
+    assert.ok(!system.includes(VIDEO_ACTION_CAUSALITY_RULE), 'translation cannot inherit the permission to expand source actions');
   }
-  assert.match(system, translation ? /不补中文未写/u : /摄影.*动作辨认/u,
-    translation ? 'translation preserves the approved enactment instead of designing a new action' : 'camera framing must expose the enacted contact');
 };
 
 // Frozen pre-change complete first-party block as it may appear in a user preset.
@@ -192,7 +205,10 @@ try {
         if (stage === 'convert') {
           const data = block(user, 'video_conversion_data');
           assert.equal(data.sourceStoryContent, story);
-          assert.deepEqual(data.shotEvidence.map((shot: any) => [shot.plannedAction, shot.plannedResult]), board.shots.map((shot) => [shot.action, shot.result]));
+          assert.deepEqual(data.shotEvidence.map((shot: any) => [shot.plannedAction, shot.plannedSpace, shot.plannedDirection, shot.plannedResult]),
+            board.shots.map((shot) => [shot.action, shot.space, shot.direction, shot.result]));
+          assert.equal(data.shotEvidence[1].previousShot.plannedResult, board.shots[0].result,
+            'the next exchange receives the actual preceding exit state');
           assert.deepEqual(block(user, 'current_reference_data').currentReferences.map((ref: any) => ref.id), context.assets.map((asset) => asset.id));
           return board.finalPrompt;
         }
@@ -373,7 +389,8 @@ try {
 
   // A custom preset containing an embedded generation block must lose that
   // permission at an existing-update boundary without editing the preset.
-  const embeddedConverter = { ...converter, systemPrompt: `${converter.systemPrompt}\n\n${legacyGenerationRule}\n\n${VIDEO_ACTION_CHOREOGRAPHY_RULE}` };
+  const embeddedConverter = { ...converter, systemPrompt: [converter.systemPrompt, legacyGenerationRule,
+    LEGACY_VIDEO_ACTION_CHOREOGRAPHY_RULE_V1_8_1, VIDEO_ACTION_CHOREOGRAPHY_RULE].join('\n\n') };
   const refreshBoard = makeBoard(); const refreshBefore = structuredClone(refreshBoard);
   let refreshCalls = 0;
   const refreshed = await convertStoryboardDraftToFinal({ draft: refreshBoard, converter: embeddedConverter,
@@ -461,7 +478,6 @@ try {
     const result = await convertStoryboardDraftToFinal({ draft: board, converter, characters: [actor], clean,
       request: async (system, user) => {
         calls++; assertScope(system, 'generation');
-        assert.match(system, /交谈、观察、静止、蓄势、轻微动作与停顿仍保留/u);
         const data = block(user, 'video_conversion_data'); assert.equal(data.sourceStoryContent, neutralStory);
         for (const shot of data.shotEvidence) assert.equal(shot.selectedPrivateFacts.length, privateSelection ? 1 : 0);
         if (privateSelection) assert.equal(data.shotEvidence[0].selectedPrivateFacts[0].profile.fullBody, actor.nsfwProfile?.fullBody);
@@ -512,10 +528,26 @@ try {
   // Helper strips only complete owned blocks. Literal custom additions remain
   // untouched, even if they mention the same marker as on-screen subject text.
   const custom = '用户自定义：屏幕上显示 VIDEO_ACTION_CHOREOGRAPHY_V1；保留我的构图。';
-  const mixed = [custom, ...rules, VIDEO_ACTION_CHOREOGRAPHY_RULE, legacyGenerationRule].join('\n\n');
-  const translatedScope = withVideoActionChoreographyScope(mixed, 'translation');
-  assertScope(translatedScope, 'translation'); assert.ok(translatedScope.includes(custom));
-  assert.ok(!translatedScope.includes(legacyGenerationRule), 'legacy generation authority is removed from a translation-only request');
+  const mixed = [custom, ...rules, VIDEO_ACTION_CHOREOGRAPHY_RULE, VIDEO_ACTION_CAUSALITY_RULE,
+    VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE, legacyGenerationRule, ...legacy181Blocks, custom].join('\n\n');
+  const mixedBefore = mixed;
+  for (const scope of ['planning', 'generation', 'existing', 'format-only', 'translation'] as const) {
+    const scoped = withVideoActionChoreographyScope(mixed, scope);
+    const expected = scope === 'planning' || scope === 'generation' ? 'generation'
+      : scope === 'translation' ? 'translation' : 'existing';
+    assertScope(scoped, expected);
+    assert.equal(scoped.split(custom).length - 1, 2, 'both exact custom additions survive scope composition');
+    assert.ok(!scoped.includes(legacyGenerationRule));
+    assert.ok(!scoped.includes(VIDEO_ACTION_CAUSALITY_RULE));
+    assert.ok(!scoped.includes(VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE));
+  }
+  const seedanceScoped = withVideoActionChoreographyScope(mixed, 'translation', 'seedance');
+  assert.equal(seedanceScoped.split(VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE).length - 1, 1);
+  for (const rule of [...rules, VIDEO_ACTION_CAUSALITY_RULE, ...legacy181Blocks, legacyGenerationRule]) {
+    assert.ok(!seedanceScoped.includes(rule), 'Seedance English receives only its preservation/translation format authority');
+  }
+  assert.equal(seedanceScoped.split(custom).length - 1, 2);
+  assert.equal(mixed, mixedBefore, 'scope selection never mutates the authored preset');
   // Frozen v2 fingerprint for these exact request facts. Merely observing
   // freshness cannot rewrite old derived text or trigger another model call.
   const cacheInput = { targetId: 'seedance-2.5', canonicalPrompt: '【0s-8s】沈衡将布袋抛给陆青，陆青接稳。',

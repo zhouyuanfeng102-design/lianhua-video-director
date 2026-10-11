@@ -2730,6 +2730,41 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
 .single-api-grid .api-profile-box { grid-template-columns: minmax(0, 1fr) auto; align-items: center; padding: 4px 5px; }
 .single-api-grid .api-profile-actions { align-items: center; }
 .single-api-grid .hint-box { padding: 6px 8px; font-size: calc(10px * var(--ui-font-scale, 1)); line-height: 1.35; }
+.single-api-grid .image-api-card {
+  display: flex; flex-direction: column; gap: 8px;
+}
+.image-api-card > .image-api-heading { align-items: center; margin-bottom: 0; gap: 12px; }
+.image-api-heading .image-api-enable { flex-shrink: 0; margin: 0; color: var(--text); }
+.image-api-form {
+  flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, .85fr) minmax(0, 1.15fr);
+  gap: 12px; align-content: start; align-items: start; overflow: auto;
+}
+.image-api-section {
+  min-width: 0; display: grid; gap: 10px; align-content: start;
+  padding: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel);
+}
+.image-api-section > h3 {
+  margin: 0; padding-bottom: 8px; border-bottom: 1px solid var(--line);
+  color: var(--violet); font-size: calc(12px * var(--ui-font-scale, 1));
+}
+.image-api-section .field { min-width: 0; align-content: start; }
+.image-api-section .api-fields-two { align-items: start; gap: 8px; }
+.image-api-section :is(input:not([type="checkbox"]), select) { min-width: 0; height: 32px; }
+.image-api-section .field-hint { overflow-wrap: anywhere; }
+.image-api-resolution-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; }
+.image-api-resolution-options { display: flex; align-items: center; gap: 18px; }
+.image-api-resolution-options > .check-row { margin: 0; gap: 6px; }
+.image-api-resolution-options > .check-row > input { margin: 0; }
+@media (max-width: 1250px) {
+  .image-api-form { gap: 8px; grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr); }
+  .image-api-section { gap: 8px; padding: 9px; }
+  .image-api-protocol-fields { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-height: 800px) {
+  .single-api-grid .image-api-card { gap: 6px; }
+  .image-api-section { gap: 7px; padding: 8px 10px; }
+  .image-api-section > h3 { padding-bottom: 6px; }
+}
 .video-api-card { min-height: 0; height: 100%; display: grid; align-content: start; gap: 5px; }
 .video-api-fields { grid-template-columns: repeat(4, minmax(0, 1fr)); align-content: start; }
 .credential-panel-card { min-height: 0; height: 100%; align-content: start; }

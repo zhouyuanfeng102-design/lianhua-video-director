@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
-import { SPATIAL_COORDINATE_RULE, SPATIAL_CONTINUITY_REVIEW_RULE, SPATIAL_TRANSLATION_RULE } from '../src/spatialContinuityRules';
+import {
+  SPATIAL_COORDINATE_RULE, SPATIAL_CONTINUITY_REVIEW_RULE, SPATIAL_TRANSLATION_RULE,
+  DIRECTED_ACTION_RELATION_RULE, STORYBOARD_FRAME_VISIBILITY_RULE, STORYBOARD_SPATIAL_FRAME_RULE,
+  LEGACY_STORYBOARD_SPATIAL_FRAME_RULE_V1_8_1,
+} from '../src/spatialContinuityRules';
 import * as ruleExports from '../src/videoActingCameraRules';
 import {
   STORY_MOVEMENT_RELATION_RULE, STORY_SPOKEN_CONTENT_RULE,
@@ -18,6 +22,9 @@ import {
   VIDEO_ACTING_CAMERA_REVIEW_RULE,
   VIDEO_ACTING_CAMERA_TRANSLATION_RULE,
   VIDEO_ACTING_CAMERA_RULES,
+  LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_1,
+  LEGACY_VIDEO_ACTING_CAMERA_TRANSLATION_RULE_V1_8_1,
+  stripLegacyVideoActingCameraRules,
 } from '../src/videoActingCameraRules';
 
 // Contract tests inspect only the instructions supplied to AI. They never
@@ -25,9 +32,12 @@ import {
 const tests: Array<{ name: string; run: () => void }> = [];
 const test = (name: string, run: () => void): void => { tests.push({ name, run }); };
 
-test('the module exports only text rules and the shared bundle contains each directing rule once', () => {
-  assert.equal(Object.keys(ruleExports).length, 9);
-  assert.ok(Object.values(ruleExports).every((value) => typeof value === 'string' && value.length > 0));
+test('the module exposes text contracts and one request-only compatibility helper; the current bundle contains each directing rule once', () => {
+  assert.equal(ruleExports.stripLegacyVideoActingCameraRules, stripLegacyVideoActingCameraRules);
+  for (const [name, value] of Object.entries(ruleExports)) {
+    if (name === 'stripLegacyVideoActingCameraRules') continue;
+    assert.ok(typeof value === 'string' && value.length > 0, `${name} must remain a text contract`);
+  }
   const rules = [
     VIDEO_NATURAL_PERFORMANCE_RULE, VIDEO_WORLD_SPACE_CAMERA_RULE,
     VIDEO_AI_SHOT_COVERAGE_RULE, VIDEO_CAMERA_SELECTION_RULE,
@@ -37,6 +47,42 @@ test('the module exports only text rules and the shared bundle contains each dir
   assert.equal(VIDEO_ACTING_CAMERA_RULES, rules.join('\n\n'));
   for (const rule of rules) assert.equal(VIDEO_ACTING_CAMERA_RULES.split(rule).length - 1, 1);
   assert.equal(VIDEO_ACTING_CAMERA_RULES.includes(VIDEO_ACTING_CAMERA_TRANSLATION_RULE), false);
+});
+
+test('request compatibility preserves complete current bundles and every current single camera/spatial/frame rule', () => {
+  const currentRules = [
+    VIDEO_ACTING_CAMERA_RULES, VIDEO_ACTING_CAMERA_TRANSLATION_RULE,
+    VIDEO_NATURAL_PERFORMANCE_RULE, VIDEO_WORLD_SPACE_CAMERA_RULE,
+    VIDEO_AI_SHOT_COVERAGE_RULE, VIDEO_CAMERA_SELECTION_RULE,
+    VIDEO_MOTIVATED_LIGHTING_RULE, VIDEO_ACTING_CAMERA_FIELD_RULE,
+    VIDEO_ACTING_CAMERA_REVIEW_RULE, SPATIAL_COORDINATE_RULE,
+    SPATIAL_CONTINUITY_REVIEW_RULE, SPATIAL_TRANSLATION_RULE,
+    DIRECTED_ACTION_RELATION_RULE, STORYBOARD_FRAME_VISIBILITY_RULE, STORYBOARD_SPATIAL_FRAME_RULE,
+  ];
+  for (const rule of currentRules) {
+    assert.equal(stripLegacyVideoActingCameraRules(rule), rule,
+      'shared legacy text nested inside a current block must not remove current instructions');
+  }
+  const currentRequest = currentRules.join('\ncustom separator\n');
+  assert.equal(stripLegacyVideoActingCameraRules(currentRequest), currentRequest);
+});
+
+test('request compatibility removes full changed legacy blocks in mixed requests while preserving current rules and custom text', () => {
+  const prefix = 'User custom direction: keep the original fight outcome.\n';
+  const suffix = '\nCustom appendix: the camera observes the action.';
+  const mixed = prefix + LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_1
+    + '\n' + VIDEO_ACTING_CAMERA_RULES + '\n'
+    + LEGACY_VIDEO_ACTING_CAMERA_TRANSLATION_RULE_V1_8_1
+    + '\n' + VIDEO_ACTING_CAMERA_TRANSLATION_RULE + '\n'
+    + LEGACY_STORYBOARD_SPATIAL_FRAME_RULE_V1_8_1
+    + '\n' + STORYBOARD_SPATIAL_FRAME_RULE + suffix;
+  const expected = prefix + '\n' + VIDEO_ACTING_CAMERA_RULES + '\n'
+    + '\n' + VIDEO_ACTING_CAMERA_TRANSLATION_RULE + '\n'
+    + '\n' + STORYBOARD_SPATIAL_FRAME_RULE + suffix;
+  assert.equal(stripLegacyVideoActingCameraRules(mixed), expected);
+  assert.equal(stripLegacyVideoActingCameraRules(LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_1), '');
+  assert.equal(stripLegacyVideoActingCameraRules(prefix + suffix), prefix + suffix,
+    'custom prose is not a semantic rewriting target');
 });
 
 test('performance follows story stimuli and permits warranted strong emotion without mechanical quotas', () => {
@@ -189,7 +235,9 @@ test('translation preserves confirmed acting and camera-space distinctions witho
   for (const requirement of [
     /已确认中文H3为唯一执行稿/u,
     /逐镜表演幅度、触发和回落/u,
-    /说话与倾听归属、世界路线、人物朝向、机位视向、可见背景/u,
+    /说话与倾听归属、世界路线、人物朝向/u,
+    /双方进入\/退出关系/u,
+    /机位视向、可见背景/u,
     /准确区分人物向目的地前进与摄影机向后退拍/u,
     /保留中文已经明确的强烈情绪或静止状态/u,
     /只修复翻译遗漏与歧义/u,

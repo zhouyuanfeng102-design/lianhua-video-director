@@ -11,6 +11,7 @@ import { createQaProcessHarness, findAvailableTcpPort, waitForCondition } from '
 const root = path.resolve(import.meta.dirname, '..');
 const version = JSON.parse(await fs.readFile(path.join(root, 'package.json'), 'utf8')).version;
 const electronOption = process.argv.indexOf('--electron');
+const checkImageProtocolAuto = process.argv.includes('--image-protocol-auto');
 const executable = electronOption === -1 ? null : path.resolve(process.argv[electronOption + 1] || '');
 if (electronOption !== -1) assert.ok(process.argv[electronOption + 1], '--electron requires an executable path');
 const output = path.join(root, 'output', 'playwright', `production-startup-${version}-${executable ? 'electron' : 'browser'}`);
@@ -86,9 +87,30 @@ try {
     await page.locator('.sidebar').waitFor({ state: 'visible' });
     assert.ok((await page.locator('body').innerText()).includes(`v${version}`), 'built renderer must show the release version');
     report.stages.push(`production-renderer-mounted-v${version}`);
-    await page.locator('.sidebar').getByRole('button', { name: '提示词导演台', exact: true }).click();
-    await page.locator('.source-settings-card').waitFor({ state: 'visible' });
-    report.stages.push('prompt-director-entry-rendered');
+    if (checkImageProtocolAuto) {
+      await page.locator('.sidebar').getByRole('button', { name: 'API 设置', exact: true }).click();
+      const card = page.locator('.image-api-card');
+      await card.waitFor({ state: 'visible' });
+      const protocol = card.getByLabel('生图协议', { exact: true });
+      const model = card.getByLabel('模型 / 工作流', { exact: true });
+      const decision = card.locator('[data-image-protocol]');
+      assert.equal(await protocol.inputValue(), 'auto');
+      await card.getByLabel('API 地址', { exact: true }).fill('https://relay.example.invalid/v1');
+      await model.fill('[Billing]gemini-3.1-flash-image-preview');
+      assert.equal(await decision.getAttribute('data-image-protocol'), 'openai-chat');
+      await model.fill('gpt-image-2.5-sunburst');
+      assert.equal(await protocol.inputValue(), 'auto');
+      assert.equal(await decision.getAttribute('data-image-protocol'), 'openai-compatible');
+      await protocol.selectOption('openai-chat');
+      assert.equal(await decision.getAttribute('data-image-protocol'), 'openai-chat');
+      await protocol.selectOption('auto');
+      assert.equal(await decision.getAttribute('data-image-protocol'), 'openai-compatible');
+      report.stages.push('image-api-default-auto-model-switch-and-manual-override-confirmed');
+    } else {
+      await page.locator('.sidebar').getByRole('button', { name: '提示词导演台', exact: true }).click();
+      await page.locator('.source-settings-card').waitFor({ state: 'visible' });
+      report.stages.push('prompt-director-entry-rendered');
+    }
     assert.deepEqual(report.pageErrors, []);
     assert.deepEqual(report.consoleErrors, []);
     assert.deepEqual(report.blockedRequests, []);

@@ -1,8 +1,9 @@
 import type { ImageApiConfig } from './types';
+import { resolveImageProtocol, type ImageProtocolSetting, type ResolvedImageProtocol } from './imageProtocol';
 
 export type ImageResolutionTier = '1K' | '2K' | '4K';
 export type ImageResolutionProfile = 'auto' | 'pixel-long-edge' | 'gpt-image-legacy' | 'gpt-image-modern' | 'gemini-k' | 'gemini-1k' | 'grok-k';
-export type ImageResolutionProtocol = 'openai-compatible' | 'openai-images' | 'openai-chat' | 'gemini' | 'xai';
+export type ImageResolutionProtocol = ImageProtocolSetting;
 export type ImageResolutionEncoding =
   | { kind: 'width-height'; width: number; height: number }
   | { kind: 'size'; value: string }
@@ -23,10 +24,11 @@ export interface ImageResolutionPlan {
 export const IMAGE_RESOLUTION_TECHNICAL_MAX_SIDE = 16384;
 const TIERS: readonly ImageResolutionTier[] = ['1K', '2K', '4K'];
 const PROFILES: readonly ImageResolutionProfile[] = ['auto', 'pixel-long-edge', 'gpt-image-legacy', 'gpt-image-modern', 'gemini-k', 'gemini-1k', 'grok-k'];
-const PROTOCOLS: readonly ImageResolutionProtocol[] = ['openai-compatible', 'openai-images', 'openai-chat', 'gemini', 'xai'];
 const EDGES = { '1K': 1024, '2K': 2048, '4K': 4096 } as const;
 type ResolutionConfig = Pick<ImageApiConfig, 'backend' | 'model'> & {
+  baseUrl?: string;
   imageProtocol?: ImageResolutionProtocol;
+  imageProtocolRuntime?: ResolvedImageProtocol;
   imageResolutionProfile?: ImageResolutionProfile;
   imageSupportedResolutions?: ImageResolutionTier[];
   imagePixelStep?: number;
@@ -94,7 +96,7 @@ const canonicalAspect = (value: string): string => {
 const configFields = (input: ImageResolutionConfigInput): ResolutionConfig => typeof input === 'string' ? { backend: input, model: '' } : input;
 export interface ImageResolutionCapabilities {
   profile: Exclude<ImageResolutionProfile, 'auto'>;
-  protocol: ImageResolutionProtocol;
+  protocol: ResolvedImageProtocol;
   pixelStep: number;
   supportedTiers: ImageResolutionTier[];
   verified: boolean;
@@ -102,7 +104,7 @@ export interface ImageResolutionCapabilities {
 }
 export const resolveImageResolutionCapabilities = (input: ImageResolutionConfigInput): ImageResolutionCapabilities => {
   const config = configFields(input);
-  const protocol = PROTOCOLS.includes(config.imageProtocol as ImageResolutionProtocol) ? config.imageProtocol! : 'openai-compatible';
+  const protocol = resolveImageProtocol(config);
   const model = config.model.trim().toLowerCase();
   const explicit = config.imageResolutionProfile && config.imageResolutionProfile !== 'auto' && PROFILES.includes(config.imageResolutionProfile);
   let profile: Exclude<ImageResolutionProfile, 'auto'> = 'pixel-long-edge';

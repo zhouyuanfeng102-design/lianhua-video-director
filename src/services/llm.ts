@@ -98,6 +98,7 @@ import { normalizeGeneratedImageData } from '../generatedImageData';
 import { normalizeReferenceImageDataUrl, referenceImageFileName } from '../imageReferenceData';
 import { createImageApiRequestError } from '../imageApiError';
 import { buildGeminiChatImageBody, readGeminiChatImageOutput, resolveGeminiChatImageEndpoint } from '../geminiChatImage';
+import { resolveImageProtocol } from '../imageProtocol';
 import { buildNovelAIImageRequest, parseNovelAIHttpResponse } from '../novelai';
 import {
   assertImageResolutionPlanForConfig,
@@ -3768,11 +3769,12 @@ export const requestShotRecommendation = async (
       VIDEO_PRIVATE_SCOPE_SELECTION_RULE,
       '每镜 sourceExcerpt 可填写你从完整 sourceStory 中自行选择的原文依据；该字段只帮助用户追溯，不是本地内容覆盖门禁。不要把改写文字冒充逐字原文；无需填写本地句子 ID。',
       '同时自行填写 space（空间关系）、performance（可见表演）、direction（朝向）和 dialogue（每句完整原对白及本镜相对起止区间，无对白写“无”）。程序直接排版你的字段，不会替你从 action 抽台词、按字数重排对白时间、猜测说话人、补写动作/镜头/光影/音效。action 中保留完整动作与发生顺序，sound 中保留你根据剧情判断的声音。',
-      'space 写本镜相对固定地标的位置及前后关系；direction 同时写人物面向、世界行进方向与画面运动方向；camera 写机位所在行进/对话轴线一侧及可见口型安排；performance 写入镜状态与听者反应；result 写镜尾的位置、朝向、动作完成状态。下一镜依据前镜结果安排入镜，不把人物翻面或跳位当成普通硬切。',
+      '先编排本镜双方的连续行动，再分配现有字段：space 写双方进入时相对固定地标的位置、真实间距及本镜移动如何接近或拉开；direction 分别写身体朝向、视线目标、武器攻向的具名对象与画面运动方向，三者不必机械同向；action 写进攻轨迹、对方同步挡闪、实际接触或落空及反馈，下一招从上一招的末态接续；result 写双方退出位置、运动阶段、姿态和武器状态中下一镜需要继承的内容。没有事件进展的空泛“战斗继续”不能替代双方末态。',
+      '最后按同一攻防事件写camera：摄影机位于交互轴哪一侧、看见谁及关键接触区、怎样跟随双方或交点；摄影机的推拉、裁切与反打不改变真实间距或把对手搬到身后。关键交锋优先让进攻与回应可辨，必要特写可以暂时裁掉一方，但在该镜仍交代具名目标的相对方向。performance 写当前刺激、发话归属与听者同时行动，不用展示脸部或冲向观众代替朝对手的进攻。',
       'dialogue 在每句原话旁直接注明说话人、声音身份、画内/背影/画外声源及相对起止时刻；不能只在遥远的全局人物档案里写性别。未获授权的其他人物在该句期间不发该句、不做同步说话口型。',
       STORYBOARD_STABLE_SUBJECT_CONTRACT,
       'characterContinuity 只包含项目人物的普通身份与衣着基准。人物出镜时必须保持对应 name、baseName、formLabel、variantOf、transformationType、gender、race、appearance 和身份 anchor。没有剧情明确形态转换时不得改变性别、物种或身体结构；如果全文明确发生转换，必须在对应镜头使用具体“谁·什么形态”的 name，并只使用该形态的资料，不把原始形态与转化形态合并。outfit 是没有剧情变化时继承的穿着基准；当前原文明示换装或已确认进入状态不同时，由你按真实时间顺序保持该变化，不强行恢复资料中的旧衣着。不要求把字段名写进 JSON，也不要把整份身份资料复写为每镜画面。',
-      'action 写该镜实际可见的一次动作、表演与结果，把心理说明转成可见证据；先安排剧情与完整发话再决定容纳它们的镜长，不反过来按AI自定镜长压缩原话，也不按固定动作阶段数、字数或每秒额度裁剪完整剧情与对白。已有准确可拍的动作描述可以沿用，不必为了词面变化改写。',
+      'action 写本镜实际可见的连续事件与双方回应，把心理说明转成可见证据。小说只写连续交战、连击或复杂动作时，在同一次交战和原结果内补足必要步法、攻击落点、接挡方式、受力与下一招承接；不是每镜只允许一次挥舞，也不凭空新增能力、伤情、胜负或对白。先安排剧情与完整发话再决定容纳它们的镜长，不反过来按AI自定镜长压缩原话，也不按固定动作阶段数、字数或每秒额度裁剪完整剧情与对白。已有准确可拍的动作描述可以沿用，不必为了词面变化改写。',
       nsfwDetailRule,
       '涉及走跑、起跳、转身、攻击、格挡、推拉或负重时，按剧情实际写出时长容得下的支撑脚与地面反力、重心转移、髋和躯干带动肩臂或腿、接触阻力与即时反馈、随动卸力和恢复平衡，避免滑步、漂浮、瞬间换姿势和僵硬肢体。',
       AUDIO_PROMPT_RULE,
@@ -6398,9 +6400,9 @@ const requestImageModelOnce = async (config: ImageApiConfig, input: string | Ima
   if ((config.backend === 'openai' || config.backend === 'novelai') && !config.model.trim()) throw new Error('请先填写图像模型名称');
   if (config.backend === 'comfyui') return requestComfyUiImage(config, options, width, height, onStart);
   if (config.backend === 'novelai') return requestNovelAiImage(config, options, width, height, onStart);
-  // Routing is explicit. Model aliases may select a capability profile, but
-  // never turn an OpenAI-compatible connection into another wire protocol.
-  const protocol = config.imageProtocol || 'openai-compatible';
+  // Resolve locally once; retries retain the saved transport through a runtime
+  // pin. Detection never submits probes or retries against another endpoint.
+  const protocol = resolveImageProtocol(config);
   if (config.backend === 'openai' && protocol === 'gemini') return requestGeminiImage(config, options, width, height, plan, onStart);
   if (config.backend === 'openai' && protocol === 'openai-chat') return requestGeminiChatImage(config, options, width, height, plan, onStart);
   const isStableDiffusion = config.backend === 'sd_webui';

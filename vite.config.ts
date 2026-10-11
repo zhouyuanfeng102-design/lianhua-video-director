@@ -54,7 +54,7 @@ export default defineConfig({
             .some((file) => normalized.endsWith(`/src/${file}`))) return 'story-causality';
           // Size modules read this technical limit during initialization.
           // It has only type imports, so keep it outside domain's runtime cycle.
-          if (normalized.endsWith('/src/imageResolution.ts')) return 'image-resolution';
+          if (['imageResolution.ts', 'imageProtocol.ts'].some((file) => normalized.endsWith(`/src/${file}`))) return 'image-resolution';
           // Dossier editing is independent of the large shared project domain.
           if (['characterDossierApplication.ts', 'components/CharacterDossierApplyDialog.tsx', 'components/CharacterDossierApplyDialog.css']
             .some((file) => normalized.endsWith(`/src/${file}`))) return 'character-dossier';

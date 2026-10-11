@@ -1,4 +1,4 @@
-import type { AppSettings, AppState, Project } from './types';
+import type { AppSettings, AppState, ImageApiConfig, Project } from './types';
 
 export type PersistedActiveProjectReference = { id: string; __activeProjectReference: true };
 export type PersistedAppState = Omit<AppState, 'projects'> & {
@@ -36,6 +36,13 @@ export const stateUtf8ByteLength = (text: string): number => {
   return bytes;
 };
 
+const withoutImageProtocolRuntime = <T extends ImageApiConfig>(config: T): T => {
+  if (config.imageProtocolRuntime === undefined) return config;
+  const stored = { ...config };
+  delete stored.imageProtocolRuntime;
+  return stored;
+};
+
 /** Pure shared implementation for synchronous exports and the renderer worker. */
 export const serializeStateSnapshot = (
   state: AppState,
@@ -52,6 +59,11 @@ export const serializeStateSnapshot = (
   });
   const serializedState: PersistedAppState = {
     ...state,
+    settings: {
+      ...state.settings,
+      imageApi: withoutImageProtocolRuntime(state.settings.imageApi),
+      imageApiProfiles: state.settings.imageApiProfiles.map(withoutImageProtocolRuntime),
+    },
     ...(projects ? { projects } : {}),
     schemaVersion: typeof state.schemaVersion === 'number' && Number.isFinite(state.schemaVersion)
       ? Math.max(policy.currentSchemaVersion, Math.floor(state.schemaVersion))
