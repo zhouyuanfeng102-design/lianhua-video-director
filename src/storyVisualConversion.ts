@@ -1,4 +1,21 @@
-import type { Project, StoryVisualConversionSnapshot } from './types';
+import type { AppState, Project, StoryVisualConversionSnapshot } from './types';
+import { sourceContentHash } from './sourceContentHash';
+import { STORY_VISUAL_ENGINE_VERSION, type StoryVisualDetailMode } from './storyVisualAction';
+
+/** Preview reuse and adoption have the same dependencies as a fresh request. */
+export const storyVisualPreparationFingerprint = (
+  state: Pick<AppState, 'settings' | 'storyExpansionPresets' | 'project'>,
+  detailMode: StoryVisualDetailMode,
+): string => {
+  const preset = state.storyExpansionPresets.find((item) => (
+    item.id === state.settings.defaultStoryExpansionPresetId && item.enabled
+  )) || state.storyExpansionPresets.find((item) => item.enabled);
+  return sourceContentHash(JSON.stringify({
+    engineVersion: STORY_VISUAL_ENGINE_VERSION, detailMode,
+    api: state.settings.textApi, preset: preset || null,
+    characters: state.project.characters, locations: state.project.locations, props: state.project.props,
+  }));
+};
 
 /** Only the exact adopted draft in its owning chapter may lend an original.
  * A similar title, a character name or another chapter is never evidence. */

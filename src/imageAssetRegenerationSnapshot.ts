@@ -1,6 +1,7 @@
 import type { ImageAssetRegenerationSnapshot, ImageGenerationTask, ReferenceAsset } from './types';
 import { normalizeImageApiSnapshot } from './imageApiSelection';
 import { normalizeImageReferenceAssetSnapshots } from './imageGeneration';
+import { normalizeCustomImageInput } from './customImageMetadata';
 
 /** Only safe small fields survive import. The separate asset mode marker is
  * retained by storage even when this returns undefined, preventing fallback. */
@@ -8,7 +9,8 @@ export const normalizeImageAssetRegenerationSnapshot = (value: unknown): ImageAs
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const record = value as Record<string, unknown>;
   if (record.version !== 1 || typeof record.model !== 'string'
-    || !Array.isArray(record.referenceAssetSnapshots) || !record.referenceAssetSnapshots.length) return undefined;
+    || !Array.isArray(record.referenceAssetSnapshots)
+    || (record.sourceKind !== 'custom' && !record.referenceAssetSnapshots.length)) return undefined;
   const imageApiSnapshot = normalizeImageApiSnapshot(record.imageApiSnapshot);
   const referenceAssetSnapshots = normalizeImageReferenceAssetSnapshots(record.referenceAssetSnapshots);
   if (!imageApiSnapshot?.config.enabled || !imageApiSnapshot.connectionFingerprint
@@ -21,13 +23,42 @@ export const normalizeImageAssetRegenerationSnapshot = (value: unknown): ImageAs
   );
   return {
     version: 1, model: record.model, imageApiSnapshot, referenceAssetSnapshots,
+    ...(record.sourceKind === 'custom' ? { sourceKind: 'custom' as const } : {}),
     ...optional('sourceFingerprint'), ...optional('regenerationRootTaskId'), ...optional('regenerationBaseName'),
+  };
+};
+
+/** Custom results retain their exact original request even after task/card deletion. */
+export const withCustomImageRegenerationSnapshot = (asset: ReferenceAsset, task: ImageGenerationTask): ReferenceAsset => {
+  if (task.assetKind !== 'custom') return asset;
+  const customImageInput = normalizeCustomImageInput(task.customImageInput);
+  const snapshot = normalizeImageAssetRegenerationSnapshot({
+    version: 1, sourceKind: 'custom', model: task.model, imageApiSnapshot: task.imageApiSnapshot,
+    referenceAssetSnapshots: task.referenceAssetSnapshots, sourceFingerprint: task.sourceFingerprint,
+    regenerationRootTaskId: task.regenerationRootTaskId || task.id,
+    regenerationBaseName: task.regenerationBaseName || task.name,
+  });
+  if (!customImageInput || !snapshot || !task.prompt.trim() || !Array.isArray(task.referenceAssetIds)
+    || snapshot.referenceAssetSnapshots.map((reference) => reference.id).join('\u0000') !== task.referenceAssetIds.join('\u0000')) {
+    throw new Error('自定义生图的原始要求、参考图或 API 快照不完整，无法保存可安全重试的结果资料；不会改用剧情、当前参考图或规则转换。');
+  }
+  return {
+    ...asset, customImageInput, imageRegenerationSnapshot: snapshot,
+    imageGenerationMode: snapshot.referenceAssetSnapshots.length ? 'image-to-image' : 'text-to-image',
+    prompt: task.prompt, negativePrompt: task.negativePrompt, imageBackend: task.backend, imageVariant: 'reference',
+    imagePromptRuleSetId: task.imagePromptRuleSetId, imagePromptRuleSetVersion: task.imagePromptRuleSetVersion,
+    imagePromptRuleSetName: task.imagePromptRuleSetName, imagePromptFormat: task.imagePromptFormat,
+    imageRequestSize: { width: task.width, height: task.height,
+      ...(task.sizeOverride === undefined ? {} : { sizeOverride: task.sizeOverride }),
+      ...(task.resolutionPlan ? { resolutionPlan: task.resolutionPlan } : {}),
+    },
   };
 };
 
 /** The original and every regenerated result carry the same frozen inputs.
  * Pixels/URLs/workflows/API keys are never copied into this snapshot. */
 export const withDirectImageRegenerationSnapshot = (asset: ReferenceAsset, task: ImageGenerationTask): ReferenceAsset => {
+  if (task.assetKind === 'custom') return withCustomImageRegenerationSnapshot(asset, task);
   if (task.imageGenerationMode !== 'image-to-image' || task.assetKind !== 'storyboard') return asset;
   const snapshot = normalizeImageAssetRegenerationSnapshot({
     version: 1, model: task.model, imageApiSnapshot: task.imageApiSnapshot,

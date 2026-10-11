@@ -35,6 +35,7 @@ import { defaultStoryboardImageOutputSize, normalizeStoryboardImageOutputSize } 
 import { normalizeImageApiSnapshot } from './imageApiSelection';
 import { imagePreparationStageLabel, normalizeImageTaskPreparationStage } from './imageTaskPreparation';
 import { normalizeImageAssetRegenerationSnapshot } from './imageAssetRegenerationSnapshot';
+import { normalizeCustomImageDraft, normalizeCustomImageInput } from './customImageMetadata';
 import { normalizeImageReferenceAssetSnapshots, normalizeStoryboardImageToImageSettings } from './imageGeneration';
 import { defaultComfyVideoConfig } from './videoGenerationTypes';
 import { defaultRunningHubVideoConfig, normalizeRunningHubVideoConfig } from './runningHubVideo';
@@ -780,7 +781,7 @@ const LEGACY_STORY_EXPANSION_GENERAL_V1_4_0: StoryExpansionPreset = {
   version: '1.4.0',
 };
 
-export const defaultStoryExpansionPresets: StoryExpansionPreset[] = [{
+const LEGACY_STORY_EXPANSION_GENERAL_V1_4_4: StoryExpansionPreset = {
   id: DEFAULT_STORY_EXPANSION_PRESET_ID,
   name: '剧情处理 · 画面描述转化与扩写',
   systemPrompt: [
@@ -804,6 +805,17 @@ export const defaultStoryExpansionPresets: StoryExpansionPreset[] = [{
   outputRules: 'optimize 输出完整、自然连贯的中文剧情画面描述，可按真实场景变化分段或加简短场景标题，不强制固定栏目；expand 输出围绕原主线扩写的完整中文剧情正文。两种模式均保留人物代号、原对白原话原语种原说话人顺序、对白与动作时序和事件因果。不得输出 H3、JSON、逐镜字段、秒数、时间轴、镜头参数、制作指令、摘要、提纲、分析、解释、规则复述或代码围栏。',
   enabled: true,
   version: '1.4.4',
+  updatedAt: 0,
+};
+
+export const defaultStoryExpansionPresets: StoryExpansionPreset[] = [{
+  ...LEGACY_STORY_EXPANSION_GENERAL_V1_4_4,
+  systemPrompt: LEGACY_STORY_EXPANSION_GENERAL_V1_4_4.systemPrompt
+    .replace('已经清晰的普通剧情可以保留有效表达。', '普通静态描述可以保留有效表达；打斗、多人互动和复杂操作应展开已有行动的连续过程，不能只换词或复述原文。')
+    .replace('转化不新增无依据的人物、装备、动作阶段、声效、时间地点或情节，不靠重复形容凑篇幅。', '转化不新增人物、装备、能力、新事件、新伤势或胜负；允许细化原文已经发生的动作，包括准备、发力或操作、路径、接触或避让、反应和结束状态，不机械走满固定步骤。原文未指定的步法、左右方向或站位只有在详细动作模式且不改变事件因果时才能作编排补充，须在元数据中单独标明，不作为原文事实。')
+    .replace('只交付完整正文，不输出分析或推理过程。', '遵循本次服务指定的事件理解或画面转化协议，结构字段只是内部资料，用户最终看到完整自然段正文；不输出推理过程。'),
+  outputRules: 'optimize 先按本次协议提取原文事件依据，再据此生成自然连贯的中文画面段落，段落元数据记录来源事件和编排补充。内部 JSON 由服务读取，正文 text 中不得出现 JSON、H3、逐镜字段、秒数、时间轴、镜头参数、制作指令或分析说明。expand 只输出围绕原主线扩写的完整中文剧情正文。两种模式保留人物代号、原对白原话原语种原说话人顺序、对白与动作时序、事件因果与结局。',
+  version: '1.5.0',
   updatedAt: now(),
 }];
 
@@ -1090,6 +1102,9 @@ const isUntouchedLegacyStoryExpansionPreset = (candidate: unknown, includeV100: 
   ) return true;
   if (LEGACY_STORY_EXPANSION_SEMANTIC_FIELDS.every(
     (field) => candidate[field] === LEGACY_STORY_EXPANSION_GENERAL_V1_4_0[field],
+  )) return true;
+  if (LEGACY_STORY_EXPANSION_SEMANTIC_FIELDS.every(
+    (field) => candidate[field] === LEGACY_STORY_EXPANSION_GENERAL_V1_4_4[field],
   )) return true;
   if (
     candidate.id === DEFAULT_STORY_EXPANSION_PRESET_ID
@@ -1522,7 +1537,7 @@ const AUTOFILL_TASK_INTERRUPTED_ERROR = '上次 AI 补齐因应用关闭或刷�
 const AUTOFILL_TASK_INVALID_ERROR = 'AI 补齐任务记录不完整，请返回图像工作台重新执行。';
 const VIDEO_TASK_SUBMISSION_INTERRUPTED_ERROR = '上次视频任务提交因应用关闭或刷新而中断，请重新提交。';
 const VIDEO_TASK_REMOTE_ID_MISSING_ERROR = '视频任务缺少远端任务 ID，应用重启后无法继续查询，请重新提交。';
-const imageTaskAssetKinds = new Set(['character', 'location', 'prop', 'grid', 'storyboard']);
+const imageTaskAssetKinds = new Set(['character', 'location', 'prop', 'grid', 'storyboard', 'custom']);
 const autofillTaskAssetKinds = new Set(['character', 'location', 'prop', 'grid']);
 const remoteVideoPollingStatuses = new Set(['submitted', 'running', 'unknown']);
 const imageTaskVariants = new Set([
@@ -1936,6 +1951,8 @@ const normalizeGenerationTasks = (incoming: unknown, projectId: string): Generat
         ? task.name
         : '未命名图像任务',
       assetKind: imageTaskAssetKinds.has(task.assetKind) ? task.assetKind : 'character',
+      ...(task.customImageInput !== undefined ? { customImageInput: normalizeCustomImageInput(task.customImageInput) } : {}),
+      ...(typeof task.customImageSavePending === 'boolean' ? { customImageSavePending: task.customImageSavePending } : {}),
       imageVariant: imageTaskVariants.has(task.imageVariant) ? task.imageVariant : 'reference',
       ...(task.imageGenerationMode === 'text-to-image' || task.imageGenerationMode === 'image-to-image'
         ? { imageGenerationMode: task.imageGenerationMode } : {}),
@@ -2687,6 +2704,9 @@ const normalizePersistedProject = (
   // project's editor state during a partial import.
   project.activeChapterId = typeof incoming.activeChapterId === 'string' ? incoming.activeChapterId : undefined;
   project.chapterWorkspaces = isRecord(incoming.chapterWorkspaces) ? incoming.chapterWorkspaces : undefined;
+  const customImageDraft = normalizeCustomImageDraft(incoming.customImageDraft);
+  if (customImageDraft) project.customImageDraft = customImageDraft;
+  else delete project.customImageDraft;
   // Presets belong to this project, including IDs whose assets are imported
   // later. Never inherit another project's voices through the import fallback.
   const voicePresets = normalizeProjectVoicePresets(incoming.voicePresets);
@@ -2737,6 +2757,7 @@ const normalizePersistedProject = (
       nsfwPrivatePart: rawNsfwPrivatePart,
       imageGenerationMode: rawImageGenerationMode,
       imageRegenerationSnapshot: rawImageRegenerationSnapshot,
+      customImageInput: rawCustomImageInput,
       imageRequestSize: rawImageRequestSize,
       characterReferenceId: rawCharacterReferenceId,
       ...asset
@@ -2751,6 +2772,7 @@ const normalizePersistedProject = (
         ? { imageGenerationMode: rawImageGenerationMode } : {}),
       ...(rawImageRegenerationSnapshot !== undefined
         ? { imageRegenerationSnapshot: normalizeImageAssetRegenerationSnapshot(rawImageRegenerationSnapshot) } : {}),
+      ...(rawCustomImageInput !== undefined ? { customImageInput: normalizeCustomImageInput(rawCustomImageInput) } : {}),
       ...(rawImageRequestSize !== undefined ? { imageRequestSize: normalizeImageRequestSize(rawImageRequestSize) } : {}),
       mediaType: item.mediaType || (item.type === 'video' ? 'video' : item.type === 'audio' ? 'audio' : item.type === 'clay-render' ? 'clay-render' : 'image'),
       tags: Array.isArray(item.tags) ? [...item.tags] : [],

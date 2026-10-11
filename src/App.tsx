@@ -1,6 +1,8 @@
 import { askChapterEntityResolutions, applyChapterEntityResolutions } from "./components/ChapterEntityConflictDialog";
 import { chapterContentForEntity } from "./chapters";
 import { imageTaskRuleMetadata } from "./imageTaskRuleMetadata";
+import { CustomImageWorkbenchPanel } from "./components/CustomImageWorkbenchPanel";
+import { retryCustomImageTask, retryCustomImageSave, type CustomImageGenerationContext } from "./customImageGeneration";
 import { useAssetViewportLayout } from "./useAssetViewportLayout";
 import { appColorModes, appColorThemes, normalizeAppColorMode, normalizeAppColorTheme, resolveAppColorMode } from "./appTheme";
 ﻿import { activeChapter, chapterScenes, chapterBoards, chapterPlans, chapterScopeProject, chapterWorkspace, withChapterWorkspace, withChapterSelection, migrateProjectChapters, appendChapters, addChapter, archiveChapter, reorderChapters, chapterIdForTask, chapterIdForAsset } from "./chapters";
@@ -59,6 +61,7 @@ import {
   ListVideo,
   Lock,
   MapPin,
+  MessageSquare,
   Moon,
   Move,
   Orbit,
@@ -138,7 +141,8 @@ import { StoryboardImageOutputSizeControls } from "./components/StoryboardImageO
 import { readGeneratedImageDimensions } from "./imageDimensions";
 import { getComfyImageSizeOverrideSupport } from "./comfyui";
 import type { StoryPreparationResult } from "./storyPreparationReview";
-import { matchingStoryVisualConversion, rememberStoryVisualConversion } from "./storyVisualConversion";
+import { matchingStoryVisualConversion, rememberStoryVisualConversion, storyVisualPreparationFingerprint } from "./storyVisualConversion";
+import type { StoryVisualDetailMode } from "./storyVisualAction";
 import { VideoGenerationSettings } from "./components/VideoGenerationSettings";
 import { useVideoGenerationController } from "./useVideoGenerationController";
 import { useVideoRuntimes } from "./videoRuntimeStore";
@@ -292,6 +296,7 @@ import {
   requestStoryBibleEnrichment,
   requestStoryboardVisibleCharacters,
   requestStoryPreparationWithReview,
+  requestStoryVisualParagraphRewrite,
   requestStoryDurationEstimate,
   requestAiStorySegmentation,
   requestTextModel,
@@ -1996,6 +2001,10 @@ export default function App() {
     String(DEFAULT_STORY_EXPANSION_TARGET_LENGTH),
   );
   const [storyPreparationMode, setStoryPreparationMode] = useState<StoryPreparationMode>("optimize");
+  const [storyVisualDetailMode, setStoryVisualDetailMode] = useState<StoryVisualDetailMode>("detailed");
+  const storyVisualDetailModeRef = useRef(storyVisualDetailMode);
+  storyVisualDetailModeRef.current = storyVisualDetailMode;
+  const [storyVisualProgress, setStoryVisualProgress] = useState("");
   const storyPreparationModeRef = useRef(storyPreparationMode);
   storyPreparationModeRef.current = storyPreparationMode;
   const [storyPreparationUndo, setStoryPreparationUndo] = useState<{
@@ -2004,7 +2013,7 @@ export default function App() {
   const [pendingStoryReview, setPendingStoryReview] = useState<{
     id: string; projectId: string; chapterId: string; before: string; sourceName: string;
     workspaceEpoch: number; result: StoryPreparationResult;
-    referenceFingerprint: string; storyReferenceContext?: StoryReferenceContext;
+    referenceFingerprint: string; settingsFingerprint: string; storyReferenceContext?: StoryReferenceContext;
   } | null>(null);
   const pendingStoryReviewRef = useRef(pendingStoryReview);
   pendingStoryReviewRef.current = pendingStoryReview;
@@ -2296,9 +2305,10 @@ export default function App() {
     || pendingStoryReview.before !== storyInput
     || pendingStoryReview.sourceName !== storyName
     || pendingStoryReview.referenceFingerprint !== storyReferenceFingerprint(state.project)
+    || pendingStoryReview.settingsFingerprint !== storyVisualPreparationFingerprint(state, storyVisualDetailMode)
   ));
   const storyPreparationReviewSummary = pendingStoryReview?.projectId === state.project.id
-    ? { warningCount: pendingStoryReview.result.warnings.length, stale: storyReviewStale }
+    ? { stale: storyReviewStale }
     : null;
   const openStoryPreparationReview = () => setStoryReviewOpen(true);
   const currentStoryVisualConversion = matchingStoryVisualConversion(state.project, activeChapter(state.project)?.id, storyInput);
@@ -6222,7 +6232,7 @@ export default function App() {
     }
   };
 
-  const handleExpandStory = async (requestMode: StoryPreparationMode) => {
+  const handleExpandStory = async (requestMode: StoryPreparationMode, options?: { regenerate?: boolean; paragraphId?: string }) => {
     if (storyExpansionAbortRef.current || busy) return;
     const requestedTargetLength = requestMode === "expand"
       ? normalizeStoryExpansionTargetLength(storyExpansionTargetLengthText)
@@ -6232,13 +6242,14 @@ export default function App() {
       return;
     }
     const existingReview = pendingStoryReviewRef.current;
-    if (requestMode === "optimize" && existingReview
+    if (requestMode === "optimize" && !options?.regenerate && !options?.paragraphId && existingReview
       && existingReview.projectId === stateRef.current.project.id
       && existingReview.chapterId === activeChapter(stateRef.current.project)?.id
       && existingReview.workspaceEpoch === workspaceEpochRef.current
       && existingReview.before === storyDraftRef.current.storyInput
       && existingReview.sourceName === storyDraftRef.current.storyName
-      && existingReview.referenceFingerprint === storyReferenceFingerprint(stateRef.current.project)) {
+      && existingReview.referenceFingerprint === storyReferenceFingerprint(stateRef.current.project)
+      && existingReview.settingsFingerprint === storyVisualPreparationFingerprint(stateRef.current, storyVisualDetailModeRef.current)) {
       setStoryReviewOpen(true);
       notify("已有 AI 画面转化结果待确认；已打开预览，没有再次请求模型。");
       return;
@@ -6274,6 +6285,18 @@ export default function App() {
     }
     const sourceStory = storyInput;
     const sourceStoryName = storyName;
+    const requestDetailMode = storyVisualDetailModeRef.current;
+    const requestSettingsFingerprint = storyVisualPreparationFingerprint(expansionState, requestDetailMode);
+    if (options?.paragraphId && (!existingReview
+      || existingReview.projectId !== expansionState.project.id
+      || existingReview.chapterId !== activeChapter(expansionState.project)?.id
+      || existingReview.workspaceEpoch !== workspaceEpochRef.current
+      || existingReview.before !== sourceStory || existingReview.sourceName !== sourceStoryName
+      || existingReview.referenceFingerprint !== requestReferenceFingerprint
+      || existingReview.settingsFingerprint !== requestSettingsFingerprint)) {
+      notify("原文或转化设置已变化，请先重新转化全文，再重做某一段。", "error");
+      return;
+    }
     storyPreparationModeRef.current = requestMode;
     setStoryPreparationMode(requestMode);
     const requestApiFingerprint = sourceContentHash(JSON.stringify(expansionState.settings.textApi));
@@ -6288,7 +6311,8 @@ export default function App() {
         && storyReferenceFingerprint(current.project) === requestReferenceFingerprint
         && sourceContentHash(JSON.stringify(current.settings.textApi)) === requestApiFingerprint
         && sourceContentHash(JSON.stringify(currentPreset || null)) === requestPresetFingerprint
-        && (requestMode !== "optimize" || sourceContentHash(JSON.stringify(current.project.characters)) === requestCharacterFingerprint);
+        && (requestMode !== "optimize" || (sourceContentHash(JSON.stringify(current.project.characters)) === requestCharacterFingerprint
+          && storyVisualPreparationFingerprint(current, storyVisualDetailModeRef.current) === requestSettingsFingerprint));
     };
     const requestProjectId = expansionState.project.id;
     const requestChapterId = activeChapter(expansionState.project)?.id;
@@ -6306,15 +6330,33 @@ export default function App() {
     const requestOperation = storyExpansionOperationRef.current + 1;
     storyExpansionOperationRef.current = requestOperation;
     setStoryExpansionBusy(true);
+    setStoryVisualProgress(options?.paragraphId ? "正在重做所选段落…" : requestMode === "optimize" ? "正在理解剧情与动作…" : "");
     try {
-      const preparationResult = await requestStoryPreparationWithReview(
+      const preparationContext = {
+        characters: expansionState.project.characters.filter((character) => !character.dossier?.archivedIntoCharacterId),
+        locations: expansionState.project.locations, props: expansionState.project.props,
+        referenceContext, detailMode: requestDetailMode,
+        onProgress: (stage: "understanding" | "visualizing" | "rewriting", completed?: number, total?: number) => {
+          if (requestController.signal.aborted) return;
+          if (storyExpansionOperationRef.current !== requestOperation || requestEpoch !== workspaceEpochRef.current
+            || stateRef.current.project.id !== requestProjectId || activeChapter(stateRef.current.project)?.id !== requestChapterId
+            || storyDraftRef.current.storyInput !== sourceStory || storyDraftRef.current.storyName !== sourceStoryName
+            || !hasCurrentPreparationSettings()) { requestController.abort(); return; }
+          const label = stage === "understanding" ? "正在理解剧情与动作" : stage === "visualizing" ? "正在细化动作与画面" : "正在重做所选段落";
+          setStoryVisualProgress(`${label}${total && total > 1 ? `（${Math.min(total, (completed || 0) + 1)}/${total}）` : ""}…`);
+        },
+      };
+      const preparationResult = options?.paragraphId && existingReview
+        ? await requestStoryVisualParagraphRewrite(expansionState.settings.textApi, sourceStory, existingReview.result,
+          options.paragraphId, requestController.signal, expansionPreset, preparationContext)
+        : await requestStoryPreparationWithReview(
         expansionState.settings.textApi,
         sourceStory,
         requestController.signal,
         expansionPreset,
         requestMode,
         requestedTargetLength,
-        { characters: expansionState.project.characters.filter((character) => !character.dossier?.archivedIntoCharacterId), referenceContext },
+        preparationContext,
       );
       if (
         requestController.signal.aborted
@@ -6329,17 +6371,16 @@ export default function App() {
       ) return;
       if (requestMode === "optimize") {
         const review = {
-          id: createId("story_review"), projectId: requestProjectId, chapterId: requestChapterId,
+          id: options?.paragraphId && existingReview ? existingReview.id : createId("story_review"), projectId: requestProjectId, chapterId: requestChapterId,
           before: sourceStory, sourceName: sourceStoryName,
           workspaceEpoch: requestEpoch, result: preparationResult,
           referenceFingerprint: requestReferenceFingerprint, storyReferenceContext: referenceContext,
+          settingsFingerprint: requestSettingsFingerprint,
         };
         pendingStoryReviewRef.current = review;
         setPendingStoryReview(review);
         setStoryReviewOpen(true);
-        notify(preparationResult.warnings.length
-          ? `AI 画面转化结果已返回，有 ${preparationResult.warnings.length} 项核对提示。原文未改动，由你决定是否采用；没有自动返修。`
-          : "AI 画面转化结果已返回，请对照全文后决定是否采用；原文未改动。");
+        notify("AI 画面转化结果已返回，请对照全文后决定是否采用；原文未改动。");
         return;
       }
       const expandedStory = preparationResult.text;
@@ -6370,11 +6411,13 @@ export default function App() {
         storyExpansionAbortRef.current = null;
         storyExpansionRequestIdentityRef.current = "";
         setStoryExpansionBusy(false);
+        setStoryVisualProgress("");
       }
     }
   };
 
   const keepOriginalStoryReview = () => {
+    storyExpansionAbortRef.current?.abort();
     pendingStoryReviewRef.current = null;
     setPendingStoryReview(null);
     setStoryReviewOpen(false);
@@ -6389,8 +6432,9 @@ export default function App() {
       || review.workspaceEpoch !== workspaceEpochRef.current
       || review.before !== currentDraft.storyInput
       || review.sourceName !== currentDraft.storyName
-      || review.referenceFingerprint !== storyReferenceFingerprint(stateRef.current.project)) {
-      notify("原文或参考资料已变化，旧转化结果不能覆盖当前文本。你仍可在预览中查看和复制。", "error");
+      || review.referenceFingerprint !== storyReferenceFingerprint(stateRef.current.project)
+      || review.settingsFingerprint !== storyVisualPreparationFingerprint(stateRef.current, storyVisualDetailModeRef.current)) {
+      notify("原文、参考资料或转化设置已变化，旧转化结果不能覆盖当前文本。你仍可在预览中查看和复制。", "error");
       return;
     }
     // Consume the preview before writing the draft, so a double-click cannot
@@ -6405,6 +6449,8 @@ export default function App() {
       id: review.id, chapterId: review.chapterId, sourceName: review.sourceName,
       sourceText: review.before, resultText: review.result.text, createdAt: Date.now(),
       referenceFingerprint: review.referenceFingerprint, storyReferenceContext: review.storyReferenceContext,
+      actionPlan: review.result.actionPlan, paragraphs: review.result.paragraphs,
+      engineVersion: review.result.engineVersion, detailMode: review.result.detailMode,
     };
     setState((current) => current.project.id === review.projectId
       && activeChapter(current.project)?.id === review.chapterId
@@ -6481,6 +6527,7 @@ export default function App() {
       const catalog = buildChapterEntityCatalog(originalProject);
       let rawAnalysis = await requestStoryAnalysis(analysisState.settings.textApi, sourceStory, requestController.signal, {
         entityCatalog: catalog, chapterId, referenceContext,
+        visualConversion: matchingStoryVisualConversion(originalProject, chapterId, sourceStory),
         onProgress: (completed, total) => { if (isAnalysisCurrent()) notify(`正在解析“${sourceStoryName}”：${completed}/${total} 部分，原文将完整处理。`); },
       });
       if (!isAnalysisCurrent()) return;
@@ -9147,6 +9194,7 @@ export default function App() {
     handleRestoreStoryPreparation,
     handleAnalyzeStory,
     storyExpansionBusy,
+    storyVisualProgress,
     storyReferenceUploading,
     handleStoryInputModeChange,
     handleStoryReferenceUpload,
@@ -9910,9 +9958,15 @@ export default function App() {
           key={pendingStoryReview.id}
           original={pendingStoryReview.before}
           result={pendingStoryReview.result}
-          stale={storyReviewStale || busy || storyExpansionBusy}
+          stale={storyReviewStale}
           fontScalePercent={uiFontScalePercent}
           referenceContext={pendingStoryReview.storyReferenceContext}
+          busy={storyExpansionBusy || busy}
+          progress={storyVisualProgress}
+          detailMode={storyVisualDetailMode}
+          onDetailModeChange={setStoryVisualDetailMode}
+          onRegenerate={() => void handleExpandStory("optimize", { regenerate: true })}
+          onRewriteParagraph={(paragraphId) => void handleExpandStory("optimize", { paragraphId })}
           onAdopt={() => adoptStoryReview(pendingStoryReview.id)}
           onKeepOriginal={keepOriginalStoryReview}
           onClose={() => setStoryReviewOpen(false)}
@@ -9922,7 +9976,9 @@ export default function App() {
         <StoryPreparationReviewDialog
           key={`source-${currentStoryVisualConversion.id}`}
           original={currentStoryVisualConversion.sourceText}
-          result={{ text: currentStoryVisualConversion.resultText, warnings: [] }}
+          result={{ text: currentStoryVisualConversion.resultText, warnings: [],
+            actionPlan: currentStoryVisualConversion.actionPlan, paragraphs: currentStoryVisualConversion.paragraphs,
+            engineVersion: currentStoryVisualConversion.engineVersion, detailMode: currentStoryVisualConversion.detailMode }}
           stale={false}
           sourceOnly
           referenceContext={currentStoryVisualConversion.storyReferenceContext}
@@ -10352,7 +10408,7 @@ interface AppContext {
   storyExpansionTargetLengthText: string;
   setStoryExpansionTargetLengthText: React.Dispatch<React.SetStateAction<string>>;
   storyPreparationMode: StoryPreparationMode;
-  storyPreparationReviewSummary: { warningCount: number; stale: boolean } | null;
+  storyPreparationReviewSummary: { stale: boolean } | null;
   openStoryPreparationReview: () => void;
   hasStoryVisualConversionSource: boolean;
   openStoryVisualConversionSource: () => void;
@@ -10368,6 +10424,7 @@ interface AppContext {
   handleStoryReferenceRemove: (referenceId: string) => void;
   handleStoryNarratorBinding: (binding: { referenceId: string; subjectId: string } | StoryNarrator | undefined) => void;
   storyExpansionBusy: boolean;
+  storyVisualProgress: string;
   directorWorkflow: Workflow;
   setDirectorWorkflow: (workflow: Workflow) => void;
   selectedDirectorSceneIds: string[];
@@ -10681,6 +10738,7 @@ function StoryView(ctx: AppContext) {
     handleRestoreStoryPreparation,
     handleAnalyzeStory,
     storyExpansionBusy,
+    storyVisualProgress,
     storyReferenceUploading,
     handleStoryInputModeChange,
     handleStoryReferenceUpload,
@@ -10843,32 +10901,37 @@ function StoryView(ctx: AppContext) {
       {storyPane === "input" ? (
         <div className="grid grid-main story-input-layout">
           <Card className="story-input-card">
-            <div className="row-between">
-              <div className="row">
-                <BookOpen size={18} color="var(--pink)" />
-                <StoryInputModeSwitch value={storyInputMode} onChange={handleStoryInputModeChange} disabled={busy || storyExpansionBusy} />
+            <div className="story-input-header">
+              <div className="row-between">
+                <div className="row">
+                  <BookOpen size={18} color="var(--pink)" />
+                  <StoryInputModeSwitch value={storyInputMode} onChange={handleStoryInputModeChange} disabled={busy || storyExpansionBusy} />
+                </div>
+                <div className="row story-source-header-actions">
+                  {hasStoryVisualConversionSource && (
+                    <Button small variant="ghost" onClick={openStoryVisualConversionSource}>查看转化来源</Button>
+                  )}
+                  <Button
+                    small
+                    icon={<Save size={14} />}
+                    onClick={handleSaveStory}
+                  >
+                    保存原文
+                  </Button>
+                </div>
               </div>
-              <div className="row story-source-header-actions">
-                {hasStoryVisualConversionSource && (
-                  <Button small variant="ghost" onClick={openStoryVisualConversionSource}>查看转化来源</Button>
-                )}
-                <Button
-                  small
-                  icon={<Save size={14} />}
-                  onClick={handleSaveStory}
-                >
-                  保存原文
-                </Button>
-              </div>
+              {storyPreparationReviewSummary && (
+                <div className="story-review-pending" role="status">
+                  <span>{storyPreparationReviewSummary.stale
+                    ? "有一份先前的 AI 结果；原文或转化设置已变化，可查看或重新转化。"
+                    : "AI 画面转化结果待确认"}</span>
+                  <Button small variant="ghost" onClick={openStoryPreparationReview}>查看转化结果</Button>
+                </div>
+              )}
+              {storyExpansionBusy && storyPreparationMode === "optimize" && storyVisualProgress && (
+                <div className="story-review-pending" role="status"><span>{storyVisualProgress}</span></div>
+              )}
             </div>
-            {storyPreparationReviewSummary && (
-              <div className="story-review-pending" role="status">
-                <span>{storyPreparationReviewSummary.stale
-                  ? "有一份先前的 AI 结果；原文已变化，仅供查看。"
-                  : `AI 画面转化结果待确认 · ${storyPreparationReviewSummary.warningCount} 项核对提示`}</span>
-                <Button small variant="ghost" onClick={openStoryPreparationReview}>查看转化结果</Button>
-              </div>
-            )}
             <Field label="章节名称">
               <input
                 value={storyName}
@@ -12393,6 +12456,16 @@ function storyboardReferenceGenerationContext(ctx: AppContext): DirectStoryboard
     }, storeImage: window.lianhuaDesktop?.storeGeneratedImage,
     notify: ctx.notify,
     reportError: (error, detail) => ctx.reportRuntimeError(detail?.stage || "image-generation", error, detail?.context),
+  };
+}
+
+function customImageGenerationContext(ctx: AppContext): CustomImageGenerationContext {
+  return {
+    getState: ctx.getCurrentState, update: ctx.setState, updateBackground: ctx.setBackgroundState,
+    loader: { readManagedImageDataUrl: window.lianhuaDesktop?.readManagedImageDataUrl, downloadImage: window.lianhuaDesktop?.downloadImage },
+    storeImage: window.lianhuaDesktop?.storeGeneratedImage,
+    notify: ctx.notify,
+    reportError: (error) => ctx.reportRuntimeError("custom-image-generation", error),
   };
 }
 
@@ -16776,11 +16849,12 @@ function ImageWorkbenchView(ctx: AppContext) {
     getBusyEpoch,
     setView,
   } = ctx;
-  type ImageWorkbenchAssetKind = ImageAssetKind | "storyboard";
+  type ImageWorkbenchAssetKind = ImageAssetKind | "storyboard" | "custom";
   const assetKind = activeImageAssetKind(storedAssetKind);
   const [storedWorkbenchAssetKind, setWorkbenchAssetKind] = useState<ImageWorkbenchAssetKind>(assetKind);
-  const workbenchAssetKind = storedWorkbenchAssetKind === "storyboard" ? "storyboard" : activeImageAssetKind(storedWorkbenchAssetKind);
+  const workbenchAssetKind = storedWorkbenchAssetKind === "storyboard" || storedWorkbenchAssetKind === "custom" ? storedWorkbenchAssetKind : activeImageAssetKind(storedWorkbenchAssetKind);
   const isStoryboardMode = workbenchAssetKind === "storyboard";
+  const isCustomMode = workbenchAssetKind === "custom";
   const [selectedStoryboardId, setSelectedStoryboardId] = useState(
     activeStoryboard?.id || state.project.storyboards[0]?.id || "",
   );
@@ -16803,8 +16877,8 @@ function ImageWorkbenchView(ctx: AppContext) {
     setSelectedStoryboardShotIds((current) => current.filter((id) => selectedStoryboard.shots.some((shot) => shot.id === id)));
   }, [selectedStoryboard?.id, selectedStoryboard?.shots]);
   useEffect(() => {
-    if (!isStoryboardMode) setWorkbenchAssetKind(assetKind);
-  }, [assetKind, isStoryboardMode]);
+    if (!isStoryboardMode && !isCustomMode) setWorkbenchAssetKind(assetKind);
+  }, [assetKind, isStoryboardMode, isCustomMode]);
   type ImageGenerationMode = "ordinary" | "private";
   type ImageGenerationOutputPane = "prompt" | "preview";
   interface ImageGenerationLaneState {
@@ -19375,7 +19449,7 @@ function ImageWorkbenchView(ctx: AppContext) {
       <SectionHeading
         eyebrow="IMAGE WORKBENCH"
         title="图像工作台"
-        description="生成角色、场景、物品、九宫格和指定分镜图片，不生成视频。"
+        description="生成角色、场景、物品、分镜图片，或自由描述自定义生图。"
         action={
           <div className="row">
             <Badge tone={imageWorkbenchApi.enabled && !imageApiSelection.issue ? "green" : "amber"}>
@@ -19392,7 +19466,7 @@ function ImageWorkbenchView(ctx: AppContext) {
           </div>
         }
       />
-      {dossierPendingBoards.length > 0 && <Card className="character-dossier-pending">
+      {!isCustomMode && dossierPendingBoards.length > 0 && <Card className="character-dossier-pending">
         <details>
           <summary>人物资料已更新 · {dossierPendingBoards.length} 组提示词待刷新</summary>
           <p className="muted">每次更新会调用文本 API，并保存旧稿。已提交任务使用原快照继续执行。</p>
@@ -19402,17 +19476,17 @@ function ImageWorkbenchView(ctx: AppContext) {
           </div>)}
         </details>
       </Card>}
-      <div className="grid grid-director">
-        <Card className={isStoryboardMode && imageFormPane !== "prompt" ? "storyboard-image-form-card" : undefined}>
+      <div className={`grid grid-director ${isCustomMode ? "custom-image-layout" : ""}`}>
+        <Card className={isCustomMode ? "custom-image-host" : isStoryboardMode && imageFormPane !== "prompt" ? "storyboard-image-form-card" : undefined}>
           <div className="row-between image-form-head">
             <div className="card-title">
               <div>
                 <h2>资产类型</h2>
-                <p>选择项目实体或手动填写参考资产</p>
+                <p>{isCustomMode ? "上传参考图与自定义要求，生成结果自动保存到资产库" : "选择项目实体或手动填写参考资产"}</p>
               </div>
               <ImageIcon size={20} color="var(--pink)" />
             </div>
-            <div className="segmented">
+            {!isCustomMode && <div className="segmented">
               <button
                 className={`segment ${imageFormPane === "form" ? "active" : ""}`}
                 onClick={() => setImageFormPane("form")}
@@ -19425,15 +19499,21 @@ function ImageWorkbenchView(ctx: AppContext) {
               >
                 提示词
               </button>
-            </div>
+            </div>}
           </div>
           <div className="segmented image-asset-kind-tabs">
-            {(["character", "location", "prop", "storyboard"] as const).map(
+            {(["character", "location", "prop", "storyboard", "custom"] as const).map(
               (item) => (
                 <button
                   key={item}
                   className={`segment ${workbenchAssetKind === item ? "active" : ""}`}
                   onClick={() => {
+                    if (item === "custom") {
+                      setWorkbenchAssetKind("custom");
+                      setImageGenerationMode("ordinary");
+                      setReferencePickerOpen(false);
+                      return;
+                    }
                     if (item === "storyboard") {
                       autofillTargetEpochRef.current = advanceAutofillTargetEpoch(
                         autofillTargetEpochRef.current,
@@ -19484,6 +19564,11 @@ function ImageWorkbenchView(ctx: AppContext) {
                       <Package size={14} />
                       物品
                     </>
+                  ) : item === "custom" ? (
+                    <>
+                      <MessageSquare size={14} />
+                      自定义生图
+                    </>
                   ) : (
                     <>
                       <Film size={14} />
@@ -19494,6 +19579,9 @@ function ImageWorkbenchView(ctx: AppContext) {
               ),
             )}
           </div>
+          {isCustomMode && <CustomImageWorkbenchPanel key={state.project.id} state={state} context={customImageGenerationContext(ctx)}
+            onOpenAssets={() => { ctx.setAssetLibrarySection("image"); ctx.setVideoAssetStoryboardFilter(""); setView("assets"); }}
+            onManageRules={() => { ctx.setRuleTab("image-rules"); setView("rules"); }} />}
           {isStoryboardMode && (
             <div className="storyboard-image-workbench-panel">
               <Field
@@ -19605,7 +19693,7 @@ function ImageWorkbenchView(ctx: AppContext) {
               )}
             </div>
           )}
-          {!isStoryboardMode && imageFormPane === "form" && (
+          {!isStoryboardMode && !isCustomMode && imageFormPane === "form" && (
             <>
               <div className="divider" />
               {assetKind !== "grid" && (
@@ -19737,7 +19825,7 @@ function ImageWorkbenchView(ctx: AppContext) {
               )}
             </>
           )}
-          {imageFormPane === "prompt" && (
+          {!isCustomMode && imageFormPane === "prompt" && (
             <div className="image-output-pane">
               <div className="prompt-copy image-prompt-copy">
                 {prompt || "尚未生成最终生图提示词。点击下方生成按钮后，文本 AI 会先按当前规则集和分类预设完成转换。"}
@@ -19755,7 +19843,7 @@ function ImageWorkbenchView(ctx: AppContext) {
             </div>
           )}
         </Card>
-        {!isStoryboardMode && (
+        {!isStoryboardMode && !isCustomMode && (
           <Card className={`image-output-card image-output-refined highlight ${imageGenerationMode === "private" ? "private" : "ordinary"}`}>
             <div className="row-between image-output-head">
               <div className="card-title">
@@ -22873,6 +22961,11 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
   }
   const tasks = state.project.generationTasks;
   const originalTask = tasks.find((candidate): candidate is ImageGenerationTask => isImageGenerationTask(candidate) && candidate.id === requestedTask.id) || requestedTask;
+  if (originalTask.assetKind === "custom") {
+    if (originalTask.customImageSavePending) await retryCustomImageSave(customImageGenerationContext(ctx), originalTask);
+    else await retryCustomImageTask(customImageGenerationContext(ctx), originalTask);
+    return;
+  }
   const currentShotRegeneration = canReconvertStoryboardImageTask(originalTask, state.project);
   const originalTaskWasTracked = tasks.some((candidate) => candidate.id === originalTask.id);
   const originalTaskIdentity = JSON.stringify(originalTask);
@@ -22968,6 +23061,7 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
     const effectiveTask = currentShotRegeneration
       ? { ...prepareCurrentShotImageRegenerationTask(originalTask, state.project), backend: imageApi.backend, model: imageApi.model }
       : originalTask;
+    if (effectiveTask.assetKind === "custom") throw new Error("自定义生图任务应使用独立生成流程。");
     if (effectiveTask.resolutionPlan) {
       assertImageResolutionPlanForConfig(effectiveTask.resolutionPlan, imageApi);
       if (effectiveTask.width !== effectiveTask.resolutionPlan.expected.width
@@ -23152,11 +23246,11 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
       const mimeType = result.generated.dataUrl?.match(/^data:([^;,]+)[;,]/iu)?.[1];
       const extension = mimeType === "image/jpeg" ? "jpg" : mimeType === "image/webp" ? "webp" : "png";
       const timestamp = Date.now();
-      const roles = { character: "character", location: "scene", prop: "prop", grid: "grid", storyboard: "composition" } as const;
+      const roles = { character: "character", location: "scene", prop: "prop", grid: "grid", storyboard: "composition", custom: "composition" } as const;
       const asset: ReferenceAsset = {
         id: createId("asset"), name: task.name,
         type: task.imageVariant === "first-frame" ? "first-frame" : task.imageVariant === "last-frame" ? "last-frame"
-          : task.assetKind === "storyboard" ? "reference" : task.assetKind,
+          : task.assetKind === "storyboard" || task.assetKind === "custom" ? "reference" : task.assetKind,
         role: task.imageVariant === "first-frame" ? "first-frame" : task.imageVariant === "last-frame" ? "last-frame" : roles[task.assetKind],
         dataUrl, url, mimeType, fileName: managed?.fileName || `${safeFileName(task.name)}.${extension}`,
         relativePath: managed?.relativePath, checksum: managed?.checksum, sizeBytes: managed?.sizeBytes,
@@ -23797,7 +23891,11 @@ function GenerationTasksView(ctx: AppContext) {
     const promptConfig = imageTaskRuleMetadata(task, state.imagePromptRules, resultAsset);
     const variantLabel = getImageVariantGenerationSpec(task.imageVariant)?.label || task.imageVariant;
     const inputMode = imageTaskGenerationMode(task);
-    const canRegenerate = canRegenerateImageTask(task, tasks)
+    const canRegenerate = (task.assetKind === "custom" && task.customImageInput
+      ? task.status !== "queued" && task.status !== "running" && !tasks.some(candidate => candidate.kind === "image"
+        && imageRegenerationRootId(candidate) === imageRegenerationRootId(task)
+        && (candidate.status === "queued" || candidate.status === "running"))
+      : canRegenerateImageTask(task, tasks))
       && !storyboardImageBatchLifecycle.isActive(`regenerate:${state.project.id}:${imageRegenerationRootId(task)}`);
     return (
       <Card key={task.id} id={`image-task-${task.id}`} className="job-card image-job-card regeneratable-image-task">
@@ -23858,14 +23956,17 @@ function GenerationTasksView(ctx: AppContext) {
               className="image-regenerate-button"
               icon={<RefreshCw size={13} />}
               disabled={!canRegenerate}
-              title={canRegenerate ? `重新生图：${task.name}。${canReconvertStoryboardImageTask(task, state.project)
+              title={task.assetKind === "custom" ? task.customImageSavePending ? "只重试保存已生成的图片，不再调用生图模型。"
+                : task.prompt ? "沿用已保存的最终提示词、参考图和尺寸生成新图，保留原图。"
+                  : "按本次任务保存的规则快照重新转换后生图。"
+                : canRegenerate ? `重新生图：${task.name}。${canReconvertStoryboardImageTask(task, state.project)
                 ? "按当前分镜和生图规则转换后生成，使用当前图像 API"
                 : task.imageApiSnapshot ? "沿用原生图 API 配置和尺寸" : "沿用提示词和尺寸，使用当前图像 API"}，保留原图。` : task.status === "queued" || task.status === "running"
                   ? "任务正在准备、排队或生成，请完成后再重新生图。"
                   : "本次准备未完成，缺少完整生图快照；请返回原分镜重新发起生成。"}
               onClick={() => void regenerateImageTask(ctx, task)}
             >
-              重新生图
+              {task.assetKind === "custom" && task.customImageSavePending ? "重试保存" : task.assetKind === "custom" && !task.prompt ? "重试规则转换" : "重新生图"}
             </Button>
             <Button
               small

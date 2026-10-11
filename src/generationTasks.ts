@@ -439,4 +439,5 @@ export const imageAssetKindLabel = (
   prop: '物品',
   grid: '九宫格',
   storyboard: '剧情分镜',
+  custom: '自定义生图',
 })[kind];

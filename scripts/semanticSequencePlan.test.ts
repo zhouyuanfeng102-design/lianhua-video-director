@@ -604,12 +604,19 @@ test('matching novel snapshots and aliases remain read-only and cannot override 
   const request = input();
   request.characterContinuity = [{ id: 'lin', name: '林舟', aliases: ['蓝衣人'] }];
   request.originalSourceContext = { id: 'conversion-1', chapterId: 'chapter-1', sourceName: '原始小说',
-    sourceText: '蓝衣人推开门。桥那头，山巅隐约可见。', resultText: request.story, createdAt: 10 };
+    sourceText: '蓝衣人推开门。桥那头，山巅隐约可见。', resultText: request.story, createdAt: 10,
+    actionPlan: { version: 1, summary: '推门后过桥', sourceParagraphs: [{ id: 'p1', text: '蓝衣人推开门。桥那头，山巅隐约可见。' }],
+      events: [{ id: 'push-door', sourceParagraphIds: ['p1'], evidence: '蓝衣人推开门。', actor: '蓝衣人', target: '门',
+        action: '推开门', phases: ['推门'], result: '门打开', uncertainties: [] }] },
+    paragraphs: [{ id: 'v1', sourceParagraphIds: ['p1'], eventIds: ['push-door'], text: request.story, stagingAdditions: [] }],
+    engineVersion: 'story-action-2.0', detailMode: 'detailed' };
   const copied = copySemanticSequencePlanningInput(request);
   assert.deepEqual(copied.originalSourceContext, request.originalSourceContext);
   copied.originalSourceContext!.sourceText = 'isolated original';
+  copied.originalSourceContext!.actionPlan!.events[0].phases!.push('副本动作');
   copied.characterContinuity![0].aliases!.push('isolated alias');
   assert.equal(request.originalSourceContext.sourceText, '蓝衣人推开门。桥那头，山巅隐约可见。');
+  assert.deepEqual(request.originalSourceContext.actionPlan!.events[0].phases, ['推门']);
   assert.deepEqual(request.characterContinuity[0].aliases, ['蓝衣人']);
   const plan = materialize(response(), request);
   plan.segments[0].content = '用户改成林舟沉默等候。';

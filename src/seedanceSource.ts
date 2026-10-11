@@ -2,12 +2,27 @@ import { buildOfficialH3CompileInput, buildOfficialH3References, buildOfficialH3
 import { officialH3ContextForStoryboard } from './officialH3Context';
 import { getOfficialSeedanceSourceFingerprint, type OfficialSeedancePromptInput } from './seedancePrompt';
 import { getVideoPromptInstructionLeak } from './videoPromptInstructionLeak';
+import { isSemanticSequencePlan, semanticSegmentSourceContext, semanticSegmentStoryContent } from './semanticSequencePlan';
 import type { Project, Storyboard } from './types';
 import { buildVideoSceneContext } from './videoSceneContext';
+
+/** Only the exact board/segment binding may contribute assigned action facts.
+ * Older boards retain their own saved source when a plan has since been edited. */
+const currentSemanticSourceContext = (project: Project, board: Storyboard) => {
+  if (!board.sequencePlanId || !board.segmentId || board.sourceStale) return undefined;
+  const plan = project.sequencePlans.find((candidate) => candidate.id === board.sequencePlanId);
+  if (!isSemanticSequencePlan(plan) || plan.chapterId !== board.chapterId) return undefined;
+  const segment = plan.segments.find((candidate) => candidate.id === board.segmentId);
+  if (!segment || segment.storyboardId !== board.id
+    || board.sourceStoryContent?.trim() !== semanticSegmentStoryContent(segment).trim()) return undefined;
+  try { return semanticSegmentSourceContext(plan, segment); }
+  catch { return undefined; } // Malformed historical evidence cannot replace saved board text.
+};
 
 /** Generation, copying and video source selection share this exact evidence snapshot. */
 export const buildOfficialSeedanceInput = (project: Project, board: Storyboard): OfficialSeedancePromptInput => {
   const context = officialH3ContextForStoryboard(project, board);
+  const sequenceSegmentContext = currentSemanticSourceContext(project, board);
   const references = buildOfficialH3References(board, context.assets, context.characters).map((reference) => {
     // Binary data belongs to the media transport. The writer consumes complete
     // recognized text facts, identities and checksum metadata, not base64 blobs.
@@ -29,6 +44,7 @@ export const buildOfficialSeedanceInput = (project: Project, board: Storyboard):
     constraints: board.promptPlan?.constraints || [board.globalLock, board.extraRequirement ? `制作要求：${board.extraRequirement}` : ''].filter(Boolean),
     sourceEvidence: {
       sourceStoryContent: board.sourceStoryContent || context.sceneContent || '',
+      ...(sequenceSegmentContext ? { sequenceSegmentContext } : {}),
       sourceSceneSnapshots: (board.sourceSceneSnapshots || []).map((scene) => ({ id: scene.id, title: scene.title, content: scene.content })),
       shots: board.shots.map((shot) => ({ ...shot, referenceAssetIds: shot.referenceAssetIds || [], prompt: shot.prompt || '' })),
       shotMode: board.shotMode,

@@ -1302,6 +1302,7 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
 .story-view { grid-template-rows: auto minmax(0, 1fr); gap: 6px !important; }
 .story-input-layout { min-height: 0; height: 100%; align-items: stretch; }
 .story-input-card { display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; gap: 6px; min-height: 0; }
+.story-input-header { display: grid; gap: 6px; min-width: 0; }
 .story-input-card .field + .field { margin-top: 0; }
 .story-input-card > .story-source-field { min-height: 0; grid-template-rows: auto minmax(0, 1fr) auto; }
 .story-source-textarea { height: 100%; min-height: 160px; resize: none; }

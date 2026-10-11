@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { requestStoryPreparationWithReview } from '../src/services/llm';
 import type { Character, TextApiConfig } from '../src/types';
+import { fixturePlan, fixtureParagraphs, readStoryVisualData, type CapturedStoryRequest } from './storyVisualTestFixtures';
 
 const character: Character = {
   id: 'shalltear', name: '夏提雅', aliases: ['红铠人'], gender: '女', apparentAge: '成年',
@@ -22,25 +23,28 @@ try {
   Object.defineProperty(globalThis, 'window', { configurable: true, writable: true, value: {
     lianhuaDesktop: { request: async (payload: { body?: string }) => {
       requests += 1;
-      messages.push(...JSON.parse(payload.body || '{}').messages);
-      return { status: 200, body: JSON.stringify({ choices: [{ message: { content: visual } }] }) };
+      const request = JSON.parse(payload.body || '{}') as CapturedStoryRequest;
+      messages.push(...request.messages);
+      const data = readStoryVisualData(request);
+      const body = data.stage === 'understanding' ? fixturePlan(data) : fixtureParagraphs(data, visual);
+      return { status: 200, body: JSON.stringify({ choices: [{ message: { content: JSON.stringify(body) } }] }) };
     } },
   } });
   const result = await requestStoryPreparationWithReview(config, source, undefined,
     { systemPrompt: '旧规则：每场必须有出场人物/剧情/对白/背景信息栏目。', outputRules: '旧规则：写到三倍长度。' },
     'optimize', 10, { characters: [character] });
-  assert.equal(requests, 1, 'understanding and self-review use the existing single request');
+  assert.equal(requests, 2, 'understanding and visual description have separate requests');
   assert.equal(result.text, visual, 'the model result is delivered without local protagonist or action rewriting');
   const user = messages.find((message) => message.role === 'user')!.content;
-  const data = JSON.parse(user.match(/<story_expansion_data>\s*([\s\S]*?)\s*<\/story_expansion_data>/u)![1]);
+  const data = JSON.parse(user.match(/<story_visual_data>\s*([\s\S]*?)\s*<\/story_visual_data>/u)![1]);
   assert.equal(data.sourceTextOrRequirement, source, 'the full source includes the visible attack in background prose');
-  assert.deepEqual(data.characterContinuity[0].aliases, ['红铠人']);
-  assert.equal(data.characterContinuity[0].id, 'shalltear');
+  assert.deepEqual(data.continuity.characters[0].aliases, ['红铠人']);
+  assert.equal(data.continuity.characters[0].id, 'shalltear');
   assert.equal(data.targetLength, undefined, 'expansion length does not limit conversion');
   assert.equal(data.existingDialogueLines, undefined, 'no local speaker extraction biases interpretation');
   const prompt = messages.map((message) => message.content).join('\n');
   for (const required of ['STORY_CAUSALITY_V1', '被动句', '背景信息', '比喻', '攻击来源确实不明',
-    '不能自行变成真实力场', '原对白全文', '不强制出场人物/剧情/对白/背景信息', '当前模式：AI画面描述转化']) {
+    '不能自行变成真实力场', '原对白全文', '不套固定栏目', '当前模式：AI画面描述转化']) {
     assert.ok(prompt.includes(required), `the conversion request must express ${required}`);
   }
   assert.doesNotMatch(prompt, /PRIVATE_DOSSIER_MUST_STAY_LOCAL/u);

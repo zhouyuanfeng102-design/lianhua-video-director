@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import { createPortal } from 'react-dom';
-import type { StoryPreparationResult, StoryPreparationWarning } from '../storyPreparationReview';
+import { getStoryPreparationParagraphs, type StoryPreparationResult } from '../storyPreparationReview';
 import type { StoryReferenceContext } from '../types';
 import { StoryReferenceAnalysisView } from './StoryReferencePanel';
 import '../storyPreparationReview.css';
@@ -13,50 +13,63 @@ export interface StoryPreparationReviewDialogProps {
   sourceOnly?: boolean;
   fontScalePercent?: number;
   referenceContext?: StoryReferenceContext;
+  onRegenerate?: () => void;
+  onRewriteParagraph?: (paragraphId: string) => void;
+  busy?: boolean;
+  progress?: string;
+  detailMode?: 'faithful' | 'detailed';
+  onDetailModeChange?: (mode: 'faithful' | 'detailed') => void;
   onAdopt: () => void;
   onKeepOriginal: () => void;
   /** Hide the dialog without discarding the pending result. */
   onClose: () => void;
 }
 
-const WARNINGS_PER_PAGE = 2;
-type ReviewTab = 'comparison' | 'warnings';
+type ReviewTab = 'comparison' | 'actions';
 
-function DialogueDetail({ label, value }: {
-  label: string;
-  value: StoryPreparationWarning['expected'];
-}) {
-  return <div className="sr-review-detail">
-    <strong>{label}</strong>
-    <div className="sr-review-detail-text" tabIndex={0} aria-label={`${label}明细`}>
-      {value ? <>
-        <div className="sr-review-speaker">说话人：{value.speaker || '（未标明或未可靠识别）'}</div>
-        <div className="sr-review-utterance">{value.utterance || '（未识别到台词文字）'}</div>
-      </> : <span className="sr-review-muted">未识别到对应对白，请查看完整文本。</span>}
-    </div>
-  </div>;
+/** Metadata is displayed as prose, never executed as markup or instructions. */
+function detailText(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(detailText).filter(Boolean).join('；');
+  if (value && typeof value === 'object') {
+    const item = value as Record<string, unknown>;
+    return [item.label, item.description ?? item.text ?? item.action ?? item.phase]
+      .filter((part): part is string => typeof part === 'string' && Boolean(part)).join('：');
+  }
+  return '';
 }
 
 /** The returned story is always plain, read-only text until the caller accepts it. */
 export function StoryPreparationReviewDialog({
-  original, result, stale, sourceOnly = false, fontScalePercent = 100, referenceContext, onAdopt, onKeepOriginal, onClose,
+  original, result, stale, sourceOnly = false, fontScalePercent = 100, referenceContext,
+  onRegenerate, onRewriteParagraph, busy = false, progress, detailMode, onDetailModeChange,
+  onAdopt, onKeepOriginal, onClose,
 }: StoryPreparationReviewDialogProps) {
   const titleId = useId();
   const descriptionId = useId();
   const comparisonId = useId();
-  const warningsId = useId();
+  const actionsId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const originalRef = useRef<HTMLTextAreaElement>(null);
   const resultRef = useRef<HTMLTextAreaElement>(null);
   const callbacksRef = useRef({ onClose });
   const mountedRef = useRef(true);
   callbacksRef.current = { onClose };
-  const [tab, setTab] = useState<ReviewTab>('comparison');
-  const [warningPage, setWarningPage] = useState(0);
+  const paragraphs = getStoryPreparationParagraphs(result);
+  const hasParagraphs = paragraphs.length > 0;
+  const [tab, setTab] = useState<ReviewTab>(hasParagraphs && !sourceOnly ? 'actions' : 'comparison');
+  const [selectedParagraphId, setSelectedParagraphId] = useState(paragraphs[0]?.id ?? '');
   const [copyStatus, setCopyStatus] = useState('');
-  const pageCount = Math.max(1, Math.ceil(result.warnings.length / WARNINGS_PER_PAGE));
-  const currentPage = Math.min(warningPage, pageCount - 1);
-  const pageWarnings = result.warnings.slice(currentPage * WARNINGS_PER_PAGE, (currentPage + 1) * WARNINGS_PER_PAGE);
+  const sourceParagraphMap = new Map((result.actionPlan?.sourceParagraphs ?? []).map((paragraph) => [paragraph.id, paragraph.text]));
+  const paragraphSources = (paragraph: typeof paragraphs[number]) => paragraph.sourceParagraphIds
+    .map((id) => sourceParagraphMap.get(id) ?? '').filter(Boolean).join('\n\n');
+  const selectedParagraph = paragraphs.find((paragraph) => paragraph.id === selectedParagraphId) ?? paragraphs[0];
+  const selectedEvents = selectedParagraph ? (result.actionPlan?.events ?? [])
+    .filter((event) => selectedParagraph.eventIds.includes(event.id)) : [];
+  const availableTabs: ReviewTab[] = ['comparison', ...(hasParagraphs ? ['actions' as const] : [])];
+  const activeTab = availableTabs.includes(tab) ? tab : 'comparison';
+  const actionDisabled = stale || busy || sourceOnly;
+  const currentDetailMode = detailMode ?? result.detailMode ?? 'detailed';
 
   useEffect(() => {
     mountedRef.current = true;
@@ -116,10 +129,13 @@ export function StoryPreparationReviewDialog({
   }, []);
 
   useEffect(() => {
-    setTab('comparison');
-    setWarningPage(0);
+    setTab(hasParagraphs && !sourceOnly ? 'actions' : 'comparison');
+    setSelectedParagraphId(paragraphs[0]?.id ?? '');
     setCopyStatus('');
-  }, [original, result]);
+    // Rewriting a paragraph must retain the active paragraph and review tab.
+    // A replacement original starts a new review, while result updates stay in place.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [original]);
 
   const copyText = async (source: 'original' | 'result') => {
     const value = source === 'original' ? original : result.text;
@@ -138,11 +154,11 @@ export function StoryPreparationReviewDialog({
   };
 
   const onTabKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>) => {
-    if (sourceOnly) return;
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
-    const nextTab = event.key === 'Home' ? 'comparison' : event.key === 'End' ? 'warnings'
-      : tab === 'comparison' ? 'warnings' : 'comparison';
+    const index = availableTabs.indexOf(activeTab);
+    const nextTab = event.key === 'Home' ? availableTabs[0] : event.key === 'End' ? availableTabs[availableTabs.length - 1]
+      : availableTabs[(index + (event.key === 'ArrowLeft' ? -1 : 1) + availableTabs.length) % availableTabs.length];
     setTab(nextTab);
     event.currentTarget.parentElement?.querySelector<HTMLButtonElement>(`[data-review-tab="${nextTab}"]`)?.focus();
   };
@@ -157,21 +173,35 @@ export function StoryPreparationReviewDialog({
           <h2 id={titleId}>{sourceOnly ? '画面描述 · 转化来源' : 'AI 画面描述转化 · 结果审阅'}</h2>
           <p id={descriptionId}>{sourceOnly
             ? '当前画面描述对应的处理前原文与已采用结果，可查看和复制。'
-            : '请对照全文检查人物、动作因果和原对白，再决定是否采用；当前原文尚未改动。'}</p>
+            : '查看 AI 返回的画面描述、动作理解与编排补充。采用后放入编辑区，当前原文尚未改动。'}</p>
         </div>
         <button type="button" className="btn sr-review-later" onClick={onClose}>{sourceOnly ? '关闭' : '稍后查看'}</button>
       </header>
 
       <div className="sr-review-tabs" role="tablist" aria-label="画面描述转化审阅视图">
         <button type="button" className="btn" role="tab" id={`${comparisonId}-tab`}
-          data-review-tab="comparison" aria-selected={tab === 'comparison'} aria-controls={comparisonId}
-          tabIndex={tab === 'comparison' ? 0 : -1} onClick={() => setTab('comparison')} onKeyDown={onTabKeyDown}>对照预览</button>
-        {!sourceOnly && <button type="button" className="btn" role="tab" id={`${warningsId}-tab`}
-          data-review-tab="warnings" aria-selected={tab === 'warnings'} aria-controls={warningsId}
-          tabIndex={tab === 'warnings' ? 0 : -1} onClick={() => setTab('warnings')} onKeyDown={onTabKeyDown}>核对提示（{result.warnings.length}）</button>}
+          data-review-tab="comparison" aria-selected={activeTab === 'comparison'} aria-controls={comparisonId}
+          tabIndex={activeTab === 'comparison' ? 0 : -1} onClick={() => setTab('comparison')} onKeyDown={onTabKeyDown}>全文对照</button>
+        {hasParagraphs && <button type="button" className="btn" role="tab" id={`${actionsId}-tab`}
+          data-review-tab="actions" aria-selected={activeTab === 'actions'} aria-controls={actionsId}
+          tabIndex={activeTab === 'actions' ? 0 : -1} onClick={() => setTab('actions')} onKeyDown={onTabKeyDown}>分段与 AI 依据（{paragraphs.length}）</button>}
       </div>
 
-      {stale && <p className="sr-review-stale" role="status">原文、参考资料或当前项目已变化，此结果对应旧资料，不能覆盖当前编辑区。仍可查看、复制或保留原文。</p>}
+      {!sourceOnly && (onRegenerate || onDetailModeChange || busy) && <div className="sr-review-conversion-tools">
+        {onDetailModeChange && <label className="sr-review-detail-mode">转化细节
+          <select aria-label="转化细节" value={currentDetailMode} disabled={busy}
+            onChange={(event) => onDetailModeChange(event.target.value === 'faithful' ? 'faithful' : 'detailed')}>
+            <option value="faithful">忠实细化</option><option value="detailed">详细动作与编排</option>
+          </select>
+        </label>}
+        <span className="sr-review-tool-note">{currentDetailMode === 'faithful' ? '细化原文已有动作，保留未确定信息。' : '细化动作过程，必要编排会列入补充说明。'}</span>
+        {onRegenerate && <button type="button" className="btn small" data-review-regenerate disabled={busy}
+          onClick={() => { if (!busy) onRegenerate(); }}>重新转化</button>}
+      </div>}
+
+      {busy && <p className="sr-review-progress" role="status" aria-live="polite">{progress || '正在转化，请稍候…'}</p>}
+
+      {stale && <p className="sr-review-stale" role="status">原文、参考资料、设置或当前项目已变化，此结果对应旧输入，不能覆盖当前编辑区。可重新转化，或查看、复制旧结果。</p>}
 
       {referenceContext && <details className="sr-review-reference-source">
         <summary>本次使用的参考资料：{referenceContext.references.map((reference) => `图${reference.number}`).join('、')}</summary>
@@ -192,7 +222,7 @@ export function StoryPreparationReviewDialog({
       </details>}
 
       <div className="sr-review-content">
-        {tab === 'comparison' ? <section className="sr-review-comparison" id={comparisonId} role="tabpanel" aria-labelledby={`${comparisonId}-tab`}>
+        {activeTab === 'comparison' ? <section className="sr-review-comparison" id={comparisonId} role="tabpanel" aria-labelledby={`${comparisonId}-tab`}>
           <div className="sr-review-text-pane">
             <div className="sr-review-pane-heading"><label htmlFor={`${comparisonId}-original`}>处理前原文</label>
               <button type="button" className="btn small" onClick={() => { void copyText('original'); }}>复制原文</button></div>
@@ -203,27 +233,51 @@ export function StoryPreparationReviewDialog({
               <button type="button" className="btn small" onClick={() => { void copyText('result'); }}>复制AI结果</button></div>
             <textarea ref={resultRef} id={`${comparisonId}-result`} aria-label="AI 返回结果" value={result.text} readOnly spellCheck={false} wrap="soft" />
           </div>
-        </section> : <section className="sr-review-warnings" id={warningsId} role="tabpanel" aria-labelledby={`${warningsId}-tab`}>
-          {result.warnings.length ? <>
-            <p className="sr-review-advisory">以下是自动识别的疑点，可能存在误判，并不表示结果不可用。请结合完整原文核对，仍可选择采用。</p>
-            <div className="sr-review-warning-list" style={{ gridTemplateRows: `repeat(${pageWarnings.length}, minmax(0, 1fr))` }}>
-              {pageWarnings.map((warning, index) => <article className="sr-review-warning-card" key={warning.id}>
-                <div className="sr-review-warning-summary">
-                  <strong>{warning.index !== undefined ? `第 ${warning.index} 条对白` : `核对提示 ${currentPage * WARNINGS_PER_PAGE + index + 1}`}</strong>
-                  <p>{warning.message}</p>
-                </div>
-                {(warning.expected || warning.actual) && <div className="sr-review-warning-details">
-                  <DialogueDetail label="原文识别" value={warning.expected} />
-                  <DialogueDetail label="返回识别" value={warning.actual} />
-                </div>}
-              </article>)}
-            </div>
-            <div className="sr-review-pagination" aria-label="核对提示分页">
-              <span>第 {currentPage + 1} / {pageCount} 页 · 共 {result.warnings.length} 条</span>
-              <button type="button" className="btn small" disabled={currentPage === 0} onClick={() => setWarningPage(currentPage - 1)}>上一页</button>
-              <button type="button" className="btn small" disabled={currentPage >= pageCount - 1} onClick={() => setWarningPage(currentPage + 1)}>下一页</button>
-            </div>
-          </> : <div className="sr-review-empty" role="status">暂无核对提示。请对照全文确认人物、动作因果及对白是否完整。</div>}
+        </section> : <section className="sr-review-paragraphs" id={actionsId} role="tabpanel" aria-labelledby={`${actionsId}-tab`}>
+          <div className="sr-review-paragraph-toolbar">
+            <span>共 {paragraphs.length} 段 · 依据与编排说明由 AI 返回</span>
+          </div>
+          <div className="sr-review-paragraph-layout">
+            <nav className="sr-review-paragraph-nav" aria-label="转化段落">
+              {paragraphs.map((paragraph) => <button type="button" key={paragraph.id}
+                className="sr-review-paragraph-link" data-review-paragraph={paragraph.id}
+                aria-current={selectedParagraph?.id === paragraph.id ? 'true' : undefined}
+                onClick={() => setSelectedParagraphId(paragraph.id)}>
+                <span className="sr-review-paragraph-index">第 {paragraphs.indexOf(paragraph) + 1} 段</span>
+                <span className="sr-review-paragraph-excerpt">{paragraph.text}</span>
+              </button>)}
+            </nav>
+            {selectedParagraph ? <article className="sr-review-paragraph-detail" data-review-selected-paragraph={selectedParagraph.id}>
+              <div className="sr-review-paragraph-heading">
+                <strong>第 {paragraphs.indexOf(selectedParagraph) + 1} 段</strong>
+                {!sourceOnly && onRewriteParagraph && <button type="button" className="btn small" data-review-rewrite={selectedParagraph.id}
+                  disabled={actionDisabled} onClick={() => { if (!actionDisabled) onRewriteParagraph(selectedParagraph.id); }}>只重做这一段</button>}
+              </div>
+              <div className="sr-review-paragraph-comparison">
+                <section className="sr-review-prose-column"><h3>AI 返回的原文依据</h3>
+                  <div className="sr-review-prose" tabIndex={0} aria-label="本段原文依据">{paragraphSources(selectedParagraph) || '模型未提供本段依据。'}</div>
+                </section>
+                <section className="sr-review-prose-column"><h3>转化后的画面描述</h3>
+                  <div className="sr-review-prose" tabIndex={0} aria-label="本段画面描述">{selectedParagraph.text}</div>
+                </section>
+              </div>
+              {selectedEvents.length > 0 && <details className="sr-review-event-facts" open>
+                <summary>AI 剧情理解与动作说明（{selectedEvents.length}）</summary>
+                {selectedEvents.map((event, index) => <div className="sr-review-event" key={index}>
+                  <strong>{[event.actor, event.action, event.target].filter(Boolean).join(' · ')}</strong>
+                  {detailText(event.evidence) && <p><span>模型引用：</span>{detailText(event.evidence)}</p>}
+                  {detailText(event.phases) && <p><span>动作过程：</span>{detailText(event.phases)}</p>}
+                  {detailText(event.result) && <p><span>结果：</span>{detailText(event.result)}</p>}
+                  {detailText(event.uncertainties) && <p className="sr-review-event-uncertainty"><span>未确定：</span>{detailText(event.uncertainties)}</p>}
+                </div>)}
+              </details>}
+              <section className={`sr-review-staging${selectedParagraph.stagingAdditions.length ? ' has-additions' : ''}`} aria-label="本段编排补充">
+                <h3>编排补充 <span>（由 AI 声明）</span></h3>
+                {selectedParagraph.stagingAdditions.length ? <ul>{selectedParagraph.stagingAdditions.map((addition, index) => <li key={index}>{addition}</li>)}</ul>
+                  : <p>本段未声明编排补充。</p>}
+              </section>
+            </article> : <div className="sr-review-empty" role="status">暂无可显示的段落。</div>}
+          </div>
         </section>}
       </div>
 
@@ -232,7 +286,7 @@ export function StoryPreparationReviewDialog({
         <p>{sourceOnly ? '来源快照只供回查，不会覆盖当前文本。' : '采用后放入编辑区并保留转化来源；可还原处理前文本，确认后再保存或解析。'}</p>
         {!sourceOnly && <div className="sr-review-actions">
           <button type="button" className="btn" onClick={onKeepOriginal}>不采用，保留原文</button>
-          <button type="button" className="btn primary" disabled={stale} onClick={() => { if (!stale) onAdopt(); }}
+          <button type="button" className="btn primary" disabled={actionDisabled} onClick={() => { if (!actionDisabled) onAdopt(); }}
             title={stale ? '原文或项目已变化，不能采用此旧结果' : undefined}>采用到编辑区</button>
         </div>}
       </footer>

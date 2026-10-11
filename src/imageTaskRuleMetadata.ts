@@ -41,6 +41,16 @@ export const imageTaskRuleMetadata = (
   rules?: Pick<ImagePromptRulesState, 'ruleSets' | 'categoryPresets'>,
   resultAsset?: ReferenceAsset,
 ): { rule: ImageRuleLabel; preset: ImageRuleLabel } => {
+  if (task.assetKind === 'custom') {
+    const input = task.customImageInput || resultAsset?.customImageInput;
+    const rule = input?.ruleSelection;
+    return {
+      rule: input?.promptMode === 'rules'
+        ? label(rule?.id, rule?.name, rule?.ruleVersion, [])
+        : { text: '原文直发', title: '直接使用本次输入的原文，未使用规则转换。' },
+      preset: { text: '未使用分类预设', title: '自定义生图不使用人物、场景或物品分类预设。' },
+    };
+  }
   const stored = selectionRecord(task);
   const record = hasRecord(stored) ? stored
     : resultAsset && resultAsset.id === task.resultAssetId ? selectionRecord(resultAsset) : stored;

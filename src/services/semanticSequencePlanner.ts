@@ -53,6 +53,7 @@ const SEMANTIC_SEQUENCE_COMMON_RULE = [
   VIDEO_SCENE_CONTEXT_RULE,
   '先理解全文叙述视角、人物称呼和连续事件，再分段。背景信息、旁观者反应或被动句中记载的真实可见行动，同样属于必须分配的剧情事件，不能因为栏目名称、姓名未出现或正文只描述受击结果就遗漏行动者。结合characterContinuity中的id/name/aliases确认称呼对应，资料中的能力本身不代表本段发生过该事件。',
   'originalSourceContext若存在，是与当前story匹配的画面描述转化前原始小说，只用于回查指代、真实攻击来源、比喻及判断依据；当前story是被采用的剧情稿，不因旧原文而撤销用户已改变的剧情，不补入本段未分配的事件，也不提前揭示原文尚未知的身份。',
+  'originalSourceContext.actionPlan若存在，是转化时保留的原文事件依据：沿用events中的稳定id、行动者、对象、原动作和结果，按当前片段实际推进填写semanticSource.events及phase，不重新猜测攻击来源或把踢改为扔。paragraphs中的stagingAdditions是用户采用的画面编排补充，不是原文事实，保持已采用稿的动作连续性，但不能用编排补充制造新伤势、能力、胜负或身份。sourceEvidence仍从本次story中逐字取证；actionPlan.evidence属于旧原文，仅用于因果核对，不伪造为本次story的字符位置。',
   '长事件可以跨多个D秒片段；给每段分配该事件真实推进的不同阶段，入口、已完成状态、当前推进与出口要明确。不同段可以引用同一事件ID或原文证据，不等于重复发生；已经完成的动作和对白只作承接事实，不能再从头重演。前段还未完成的真实动作或长发话，必须标清连续位置而非重复起点。',
   '原文和AI创作必须分离：semanticSource.sourceEvidence只列本段所依据的原文字句，逐字保留；可选sourceStart/sourceEnd使用完整story的UTF-16半开区间，无法确认准确位置则两者都省略。content是你根据归属事件写成的本段完整可执行剧情正文，不是原文截取工具的输出，也不是总剧情摘要。不得用一段全文冒充每个片段正文。',
   'semanticSource.events列当前段实际承担的事件描述、稳定ID和可选phase；semanticSource.dialogues列本段实际发声的原话、准确说话人、稳定ID及可选language/continuation。ID在跨段延续时可相同，但具体阶段或接续内容不得无意重放。没有具体对白就给空dialogues，不把人物资料、名称、场景概述或交谈概述改成新台词。没有可引用事件或证据时相应数组可为空，由你保持真实语义。',

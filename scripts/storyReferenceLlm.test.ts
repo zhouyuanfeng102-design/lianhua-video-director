@@ -4,6 +4,7 @@ import {
   requestStoryAnalysis, requestStoryBibleEnrichment,
 } from '../src/services/llm';
 import type { StoryReferenceAnalysis, StoryReferenceContext, VisionApiConfig } from '../src/types';
+import { fixturePlan, fixtureParagraphs } from './storyVisualTestFixtures';
 
 const config: VisionApiConfig = {
   enabled: true, provider: 'openai_compatible', baseUrl: 'https://reference.example.test/v1',
@@ -185,9 +186,14 @@ try {
     assert.deepEqual(actual, expected, 'all image evidence, manual corrections and narrator must reach every stage');
   };
   for (const mode of ['expand', 'optimize'] as const) {
-    requests = []; responder = () => '图1左侧人物向图2左侧人物问好。';
+    requests = []; responder = (request) => {
+      if (mode === 'expand') return '图1左侧人物向图2左侧人物问好。';
+      const visualData = data(request, 'story_visual_data');
+      return JSON.stringify(visualData.stage === 'understanding' ? fixturePlan(visualData as any)
+        : fixtureParagraphs(visualData as any, '图1左侧人物向图2左侧人物问好。'));
+    };
     await requestStoryPreparationWithReview({ ...config, vision: false }, '让图1和图2人物互动。', undefined, undefined, mode, 600, { referenceContext: context });
-    assertFullContext(data(requests[0], 'story_expansion_data').referenceContext);
+    requests.forEach((request) => assertFullContext(data(request, mode === 'optimize' ? 'story_visual_data' : 'story_expansion_data').referenceContext));
     assert.equal(typeof requests[0].messages.at(-1)?.content, 'string', 'saved visual context works with a text-only model');
     assert.match(JSON.stringify(requests[0]), /不强制出场/u);
     checks++;

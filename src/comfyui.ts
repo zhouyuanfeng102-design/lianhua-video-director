@@ -23,6 +23,8 @@ export interface ComfyUIWorkflowImportResult {
 
 export interface ComfyUIWorkflowInput {
   prompt: string;
+  /** Preserve a custom raw prompt without trimming or inlining negative text. */
+  promptMode?: 'verbatim';
   negativePrompt: string;
   width: number;
   height: number;
@@ -366,10 +368,16 @@ const randomSeed = (): number => Math.floor(Math.random() * 2_147_483_647);
 const injectWorkflowValues = (
   value: unknown,
   replacements: Readonly<Record<string, string | number | boolean>>,
+  preserveInsertedText = false,
 ): unknown => {
   if (typeof value === 'string') {
     if (Object.prototype.hasOwnProperty.call(replacements, value)) {
       return replacements[value];
+    }
+    if (preserveInsertedText) {
+      const tokens = Object.keys(replacements).sort((left, right) => right.length - left.length)
+        .map((token) => token.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&'));
+      return value.replace(new RegExp(tokens.join('|'), 'gu'), (token) => String(replacements[token]));
     }
     return Object.entries(replacements).reduce(
       (result, [token, replacement]) => result.split(token).join(String(replacement)),
@@ -377,13 +385,13 @@ const injectWorkflowValues = (
     );
   }
   if (Array.isArray(value)) {
-    return value.map((item) => injectWorkflowValues(item, replacements));
+    return value.map((item) => injectWorkflowValues(item, replacements, preserveInsertedText));
   }
   if (isPlainObject(value)) {
     return Object.fromEntries(
       Object.entries(value).map(([key, child]) => [
         key,
-        injectWorkflowValues(child, replacements),
+        injectWorkflowValues(child, replacements, preserveInsertedText),
       ]),
     );
   }
@@ -561,9 +569,10 @@ export const buildComfyUIWorkflow = (
     workflow,
     ['__NEGATIVE_PROMPT__', '{{negative_prompt}}', '{{negativePrompt}}'],
   );
-  const prompt = hasNegativePlaceholder
+  const negativePrompt = input.promptMode === 'verbatim' ? '' : input.negativePrompt;
+  const prompt = input.promptMode === 'verbatim' || hasNegativePlaceholder
     ? input.prompt
-    : appendInlineNegativePrompt(input.prompt, input.negativePrompt);
+    : appendInlineNegativePrompt(input.prompt, negativePrompt);
   const seed = Number.isFinite(input.seed)
     ? Math.max(0, Math.floor(input.seed as number))
     : randomSeed();
@@ -575,9 +584,9 @@ export const buildComfyUIWorkflow = (
   const replacements: Record<string, string | number | boolean> = {
     __PROMPT__: prompt,
     '{{prompt}}': prompt,
-    __NEGATIVE_PROMPT__: input.negativePrompt,
-    '{{negative_prompt}}': input.negativePrompt,
-    '{{negativePrompt}}': input.negativePrompt,
+    __NEGATIVE_PROMPT__: negativePrompt,
+    '{{negative_prompt}}': negativePrompt,
+    '{{negativePrompt}}': negativePrompt,
     __WIDTH__: input.width,
     '{{width}}': input.width,
     __HEIGHT__: input.height,
@@ -606,7 +615,7 @@ export const buildComfyUIWorkflow = (
     '{{smea_dyn}}': input.smeaDynamic === true,
   };
 
-  return injectWorkflowValues(workflow, replacements) as Record<string, unknown>;
+  return injectWorkflowValues(workflow, replacements, input.promptMode === 'verbatim') as Record<string, unknown>;
 };
 
 const REFERENCE_IMAGE_MARKER_PATTERN = /参考|reference|ref\b|ip[ -]?adapter|identity|character|person|face|style|subject/iu;

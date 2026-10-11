@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { fixturePlan, fixtureParagraphs, readStoryVisualData, type CapturedStoryRequest } from './storyVisualTestFixtures';
 import {
   fetchAvailableModels,
   requestDirectorDecision,
@@ -4339,164 +4340,83 @@ test('story expansion sends the complete default expansion contract instead of f
   );
 });
 
-test('story optimization treats a deity pronoun plus delivery style as an implicit speaker', async () => {
-  let requestPayload: HttpPayload | undefined;
-  const source = '市中心，庞大的母巢盘踞在断裂的楼群之间。短暂的思索后，祂用和蔼的声音回答道：\n\n“不必惊慌，我已经向你的方向派出了增援，他们伤不到你。”';
-  const optimized = [
-    '【场景1：市中心】',
-    '出场人物：母巢',
-    '剧情：母巢注意到人类士兵并回应。',
-    '对白：母巢：“不必惊慌，我已经向你的方向派出了增援，他们伤不到你。”',
-  ].join('\n');
+test('story conversion gives both stages the full source for deity pronoun interpretation', async () => {
+  const requests: CapturedStoryRequest[] = [];
+  const source = '市中心，庞大的母巢盘踞在断裂的楼群之间。祂用和蔼的声音回答道：“不必惊慌。”';
+  const optimized = '母巢用和蔼的声音回答道：“不必惊慌。”';
   installDesktopHttpFake((payload) => {
-    requestPayload = payload;
-    return textResponse(optimized);
+    const request = JSON.parse(payload.body || '{}') as CapturedStoryRequest; requests.push(request);
+    const data = readStoryVisualData(request);
+    return textResponse(JSON.stringify(data.stage === 'understanding' ? fixturePlan(data) : fixtureParagraphs(data, optimized)));
   });
-
-  assert.equal(
-    await requestStoryPreparation(textConfig, source, undefined, undefined, 'optimize'),
-    optimized,
-  );
-  const body = JSON.parse(requestPayload?.body || '{}') as {
-    messages?: Array<{ role?: string; content?: string }>;
-  };
-  const userPrompt = body.messages?.find((message) => message.role === 'user')?.content || '';
-  const data = JSON.parse(userPrompt.match(/<story_expansion_data>\s*([\s\S]*?)\s*<\/story_expansion_data>/u)?.[1] || '{}') as Record<string, unknown>;
-  assert.equal(data.sourceTextOrRequirement, source);
-  for (const key of ['existingDialogue', 'existingDialogueLines', 'sourceExcerpt', 'speaker', 'speakers', 'beats', 'scenes']) {
-    assert.ok(!Object.prototype.hasOwnProperty.call(data, key), `optimization must not provide a locally inferred ${key} checklist`);
+  assert.equal(await requestStoryPreparation(textConfig, source), optimized);
+  assert.equal(requests.length, 2);
+  for (const request of requests) {
+    const data = readStoryVisualData(request);
+    assert.equal(data.sourceTextOrRequirement, source);
+    assert.equal(data.existingDialogueLines, undefined, 'AI interprets speakers using the complete source');
   }
 });
 
-test('story optimization preserves AI-authored speaker interpretation without local semantic warnings', async () => {
-  const utterance = '不必惊慌，我已经向你的方向派出了增援，他们伤不到你。';
-  const source = `母巢用和蔼的声音回答道：“${utterance}”`;
-  const optimizedFor = (speaker: string) => [
-    '【场景1：市中心】',
-    `出场人物：${speaker}`,
-    `剧情：${speaker}作出回应。`,
-    `对白：${speaker}：“${utterance}”`,
-  ].join('\n');
-  let explicitRequest: HttpPayload | undefined;
+test('story conversion retains changed AI speaker attribution with advisory comparison', async () => {
+  let calls = 0;
+  const source = '母巢用和蔼的声音回答道：“不必惊慌。”';
+  const changed = '西娅：“不必惊慌。”';
   installDesktopHttpFake((payload) => {
-    explicitRequest = payload;
-    return textResponse(optimizedFor('母巢'));
+    calls++;
+    const data = readStoryVisualData(JSON.parse(payload.body || '{}'));
+    return textResponse(JSON.stringify(data.stage === 'understanding' ? fixturePlan(data) : fixtureParagraphs(data, changed)));
   });
-  assert.equal(
-    await requestStoryPreparation(textConfig, source, undefined, undefined, 'optimize'),
-    optimizedFor('母巢'),
-  );
-  const explicitBody = JSON.parse(explicitRequest?.body || '{}') as {
-    messages?: Array<{ role?: string; content?: string }>;
-  };
-  const explicitUserPrompt = explicitBody.messages?.find((message) => message.role === 'user')?.content || '';
-  const explicitData = JSON.parse(explicitUserPrompt.match(/<story_expansion_data>\s*([\s\S]*?)\s*<\/story_expansion_data>/u)?.[1] || '{}') as Record<string, unknown>;
-  assert.equal(explicitData.sourceTextOrRequirement, source);
-  for (const key of ['existingDialogue', 'existingDialogueLines', 'sourceExcerpt', 'speaker', 'speakers', 'beats', 'scenes']) {
-    assert.ok(!Object.prototype.hasOwnProperty.call(explicitData, key), `optimization must not provide a locally inferred ${key} checklist`);
-  }
-
-  let changedRequests = 0;
-  installDesktopHttpFake(() => {
-    changedRequests += 1;
-    return textResponse(optimizedFor('西娅'));
-  });
-  const reviewed = await requestStoryPreparationWithReview(textConfig, source, undefined, undefined, 'optimize');
-  assert.equal(reviewed.text, optimizedFor('西娅'));
-  assert.equal(changedRequests, 1, 'speaker interpretation must not trigger a local semantic repair');
-  assert.deepEqual(reviewed.warnings, [], 'production must not reconstruct a local speaker checklist');
+  const result = await requestStoryPreparationWithReview(textConfig, source);
+  assert.equal(result.text, changed);
+  assert.ok(result.warnings.some((warning) => warning.kind === 'dialogue-speaker'));
+  assert.equal(calls, 2, 'advice causes no content-repair request');
 });
 
-test('story optimization disables DeepSeek thinking and retries an explicitly rejected output limit', async () => {
+test('story conversion keeps reasoning defaults and remembers an explicit output-cap fallback', async () => {
   const requests: HttpPayload[] = [];
-  const source = '雨夜，林澜推开仓库门，发现地面有一串湿脚印。她沿脚印走到窗边，停下检查破损的窗锁。';
-  const optimized = [
-    '【场景1：仓库·雨夜】',
-    '出场人物：林澜',
-    '剧情：林澜推开仓库门，发现地面的湿脚印，沿脚印走到窗边检查破损的窗锁。',
-    '对白：无',
-  ].join('\n');
+  const source = '林澜推开仓库门，沿湿脚印走到窗边。';
   installDesktopHttpFake((payload) => {
     requests.push(payload);
-    if (requests.length === 1) {
-      return {
-        status: 400,
-        body: JSON.stringify({ error: { message: 'Invalid max_tokens value: valid range is [1, 8192]' } }),
-      };
-    }
-    return textResponse(optimized);
+    if (requests.length === 1) return { status: 400, body: JSON.stringify({ error: { message: 'Invalid max_tokens value: valid range is [1, 8192]' } }) };
+    const data = readStoryVisualData(JSON.parse(payload.body || '{}'));
+    return textResponse(JSON.stringify(data.stage === 'understanding' ? fixturePlan(data) : fixtureParagraphs(data, source)));
   });
-
-  assert.equal(await requestStoryPreparation({
-    ...textConfig,
-    baseUrl: 'https://api.deepseek.com',
-    model: 'deepseek-v4-pro',
-    maxTokens: 100_000,
-  }, source, undefined, undefined, 'optimize'), optimized);
-  const bodies = requests.map((request) => JSON.parse(request.body || '{}')) as Array<{
-    max_tokens?: number;
-    thinking?: { type?: string };
-  }>;
-  assert.deepEqual(bodies.map((body) => body.max_tokens), [100_000, 8_192]);
-  assert.deepEqual(bodies.map((body) => body.thinking), [
-    { type: 'disabled' },
-    { type: 'disabled' },
-  ]);
+  const config = { ...textConfig, baseUrl: 'https://api.deepseek.com', model: 'deepseek-v4-pro', maxTokens: 100_000 };
+  assert.equal(await requestStoryPreparation(config, source), source);
+  const bodies = requests.map((request) => JSON.parse(request.body || '{}'));
+  assert.deepEqual(bodies.map((body) => body.max_tokens), [100_000, 8_192, 8_192]);
+  assert.ok(bodies.every((body) => body.thinking === undefined));
+  assert.equal(config.maxTokens, 100_000, 'provider fallback does not edit saved settings');
 });
 
-test('story optimization disables thinking for an explicitly selected DeepSeek provider behind an alias proxy', async () => {
-  let requestPayload: HttpPayload | undefined;
-  const source = '雨夜，林澜推开仓库门，发现地面有一串湿脚印。';
-  const optimized = [
-    '【场景1：仓库·雨夜】',
-    '出场人物：林澜',
-    '剧情：林澜推开仓库门，发现地面有一串湿脚印。',
-    '对白：无',
-  ].join('\n');
-  installDesktopHttpFake((payload) => {
-    requestPayload = payload;
-    return textResponse(optimized);
-  });
-
-  assert.equal(await requestStoryPreparation({
-    ...textConfig,
-    provider: 'deepseek',
-    baseUrl: 'https://text-proxy.example.com/gateway',
-    model: 'production-chat-alias',
-  }, source, undefined, undefined, 'optimize'), optimized);
-  const body = JSON.parse(requestPayload?.body || '{}') as {
-    thinking?: { type?: string };
-  };
-  assert.deepEqual(body.thinking, { type: 'disabled' });
-});
-
-test('story optimization preserves nonstandard AI prose without local format or semantic warnings', async () => {
+test('story conversion leaves DeepSeek reasoning unchanged behind an alias proxy', async () => {
   const requests: HttpPayload[] = [];
-  const source = '雨夜，林澜推开仓库门，发现地面有一串湿脚印。';
-  const optimized = [
-    '【场景1：仓库·雨夜】',
-    '出场人物：林澜',
-    '剧情：林澜推开仓库门，发现地面有一串湿脚印。',
-    '对白：无',
-  ].join('\n');
+  const source = '林澜推开仓库门。';
   installDesktopHttpFake((payload) => {
     requests.push(payload);
-    return textResponse(requests.length === 1 ? `整理结果如下：\n${optimized}` : optimized);
+    const data = readStoryVisualData(JSON.parse(payload.body || '{}'));
+    return textResponse(JSON.stringify(data.stage === 'understanding' ? fixturePlan(data) : fixtureParagraphs(data, source)));
   });
-
-  const reviewed = await requestStoryPreparationWithReview(textConfig, source, undefined, undefined, 'optimize');
-  assert.equal(reviewed.text, `整理结果如下：\n${optimized}`);
-  assert.deepEqual(reviewed.warnings, []);
-  assert.equal(requests.length, 1);
-  const requestBody = JSON.parse(requests[0]?.body || '{}') as {
-    messages?: Array<{ role?: string; content?: string }>;
-  };
-  assert.doesNotMatch(
-    requestBody.messages?.find((message) => message.role === 'user')?.content || '',
-    /<story_preparation_repair_data>/u,
-  );
+  assert.equal(await requestStoryPreparation({ ...textConfig, provider: 'deepseek', baseUrl: 'https://text-proxy.example.com/gateway', model: 'production-chat-alias' }, source), source);
+  assert.equal(requests.length, 2);
+  assert.ok(requests.every((request) => JSON.parse(request.body || '{}').thinking === undefined));
 });
 
+test('story conversion preserves readable nonstandard prose with metadata advice and no repair', async () => {
+  let calls = 0;
+  const source = '林澜推开仓库门。';
+  const body = '整理结果如下：林澜推开仓库门，门口露出一串湿脚印。';
+  installDesktopHttpFake((payload) => {
+    calls++;
+    const data = readStoryVisualData(JSON.parse(payload.body || '{}'));
+    return textResponse(data.stage === 'understanding' ? JSON.stringify(fixturePlan(data)) : body);
+  });
+  const result = await requestStoryPreparationWithReview(textConfig, source);
+  assert.equal(result.text, body);
+  assert.ok(result.warnings.some((warning) => warning.kind === 'format'));
+  assert.equal(calls, 2);
+});
 test('story expansion uses an OpenAI-compatible system/system/user sequence with output protocol after data', async () => {
   let requestPayload: HttpPayload | undefined;
   const source = '旅人进入废弃车站，发现墙上的时钟正在倒转。';

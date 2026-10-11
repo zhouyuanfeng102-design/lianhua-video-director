@@ -1,4 +1,5 @@
 import { normalizeStoryReferenceContext } from './storyReferences';
+import { normalizeStoryVisualActionPlan, normalizeStoryVisualParagraphs } from './storyVisualAction';
 import { MAX_PLANNED_SEQUENCE_SEGMENT_DURATION_SEC, requestedSegmentDurationWindows } from './sequenceDurationContract';
 import { sourceContentHash } from './sourceContentHash';
 import type { StoryPacingContext } from './storyPacing';
@@ -141,8 +142,15 @@ export const normalizeStoryVisualConversionSnapshot = (value: unknown): StoryVis
     || typeof value.sourceName !== 'string' || typeof value.sourceText !== 'string' || !value.sourceText.trim()
     || typeof value.resultText !== 'string' || !value.resultText.trim()
     || typeof value.createdAt !== 'number' || !Number.isFinite(value.createdAt)) return undefined;
+  const actionPlan = normalizeStoryVisualActionPlan(value.actionPlan, value.sourceText);
+  const paragraphs = normalizeStoryVisualParagraphs(value.paragraphs, actionPlan);
+  // Copy model metadata as supplied; reading a saved source never scores or
+  // checks its content against the adopted prose or quoted source.
   return { id: value.id, chapterId: value.chapterId, sourceName: value.sourceName,
     sourceText: value.sourceText, resultText: value.resultText, createdAt: value.createdAt,
+    ...(actionPlan ? { actionPlan } : {}), ...(paragraphs.length ? { paragraphs } : {}),
+    ...(typeof value.engineVersion === 'string' ? { engineVersion: value.engineVersion } : {}),
+    ...(value.detailMode === 'faithful' || value.detailMode === 'detailed' ? { detailMode: value.detailMode } : {}),
     ...(normalizeStoryReferenceContext(value.storyReferenceContext) ? { storyReferenceContext: normalizeStoryReferenceContext(value.storyReferenceContext) } : {}),
     ...(typeof value.referenceFingerprint === 'string' ? { referenceFingerprint: value.referenceFingerprint } : {}) };
 };

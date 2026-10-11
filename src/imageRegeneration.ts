@@ -9,6 +9,7 @@ import { normalizePrivateFullBodyOutputSize } from './imageOutputSize';
 import { IMAGE_RESOLUTION_TECHNICAL_MAX_SIDE, normalizeImageResolutionPlan } from './imageResolution';
 import type { ImageResolutionPlan } from './imageResolution';
 import { normalizeImageAssetRegenerationSnapshot, withDirectImageRegenerationSnapshot } from './imageAssetRegenerationSnapshot';
+import { normalizeCustomImageInput } from './customImageMetadata';
 import { assertValidFinalImagePrompt } from './imagePromptRules';
 import { buildImagePromptIdentityContext } from './imagePromptIdentityContext';
 import { characterDossierFormForRequest, dossierUsesStory } from './characterDossierPolicy';
@@ -63,6 +64,7 @@ export const canRegenerateImageTask = (
   tasks: readonly GenerationTask[],
 ): boolean => {
   if (active(task)) return false;
+  if (task.assetKind === 'custom' && (!task.prompt.trim() || task.customImageSavePending)) return false;
   const rootId = imageRegenerationRootId(task);
   return !tasks.some((candidate) => (
     candidate.kind === 'image'
@@ -72,6 +74,7 @@ export const canRegenerateImageTask = (
 };
 
 const inferAssetKind = (asset: ReferenceAsset): ImageGenerationTask['assetKind'] | null => {
+  if (asset.customImageInput || asset.imageRegenerationSnapshot?.sourceKind === 'custom') return 'custom';
   if (asset.sourceEntityKind) return asset.sourceEntityKind;
   if (asset.sourceStoryboardId || asset.type === 'first-frame' || asset.type === 'last-frame') return 'storyboard';
   if (asset.type === 'character' || asset.type === 'location' || asset.type === 'prop' || asset.type === 'grid') return asset.type;
@@ -129,6 +132,31 @@ export const resolveImageAssetRegenerationTask = (
   const existing = project.generationTasks.find((candidate): candidate is ImageGenerationTask => (
     candidate.kind === 'image' && candidate.resultAssetId === asset.id
   ));
+  if (asset.customImageInput || asset.imageRegenerationSnapshot?.sourceKind === 'custom') {
+    if (existing?.assetKind === 'custom') return existing;
+    const snapshot = normalizeImageAssetRegenerationSnapshot(asset.imageRegenerationSnapshot);
+    const customImageInput = normalizeCustomImageInput(asset.customImageInput);
+    const requestSize = savedImageRequestSize(asset);
+    if (!snapshot || snapshot.sourceKind !== 'custom' || !customImageInput || !requestSize || !asset.prompt?.trim()
+      || asset.imageBackend !== snapshot.imageApiSnapshot.config.backend) {
+      throw new Error('这张自定义图片的原始要求、最终提示词、尺寸、参考图或 API 快照缺失/损坏，不能按原要求重新生成；不会改用剧情或当前规则。');
+    }
+    const references = snapshot.referenceAssetSnapshots.map((reference) => reference.id);
+    return {
+      id: `asset-regeneration-${asset.id}`, kind: 'image', name: asset.name, assetKind: 'custom', imageVariant: 'reference',
+      customImageInput, status: 'succeeded', prompt: asset.prompt, negativePrompt: asset.negativePrompt,
+      ...requestSize, backend: snapshot.imageApiSnapshot.config.backend, model: snapshot.model,
+      imageApiSnapshot: snapshot.imageApiSnapshot,
+      imageGenerationMode: references.length ? 'image-to-image' : 'text-to-image',
+      imageInputMode: references.length ? 'image-to-image' : 'text-to-image',
+      imagePromptRuleSetId: asset.imagePromptRuleSetId, imagePromptRuleSetName: asset.imagePromptRuleSetName,
+      imagePromptRuleSetVersion: asset.imagePromptRuleSetVersion, imagePromptFormat: asset.imagePromptFormat,
+      sourceFingerprint: snapshot.sourceFingerprint, referenceAssetIds: references, primaryReferenceAssetIds: [],
+      referenceAssetSnapshots: snapshot.referenceAssetSnapshots, conversionSource: '', converterSystemPrompt: '',
+      regenerationRootTaskId: snapshot.regenerationRootTaskId, regenerationBaseName: snapshot.regenerationBaseName,
+      resultAssetId: asset.id, resultUrl: asset.url, createdAt: asset.createdAt, updatedAt: asset.updatedAt,
+    };
+  }
   // An explicit direct result marker cannot be downgraded by an incomplete
   // imported/deleted-and-restored task record lacking its execution mode.
   if (existing && (asset.imageGenerationMode !== 'image-to-image' || existing.imageGenerationMode === 'image-to-image')) return existing;
@@ -370,6 +398,16 @@ const directStoryboardReferenceSnapshots = (task: ImageGenerationTask): ImageRef
   return snapshots;
 };
 
+const customReferenceSnapshots = (task: ImageGenerationTask): ImageReferenceAssetSnapshot[] => {
+  const snapshots = normalizeImageReferenceAssetSnapshots(task.referenceAssetSnapshots);
+  if (!normalizeCustomImageInput(task.customImageInput) || !Array.isArray(task.referenceAssetSnapshots)
+    || !Array.isArray(task.referenceAssetIds) || snapshots.length !== task.referenceAssetSnapshots.length
+    || snapshots.map((snapshot) => snapshot.id).join('\u0000') !== task.referenceAssetIds.join('\u0000')) {
+    throw new Error('自定义生图的原始输入或参考图快照缺失/损坏，不能按原词重试；不会替换参考图或重新转换。');
+  }
+  return snapshots;
+};
+
 export const imageTaskNeedsLandscapeScopeRepair = (task: ImageGenerationTask): boolean => (
   isLandscapeImageRequest(task.assetKind, task.imageVariant)
   && !(task.converterSystemPrompt || '').includes(IMAGE_PROMPT_LANDSCAPE_SCOPE_CONTRACT)
@@ -382,6 +420,7 @@ const landscapeRegenerationNegativePrompt = (negativePrompt?: string): string =>
 };
 
 const regenerationNegativePrompt = (task: ImageGenerationTask): string | undefined => {
+  if (task.assetKind === 'custom') return task.negativePrompt;
   if (isNsfwPrivateImageTask(task)) return privateImageVariantNegativePrompt(task.imageVariant);
   const variantNegative = ordinaryImageVariantNegativePrompt(task.imageVariant);
   if (isLandscapeImageRequest(task.assetKind, task.imageVariant)) {
@@ -394,6 +433,14 @@ export const resolveImageRegenerationSource = (
   task: ImageGenerationTask,
   project: Project,
 ): RegenerationSource => {
+  if (task.assetKind === 'custom') {
+    if (!task.prompt.trim()) throw new Error('自定义任务没有已保存的最终提示词，请明确选择重新转换或编辑后重新生成；本次不会调用文本模型。');
+    const snapshots = customReferenceSnapshots(task);
+    return {
+      conversionSource: '', converterSystemPrompt: '', referenceAssetIds: snapshots.map((snapshot) => snapshot.id),
+      primaryReferenceAssetIds: [], referenceAssetSnapshots: snapshots,
+    };
+  }
   const privateTask = isNsfwPrivateImageTask(task);
   const privatePart = privateTaskPart(task);
   if (task.imageGenerationMode === 'image-to-image' && task.assetKind === 'storyboard' && !privateTask) {
@@ -604,7 +651,9 @@ export const buildImageRegenerationTask = (
     id: input.id,
     name: nextName(baseName, project),
     status: 'queued', backend: input.backend,
-    model: source.imageGenerationMode === 'image-to-image' ? source.model : input.model,
+    model: source.assetKind === 'custom' || source.imageGenerationMode === 'image-to-image' ? source.model : input.model,
+    ...(source.assetKind === 'custom' && source.customImageInput
+      ? { customImageInput: { ...source.customImageInput, operation: 'saved-final' as const }, customImageSavePending: undefined } : {}),
     ...(source.imageApiSnapshot ? { imageApiSnapshot: { ...source.imageApiSnapshot, config: { ...source.imageApiSnapshot.config } } } : {}),
     prompt: imageTaskNeedsLandscapeScopeRepair(source) ? '' : source.prompt,
     negativePrompt: regenerationNegativePrompt(source),
@@ -636,6 +685,13 @@ export const executeImageRegeneration = async <T>(
   },
 ): Promise<{ finalPrompt: string; generated: T }> => {
   const hasSavedPrompt = Boolean(task.prompt.trim()) && !imageTaskNeedsLandscapeScopeRepair(task);
+  if (task.assetKind === 'custom') {
+    if (!hasSavedPrompt) throw new Error('自定义任务没有已保存的最终提示词，不能在重新生图时自动转换。');
+    const snapshots = customReferenceSnapshots(task);
+    if (options.referenceImages.length !== snapshots.length || options.referenceImages.some((image) => !image.trim())) {
+      throw new Error(`自定义参考图读取不完整：需要 ${snapshots.length} 张原图，实际读取 ${options.referenceImages.length} 张；未提交生图请求。`);
+    }
+  }
   if (task.imageGenerationMode === 'image-to-image' && task.assetKind === 'storyboard' && !isNsfwPrivateImageTask(task)) {
     if (!hasSavedPrompt) throw new Error('图生图任务缺少已保存的镜头画面描述，不能自动改用文本转换或文生图。');
     const snapshots = directStoryboardReferenceSnapshots(task);

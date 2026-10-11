@@ -3,11 +3,11 @@ import type { ImageVariant } from '../types';
 import '../imageOutputSize.css';
 
 export function ImageOutputSizeControls({ lane, value, resolved, disabled, capabilityNote, onChange }: {
-  lane: 'ordinary' | 'private'; value: ImageOutputSizePreference; resolved: ResolvedImageOutputSize;
+  lane: 'ordinary' | 'private' | 'custom'; value: ImageOutputSizePreference; resolved: ResolvedImageOutputSize;
   variant: ImageVariant; disabled: boolean; capabilityNote: string;
   onChange: (value: ImageOutputSizePreference) => void;
 }) {
-  const label = lane === 'private' ? '私密' : '普通';
+  const label = lane === 'custom' ? '自定义' : lane === 'private' ? '私密' : '普通';
   const custom = value.mode === 'custom';
   const legacy = value.mode === 'default' || value.mode === '1x' || value.mode === '2x';
   const namedResolution = resolved.resolutionPlan?.encoding.kind === 'tier';

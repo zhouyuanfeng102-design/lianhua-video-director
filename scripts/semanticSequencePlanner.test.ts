@@ -131,7 +131,12 @@ test('planning sends original-novel evidence and stable aliases once and keeps A
   request.characterContinuity = [{ id: 'shalltear', name: '夏提雅', aliases: ['红铠人'], signatureProps: '枪形武器' }];
   request.originalSourceContext = { id: 'conversion-combat', chapterId: 'combat-chapter', sourceName: '战斗小说',
     sourceText: '红铠人用形状怪异的枪形武器把敌人打上半空。冲锋者像撞上看不见的墙。侍从说：“飞出去了……”',
-    resultText: request.story, createdAt: 1 };
+    resultText: request.story, createdAt: 1,
+    actionPlan: { version: 1, summary: '枪形武器迎击，敌人飞出',
+      sourceParagraphs: [{ id: 'p1', text: '红铠人用形状怪异的枪形武器把敌人打上半空。冲锋者像撞上看不见的墙。侍从说：“飞出去了……”' }],
+      events: [{ id: 'counterattack', sourceParagraphIds: ['p1'], evidence: '红铠人用形状怪异的枪形武器把敌人打上半空。',
+        actor: '夏提雅', target: '敌军', action: '枪形武器迎击', phases: ['迎击', '击飞'], result: '敌人飞出', uncertainties: [] }] },
+    paragraphs: [{ id: 'v1', sourceParagraphIds: ['p1'], eventIds: ['counterattack'], text: request.story, stagingAdditions: [] }] };
   const authored = response(1);
   authored.segments[0].content = request.story;
   authored.segments[0].semanticSource = {
@@ -151,6 +156,7 @@ test('planning sends original-novel evidence and stable aliases once and keeps A
     assert.match(system, /比喻不改成真实能力，原文确有的能力仍须保留/u);
     assert.match(system, /未知攻击来源须保留未知/u);
     assert.match(system, /content必须实际表达已分配事件的行动者、动作对象与结果/u);
+    assert.match(system, /沿用events中的稳定id、行动者、对象、原动作和结果/u);
     return textReply(authored);
   });
   const plan = await requestSemanticSequencePlan(config(), request, undefined, options);

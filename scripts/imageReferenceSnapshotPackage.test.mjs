@@ -11,6 +11,7 @@ const require = createRequire(import.meta.url);
 const { collectImageReferenceSnapshotsForExport } = require('../electron/imageReferenceSnapshots.cjs');
 const { readManagedImageDataUrl } = require('../electron/imageReferenceTransport.cjs');
 const { createStateStore } = require('../electron/statePersistenceStore.cjs');
+const { readProjectLibrary } = require('../electron/projectLibraryStore.cjs');
 const mainSource = fs.readFileSync(new URL('../electron/main.cjs', import.meta.url), 'utf8');
 const checksum = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
@@ -213,7 +214,7 @@ test('external backups include deleted-card originals and preserve task checksum
   for (const relativePath of ['image/original.png', 'image/archived.png']) {
     assert.deepEqual(fs.readFileSync(path.join(backupRoot, 'assets', relativePath)), png);
   }
-  const backupState = JSON.parse(fs.readFileSync(result.externalBackup, 'utf8'));
+  const backupState = readProjectLibrary(fs.readFileSync(result.externalBackup, 'utf8'), { root: backupRoot });
   const frozen = backupState.project.generationTasks[0].referenceAssetSnapshots[0];
   assert.equal(readManagedImageDataUrl({ assetRoot: path.join(backupRoot, 'assets'), relativePath: frozen.relativePath, expectedChecksum: frozen.checksum }).dataUrl,
     `data:image/png;base64,${png.toString('base64')}`);
@@ -222,9 +223,9 @@ test('external backups include deleted-card originals and preserve task checksum
   const replacement = Buffer.concat([png, Buffer.from('changed original')]);
   fs.writeFileSync(path.join(dataRoot, 'assets/image/original.png'), replacement);
   state.project.assets = [ref({ checksum: checksum(replacement) })];
-  store.backup(JSON.stringify(state));
+  assert.throws(() => store.backup(JSON.stringify(state)), /媒体文件引用 SHA-256 冲突/u);
   const replacedManifest = JSON.parse(fs.readFileSync(path.join(backupRoot, 'backup-integrity.json'), 'utf8'));
-  assert.equal(replacedManifest.assets.find((asset) => asset.relativePath === 'image/original.png').missing, true);
+  assert.deepEqual(replacedManifest, manifest, 'a conflicting current card cannot replace the last complete backup manifest');
   assert.deepEqual(fs.readFileSync(path.join(backupRoot, 'assets/image/original.png')), png, 'the saved original is never overwritten with changed pixels');
 });
 
@@ -249,12 +250,12 @@ test('external backups retain result-owned originals without a source task or re
   const manifest = JSON.parse(fs.readFileSync(path.join(backupRoot, 'backup-integrity.json'), 'utf8'));
   assert.deepEqual(manifest.assets.map((asset) => asset.relativePath).sort(), ['image/original.png', 'image/result.png']);
   assert.ok(manifest.assets.every((asset) => !asset.missing));
-  const restored = JSON.parse(fs.readFileSync(saved.externalBackup, 'utf8'));
+  const restored = readProjectLibrary(fs.readFileSync(saved.externalBackup, 'utf8'), { root: backupRoot });
   const frozen = restored.project.assets[0].imageRegenerationSnapshot.referenceAssetSnapshots[0];
   assert.equal(readManagedImageDataUrl({ assetRoot: path.join(backupRoot, 'assets'), relativePath: frozen.relativePath, expectedChecksum: frozen.checksum }).dataUrl,
     `data:image/png;base64,${png.toString('base64')}`);
   fs.writeFileSync(path.join(dataRoot, 'assets/image/original.png'), Buffer.concat([png, Buffer.from('changed')]));
-  store.backup(JSON.stringify(state));
+  assert.throws(() => store.backup(JSON.stringify(state)), /备份不完整/u);
   const changed = JSON.parse(fs.readFileSync(path.join(backupRoot, 'backup-integrity.json'), 'utf8'));
   assert.equal(changed.assets.find((asset) => asset.relativePath === frozen.relativePath).missing, true);
   assert.deepEqual(fs.readFileSync(path.join(backupRoot, 'assets/image/original.png')), png);

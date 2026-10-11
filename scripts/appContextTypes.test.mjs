@@ -124,9 +124,11 @@ test("AI preparation uses the clicked mode and enabled rules while preserving re
     && node.name.getText(sourceFile) === 'handleExpandStory')[0];
   assert.ok(declaration && ts.isArrowFunction(declaration.initializer), 'shared AI preparation handler should exist');
   const handler = declaration.initializer;
-  assert.equal(handler.parameters.length, 1);
+  assert.equal(handler.parameters.length, 2);
   assert.equal(handler.parameters[0].name.getText(sourceFile), 'requestMode');
   assert.equal(handler.parameters[0].type.getText(sourceFile), 'StoryPreparationMode');
+  assert.equal(handler.parameters[1].name.getText(sourceFile), 'options');
+  assert.ok(handler.parameters[1].questionToken, 'review regeneration and paragraph rewrite remain optional for the two entry buttons');
   const actionSource = handler.body.getText(sourceFile);
 
   assert.match(actionSource, /storyExpansionPresets/u);
@@ -186,7 +188,8 @@ test('every optimization result is pending user review before any editor write, 
   const adopt = arrowDeclaration('adoptStoryReview').body.getText(sourceFile);
   for (const guard of ['review.id !== expectedId', 'review.projectId !== stateRef.current.project.id',
     'review.workspaceEpoch !== workspaceEpochRef.current', 'review.before !== currentDraft.storyInput',
-    'review.sourceName !== currentDraft.storyName', 'storyExpansionAbortRef.current']) {
+    'review.sourceName !== currentDraft.storyName', 'storyExpansionAbortRef.current',
+    'review.settingsFingerprint !== storyVisualPreparationFingerprint(stateRef.current, storyVisualDetailModeRef.current)']) {
     assert.ok(adopt.includes(guard), `adoption must recheck ${guard} at click time`);
   }
   assert.match(adopt, /setStoryInput\(review\.result\.text\)/u, 'adoption uses the actual AI text, not a local rewrite');
@@ -197,6 +200,8 @@ test('every optimization result is pending user review before any editor write, 
   assert.match(adopt, /review\.chapterId !== activeChapter\(stateRef\.current\.project\)\?\.id/u);
 
   const keep = arrowDeclaration('keepOriginalStoryReview').body.getText(sourceFile);
+  assert.match(keep, /storyExpansionAbortRef\.current\?\.abort\(\)/u,
+    'declining a result must also cancel an in-flight replacement so it cannot reopen the review later');
   assert.match(keep, /pendingStoryReviewRef\.current = null/u);
   assert.doesNotMatch(keep, /\b(?:setStoryInput|setStoryName|setState|persistPrimarySourceDocument)\s*\(|storyDraftRef\.current\s*=/u,
     'declining a pending result only dismisses it and cannot restore a stale original over newer user edits');
@@ -205,7 +210,58 @@ test('every optimization result is pending user review before any editor write, 
   assert.equal(reviewDialogs.length, 2, 'pending review and read-only provenance reuse the comparison dialog');
   assert.match(reviewDialogs[1].getText(sourceFile), /sourceOnly/u);
   assert.match(reviewDialogs[0].getText(sourceFile), /onAdopt=\{\(\) => adoptStoryReview\(pendingStoryReview\.id\)\}/u);
-  assert.match(reviewDialogs[0].getText(sourceFile), /stale=\{storyReviewStale \|\| busy \|\| storyExpansionBusy\}/u);
+  assert.match(reviewDialogs[0].getText(sourceFile), /stale=\{storyReviewStale\}/u,
+    'input changes and active processing must be represented independently');
+  assert.match(reviewDialogs[0].getText(sourceFile), /busy=\{storyExpansionBusy \|\| busy\}/u);
+});
+
+test('whole regeneration and local rewrite share draft ownership guards and current configuration fingerprints', () => {
+  const handler = arrowDeclaration('handleExpandStory');
+  const handlerSource = handler.body.getText(sourceFile);
+  const cache = descendants(handler.body, (node) => ts.isIfStatement(node)
+    && node.expression.getText(sourceFile).includes('!options?.regenerate'))[0];
+  assert.ok(cache, 'cached preview reuse must be bypassed by explicit regeneration');
+  const cacheSource = cache.expression.getText(sourceFile);
+  assert.match(cacheSource, /!options\?\.paragraphId/u, 'a local rewrite must also bypass cached preview reuse');
+  assert.match(cacheSource, /existingReview\.settingsFingerprint === storyVisualPreparationFingerprint\(/u,
+    'preview cache includes current API, rules, engine and detail-mode configuration');
+
+  const rewriteGuard = descendants(handler.body, (node) => ts.isIfStatement(node)
+    && node.expression.getText(sourceFile).startsWith('options?.paragraphId &&'))[0];
+  assert.ok(rewriteGuard, 'local rewriting requires a valid pending review');
+  const guardSource = rewriteGuard.expression.getText(sourceFile);
+  for (const guard of ['!existingReview', 'existingReview.projectId !== expansionState.project.id',
+    'existingReview.chapterId !== activeChapter(expansionState.project)?.id',
+    'existingReview.workspaceEpoch !== workspaceEpochRef.current', 'existingReview.before !== sourceStory',
+    'existingReview.sourceName !== sourceStoryName', 'existingReview.referenceFingerprint !== requestReferenceFingerprint',
+    'existingReview.settingsFingerprint !== requestSettingsFingerprint']) {
+    assert.ok(guardSource.includes(guard), `a local rewrite must reject ${guard}`);
+  }
+  assert.ok(descendants(rewriteGuard.thenStatement, ts.isReturnStatement).length,
+    'a stale local rewrite exits before creating a model request');
+
+  const rewriteCalls = callsNamed(handler.body, 'requestStoryVisualParagraphRewrite');
+  assert.equal(rewriteCalls.length, 1, 'the local rewrite uses its own service boundary');
+  assert.equal(rewriteCalls[0].arguments[1].getText(sourceFile), 'sourceStory',
+    'local rewriting still carries the complete narrative');
+  assert.equal(rewriteCalls[0].arguments[2].getText(sourceFile), 'existingReview.result');
+  assert.equal(rewriteCalls[0].arguments[3].getText(sourceFile), 'options.paragraphId');
+  assert.equal(rewriteCalls[0].arguments[4].getText(sourceFile), 'requestController.signal');
+  const lateGuard = descendants(handler.body, (node) => ts.isIfStatement(node)
+    && node.expression.getText(sourceFile).includes('requestController.signal.aborted')
+    && node.expression.getText(sourceFile).includes('!hasCurrentPreparationSettings()'))[0];
+  assert.ok(lateGuard && rewriteCalls[0].end < lateGuard.pos,
+    'both service branches pass the same late-response ownership and draft checks');
+  assert.match(handlerSource, /id:\s*options\?\.paragraphId && existingReview \? existingReview\.id : createId\("story_review"\)/u,
+    'replacing one paragraph keeps the same review identity and selection');
+  const settingsGuard = arrowDeclaration('hasCurrentPreparationSettings').body.getText(sourceFile);
+  assert.match(settingsGuard, /storyVisualPreparationFingerprint\(current, storyVisualDetailModeRef\.current\) === requestSettingsFingerprint/u,
+    'late responses must recheck the conversion configuration before changing a pending review');
+
+  const dialog = descendants(sourceFile, (node) => ts.isJsxSelfClosingElement(node)
+    && node.tagName.getText(sourceFile) === 'StoryPreparationReviewDialog')[0].getText(sourceFile);
+  assert.match(dialog, /onRegenerate=\{\(\) => void handleExpandStory\("optimize", \{ regenerate: true \}\)\}/u);
+  assert.match(dialog, /onRewriteParagraph=\{\(paragraphId\) => void handleExpandStory\("optimize", \{ paragraphId \}\)\}/u);
 });
 
 test('all state snapshot and export boundaries use compact persistence with caught synchronous size errors', () => {

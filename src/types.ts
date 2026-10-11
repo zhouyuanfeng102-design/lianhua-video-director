@@ -13,7 +13,7 @@ import type {
 } from './imagePromptRules';
 import type { MorphologyKind } from './characterMorphology';
 import type { VideoWorkbenchDraft, VideoWorkbenchState } from './videoWorkbench';
-import type { ImageOutputSizePreferences } from './imageOutputSize';
+import type { ImageOutputSizePreference, ImageOutputSizePreferences } from './imageOutputSize';
 import type { ImageResolutionPlan } from './imageResolution';
 import type { ImageProtocolSetting, ResolvedImageProtocol } from './imageProtocol';
 import type { StoryboardImageOutputSizePreference } from './storyboardImageOutputSize';
@@ -452,6 +452,8 @@ export interface ReferenceAsset extends StoryboardImageFrameMetadata {
   imageGenerationMode?: 'text-to-image' | 'image-to-image';
   /** Safe original-image/API locators retained when a completed task is deleted. */
   imageRegenerationSnapshot?: ImageAssetRegenerationSnapshot;
+  /** Independent custom-workbench provenance; raw text and converted text remain separate. */
+  customImageInput?: CustomImageInput;
   /** Frozen requested pixels, separate from actual asset width/height; survives deleting the task. */
   imageRequestSize?: { width: number; height: number; sizeOverride?: boolean; resolutionPlan?: ImageResolutionPlan };
   gridStates?: GridVisualState[];
@@ -682,6 +684,10 @@ export interface SemanticEventCausality {
 
 /** An adopted visual description retains its actual pre-conversion source. */
 export interface StoryVisualConversionSnapshot {
+  actionPlan?: import('./storyVisualAction').StoryVisualActionPlan;
+  paragraphs?: import('./storyVisualAction').StoryVisualParagraph[];
+  engineVersion?: string;
+  detailMode?: import('./storyVisualAction').StoryVisualDetailMode;
   storyReferenceContext?: StoryReferenceContext;
   referenceFingerprint?: string;
   id: string;
@@ -1088,6 +1094,8 @@ export interface Project {
   assets: ReferenceAsset[];
   voicePresets?: import('./videoAudioTypes').ProjectVoicePresets;
   generationTasks: GenerationTask[];
+  /** Project-owned custom-image composer draft; no image pixels or API credentials. */
+  customImageDraft?: CustomImageDraft;
   /** Independent local post-production; does not enter the paid generation queue. */
   videoWorkbench?: VideoWorkbenchState;
   createdAt: number;
@@ -1157,6 +1165,8 @@ export interface ImageReferenceAssetSnapshot {
  * this small complement stores only credential-free execution provenance. */
 export interface ImageAssetRegenerationSnapshot {
   version: 1;
+  /** Absent keeps the legacy direct-storyboard contract. Custom requests allow zero references. */
+  sourceKind?: 'custom';
   model: string;
   imageApiSnapshot: ImageApiExecutionSnapshot;
   referenceAssetSnapshots: ImageReferenceAssetSnapshot[];
@@ -1165,11 +1175,42 @@ export interface ImageAssetRegenerationSnapshot {
   regenerationBaseName?: string;
 }
 
+export interface CustomImageRuleSnapshot {
+  version: 1;
+  id: string;
+  name: string;
+  ruleVersion: string;
+  format: ImagePromptFormat;
+  systemPrompt: string;
+  outputRules: string;
+  negativePrompt?: string;
+}
+
+export interface CustomImageInput {
+  version: 1;
+  userPrompt: string;
+  promptMode: 'raw' | 'rules';
+  ruleSelection?: CustomImageRuleSnapshot;
+  operation?: 'initial' | 'saved-final' | 'reconvert';
+}
+
+export interface CustomImageDraft {
+  version: 1;
+  userPrompt: string;
+  referenceAssetIds: string[];
+  sizePreference: ImageOutputSizePreference;
+  promptMode: 'raw' | 'rules';
+  ruleSetId?: string;
+}
+
 export interface ImageGenerationTask extends StoryboardImageFrameMetadata {
   id: string;
   kind: 'image';
   name: string;
-  assetKind: 'character' | 'location' | 'prop' | 'grid' | 'storyboard';
+  assetKind: 'character' | 'location' | 'prop' | 'grid' | 'storyboard' | 'custom';
+  customImageInput?: CustomImageInput;
+  /** A returned image may be saved again without repeating the paid generation request. */
+  customImageSavePending?: boolean;
   imageVariant: ImageVariant;
   /** Absent for historical tasks; explicit direct mode never invokes the text converter. */
   imageGenerationMode?: 'text-to-image' | 'image-to-image';
