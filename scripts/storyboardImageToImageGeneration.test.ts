@@ -9,6 +9,7 @@ import { createInitialState, type ManagedMediaResult } from '../src/storage';
 import { createStoryboardImageBatchLifecycle } from '../src/storyboardImages';
 import { resolveImageApiForRegeneration } from '../src/imageApiSelection';
 import { resolveImageAssetRegenerationTask, resolveImageRegenerationSource } from '../src/imageRegeneration';
+import { resolveImagePromptSelection, sanitizeFinalImagePrompt } from '../src/imagePromptRules';
 import { generateDirectStoryboardImages, updateStoryboardImageToImageSettings, type DirectStoryboardImageErrorDetail, type DirectStoryboardImageGenerationContext, type DirectStoryboardImageGenerationOptions } from '../src/storyboardImageToImageGeneration';
 import { TextModelResponseError, type ImageGenerationOptions } from '../src/services/llm';
 import type { AppState, ImageApiConfig, ImageGenerationTask, ReferenceAsset, Storyboard, TextApiConfig, VideoShot } from '../src/types';
@@ -83,7 +84,8 @@ const fixture = () => {
     ...initial, project, projects: [project], activeProjectId: project.id,
     settings: {
       ...initial.settings,
-      textApi: { ...initial.settings.textApi, enabled: false, baseUrl: '', apiKey: '', model: '' },
+      textApi: { ...initial.settings.textApi, enabled: true, baseUrl: 'https://fixture-text.invalid/v1', apiKey: 'fixture-text-key', model: 'fixture-text-model' },
+      imagePromptRuleSetIdByBackend: { ...initial.settings.imagePromptRuleSetIdByBackend, openai: 'image-rule-openai-gpt-image' },
       imageApiProfiles: [], activeImageApiProfileId: null,
       imageApi: { enabled: true, backend: 'openai', baseUrl: 'https://fixture-image.invalid/v1', apiKey: 'fixture-only-never-transmitted', model: 'fixture-image-model' },
       storyboardImageOutputSize: { mode: '4k', width: 1024, height: 1024 },
@@ -91,6 +93,7 @@ const fixture = () => {
   };
   const queued = deferred();
   const calls: Array<{ api: ImageApiConfig; input: ImageGenerationOptions }> = [];
+  const conversions: Array<{ api: TextApiConfig; kind: string; source: string; format: string; rules: string; identityContext: string; prompt: string }> = [];
   const stores: Array<{ dataUrl: string; fileName?: string }> = [];
   const reads: string[] = [];
   const media = new Map<string, { dataUrl: string; checksum: string }>();
@@ -118,6 +121,15 @@ const fixture = () => {
       return { relativePath, checksum, fileName: payload.fileName || 'fixture.png', managed: true, missing: false,
         sizeBytes: payload.dataUrl.length, mediaType: 'image', mimeType: 'image/png', url: `lianhua-asset://fixture/${relativePath}` };
     },
+    convertPrompt: async (api, kind, source, format, rules, identityContext = '') => {
+      assert.doesNotMatch(source + rules + identityContext, /data:image\//u, 'converting the authored text never transmits reference pixels to the text model');
+      const visual = source.split('\n').find((line) => /原画面|规划静帧/u.test(line)) || '人物站在飞船观察窗旁';
+      const prompt = format === 'natural-language'
+        ? `转换后的静态画面：${visual}。人物的右手保持清晰可见，柔和月光照亮深蓝衣料，平视中景呈现连续空间。`
+        : 'cinematic still, moonlight, spaceship window, standing person, blue uniform, medium shot';
+      conversions.push({ api: clone(api), kind, source, format, rules, identityContext, prompt });
+      return prompt;
+    },
     generateImage: async (api, input, onStart) => {
       assert.equal(typeof input, 'object');
       await onStart?.();
@@ -128,7 +140,7 @@ const fixture = () => {
     reportError: (error, detail) => { reported.push(error); reportDetails.push(detail); },
   };
   const run = (options?: DirectStoryboardImageGenerationOptions) => generateDirectStoryboardImages(ctx, project.id, 'board-2', options);
-  return { ctx, calls, stores, reads, media, notices, reported, reportDetails, queued, imageTasks, run, getState: () => state, mutate: update, projectId: project.id };
+  return { ctx, calls, conversions, stores, reads, media, notices, reported, reportDetails, queued, imageTasks, run, getState: () => state, mutate: update, projectId: project.id };
 };
 const boardWithoutImageSettings = (board: Storyboard): string => {
   const { imageToImage: _settings, ...content } = board;
@@ -172,8 +184,20 @@ try {
   const success = fixture();
   const originalBoard = boardWithoutImageSettings(success.getState().project.storyboards[0]);
   await bounded(success.run());
-  assert.equal(success.getState().settings.textApi.enabled, false);
-  assert.equal(success.calls.length, 4, 'default generates all source shots with the text API disabled and ignores historical shot picks');
+  assert.equal(success.getState().settings.textApi.enabled, true);
+  assert.equal(success.calls.length, 4, 'default converts and generates all source shots while ignoring historical shot picks');
+  assert.equal(success.conversions.length, 4, 'every ordinary reference-image shot executes its selected text converter before image submission');
+  assert.ok(success.conversions.every((call) => call.kind === 'storyboard' && call.format === 'natural-language'));
+  assert.ok(success.calls.every((call, index) => call.input.prompt.includes(success.conversions[index].prompt)));
+  assert.ok(success.imageTasks().every((task) => task.imagePromptRuleSetId === 'image-rule-openai-gpt-image'
+    && task.imagePromptPresetId === 'image-preset-storyboard' && task.imagePromptRuleSetName && task.imagePromptPresetName
+    && task.imagePromptRuleSetVersion === '1.0.0' && task.imagePromptPresetVersion === '1.0.0'
+    && task.converterSystemPrompt && task.imagePromptFormat === 'natural-language'));
+  const ordinarySelection = resolveImagePromptSelection({ backend: 'openai', model: 'fixture-image-model', assetKind: 'storyboard',
+    manualRuleSetId: 'image-rule-openai-gpt-image', manualPresetId: 'image-preset-storyboard', state: success.getState().imagePromptRules });
+  const ordinaryNegative = sanitizeFinalImagePrompt([ordinarySelection.ruleSet.negativePrompt, ordinarySelection.preset.negativePrompt].filter(Boolean).join(', '), ordinarySelection.ruleSet.format);
+  assert.ok(success.calls.every((call) => call.input.negativePrompt === ordinaryNegative), 'the selected rule and single-frame preset both contribute the submitted negative prompt');
+  assert.ok(success.imageTasks().every((task) => task.negativePrompt === ordinaryNegative));
   assert.deepEqual(success.calls.map((call) => call.input.referenceImages), Array.from({ length: 4 }, () => [pngB, pngA]), 'all images use the current public originals in order; legacy per-shot and video references never enter');
   assert.deepEqual(success.calls.map((call) => [call.input.width, call.input.height, call.input.sizeOverride]), Array.from({ length: 4 }, () => [4096, 2304, true]), 'the image-workbench resolution is the exact submitted pixel request');
   assert.deepEqual(success.calls.map((call) => [call.input.primaryReferenceImageCount, call.input.preserveReferenceImageOrder]), Array.from({ length: 4 }, () => [2, true]));
@@ -192,6 +216,9 @@ try {
   assert.ok(generatedAssets.every((asset) => asset.sourceStoryboardId === 'board-2' && asset.width === 2 && asset.height === 2));
   assert.ok(generatedAssets.every((asset) => asset.imageGenerationMode === 'image-to-image'
     && asset.imageRegenerationSnapshot?.referenceAssetSnapshots.length === 2), 'actual result assets retain their safe direct retry inputs');
+  assert.ok(generatedAssets.every((asset) => asset.imagePromptRuleSetId === 'image-rule-openai-gpt-image'
+    && asset.imagePromptPresetId === 'image-preset-storyboard' && asset.negativePrompt === ordinaryNegative),
+  'saved images retain the same executed converter trace and negative prompt as their task');
   assert.ok(generatedAssets.every((asset) => asset.imageRequestSize?.width === 4096 && asset.imageRequestSize?.height === 2304), 'actual encoded size stays distinct from requested size');
   assert.equal(success.reported.length, 0);
   const resultOnly = { ...success.getState().project, assets: [generatedAssets[0]], generationTasks: [], storyboards: [] };
@@ -252,7 +279,7 @@ try {
   const microTask = micro.imageTasks()[0];
   assert.equal(microTask.imagePromptRuleSetId, 'image-rule-openai-gpt-image-2-5-micro-nsfw');
   assert.equal(microTask.imagePromptPresetId, 'image-preset-gpt-image-2-5-micro-nsfw-storyboard');
-  assert.match(microTask.sourceFingerprint || '', /^direct-storyboard-image-v3-/u);
+  assert.match(microTask.sourceFingerprint || '', /^direct-storyboard-image-v4-/u);
   assert.equal(microTask.conversionIdentityContext, converterCalls[0].identityContext, 'the executed converter evidence is persisted with the task');
   assert.equal(JSON.stringify(micro.getState().project.storyboards[0]), microBoardBefore, 'adding converter identity context cannot rewrite H3 or other board fields');
   const microAsset = micro.getState().project.assets.find((asset) => asset.source === 'generated')!;
@@ -320,6 +347,15 @@ try {
   }));
   await bounded(sdDefault.run());
   assert.equal(sdDefault.calls.length, 4, 'SD WebUI img2img accepts an omitted model for the current server checkpoint');
+  assert.equal(sdDefault.conversions.length, 4);
+  assert.ok(sdDefault.conversions.every((call) => call.format === 'sd-tags'));
+  assert.ok(sdDefault.imageTasks().every((task) => task.imagePromptFormat === 'sd-tags'
+    && task.imagePromptRuleSetId === 'image-rule-sd-webui' && task.imagePromptPresetId === 'image-preset-storyboard'));
+  assert.ok(sdDefault.calls.every((call, index) => call.input.prompt === sdDefault.conversions[index].prompt),
+    'tag prompts remain the selected protocol and are not contaminated by local natural-language reference or framing instructions');
+  const sdSelection = resolveImagePromptSelection({ backend: 'sd-webui', assetKind: 'storyboard', state: sdDefault.getState().imagePromptRules });
+  const sdNegative = sanitizeFinalImagePrompt([sdSelection.ruleSet.negativePrompt, sdSelection.preset.negativePrompt].filter(Boolean).join(', '), sdSelection.ruleSet.format);
+  assert.ok(sdDefault.calls.every((call) => call.input.negativePrompt === sdNegative));
   assert.ok(sdDefault.imageTasks().every((task) => task.status === 'succeeded' && task.model === ''));
   const sdAssets = sdDefault.getState().project.assets.filter((asset) => asset.source === 'generated');
   assert.equal(sdAssets.length, 4, 'an empty SD model must not discard a successful image while saving its retry snapshot');
@@ -335,7 +371,13 @@ try {
   const boundaries = fixture();
   const beforeBoundaries = JSON.stringify(boundaries.getState().project.storyboards[0]);
   await bounded(boundaries.run({ mode: 'boundary-frames' }));
-  assert.equal(boundaries.calls.length, 2, 'the existing first/last-frame button needs no text model');
+  assert.equal(boundaries.calls.length, 2, 'the existing first/last-frame button converts each boundary with the selected rules');
+  assert.equal(boundaries.conversions.length, 2);
+  assert.match(boundaries.conversions[0].source, /本张是视频首帧.*第一镜的开始/u);
+  assert.match(boundaries.conversions[1].source, /本张是视频尾帧.*最后一镜结束/u);
+  assert.ok(boundaries.calls.every((call, index) => call.input.prompt.includes(boundaries.conversions[index].prompt)));
+  assert.ok(boundaries.calls.every((call) => !/本张是视频首帧|本张是视频尾帧|首帧取景：|尾帧取景：/u.test(call.input.prompt)),
+    'local boundary production instructions become converter input instead of being used as the final image prompt');
   assert.deepEqual(boundaries.calls.map((call) => call.input.referenceImages), [[pngB, pngA], [pngB, pngA]]);
   assert.deepEqual(boundaries.imageTasks().map((task) => [task.sourceShotId, task.imageVariant]), [['shot-1', 'first-frame'], ['shot-4', 'last-frame']]);
   const boundaryAssets = boundaries.getState().project.assets.filter((asset) => asset.source === 'generated');
@@ -423,7 +465,18 @@ try {
   assert.ok(brokenReference.notices.some((notice) => /参考图.*(?:丢失|无法读取)/u.test(notice.message)), 'missing originals never fall back to a text-only image request');
   assert.equal(brokenReference.reportDetails[0]?.stage, 'image-reference-load');
 
+  for (const mode of ['storyboard-shots', 'boundary-frames'] as const) {
+    const withoutText = fixture();
+    withoutText.mutate((state) => ({ ...state, settings: { ...state.settings, textApi: { ...state.settings.textApi, enabled: false } } }));
+    await bounded(withoutText.run({ mode }));
+    assert.equal(withoutText.calls.length, 0, `${mode} never submits raw local rules when the text converter is unavailable`);
+    assert.equal(withoutText.conversions.length, 0);
+    assert.ok(withoutText.notices.some((notice) => /文本 API/u.test(notice.message)));
+    assert.equal(withoutText.reportDetails[0]?.stage, 'image-prompt-convert');
+  }
+
   const customWithoutText = fixture();
+  customWithoutText.mutate((state) => ({ ...state, settings: { ...state.settings, textApi: { ...state.settings.textApi, enabled: false } } }));
   await bounded(customWithoutText.run({ mode: 'storyboard-shots', count: 5 }));
   assert.equal(customWithoutText.imageTasks().length, 0);
   assert.equal(customWithoutText.calls.length, 0);
@@ -461,7 +514,10 @@ try {
   await bounded(customPending);
   assert.deepEqual(custom.imageTasks().map((task) => task.id), customTaskIds, 'planning fills original tasks instead of creating replacement IDs');
   assert.equal(custom.calls.length, 5, 'the frozen custom total is independent of source video shot count or later UI changes');
-  assert.equal(planner.calls.length, 1, 'valid custom-frame plans need exactly one source-text call, not per-frame conversion');
+  assert.equal(planner.calls.length, 1, 'valid custom-frame plans need exactly one planning call');
+  assert.equal(custom.conversions.length, 5, 'each planned static frame then runs the ordinary selected converter');
+  assert.ok(custom.conversions.every((call, index) => call.source.includes(planner.frames[index].description)
+    && call.api.model === 'frozen-text-model'), 'custom-frame conversion uses the frozen planner result and captured text API');
   assert.equal(planner.calls[0].api.model, 'frozen-text-model');
   const planInput = JSON.parse(planner.calls[0].user);
   assert.equal(planInput.requestedImageCount, 5);
@@ -637,9 +693,6 @@ try {
 
   const converterFailure = fixture();
   prepareCustomPlanner(converterFailure, 1);
-  converterFailure.mutate((state) => ({ ...state, settings: { ...state.settings,
-    imagePromptRuleSetIdByBackend: { ...state.settings.imagePromptRuleSetIdByBackend, openai: 'image-rule-openai-gpt-image-2-5-micro-nsfw' },
-  } }));
   const converterApi = clone(converterFailure.getState().settings.textApi);
   const converterStarted = deferred();
   const converterGate = deferred();
@@ -664,6 +717,13 @@ try {
     projectId: converterFailure.projectId, projectName: 'Direct image fixture',
     provider: converterApi.provider, model: converterApi.model, endpoint: converterApi.baseUrl,
   } });
+
+  const emptyConversion = fixture();
+  emptyConversion.ctx.convertPrompt = async () => '   ';
+  await bounded(emptyConversion.run({ mode: 'boundary-frames' }));
+  assert.equal(emptyConversion.calls.length, 0, 'an empty ordinary converter result blocks image submission instead of falling back to local framing rules');
+  assert.ok(emptyConversion.imageTasks().every((task) => task.status === 'failed' && /提示词为空/u.test(task.error || '')));
+  assert.ok(emptyConversion.reportDetails.every((detail) => detail?.stage === 'image-prompt-convert'));
 
   for (const echoFormat of ['raw', 'json', 'url'] as const) {
     const echoed = fixture();
@@ -755,11 +815,11 @@ try {
   assert.equal(failure.imageTasks()[1].sourceShotId, 'shot-4');
   assert.equal(failure.getState().project.assets.find((asset) => asset.source === 'generated')?.sourceShotId, 'shot-4');
   assert.equal(failure.reportDetails[0]?.stage, 'image-generation');
-  assert.equal(unexpectedNetworkCalls, 0, 'the disabled text API and real image APIs are never called by this test');
+  assert.equal(unexpectedNetworkCalls, 0, 'the text converter, planner and image API are mocked without real network requests');
 
   const controller = readFileSync(new URL('../src/storyboardImageToImageGeneration.ts', import.meta.url), 'utf8');
-  assert.doesNotMatch(controller, /convertImagePrompt|executeStoryboardImageGeneration|enrichStoryboardImage/u, 'direct controller has no text conversion or identity enrichment prerequisite');
-  console.log('Direct storyboard image controller: shared originals, existing default/boundary/custom buttons, text-only still planning, stale-source rejection, frozen queue, cancellation and metadata preservation passed.');
+  assert.doesNotMatch(controller, /executeStoryboardImageGeneration|enrichStoryboardImage/u, 'converting the authored shot text never switches to unrelated automatic reference enrichment');
+  console.log('Reference storyboard image controller: selected-rule conversion, boundary/custom stills, format and negative prompts, frozen originals, safe failures, cancellation and metadata preservation passed.');
 } finally {
   globalThis.fetch = originalFetch;
 }

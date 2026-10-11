@@ -124,7 +124,7 @@ async function inspectResultLayout(viewport) {
   assert.ok(layout.documentWidth <= viewport.width + 1 && layout.pane.bottom <= viewport.height + 1, 'result panel stays inside the viewport');
   for (const control of layout.controls) assert.ok(control.visible && control.bottom <= viewport.height + 1 && control.right <= viewport.width + 1, `${control.name} is visible and unobscured`);
 }
-async function generate(button, expectedIds, expectedSize, stage, { count = 1, boardId = 'i2i-board', planningCalls = 0 } = {}) {
+async function generate(button, expectedIds, expectedSize, stage, { count = 1, boardId = 'i2i-board', planningCalls = 0, conversionCalls = count } = {}) {
   const before = await readState(); const oldIds = before.project.generationTasks.map((task) => task.id); const firstRequest = requests.length; const firstTextRequest = textRequests.length;
   await button.click();
   await page.waitForFunction(({ key, oldIds, count }) => {
@@ -136,6 +136,9 @@ async function generate(button, expectedIds, expectedSize, stage, { count = 1, b
     assert.equal(task.status, 'succeeded', `${stage}: ${task.error || 'no failure'}`);
     assert.equal(task.imageGenerationMode, 'image-to-image'); assert.equal(task.sourceStoryboardId, boardId);
     assert.deepEqual(task.referenceAssetIds, expectedIds); assert.deepEqual([task.width, task.height], expectedSize);
+    assert.equal(task.imagePromptRuleSetId, 'image-rule-openai-gpt-image');
+    assert.equal(task.imagePromptPresetId, 'image-preset-storyboard');
+    assert.ok(task.converterSystemPrompt, `${stage}: the task records its executed converter`);
     const asset = state.project.assets.find((entry) => entry.id === task.resultAssetId);
     assert.equal(asset.sourceStoryboardId, task.sourceStoryboardId); assert.equal(asset.sourceShotId, task.sourceShotId);
     assert.deepEqual([asset.imageRequestSize.width, asset.imageRequestSize.height], expectedSize, `${stage}: output records requested pixels`);
@@ -146,8 +149,10 @@ async function generate(button, expectedIds, expectedSize, stage, { count = 1, b
   }
   const actual = requests.slice(firstRequest);
   assert.equal(actual.length, count, `${stage}: requested image count is exact`);
-  for (const request of actual) { assert.equal(request.path, imagePath); assert.equal(request.model, 'mock-image'); assert.equal(request.size, expectedSize.join('x')); assert.deepEqual(request.images, expectedIds.map((id) => pixels[id].split(',')[1]), `${stage}: every actual multipart contains exact original pixels in order`); }
-  assert.equal(textRequests.length - firstTextRequest, planningCalls, `${stage}: only the custom count may call the text-only still planner`);
+  for (const request of actual) { assert.equal(request.path, imagePath); assert.equal(request.model, 'mock-image'); assert.equal(request.size, expectedSize.join('x')); assert.deepEqual(request.images, expectedIds.map((id) => pixels[id].split(',')[1]), `${stage}: every actual multipart contains exact original pixels in order`); assert.match(request.prompt, /AI已转换的静态画面/u); assert.doesNotMatch(request.prompt, /本张是视频首帧|本张是视频尾帧/u); }
+  const newTextRequests = textRequests.slice(firstTextRequest);
+  assert.equal(newTextRequests.filter((request) => request.kind === 'frame-plan').length, planningCalls, `${stage}: only custom quantities require the separate still planner`);
+  assert.equal(newTextRequests.filter((request) => request.kind === 'prompt-convert').length, conversionCalls, `${stage}: each uncached image uses the selected text converter`);
   await assertH3Unchanged(); stages.push(stage); return tasks;
 }
 
@@ -187,11 +192,18 @@ try {
     if (url.pathname === fixturePath) { await route.fulfill({ contentType: 'text/html', body: '<!doctype html><html><body>Isolated direct storyboard fixture</body></html>' }); return; }
     if (url.pathname === textPath) {
       try {
-        assert.ok(allowFramePlanning, 'default, boundary, workbench and retry paths must not call a text API');
         const body = request.postDataJSON(); assert.equal(body.model, 'mock-static-frame-planner');
-        assert.ok(body.messages.every((message) => typeof message.content === 'string'), 'the still planner receives no multimodal/image content');
+        assert.ok(body.messages.every((message) => typeof message.content === 'string'), 'the planner and image-prompt converter receive no multimodal/image content');
         const system = body.messages.filter((message) => message.role === 'system').map((message) => message.content).join('\n');
-        assert.match(system, /分镜静帧规划导演/u); assert.doesNotMatch(JSON.stringify(body), /data:image|image_url|image_base64/u);
+        assert.doesNotMatch(JSON.stringify(body), /data:image|image_url|image_base64/u);
+        if (!/分镜静帧规划导演/u.test(system)) {
+          assert.match(system, /分镜单帧/u);
+          const prompt = `AI已转换的静态画面${textRequests.length + 1}：薄雾中青石桥横跨河面，晨光照亮石栏杆，固定中景呈现连续桥面与远处桥头。`;
+          textRequests.push({ kind: 'prompt-convert', path: url.pathname, model: body.model, imageParts: 0, prompt });
+          await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: prompt }, finish_reason: 'stop' }] }) });
+          return;
+        }
+        assert.ok(allowFramePlanning, 'only the explicit custom quantity may invoke the still planner');
         const input = JSON.parse(body.messages.find((message) => message.role === 'user').content);
         assert.equal(input.requestedImageCount, 5); assert.equal(input.source.storyboardId, 'i2i-board'); assert.equal(input.source.shots.length, 2);
         assert.ok(input.source.confirmedH3, 'custom count plans from confirmed H3 as well as source story');
@@ -200,9 +212,9 @@ try {
           const shot = input.source.shots.find((item) => item.startSec <= timeSec && item.endSec > timeSec);
           return { sourceShotId: shot.id, description: `AI规划静帧${index + 1}：第${timeSec}秒，原机位下青石桥和薄雾的独立静态画面。`, timeSec };
         });
-        textRequests.push({ path: url.pathname, model: body.model, requestedImageCount: input.requestedImageCount, sourceStoryboardId: input.source.storyboardId, sourceShotCount: input.source.shots.length, imageParts: 0, frames });
+        textRequests.push({ kind: 'frame-plan', path: url.pathname, model: body.model, requestedImageCount: input.requestedImageCount, sourceStoryboardId: input.source.storyboardId, sourceShotCount: input.source.shots.length, imageParts: 0, frames });
         await route.fulfill({ contentType: 'application/json', body: JSON.stringify({ choices: [{ message: { role: 'assistant', content: JSON.stringify(frames) }, finish_reason: 'stop' }] }) });
-      } catch (cause) { errors.push(String(cause)); await route.fulfill({ status: 500, body: JSON.stringify({ error: { message: 'Only the isolated text-only static-frame plan is allowed' } }) }); }
+      } catch (cause) { errors.push(String(cause)); await route.fulfill({ status: 500, body: JSON.stringify({ error: { message: 'Isolated storyboard text mock rejected request' } }) }); }
       return;
     }
     if (url.pathname === imagePath) {
@@ -246,7 +258,9 @@ try {
     scene.storyboardIds.push(otherBoard.id);
     const project = { ...state.project, id: 'storyboard-i2i-ui-project', name: '分镜图生图隔离测试', characters: [], locations: [], props: [], assets, sourceDocuments: [{ id: 'i2i-source', name: scene.title, content: story, createdAt: now, updatedAt: now }], scenes: [scene], storyboards: [board, otherBoard], sequencePlans: [], generationTasks: [], createdAt: now, updatedAt: now };
     state.project = project; state.projects = [project]; state.activeProjectId = project.id;
-    state.settings.textApi = { ...state.settings.textApi, enabled: false, provider: 'openai_compatible', baseUrl: `${origin}/__storyboard_i2i_mock__/text`, apiKey: '', model: 'mock-static-frame-planner' };
+    state.settings.textApi = { ...state.settings.textApi, enabled: true, provider: 'openai_compatible', baseUrl: `${origin}/__storyboard_i2i_mock__/text`, apiKey: '', model: 'mock-static-frame-planner' };
+    state.settings.imagePromptRuleSetIdByBackend = { ...state.settings.imagePromptRuleSetIdByBackend, openai: 'image-rule-openai-gpt-image' };
+    state.settings.imagePromptPresetIdByAssetKind = { ...state.settings.imagePromptPresetIdByAssetKind, storyboard: 'image-preset-storyboard' };
     state.settings.imageApi = { enabled: true, backend: 'openai', baseUrl: `${origin}/__storyboard_i2i_mock__/image`, apiKey: '', model: 'mock-image' };
     state.settings.imageApiProfiles = [{ ...state.settings.imageApi, id: 'i2i-original-image-api', name: '隔离原图生图 API', createdAt: now, updatedAt: now }];
     state.settings.activeImageApiProfileId = 'i2i-original-image-api'; state.settings.textApiProfiles = []; state.settings.activeTextApiProfileId = null;
@@ -272,10 +286,10 @@ try {
   await enterDirector(); await directorResult();
   assert.match(await page.getByLabel('当前分镜图分辨率', { exact: true }).innerText(), /2048×1152/u);
   for (const viewport of [{ width: 1366, height: 900 }, { width: 1280, height: 800 }]) await inspectResultLayout(viewport);
-  assert.equal((await readState()).settings.textApi.enabled, false);
-  const defaults = await generate(page.getByRole('button', { name: '生成分镜图片（2张）', exact: true }), ['a', 'b'], [2048, 1152], 'default-original-button-two-shots-two-originals-no-text', { count: 2 });
+  assert.equal((await readState()).settings.textApi.enabled, true);
+  const defaults = await generate(page.getByRole('button', { name: '生成分镜图片（2张）', exact: true }), ['a', 'b'], [2048, 1152], 'default-original-button-two-shots-two-selected-rule-conversions', { count: 2 });
   assert.deepEqual(new Set(defaults.map((task) => task.sourceShotId)), new Set(['i2i-shot-1', 'i2i-shot-2']));
-  assert.equal(textRequests.length, 0);
+  assert.equal(textRequests.length, 2);
 
   await setTextEnabled(true); await enterDirector(); await directorResult();
   await page.getByRole('spinbutton', { name: '自定义分镜图片数量', exact: true }).fill('5');
@@ -288,7 +302,7 @@ try {
   const originalSecond = custom.find((task) => task.imageFrameIndex === 2);
   assert.ok(originalSecond);
 
-  await setTextEnabled(false); await enterDirector(); await directorResult();
+  await enterDirector(); await directorResult();
   assert.equal(await page.getByRole('spinbutton', { name: '自定义分镜图片数量', exact: true }).inputValue(), '5');
   const boundary = await generate(page.getByRole('button', { name: '生成首尾帧图片（2张）', exact: true }), ['a', 'b'], [2048, 1152], 'original-first-last-button-two-images-independent-of-custom-five', { count: 2 });
   assert.deepEqual(new Set(boundary.map((task) => task.imageVariant)), new Set(['first-frame', 'last-frame']));
@@ -296,7 +310,7 @@ try {
   await enterWorkbench(); await workbenchResult();
   const shotPicker = page.getByRole('group', { name: '选择分镜镜头', exact: true });
   await shotPicker.getByRole('checkbox', { name: '选择第 2 镜', exact: true }).check();
-  const workbench = await generate(shotPicker.getByRole('button', { name: '生成选中分镜图片（1 张）', exact: true }), ['a', 'b'], [2048, 1152], 'workbench-original-shot-picker-and-button-use-current-originals');
+  const workbench = await generate(shotPicker.getByRole('button', { name: '生成选中分镜图片（1 张）', exact: true }), ['a', 'b'], [2048, 1152], 'workbench-original-shot-picker-reuses-matching-converted-prompt', { conversionCalls: 0 });
   assert.equal(workbench[0].sourceShotId, 'i2i-shot-2');
 
   await page.locator('.storyboard-image-mode-tabs').getByRole('button', { name: '参考图（2）', exact: true }).click();
@@ -318,8 +332,9 @@ try {
   const originalCard = page.locator(`[id="image-task-${originalSecond.id}"]`);
   await originalCard.waitFor();
   const [retry] = await generate(originalCard.locator('.image-regenerate-button'), ['a', 'b'], [2048, 1152], 'custom-task-retry-keeps-original-pixels-size-and-static-frame');
-  assert.equal(retry.regenerationSourceTaskId, originalSecond.id); assert.equal(retry.imageFrameIndex, 2); assert.equal(retry.imageFrameCount, 5); assert.equal(retry.imageFrameDescription, originalSecond.imageFrameDescription);
-  assert.equal(textRequests.length, 1); assert.equal((await readState()).settings.textApi.enabled, false);
+  assert.equal(retry.regenerationSourceTaskId, originalSecond.id);
+  assert.equal(retry.imageFrameIndex, undefined); assert.equal(retry.imageFrameCount, undefined); assert.equal(retry.imageFrameDescription, undefined);
+  assert.equal(textRequests.filter((request) => request.kind === 'frame-plan').length, 1); assert.equal((await readState()).settings.textApi.enabled, true);
 
   // This is an isolated restore fixture, not a mutation of real user data:
   // original tasks and reference-asset metadata disappear, but managed image
@@ -381,8 +396,8 @@ try {
   const [assetRetry] = await generate(recoveredCard.locator('.asset-regenerate-button'), ['a', 'b'], [2048, 1152], 'asset-card-regeneration-after-task-and-reference-deletion-uses-frozen-originals');
   assert.equal(assetRetry.regenerationSourceTaskId, `asset-regeneration-${recoveredAssetId}`);
   assert.equal(assetRetry.imageApiSnapshot.profileId, 'i2i-original-image-api');
-  assert.equal(assetRetry.imageFrameIndex, 2); assert.equal(assetRetry.imageFrameCount, 5); assert.equal(assetRetry.imageFrameDescription, originalSecond.imageFrameDescription);
-  assert.equal(textRequests.length, 1); await capture('asset-snapshot-recovered-with-original-api');
+  assert.equal(assetRetry.imageFrameIndex, undefined); assert.equal(assetRetry.imageFrameCount, undefined); assert.equal(assetRetry.imageFrameDescription, undefined);
+  assert.equal(textRequests.filter((request) => request.kind === 'frame-plan').length, 1); await capture('asset-snapshot-recovered-with-original-api');
   await assertH3Unchanged(); assert.deepEqual(errors, []); assert.deepEqual(blockedRequests, []);
   await fs.writeFile(path.join(output, 'report.json'), JSON.stringify({ passed: true, stages, layouts, screenshots, requests, textRequests, errors, blockedRequests, output }, null, 2));
   console.log(JSON.stringify({ passed: true, stages, imageRequests: requests.length, textRequests: textRequests.length, errors, blockedRequests, report: path.join(output, 'report.json') }, null, 2));

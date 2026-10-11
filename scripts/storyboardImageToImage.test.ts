@@ -59,6 +59,10 @@ assert.deepEqual(requests.map((item) => item.referenceAssetIds), [['a'], ['b', '
 assert.deepEqual(requests.map((item) => item.primaryReferenceAssetIds), [['a'], ['b', 'a']]);
 assert.equal(requests[0].directPromptSource, 'shot-visual');
 assert.match(requests[0].directPrompt, /第2镜原动作/u);
+assert.match(requests[0].conversionSource, /静帧取景/u);
+assert.match(requests[0].conversionSource, /第2镜原动作/u);
+assert.doesNotMatch(requests[0].conversionSource, /data:image|本次实际上传图片|完整参考图名称/u,
+  'conversion receives authored visual text and framing, not pixels or image-upload metadata');
 assert.doesNotMatch(requests[0].directPrompt, /不应发送|旧视频稿|历史全局外貌|第4镜原动作/u);
 assert.deepEqual(requests[0].referenceAssetIds, requests[0].primaryReferenceAssetIds);
 assert.equal(JSON.stringify(board), original, 'H3/video references/shots are never rewritten');
@@ -107,12 +111,44 @@ const fingerprint = directStoryboardImageSourceFingerprint(h3Board, h3Requests[0
 const cached = buildDirectStoryboardImageRequests(h3Board, selection, {
   ...context, currentImagePromptsByShotId: { 'shot-2': { prompt: '已确认同版本图片提示词', sourceFingerprint: fingerprint } },
 });
-assert.equal(cached[0].directPrompt, '已确认同版本图片提示词');
-assert.equal(cached[0].directPromptSource, 'current-image-prompt');
+assert.notEqual(cached[0].directPromptSource, 'current-image-prompt');
+assert.doesNotMatch(cached[0].directPrompt, /已确认同版本图片提示词/u,
+  'a legacy direct prompt without converter provenance must be converted again');
 const staleCache = buildDirectStoryboardImageRequests(h3Board, selection, {
   ...context, currentImagePromptsByShotId: { 'shot-2': { prompt: '错误旧缓存', sourceFingerprint: 'stale' } },
 });
 assert.doesNotMatch(staleCache[0].directPrompt, /错误旧缓存/u);
+const selectedConversion: DirectStoryboardImagePromptConversion = {
+  ruleSetId: 'image-rule-openai', ruleSetVersion: '1.0.0',
+  presetId: 'image-preset-storyboard', presetVersion: '1.0.0',
+  format: 'natural-language', mode: 'selected-image-rules', version: 4,
+  converterSystemPrompt: '按所选普通规则转换成单帧画面提示词。',
+  negativePrompt: 'multiple panels, watermark',
+};
+const selectedContext = { ...context, directPromptConversion: selectedConversion };
+const selectedFingerprint = directStoryboardImageSourceFingerprint(h3Board, h3Requests[0], selectedContext);
+assert.match(selectedFingerprint, /^direct-storyboard-image-v4-/u);
+assert.notEqual(selectedFingerprint, fingerprint);
+assert.notEqual(buildDirectStoryboardImageRequests(h3Board, selection, {
+  ...selectedContext,
+  currentImagePromptsByShotId: { 'shot-2': { prompt: '历史未转换的首帧规则', sourceFingerprint: fingerprint } },
+})[0].directPromptSource, 'current-image-prompt', 'all selected rules reject legacy unconverted caches');
+const cachedSelected = buildDirectStoryboardImageRequests(h3Board, selection, {
+  ...selectedContext,
+  currentImagePromptsByShotId: { 'shot-2': { prompt: '阿莲站在画面右侧，右手抬起，暖月光。', sourceFingerprint: selectedFingerprint } },
+});
+assert.equal(cachedSelected[0].directPromptSource, 'current-image-prompt');
+assert.equal(cachedSelected[0].directPrompt, '阿莲站在画面右侧，右手抬起，暖月光。');
+for (const patch of [
+  { ruleSetId: 'other-rule' }, { presetId: 'other-preset' },
+  { ruleSetVersion: '1.0.1' }, { presetVersion: '1.0.1' },
+  { converterSystemPrompt: '同版本但已经编辑的普通规则或分镜单帧预设。' },
+  { negativePrompt: 'text, logo' }, { format: 'sd-tags' },
+] satisfies Partial<DirectStoryboardImagePromptConversion>[]) {
+  assert.notEqual(selectedFingerprint, directStoryboardImageSourceFingerprint(h3Board, h3Requests[0], {
+    ...selectedContext, directPromptConversion: { ...selectedConversion, ...patch },
+  }), `changed conversion provenance invalidates the cache: ${JSON.stringify(patch)}`);
+}
 const microConversion = {
   ruleSetId: 'image-rule-openai-gpt-image-2-5-micro-nsfw',
   ruleSetVersion: '1.0.0',
@@ -318,15 +354,19 @@ assert.match(singleBoundary[0].name, /首帧/u);
 assert.match(singleBoundary[1].name, /尾帧/u);
 
 const batchCacheContext = {
-  ...context,
+  ...selectedContext,
   currentImagePromptsByShotId: Object.fromEntries(board.shots.map((item) => [item.id, {
     prompt: `不应跨时刻复用的全镜缓存 ${item.id}`,
-    sourceFingerprint: directStoryboardImageSourceFingerprint(sharedBoard, { shotId: item.id, referenceAssetIds: ['b', 'a'] }, context),
+    sourceFingerprint: directStoryboardImageSourceFingerprint(sharedBoard, { shotId: item.id, referenceAssetIds: ['b', 'a'] }, selectedContext),
   }])),
 };
 assert.equal(buildDirectStoryboardImageBatchRequests(sharedBoard, {
   mode: 'storyboard-shots', referenceAssetIds: ['b', 'a'],
 }, batchCacheContext)[0].directPromptSource, 'current-image-prompt');
+assert.equal(buildDirectStoryboardImageBatchRequests(sharedBoard, {
+  mode: 'storyboard-shots', referenceAssetIds: ['b', 'a'],
+}, batchCacheContext)[0].directPrompt, '不应跨时刻复用的全镜缓存 shot-1',
+  'normal batches keep a matching converted prompt intact without prepending production instructions');
 for (const batch of [
   buildDirectStoryboardImageBatchRequests(sharedBoard, { mode: 'boundary-frames', referenceAssetIds: ['b', 'a'] }, batchCacheContext),
   buildDirectStoryboardImageBatchRequests(sharedBoard, { mode: 'storyboard-shots', referenceAssetIds: ['b', 'a'], frames: customPlan }, batchCacheContext),

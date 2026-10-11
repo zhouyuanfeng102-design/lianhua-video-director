@@ -13357,7 +13357,8 @@ function DirectorView(ctx: AppContext) {
     }
     // Keep the original result buttons as the sole director generation entry.
     // A chosen reference set applies to every output, including custom totals
-    // and both boundary images; it never enters the text conversion pipeline.
+    // and both boundary images. Shot text still follows the selected converter;
+    // the original reference pixels are attached only to the image request.
     if (sourceBoard.imageToImage?.referenceAssetIds.length) {
       const preparation = { key: `${state.project.id}:${sourceBoard.id}`, mode };
       setStoryboardImagePreparation(preparation);
@@ -19855,7 +19856,7 @@ function ImageWorkbenchView(ctx: AppContext) {
                   <div className="storyboard-shot-picker-actions">
                     <span className="field-hint">{selectedStoryboard.imageToImage?.referenceAssetIds.length
                       ? `仅生成勾选镜头，每张均带 ${selectedStoryboard.imageToImage.referenceAssetIds.length} 张所选原图。`
-                      : "仅生成勾选镜头；到参考图栏选图后，此按钮直接图生图。"}</span>
+                      : "仅生成勾选镜头；选择参考图后，先转换提示词，再携带原图生图。"}</span>
                     <Button
                       variant="primary"
                       icon={<WandSparkles size={16} />}
@@ -23163,13 +23164,14 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
   // not wait for the first generation to finish and then bill a second retry.
   const lease = storyboardImageBatchLifecycle.begin(key);
   if (!lease) return;
-  const requestedApiSnapshot = currentShotRegeneration ? undefined : originalTask.imageApiSnapshot;
+  const frozenReferenceRegeneration = originalTask.imageGenerationMode === "image-to-image";
+  const requestedApiSnapshot = currentShotRegeneration && !frozenReferenceRegeneration ? undefined : originalTask.imageApiSnapshot;
   const requestedApiSourceIdentity = imageApiRegenerationSourceIdentity(state.settings, requestedApiSnapshot);
   let imageApi: AppState["settings"]["imageApi"];
   let currentApiSnapshot: ImageGenerationTask["imageApiSnapshot"];
   try {
     imageApi = await resolveImageApiForRegeneration(state.settings, requestedApiSnapshot);
-    if (currentShotRegeneration) {
+    if (currentShotRegeneration && !frozenReferenceRegeneration) {
       currentApiSnapshot = await captureImageApiSnapshot(imageApi, resolveWorkbenchImageApi(state.settings, "ordinary").profileId);
     }
   } catch (error) {
@@ -23259,7 +23261,7 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
       : effectiveTask.assetKind === "character" && (effectiveTask.imageVariant === "turnaround" || effectiveTask.imageVariant === "five-view")
         ? "character-sheet"
         : effectiveTask.assetKind;
-    let trace: ImageGenerationTaskPatch = {};
+    let trace: ImageGenerationTaskPatch & Pick<ImageGenerationTask, "negativePrompt"> = {};
     const requiresPromptConversion = privateRegeneration || landscapeRepair || !effectiveTask.prompt.trim();
     if (requiresPromptConversion) {
       if (!source.conversionSource.trim()) throw new Error("该旧任务没有保存可恢复的生图资料，请返回工作台重新创建任务。");
@@ -23293,6 +23295,9 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
           imagePromptPresetId: selection.preset.id, imagePromptPresetVersion: selection.preset.version,
           imagePromptPresetName: selection.preset.name,
           imagePromptFormat: selection.ruleSet.format,
+          negativePrompt: sanitizeFinalImagePrompt([
+            selection.ruleSet.negativePrompt, selection.preset.negativePrompt,
+          ].filter(Boolean).join(", "), selection.ruleSet.format) || undefined,
         };
       }
     }

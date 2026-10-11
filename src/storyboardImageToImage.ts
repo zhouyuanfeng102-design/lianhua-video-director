@@ -60,7 +60,7 @@ export interface DirectStoryboardImageBatchSelection {
 }
 
 export interface DirectStoryboardImageRequest extends StoryboardImageRequest {
-  /** Already usable by the image API; it must never enter the text converter. */
+  /** A matching converted cache, or a legacy draft that the worker must convert. */
   directPrompt: string;
   directPromptSource: 'current-image-prompt' | 'confirmed-h3' | 'shot-visual';
 }
@@ -71,9 +71,12 @@ export interface DirectStoryboardImagePromptConversion {
   presetId: string;
   presetVersion?: string;
   format: string;
-  mode: 'gpt-image-2-5-micro-nsfw';
-  /** Version 3 requires specific work identity; 2 is retained for old provenance. */
-  version: 2 | 3;
+  mode: 'gpt-image-2-5-micro-nsfw' | 'selected-image-rules';
+  /** Version 4 converts every selected rule; 2/3 describe older micro provenance. */
+  version: 2 | 3 | 4;
+  /** Content is part of provenance even when a user edits rules without a version bump. */
+  converterSystemPrompt?: string;
+  negativePrompt?: string;
 }
 
 export interface DirectStoryboardImageBuildContext extends StoryboardImageBuildContext {
@@ -175,23 +178,23 @@ export const directStoryboardImageSourceFingerprint = (
   const assets = new Map(context.assets.map((asset) => [asset.id, asset]));
   const hasConversion = Boolean(context.directPromptConversion);
   return `direct-storyboard-image-${hasConversion ? `v${context.directPromptConversion?.version ?? 2}` : 'v1'}-${fnv1a(JSON.stringify({
-    referenceFramingVersion: 2,
+    referenceFramingVersion: 3,
     includeReferenceMetadata: Boolean(context.includeReferenceMetadata),
     boardId: storyboard.id, shotId: request.shotId,
-    // Keep ordinary per-shot legacy fingerprints stable, but never reuse one
-    // moment's image prompt for another moment, first frame or last frame.
+    // Never reuse one moment's image prompt for another moment, first frame
+    // or last frame. The rule content below also invalidates edited presets.
     purpose: request.purpose === 'storyboard-shot' ? undefined : request.purpose,
     imageFrameIndex: request.imageFrameIndex, imageFrameCount: request.imageFrameCount,
     imageFrameDescription: request.imageFrameDescription, imageFrameTimeSec: request.imageFrameTimeSec,
     directPromptConversion: context.directPromptConversion,
-    // Ordinary direct requests retain their exact legacy fingerprint. Only
-    // converter-authored prompts depend on their frozen identity evidence.
+    // Only converter-authored prompts depend on their frozen identity evidence.
     ...(hasConversion ? { conversionIdentityContext: context.conversionIdentityContext || '' } : {}),
     visual: shot ? directVisualSource(storyboard, shot) : null,
     references: request.referenceAssetIds.map((id) => {
       const asset = assets.get(id);
       return asset ? {
         id, name: asset.name, role: asset.referenceRole || asset.role,
+        sourceEntityKind: asset.sourceEntityKind, sourceEntityId: asset.sourceEntityId,
         characterReferenceId: asset.characterReferenceId,
         checksum: asset.checksum, relativePath: asset.relativePath, url: asset.url,
         // Inline-only imports do not necessarily have a checksum.
@@ -282,8 +285,15 @@ export const buildDirectStoryboardImageBatchRequests = (
       referenceRole: purpose === 'storyboard-shot' ? 'composition' : purpose,
       imageVariant: purpose === 'storyboard-shot' ? 'storyboard-frame' : purpose,
       referenceAssetIds: [...referenceAssetIds], primaryReferenceAssetIds: [...referenceAssetIds],
-      directPrompt: [...momentLines, storyboardImageFramingInstruction(purpose), template.directPrompt].join('\n'),
-      conversionSource: [...momentLines, storyboardImageFramingInstruction(purpose), template.conversionSource].join('\n'),
+      // A cached converter result is already a final picture prompt. Do not
+      // put local production constraints back into it after conversion.
+      directPrompt: template.directPromptSource === 'current-image-prompt'
+        ? template.directPrompt
+        : [...momentLines, storyboardImageFramingInstruction(purpose), template.directPrompt].join('\n'),
+      conversionSource: [
+        ...momentLines, storyboardImageFramingInstruction(purpose),
+        directVisualSource(storyboard, storyboard.shots.find((shot) => shot.id === shotId)!).body,
+      ].join('\n'),
     };
     return request;
   });
@@ -310,8 +320,8 @@ const assertSelectedReferenceAssets = (
   });
 };
 
-/** Only explicit per-shot IDs enter the request. No global references,
- * character inference, identity enrichment or text-model call is involved. */
+/** Only explicit per-shot IDs enter the request. The worker converts this
+ * authored text separately; the builder never changes or interprets pixels. */
 export const buildDirectStoryboardImageRequests = (
   storyboard: Storyboard,
   selection: DirectStoryboardImageSelection,
@@ -338,7 +348,8 @@ export const buildDirectStoryboardImageRequests = (
     const visual = directVisualSource(storyboard, shot);
     if (!visual.body) throw new Error(`第 ${shot.index} 镜没有现成的画面描述，请先生成或填写该镜内容。`);
     const cached = context.currentImagePromptsByShotId?.[shot.id];
-    const reusable = cached && text(cached.prompt) && cached.sourceFingerprint === directStoryboardImageSourceFingerprint(
+    // An old unconverted v1 prompt is never proof of a selected-rule result.
+    const reusable = context.directPromptConversion && cached && text(cached.prompt) && cached.sourceFingerprint === directStoryboardImageSourceFingerprint(
       storyboard, { shotId: shot.id, referenceAssetIds }, context,
     );
     const directPrompt = reusable ? cached.prompt : buildDirectStoryboardImagePromptWithReferences(
@@ -351,8 +362,7 @@ export const buildDirectStoryboardImageRequests = (
       assetKind: 'storyboard', assetType: 'reference', assetRole: 'composition', referenceRole: 'composition',
       imageVariant: 'storyboard-frame',
       referenceAssetIds: [...referenceAssetIds], primaryReferenceAssetIds: [...referenceAssetIds],
-      // Retained as provenance only. The direct path submits directPrompt.
-      conversionSource: visual.body,
+      conversionSource: [storyboardImageFramingInstruction('storyboard-shot'), visual.body].join('\n'),
       directPrompt, directPromptSource: reusable ? 'current-image-prompt' : visual.source,
       width: output.width, height: output.height, sizeOverride: output.sizeOverride, resolutionPlan: output.resolutionPlan,
     };

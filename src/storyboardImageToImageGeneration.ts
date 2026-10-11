@@ -9,12 +9,13 @@ import { createImageGenerationTask, GenerationTaskCancelledError, isGenerationTa
 import { requestImageModel, requestImagePromptConverter, requestTextModel } from './services/llm';
 import { readGeneratedImageDimensions } from './imageDimensions';
 import { imageReturnedSizeWarning } from './imageOutputSize';
-import { buildImagePromptConverterSystemPrompt, gptImage25MicroNsfwConverterExtraRule, isGptImage25MicroNsfwPromptSelection, resolveImagePromptSelection, type ImagePromptBackend } from './imagePromptRules';
+import { assertValidFinalImagePrompt, buildImagePromptConverterSystemPrompt, gptImage25MicroNsfwConverterExtraRule, resolveImagePromptSelection, sanitizeFinalImagePrompt, type ImagePromptBackend } from './imagePromptRules';
 import { buildImagePromptIdentityContext } from './imagePromptIdentityContext';
 import { getSafeErrorDiagnostics } from './errorDiagnostics';
 import { defaultStoryboardImageOutputSize, resolveStoryboardImageOutputSize } from './storyboardImageOutputSize';
 import { runStoryboardImageBatch, type StoryboardImageBatchLifecycle, type StoryboardReferenceImageLoader } from './storyboardImages';
-import { assertDirectStoryboardImageApiSupport, buildDirectStoryboardImageBatchRequests, buildDirectStoryboardImagePromptWithReferences, directStoryboardImageSourceFingerprint, normalizeStoryboardImageToImageSettings, resolveDirectStoryboardReferenceImages, type DirectStoryboardImagePromptConversion } from './storyboardImageToImage';
+import { assertDirectStoryboardImageApiSupport, buildDirectStoryboardImageBatchRequests, directStoryboardImageSourceFingerprint, normalizeStoryboardImageToImageSettings, resolveDirectStoryboardReferenceImages, type DirectStoryboardImagePromptConversion } from './storyboardImageToImage';
+import { buildStoryboardImagePromptWithReferences } from './storyboardImageReferences';
 import { requestStoryboardImageFramePlan, validateStoryboardImagePlanCount, type StoryboardImageFramePlan } from './storyboardImagePlan';
 import { withDirectImageRegenerationSnapshot } from './imageAssetRegenerationSnapshot';
 import { imagePromptOutputSpecificationRule } from './imageGeneration';
@@ -37,8 +38,8 @@ export interface DirectStoryboardImageGenerationContext {
   loader: StoryboardReferenceImageLoader;
   storeImage?: (payload: { dataUrl: string; fileName?: string }) => Promise<ManagedMediaResult>;
   generateImage?: typeof requestImageModel;
-  /** Only custom-count static-frame planning uses text; selected image pixels
-   * never enter this call, a prompt converter or identity enrichment. */
+  /** Static-frame planning and prompt conversion use authored text only;
+   * selected image pixels are frozen separately for the image API. */
   planFrames?: typeof requestStoryboardImageFramePlan;
   requestText?: typeof requestTextModel;
   convertPrompt?: typeof requestImagePromptConverter;
@@ -74,9 +75,13 @@ const imagePromptBackendForApi = (
   backend === 'sd_webui' ? 'sd-webui' : backend
 );
 
-const directMicroNsfwReferenceRule = [
+const directReferenceConversionRule = [
   '本次转换结果将用于分镜图生图：参考图会随同一请求上传并负责身份、外貌或场景外观；最终提示词只描述当前目标静帧，不写上传图片编号、规则名称、字段名或制作说明。',
-  '保留当前镜头的主体数量、动作、站位、机位、遮挡层、衣着基底和参考图身份；不要改成多视图、拼图、设定板、私密资料图、部位特写、直接裸露或性行为画面。',
+  '保留当前镜头的主体数量、动作、站位、机位、遮挡层、衣着状态和参考图身份；参考图的临时持物、姿态和背景不得覆盖当前镜头。',
+  '分镜图片只能表现一个明确可见的静止瞬间，使用一个景别、一个机位和一套光线；首尾帧按对应时刻的实际裁切取景，不为展示身份补出画外人物、脸或全身。',
+  '只描述画面里真实可见的主体、动作或状态、地点、空间层次、固定道具、构图、光线、风格和连续性锚点。',
+  '被分析、被寻找、被定位、被谈论或可能存在的对象不等于实际出镜主体；原文未明确可见时不得让其出镜。',
+  '不得输出剧情原文、字段标题、时间戳、音效、台词、镜头切换、运镜过程、模板占位词、Markdown、解释或制作过程。',
 ].join('\n');
 
 /** Only image-only preferences change: no H3, shot fields or video bindings. */
@@ -89,9 +94,8 @@ export const updateStoryboardImageToImageSettings = (
   } : board),
 }));
 
-/** All existing image buttons use the same captured public image selection.
- * Defaults and boundary frames do not need a text API; a custom total performs
- * only the existing source-text still planning, never image-to-text conversion. */
+/** All image buttons freeze the selected originals and convert authored shot
+ * text with the selected image rules before submitting those original pixels. */
 export const generateDirectStoryboardImages = async (
   ctx: DirectStoryboardImageGenerationContext, projectId: string, storyboardId: string,
   options: DirectStoryboardImageGenerationOptions = { mode: 'storyboard-shots' },
@@ -145,7 +149,7 @@ export const generateDirectStoryboardImages = async (
     imageErrorContext = { ...projectContextSnapshot, provider: api.backend, model: api.model, endpoint: api.baseUrl };
     failureDetail = { stage: 'image-preparation', context: imageErrorContext };
     if (!api.enabled || !api.baseUrl.trim() || (api.backend === 'openai' && !api.model.trim())) {
-      throw new Error('请先配置并启用可用的生图 API；默认分镜和首尾帧图生图不需要文本 API。');
+      throw new Error('请先配置并启用可用的生图 API。');
     }
     assertDirectStoryboardImageApiSupport(api, settings.referenceAssetIds.length);
     let directPromptConversion: DirectStoryboardImagePromptConversion | undefined;
@@ -160,7 +164,8 @@ export const generateDirectStoryboardImages = async (
     > | undefined;
     let imagePromptConverterRules = '';
     let conversionIdentityContext = '';
-    let selectedPromptFormat = 'natural-language';
+    let selectedPromptFormat: NonNullable<ImageGenerationTask['imagePromptFormat']> = 'natural-language';
+    let negativePrompt = '';
     try {
       const imagePromptSelection = resolveImagePromptSelection({
         backend: imagePromptBackendForApi(api.backend),
@@ -171,7 +176,7 @@ export const generateDirectStoryboardImages = async (
         state: initial.imagePromptRules,
       });
       selectedPromptFormat = imagePromptSelection.ruleSet.format;
-      if (isGptImage25MicroNsfwPromptSelection(imagePromptSelection)) {
+      {
         const sourceSceneIds = new Set([board.sceneId, ...(board.sourceSceneIds || [])]);
         const sourceScenes = [
           ...(board.sourceSceneSnapshots || []),
@@ -200,16 +205,22 @@ export const generateDirectStoryboardImages = async (
           presetId: imagePromptSelection.preset.id,
           presetVersion: imagePromptSelection.preset.version,
           format: imagePromptSelection.ruleSet.format,
-          mode: 'gpt-image-2-5-micro-nsfw',
-          version: 3,
+          mode: 'selected-image-rules',
+          version: 4,
         };
         imagePromptConverterRules = buildImagePromptConverterSystemPrompt(
           imagePromptSelection,
           [
-            directMicroNsfwReferenceRule,
+            directReferenceConversionRule,
             gptImage25MicroNsfwConverterExtraRule(imagePromptSelection, 'storyboard', 'storyboard-frame'),
+            requested.count !== undefined ? '本批次为用户自定义数量的分镜静帧。AI 选定时刻与裁切只能解释原镜允许的画面，不能覆盖 H3 明确的机位、具名站位、身体侧别和画外状态，也不把全部动作阶段同时入画。' : '',
           ].join('\n'),
+          'storyboard-frame',
         );
+        negativePrompt = sanitizeFinalImagePrompt([
+          imagePromptSelection.ruleSet.negativePrompt,
+          imagePromptSelection.preset.negativePrompt,
+        ].filter(Boolean).join(', '), selectedPromptFormat);
       }
     } catch (error) {
       const detail = error instanceof Error ? error.message : String(error || '未知错误');
@@ -221,11 +232,12 @@ export const generateDirectStoryboardImages = async (
     }
     if (directPromptConversion && (!textApi.enabled || !textApi.baseUrl.trim() || !textApi.model.trim())) {
       failureDetail = { stage: 'image-prompt-convert', context: textErrorContext };
-      throw new Error('GPT Image 2.5 微 NSFW 分镜图生图必须先由文本模型转换成最终微 NSFW 生图提示词；请先启用并配置文本 API，本次没有调用图像模型。');
+      throw new Error('分镜图生图必须先由文本模型按所选生图规则和分类预设转换成最终图片提示词；请先启用并配置文本 API，本次没有调用图像模型。');
     }
     const size = resolveStoryboardImageOutputSize(initial.settings.storyboardImageOutputSize || defaultStoryboardImageOutputSize(), board.aspectRatio, api);
     if (size.issue) throw new Error(`分镜图片分辨率无效：${size.issue}`);
     if (imagePromptConverterRules) imagePromptConverterRules += `\n\n${imagePromptOutputSpecificationRule({ width: size.width, height: size.height, aspectRatio: size.resolutionPlan?.logicalAspectRatio || board.aspectRatio, resolution: size.resolutionPlan?.tier }, 'storyboard-frame')}`;
+    if (directPromptConversion) directPromptConversion = { ...directPromptConversion, converterSystemPrompt: imagePromptConverterRules, negativePrompt };
     const projectContext = {
       includeReferenceMetadata: api.backend === 'openai' && selectedPromptFormat === 'natural-language',
       characters: cloneImageBatchConfig(initial.project.characters.filter((character) => !character.dossier?.archivedIntoCharacterId)), locations: cloneImageBatchConfig(initial.project.locations),
@@ -260,7 +272,8 @@ export const generateDirectStoryboardImages = async (
         assetKind: 'storyboard', imageVariant: request?.imageVariant || 'storyboard-frame',
         imageFrameBatchId: requested.mode === 'boundary-frames' ? undefined : batchId,
         ...(requested.count !== undefined ? { imageFrameIndex: index + 1, imageFrameCount: taskCount } : {}),
-        imageGenerationMode: 'image-to-image', prompt: '', imagePromptFormat: 'natural-language',
+        imageGenerationMode: 'image-to-image', prompt: '', imagePromptFormat: selectedPromptFormat,
+        negativePrompt: negativePrompt || undefined,
         ...(imagePromptTrace || {}),
         conversionSource: request?.conversionSource || '', width: size.width, height: size.height,
         sizeOverride: size.sizeOverride, resolutionPlan: size.resolutionPlan,
@@ -341,7 +354,7 @@ export const generateDirectStoryboardImages = async (
       imageFrameDescription: request.imageFrameDescription, imageFrameTimeSec: request.imageFrameTimeSec,
       imageGenerationMode: 'image-to-image',
       prompt: directPromptConversion && request.directPromptSource !== 'current-image-prompt' ? '' : request.directPrompt,
-      imagePromptFormat: 'natural-language',
+      imagePromptFormat: selectedPromptFormat,
       conversionSource: request.conversionSource, width: request.width, height: request.height, sizeOverride: request.sizeOverride, resolutionPlan: request.resolutionPlan,
       imageApiSnapshot: apiSnapshot, sourceStoryboardId: board.id, sourceShotId: request.shotId,
       sourceFingerprint: directStoryboardImageSourceFingerprint(board, request, projectContext),
@@ -379,10 +392,11 @@ export const generateDirectStoryboardImages = async (
             imagePromptConverterRules, conversionIdentityContext,
           );
           assertActive();
+          const sanitized = assertValidFinalImagePrompt(converted, selectedPromptFormat!, request.conversionSource);
           const orderedAssets = request.referenceAssetIds.map((id) => projectContext.assets.find((asset) => asset.id === id)!);
-          task = { ...task, prompt: buildDirectStoryboardImagePromptWithReferences(
-            converted, orderedAssets, projectContext, projectContext.includeReferenceMetadata,
-          ) };
+          task = { ...task, prompt: projectContext.includeReferenceMetadata
+            ? buildStoryboardImagePromptWithReferences(sanitized, orderedAssets, projectContext)
+            : sanitized };
           tasks[index] = task;
           ctx.updateBackground((state) => applyOwnedProjectUpdate(state, projectId, (project) => ({
             ...project, generationTasks: updateImagePreparationTasks(project.generationTasks, [task],
@@ -391,7 +405,7 @@ export const generateDirectStoryboardImages = async (
         }
         taskFailureStage = 'image-generation';
         const generated = await (ctx.generateImage || requestImageModel)(api, {
-          prompt: task.prompt, width: task.width, height: task.height, sizeOverride: task.sizeOverride, resolutionPlan: task.resolutionPlan,
+          prompt: task.prompt, negativePrompt: task.negativePrompt, width: task.width, height: task.height, sizeOverride: task.sizeOverride, resolutionPlan: task.resolutionPlan,
           referenceImages, primaryReferenceImageCount: referenceImages.length, preserveReferenceImageOrder: true,
         }, assertActive);
         taskFailureStage = 'image-result-save';
@@ -410,7 +424,7 @@ export const generateDirectStoryboardImages = async (
           sourceStoryboardId: board.id, sourceShotId: request.shotId, imageVariant: task.imageVariant,
           imageFrameBatchId: task.imageFrameBatchId, imageFrameIndex: task.imageFrameIndex,
           imageFrameCount: task.imageFrameCount, imageFrameDescription: task.imageFrameDescription, imageFrameTimeSec: task.imageFrameTimeSec,
-          prompt: task.prompt, imageBackend: task.backend, imagePromptRuleSetId: task.imagePromptRuleSetId,
+          prompt: task.prompt, negativePrompt: task.negativePrompt, imageBackend: task.backend, imagePromptRuleSetId: task.imagePromptRuleSetId,
           imagePromptRuleSetName: task.imagePromptRuleSetName,
           imagePromptRuleSetVersion: task.imagePromptRuleSetVersion, imagePromptPresetId: task.imagePromptPresetId,
           imagePromptPresetName: task.imagePromptPresetName,

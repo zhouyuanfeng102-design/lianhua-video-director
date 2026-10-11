@@ -49,6 +49,7 @@ const project = {
 };
 let state: AppState = { ...initial, project, projects: [project], activeProjectId: project.id,
   settings: { ...initial.settings, imageApiProfiles: [], activeImageApiProfileId: null,
+    textApi: { ...initial.settings.textApi, enabled: true, baseUrl: 'https://text.fixture.invalid/v1', model: 'captured-text-model' },
     imageApi: { enabled: true, backend: 'openai', baseUrl: 'https://fixture.invalid/v1', apiKey: '', model: 'fixture-model' },
     storyboardImageOutputSize: { mode: '1k', width: 1024, height: 1024 } } };
 const preparationStarted = deferred();
@@ -58,6 +59,8 @@ const queueGate = deferred();
 const blocker = enqueueImageTask(() => queueGate.promise);
 const media = new Map<string, string>();
 const calls: ImageGenerationOptions[] = [];
+const conversionCalls: { source: string; model: string }[] = [];
+const imageApiModels: string[] = [];
 const update: DirectStoryboardImageGenerationContext['update'] = (updater) => {
   state = updater(state);
   if (state.project.generationTasks.some((task) => task.kind === 'image'
@@ -81,8 +84,16 @@ const ctx: DirectStoryboardImageGenerationContext = {
     return { relativePath, checksum, fileName: payload.fileName || 'fixture.png', managed: true, missing: false,
       sizeBytes: payload.dataUrl.length, mediaType: 'image', mimeType: 'image/png', url: `lianhua-asset://fixture/${relativePath}` };
   },
-  generateImage: async (_api, input, onStart) => {
+  convertPrompt: async (api, _kind, source) => {
+    conversionCalls.push({ source, model: api.model });
+    assert.match(source, /旧门/u, 'the converter receives the prepared authored text snapshot');
+    assert.doesNotMatch(source, /新窗|data:image/u);
+    const frozenLocation = source.match(/旧门/u)![0];
+    return `一名人物站在${frozenLocation}旁，中景构图，温暖柔和的光线照亮人物和门框。`;
+  },
+  generateImage: async (api, input, onStart) => {
     await onStart?.();
+    imageApiModels.push(api.model);
     calls.push(input as ImageGenerationOptions);
     return { dataUrl: png };
   },
@@ -98,28 +109,42 @@ try {
   preparationGate.resolve();
   await bounded(prepared.promise);
   assert.equal(calls.length, 0, 'prepared requests still wait behind existing FIFO image work');
+  assert.equal(conversionCalls.length, 0, 'conversion also waits for the prepared request to reach the queue');
   const captured = state.project.generationTasks[0] as ImageGenerationTask;
   assert.equal(captured.id, originalTaskId);
   assert.equal(captured.status, 'queued');
-  assert.match(captured.prompt, /旧门/u);
+  assert.equal(captured.prompt, '', 'local framing instructions are not stored as a final image prompt');
+  assert.match(captured.conversionSource || '', /旧门/u);
+  assert.match(captured.converterSystemPrompt || '', /当前目标静帧/u);
   state = { ...state, project: { ...state.project,
     sourceDocuments: state.project.sourceDocuments.map((document) => document.id === 'own-chapter'
       ? { ...document, content: '本章现在改成了新的剧情' } : document),
     storyboards: state.project.storyboards.map((item) => ({ ...item, finalPrompt: '新的镜头正文',
       officialPromptZh: 'detailed_description: [Shot 1] 新画面：人物站在新窗旁。',
       shots: item.shots.map((shot) => ({ ...shot, action: '站在新窗旁' })) })),
+    assets: state.project.assets.map((asset) => ({ ...asset, dataUrl: 'data:image/png;base64,Y2hhbmdlZC1waXhlbHM=' })),
+  }, settings: { ...state.settings,
+    imageApi: { ...state.settings.imageApi, model: 'new-image-model' },
+    textApi: { ...state.settings.textApi, model: 'new-text-model' },
   } };
   queueGate.resolve();
   await bounded(Promise.all([blocker, pending]));
   assert.equal(calls.length, 1, 'source edits after preparation cannot silently discard an already queued frozen request');
-  assert.equal(calls[0].prompt, captured.prompt);
+  assert.equal(conversionCalls.length, 1);
+  assert.equal(conversionCalls[0].source, captured.conversionSource);
+  assert.equal(conversionCalls[0].model, 'captured-text-model');
+  assert.deepEqual(imageApiModels, ['fixture-model']);
+  assert.deepEqual(calls[0].referenceImages, [png], 'image requests retain the original prepared reference pixels');
+  assert.equal(calls[0].preserveReferenceImageOrder, true);
   assert.match(calls[0].prompt, /旧门/u);
   assert.doesNotMatch(calls[0].prompt, /新窗/u);
+  assert.doesNotMatch(calls[0].prompt, /静帧取景/u, 'the image API receives the converted picture description');
   assert.equal(state.project.generationTasks[0].id, originalTaskId);
   assert.equal(state.project.generationTasks[0].status, 'succeeded');
   assert.equal((state.project.generationTasks[0] as ImageGenerationTask).preparationStage, undefined);
+  assert.equal((state.project.generationTasks[0] as ImageGenerationTask).prompt, calls[0].prompt);
   assert.match(state.project.storyboards[0].officialPromptZh || '', /新窗/u);
-  console.log('Prepared storyboard snapshot: unrelated chapters retain preparation; ready FIFO tasks survive source edits with the captured prompt and terminal record.');
+  console.log('Prepared storyboard snapshot: ready FIFO tasks convert captured H3 text and retain original references/API after live edits, with a terminal task record.');
 } finally {
   preparationGate.resolve();
   queueGate.resolve();

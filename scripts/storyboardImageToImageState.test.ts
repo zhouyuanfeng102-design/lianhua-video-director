@@ -57,6 +57,7 @@ const task = (overrides: Partial<ImageGenerationTask> = {}): ImageGenerationTask
   sourceStoryboardId: board.id, sourceShotId: 'shot-2', sourceFingerprint: 'image-only-source',
   referenceAssetIds: ['reference-a'], primaryReferenceAssetIds: ['reference-a'], referenceAssetSnapshots: [snapshot],
   conversionSource: '历史文本转换输入不得使用', converterSystemPrompt: '历史转换规则不得使用',
+  imagePromptRuleSetId: 'image-rule-openai', imagePromptPresetId: 'image-preset-storyboard',
   batchId: 'direct-batch', batchIndex: 16, batchCount: 16, createdAt: 2, updatedAt: 3, ...overrides,
 });
 
@@ -126,7 +127,7 @@ assert.equal(restoredTask.batchCount, 16);
 const restoredLegacy = restored.project.generationTasks.find((item) => item.id === 'legacy') as ImageGenerationTask;
 assert.equal(restoredLegacy.imageGenerationMode, undefined);
 assert.equal(restoredLegacy.referenceAssetSnapshots, undefined);
-assert.equal(restoredLegacy.batchIndex, 0);
+assert.equal(restoredLegacy.batchIndex, undefined, 'storyboard batch indexes are one-based; an imported zero is invalid');
 const imageFrameMetadata = (item: ImageGenerationTask) => ({
   imageVariant: item.imageVariant, imageFrameBatchId: item.imageFrameBatchId,
   imageFrameIndex: item.imageFrameIndex, imageFrameCount: item.imageFrameCount,
@@ -196,7 +197,7 @@ const execution = await executeImageRegeneration(regenerated, {
 assert.equal(generated, 1);
 assert.equal(execution.finalPrompt, task().prompt);
 assert.throws(() => resolveImageRegenerationSource(task({ referenceAssetSnapshots: undefined }), changedProject), /快照缺失或不完整/u);
-assert.throws(() => resolveImageRegenerationSource(task({ prompt: '' }), changedProject), /没有保存镜头画面描述/u);
+assert.throws(() => resolveImageRegenerationSource(task({ prompt: '', conversionSource: '' }), changedProject), /没有保存最终图片提示词或可恢复/u);
 await assert.rejects(executeImageRegeneration(task(), {
   referenceImages: [], primaryReferenceImageCount: 0,
   convertPrompt: async () => { throw new Error('must not convert'); }, persistPrompt: () => {},

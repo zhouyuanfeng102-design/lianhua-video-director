@@ -299,24 +299,28 @@ export const prepareCurrentShotImageRegenerationTask = (
   project: Project,
 ): ImageGenerationTask => {
   const { storyboard, request } = currentShotRegenerationRequest(task, project);
+  const frozenReferenceTask = task.imageGenerationMode === 'image-to-image';
+  const snapshots = frozenReferenceTask ? directStoryboardReferenceSnapshots(task) : undefined;
   return {
     ...task,
-    imageGenerationMode: 'text-to-image',
+    imageGenerationMode: frozenReferenceTask ? 'image-to-image' : 'text-to-image',
     prompt: '',
     converterSystemPrompt: '',
     conversionSource: request.conversionSource,
     conversionIdentityContext: buildImagePromptIdentityContext(project, [], storyboard),
-    referenceAssetIds: [...request.referenceAssetIds],
-    primaryReferenceAssetIds: [...request.primaryReferenceAssetIds],
-    referenceAssetSnapshots: undefined,
-    imageApiSnapshot: undefined,
+    referenceAssetIds: frozenReferenceTask ? cleanIdList(task.referenceAssetIds) : [...request.referenceAssetIds],
+    primaryReferenceAssetIds: frozenReferenceTask ? cleanIdList(task.primaryReferenceAssetIds) : [...request.primaryReferenceAssetIds],
+    referenceAssetSnapshots: snapshots,
+    imageApiSnapshot: frozenReferenceTask ? task.imageApiSnapshot : undefined,
     imagePromptRuleSetId: undefined, imagePromptRuleSetName: undefined, imagePromptRuleSetVersion: undefined,
     imagePromptPresetId: undefined, imagePromptPresetName: undefined, imagePromptPresetVersion: undefined,
     imagePromptFormat: undefined,
     sourceFingerprint: undefined,
     imageFrameBatchId: undefined, imageFrameIndex: undefined, imageFrameCount: undefined,
     imageFrameDescription: undefined, imageFrameTimeSec: undefined,
-    width: request.width, height: request.height, sizeOverride: request.sizeOverride,
+    width: frozenReferenceTask ? task.width : request.width,
+    height: frozenReferenceTask ? task.height : request.height,
+    sizeOverride: frozenReferenceTask ? task.sizeOverride : request.sizeOverride,
     negativePrompt: ordinaryImageVariantNegativePrompt(task.imageVariant),
     bindingWarning: '已按当前镜头与当前规则重新转换；原图、原任务和视频提示词保留。',
   };
@@ -330,15 +334,15 @@ export const buildCurrentShotImageRegenerationVisualAnchor = (
   return buildStoryboardImageAssetVisualAnchor(storyboard, request, context);
 };
 
-/** Current-shot reconstruction needs a surviving source shot, not the old
- * direct-image API/reference snapshot. This keeps deleted-task legacy assets
- * repairable without weakening ordinary exact-replay validation. */
+/** Rebuild current-shot text while preserving the original direct-image
+ * provenance. A missing reference snapshot cannot become a different image
+ * request merely because the source shot still exists. */
 export const resolveImageAssetCurrentShotRegenerationTask = (
   asset: ReferenceAsset,
   project: Project,
   imageApi: ImageApiConfig,
 ): ImageGenerationTask | null => {
-  const seed = resolveImageAssetRegenerationTask({ ...asset, imageGenerationMode: undefined }, project, imageApi);
+  const seed = resolveImageAssetRegenerationTask(asset, project, imageApi);
   return seed && canReconvertStoryboardImageTask(seed, project)
     ? seed : null;
 };
@@ -398,6 +402,17 @@ const directStoryboardReferenceSnapshots = (task: ImageGenerationTask): ImageRef
   return snapshots;
 };
 
+const hasUnconvertedDirectStoryboardPrompt = (task: ImageGenerationTask): boolean => (
+  task.imageGenerationMode === 'image-to-image' && task.assetKind === 'storyboard'
+  && !isNsfwPrivateImageTask(task)
+  && (task.sourceFingerprint?.startsWith('direct-storyboard-image-v1-')
+    || !(task.imagePromptRuleSetId?.trim() && task.imagePromptPresetId?.trim()) && !task.converterSystemPrompt?.trim())
+);
+
+const unconvertedStoryboardPromptError = (): Error => new Error(
+  '这条旧参考图任务没有经过图片提示词转换，不能把本地规则说明当作最终提示词重放；来源镜头或对应首尾帧已无法恢复，请从当前分镜重新创建任务。原任务和原图保留。',
+);
+
 const customReferenceSnapshots = (task: ImageGenerationTask): ImageReferenceAssetSnapshot[] => {
   const snapshots = normalizeImageReferenceAssetSnapshots(task.referenceAssetSnapshots);
   if (!normalizeCustomImageInput(task.customImageInput) || !Array.isArray(task.referenceAssetSnapshots)
@@ -444,10 +459,16 @@ export const resolveImageRegenerationSource = (
   const privateTask = isNsfwPrivateImageTask(task);
   const privatePart = privateTaskPart(task);
   if (task.imageGenerationMode === 'image-to-image' && task.assetKind === 'storyboard' && !privateTask) {
-    if (!task.prompt.trim()) throw new Error('原图生图任务没有保存镜头画面描述，不能调用文本 API 猜测或改写原任务；请从对应分镜重新创建任务。');
     const snapshots = directStoryboardReferenceSnapshots(task);
+    if (task.prompt.trim() && hasUnconvertedDirectStoryboardPrompt(task)) throw unconvertedStoryboardPromptError();
+    if (!task.prompt.trim() && !task.conversionSource?.trim()) {
+      throw new Error('原图生图任务没有保存最终图片提示词或可恢复的镜头画面资料；请从对应分镜重新创建任务。');
+    }
     return {
-      conversionSource: '', converterSystemPrompt: '',
+      conversionSource: task.prompt.trim() ? '' : task.conversionSource || '',
+      converterSystemPrompt: task.prompt.trim() ? '' : task.converterSystemPrompt || '',
+      ...(!task.prompt.trim() && typeof task.conversionIdentityContext === 'string'
+        ? { conversionIdentityContext: task.conversionIdentityContext } : {}),
       referenceAssetIds: cleanIdList(task.referenceAssetIds),
       primaryReferenceAssetIds: cleanIdList(task.primaryReferenceAssetIds),
       referenceAssetSnapshots: snapshots,
@@ -693,7 +714,10 @@ export const executeImageRegeneration = async <T>(
     }
   }
   if (task.imageGenerationMode === 'image-to-image' && task.assetKind === 'storyboard' && !isNsfwPrivateImageTask(task)) {
-    if (!hasSavedPrompt) throw new Error('图生图任务缺少已保存的镜头画面描述，不能自动改用文本转换或文生图。');
+    if (hasSavedPrompt && hasUnconvertedDirectStoryboardPrompt(task)) throw unconvertedStoryboardPromptError();
+    if (!hasSavedPrompt && !task.conversionSource?.trim()) {
+      throw new Error('图生图任务缺少最终图片提示词和可恢复的镜头画面资料，无法重新转换；未提交生图请求。');
+    }
     const snapshots = directStoryboardReferenceSnapshots(task);
     // Explicit slots retain their order even when two selected files contain
     // identical pixels. Direct-mode transport must not silently merge slots.
