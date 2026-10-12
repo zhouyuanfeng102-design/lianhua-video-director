@@ -6,6 +6,9 @@ import {
   AUDIO_TRANSLATION_SCOPE_RULE,
   DIEGETIC_AUDIO_SCOPE_RULE,
   DIALOGUE_DELIVERY_RULE,
+  DIALOGUE_VOICE_IDENTITY_RULE,
+  DIALOGUE_VOICE_IDENTITY_TRANSLATION_RULE,
+  LEGACY_DIALOGUE_VOICE_IDENTITY_RULE_V1_8_9,
   NATURAL_ACTION_AUDIO_RULE,
   NATURAL_BACKGROUND_MUSIC_RULE,
   NO_DIALOGUE_PERFORMANCE_RULE,
@@ -16,6 +19,9 @@ import {
   stripContinuousAmbientBed,
 } from '../src/audioPromptPolicy';
 import { compileTargetPrompt, type PromptAdapterInput } from '../src/promptAdapters';
+import { H3_DIALOGUE_FORMAT_RULE } from '../src/h3PromptProtocol';
+import { VIDEO_DIALOGUE_STAGING_RULE } from '../src/videoConversionRules';
+import { SEEDANCE_CHINESE_WRITER_RULE } from '../src/seedancePromptRules';
 
 assert.match(AUDIO_PROMPT_RULE, /新生成默认仅剧情内声音.*non_diegetic_music写N\/A/u);
 assert.match(AUDIO_PROMPT_RULE, /只有用户在本次请求中明确要求非叙事配乐.*才可写入non_diegetic_music/u);
@@ -70,6 +76,26 @@ assert.match(AUDIO_TRANSLATION_SCOPE_RULE, /出现与结束时段、相对本镜
 assert.match(AUDIO_TRANSLATION_SCOPE_RULE, /不把局部事件改成贯穿全段的continuous\/throughout ambience/u);
 assert.match(AUDIO_TRANSLATION_SCOPE_RULE, /同一已确认跨镜声源保持原范围，不能一刀切删掉或改短/u);
 assert.match(AUDIO_EXISTING_SCOPE_RULE, /不延长局部声音、不提前引入后段声源.*不在镜内与overall_soundscape新增重复铺底/u);
+
+// Source contracts must reach both planners and final delivery without a new
+// request stage; voice descriptions in a draft are not confirmation evidence.
+for (const consumer of [VIDEO_DIALOGUE_STAGING_RULE, H3_DIALOGUE_FORMAT_RULE, SEEDANCE_CHINESE_WRITER_RULE]) {
+  assert.equal(consumer.split(DIALOGUE_VOICE_IDENTITY_RULE).length - 1, 1,
+    'each existing dialogue route carries one source-grounded voice contract');
+  assert.ok(!consumer.includes(LEGACY_DIALOGUE_VOICE_IDENTITY_RULE_V1_8_9),
+    'live dialogue routes use the current contract rather than the saved legacy sentence');
+}
+assert.match(DIALOGUE_VOICE_IDENTITY_RULE, /voiceFactScope=source-grounded-new-draft.*用户明确要求.*原剧情明确.*确认依据/u);
+assert.match(DIALOGUE_VOICE_IDENTITY_RULE, /候选分镜、canonicalPrompt、candidatePrompt或旧shots.*不因进入候选稿就成为已确认声音事实/u);
+assert.match(DIALOGUE_VOICE_IDENTITY_RULE, /没有已确认特殊声线时.*已知女性保持女性发声身份.*已知男性保持男性发声身份/u);
+assert.match(DIALOGUE_VOICE_IDENTITY_RULE, /低声、怯声、柔声、结巴或用力不是男声、少年音或另一声音身份的依据/u);
+assert.match(DIALOGUE_VOICE_IDENTITY_RULE, /中文执行稿与H3人物身份定义.*保留项目已知性别.*每句对白紧邻/u);
+assert.match(DIALOGUE_VOICE_IDENTITY_RULE, /voiceFactScope=preserve-confirmed-source.*不把已确认sourcePrompt降为候选稿.*不借新规则给旧稿新增性别、声线或重新配音/u);
+assert.match(DIALOGUE_VOICE_IDENTITY_RULE, /没有voiceFactScope.*格式修复或翻译不能被当成重新建立声音事实的授权/u);
+assert.match(DIALOGUE_VOICE_IDENTITY_TRANSLATION_RULE, /源稿的女性身份与女性发声身份.*不能.*he\/his、male voice或boyish timbre.*特殊声线仍按源稿保留/u);
+assert.match(DIALOGUE_VOICE_IDENTITY_TRANSLATION_RULE, /原稿依据不足时重复原完整姓名.*避免猜写he\/his或she\/her/u);
+assert.match(H3_DIALOGUE_FORMAT_RULE, /候选分镜自行添加.*不构成确认来源/u);
+assert.match(H3_DIALOGUE_FORMAT_RULE, /已有确认稿的翻译、参考更新、衔接和纯格式修复.*不补写原稿没有的性别或声音内容/u);
 
 for (const sharedRule of [VISUAL_IDENTITY_SPEECH_SCOPE_RULE, NO_DIALOGUE_PERFORMANCE_RULE]) {
   assert.equal(DIALOGUE_DELIVERY_RULE.split(sharedRule).length - 1, 1,

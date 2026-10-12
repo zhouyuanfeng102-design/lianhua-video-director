@@ -989,7 +989,7 @@ export const buildGlobalLock = (
       ? '动态衣物优先：当前衣着以已确认入口和逐镜状态为准；仅执行剧情明确的衣着变化，未涉及的衣物保持原状；已有离身衣物保持位置，只有剧情明确穿回时才恢复对应着装。'
       : '',
     entryState ? `承接上一段：${entryState}` : '',
-    characterLocks.length ? `固定人物：${characterLocks.join('；')}` : '',
+    characterLocks.length ? `固定人物：${characterLocks.join('；')}。以上为已保存人物身份参考，不是本段必须出场、入画或发声的名单；实际参与、当前形态与对白归属由本段剧情决定。` : '',
     sceneLocations.length === 1 ? `固定场景：${sceneLocations[0].name}，${sceneLocations[0].description}，${sceneLocations[0].timeWeather}，${sceneLocations[0].lighting}，${sceneLocations[0].anchor}` : '',
     sceneLocations.length > 1 ? `场景序列：${sceneLocations.map((item) => `${item.name}（${[item.description, item.timeWeather, item.lighting, item.anchor].filter(Boolean).join('，')}）`).join('；')}。仅在剧情明确发生地点变化时切换场景，每个地点内部的空间布局、陈设、光向和色彩保持稳定` : '',
     propLocks.length ? `本场景道具候选：${propLocks.join('、')}；仅在当前镜头剧情明确可见时呈现，按持有、交接、放下、使用或消耗状态保持外形、材质、方向和状态连续` : '',

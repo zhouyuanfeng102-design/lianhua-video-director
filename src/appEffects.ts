@@ -28,7 +28,8 @@ import { isDossierFieldConfirmed, preserveConfirmedCharacterFields, CHARACTER_DO
 import { readProjectStoryDraft } from './storyDraft';
 import { normalizeDirectorLookDraft, type DirectorLookDraft } from './directorLookDraft';
 import { directorStylePresets, formatDirectorStyleSummary } from './directorStyles';
-import { AUDIO_EXISTING_SCOPE_RULE, AUDIO_PROMPT_RULE, DIALOGUE_DELIVERY_RULE, DIALOGUE_LANGUAGE_RULE } from './audioPromptPolicy';
+import { AUDIO_EXISTING_SCOPE_RULE, AUDIO_PROMPT_RULE, DIALOGUE_DELIVERY_RULE, DIALOGUE_LANGUAGE_RULE,
+  LEGACY_DIALOGUE_VOICE_IDENTITY_RULE_V1_8_9 } from './audioPromptPolicy';
 import {
   MOSE_JIANGHU_NSFW_ANATOMICAL_DETAIL_RULES,
   MOSE_JIANGHU_NSFW_DETAIL_RULES,
@@ -522,7 +523,7 @@ export const convertStoryboardDraftToFinal = async (
     VIDEO_CREATIVE_DIRECTION_DATA_RULE,
     VIDEO_ACTING_CAMERA_RULES,
     VIDEO_CONVERSION_STORY_RULE, VIDEO_DIALOGUE_RULE, VIDEO_LOCAL_TIME_RULE, VIDEO_SCENE_STYLE_RULE,
-    VIDEO_DIALOGUE_STAGING_RULE, VIDEO_SPATIAL_CONTINUITY_RULE,
+    VIDEO_DIALOGUE_STAGING_RULE, LEGACY_DIALOGUE_VOICE_IDENTITY_RULE_V1_8_9, VIDEO_SPATIAL_CONTINUITY_RULE,
     VIDEO_STAGING_REVIEW_RULE, VIDEO_PROMPT_FOCUS_RULE, VIDEO_WARDROBE_SCOPE_RULE,
     ...(input.sequenceHandoff ? [VIDEO_SEQUENCE_TEXT_HANDOFF_RULE] : []),
     VIDEO_CONVERSION_FORMAT_RULE, VIDEO_CONVERSION_EXAMPLE, AUDIO_PROMPT_RULE, DIALOGUE_DELIVERY_RULE, DIALOGUE_LANGUAGE_RULE,
@@ -561,6 +562,7 @@ export const convertStoryboardDraftToFinal = async (
     `<video_conversion_hard_contract>\n${hardContract}\n</video_conversion_hard_contract>`,
   ].join('\n\n'), input.purpose === 'reference-refresh' ? 'existing' : 'generation');
   const conversionData = serializeUntrustedConversionData({
+    voiceFactScope: input.purpose === 'reference-refresh' ? 'preserve-confirmed-source' : 'source-grounded-new-draft',
     sourceStoryContent: sourceStoryContent
       || '[原始剧情未单独保存，请结合完整原始计划理解内容]',
     shotEvidence,

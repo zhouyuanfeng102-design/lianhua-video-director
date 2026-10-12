@@ -1,13 +1,14 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
-import { BookOpen, Brain, ImagePlus, Images, Link2, Upload, UserRound, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, BookOpen, Brain, ImagePlus, Images, Link2, Upload, UserRound, X } from 'lucide-react';
 import { assetPreviewUrl } from '../media';
-import type { Project, StoryInputMode, StoryNarrator, StoryReference, StoryReferenceAnalysis, StoryReferenceSubject, StoryReferenceSubjectBinding } from '../types';
+import { comicSourceFingerprint, storyComicSettings } from '../comicSources';
+import type { Project, StoryComicSettings, StoryImageSourceMode, StoryInputMode, StoryNarrator, StoryReference, StoryReferenceAnalysis, StoryReferenceSubject, StoryReferenceSubjectBinding } from '../types';
 import { AssetImagePreview } from './AssetImagePreview';
 import { ReferenceImagePickerModal } from './ReferenceImagePickerModal';
 import './StoryReferencePanel.css';
 
-export type StoryReferencePatch = Partial<Pick<StoryReference, 'enabled' | 'fullDescription' | 'notes' | 'subjectBindings'>>;
+export type StoryReferencePatch = Partial<Pick<StoryReference, 'enabled' | 'fullDescription' | 'notes' | 'subjectBindings' | 'sourceRole' | 'pageOrder'>>;
 export type StoryNarratorBinding = { referenceId: string; subjectId: string } | StoryNarrator | undefined;
 
 export interface StoryReferencePanelProps {
@@ -15,13 +16,22 @@ export interface StoryReferencePanelProps {
   chapterId: string;
   uploading?: boolean;
   disabled?: boolean;
-  onUpload: (file: File) => void | Promise<void>;
-  onAddAsset: (assetId: string) => void | Promise<void>;
+  onUpload: (file: File, sourceRole?: 'reference' | 'comic') => void | Promise<void>;
+  onAddAsset: (assetId: string, sourceRole?: 'reference' | 'comic') => void | Promise<void>;
   onRecognize: (referenceId: string) => void | Promise<void>;
   onUpdateReference: (referenceId: string, patch: StoryReferencePatch) => void;
   onRemoveReference: (referenceId: string) => void;
   onInsertReference: (text: string) => void;
   onBindNarrator: (binding: StoryNarratorBinding) => void;
+  onSetImageSourceMode: (mode: StoryImageSourceMode) => void;
+  onSetComicSettings: (patch: Partial<StoryComicSettings>) => void;
+  onMoveComicPage: (referenceId: string, direction: -1 | 1) => void;
+  onGenerateComicStory: () => void | Promise<void>;
+  comicGenerating?: boolean;
+  onUpdateComicStory: (text: string) => void;
+  onAdoptComicStory: () => void;
+  onCreateComicPanelReference: (referenceId: string, panelId: string) => void | Promise<void>;
+  onCancelComicGeneration: () => void;
 }
 
 export function StoryInputModeSwitch({ value, onChange, disabled = false }: {
@@ -75,13 +85,57 @@ function ReferenceDialog({ title, onClose, children, className = '' }: { title: 
   </div>, document.body);
 }
 
-export function StoryReferenceAnalysisView({ analysis }: { analysis: StoryReferenceAnalysis }) {
+const comicTextLabels = { dialogue: '对白', thought: '内心', narration: '旁白', sfx: '拟声', unknown: '类别不明' };
+
+function ComicPanelEvidence({ analysis, disabled = false, onCreatePanelReference }: {
+  analysis: StoryReferenceAnalysis; disabled?: boolean;
+  onCreatePanelReference?: (panelId: string) => void | Promise<void>;
+}) {
+  const [cropping, setCropping] = useState<string>();
+  const [cropError, setCropError] = useState('');
+  const comic = analysis.comic;
+  if (!comic) return null;
+  const characterName = (id?: string) => id ? analysis.characters.find((subject) => subject.id === id)?.label || id : '说话人未确定';
+  const crop = async (panelId: string) => {
+    if (disabled || cropping || !onCreatePanelReference) return;
+    setCropError(''); setCropping(panelId);
+    try { await onCreatePanelReference(panelId); }
+    catch (error) { setCropError(error instanceof Error ? error.message : '单格参考图生成失败，请重试。'); }
+    finally { setCropping(undefined); }
+  };
+  return <section className="story-comic-evidence" aria-label="漫画图格识别资料">
+    <h4>漫画图格与文字（{comic.panels.length} 格）</h4>
+    <p className="field-hint">图格按阅读顺序排列。对白保留原文与中文对照；不确定的信息需结合原图确认。</p>
+    {comic.uncertainties.length > 0 && <p className="story-reference-warning">本页不确定项：{comic.uncertainties.join('；')}</p>}
+    {[...comic.panels].sort((a, b) => a.order - b.order).map((panel) => <details className="story-comic-panel-detail" key={panel.id} open>
+      <summary>第 {panel.order} 格 · {panel.description || '画面描述待补充'}</summary>
+      {panel.characterIds.length > 0 && <p>人物：{panel.characterIds.map((id) => characterName(id)).join('、')}</p>}
+      {(panel.entryState || panel.exitState) && <div className="story-comic-panel-states"><p>起始状态：{panel.entryState || '未明确'}</p><p>结束状态：{panel.exitState || '未明确'}</p></div>}
+      {panel.actions.length > 0 && <div className="story-comic-panel-actions"><strong>动作与结果</strong>{panel.actions.map((action) => <p key={action.id}>{action.actorId ? characterName(action.actorId) + '：' : ''}{action.action}{action.targetId ? ' · 对象：' + characterName(action.targetId) : ''}{action.result ? ' → ' + action.result : ''}{action.phase ? '（' + action.phase + '）' : ''}</p>)}</div>}
+      {panel.texts.length > 0 ? <div className="story-comic-panel-texts">{panel.texts.map((item) => <div className="story-comic-text" key={item.id}>
+        <strong>{comicTextLabels[item.type]} · {item.speakerId ? characterName(item.speakerId) : item.type === 'dialogue' || item.type === 'thought' ? '说话人未确定' : '—'}{item.language ? ' · ' + item.language : ''}</strong>
+        <p className="story-reference-prose">原文：{item.text || '未读出文字'}</p>
+        {item.chineseText && <p className="story-reference-prose">中文对照：{item.chineseText}</p>}
+        {item.uncertainty && <p className="story-comic-uncertainty">不确定：{item.uncertainty}</p>}
+      </div>)}</div> : <p className="field-hint">本格没有识别到文字。</p>}
+      {panel.uncertainties.length > 0 && <p className="story-comic-uncertainty">本格不确定项：{panel.uncertainties.join('；')}</p>}
+      {onCreatePanelReference && <button type="button" className="btn small ghost" disabled={disabled || Boolean(cropping) || !panel.bounds} onClick={() => void crop(panel.id)} title={panel.bounds ? '从漫画原图裁出本格，另存为视频参考；原页保留' : '没有可靠的图格边界，暂时不能裁图'}><ImagePlus size={13} />{cropping === panel.id ? '裁图中…' : '裁出本格作为视频参考'}</button>}
+    </details>)}
+    {cropError && <p className="story-reference-warning" role="alert">{cropError}</p>}
+  </section>;
+}
+
+export function StoryReferenceAnalysisView({ analysis, disabled = false, onCreatePanelReference }: {
+  analysis: StoryReferenceAnalysis; disabled?: boolean;
+  onCreatePanelReference?: (panelId: string) => void | Promise<void>;
+}) {
   const rows: Array<[string, string | string[]]> = [
     ['完整画面描述', analysis.description], ['事件与动作', analysis.events], ['关系与位置', analysis.relationships],
     ['风格', analysis.style], ['构图', analysis.composition], ['光线', analysis.lighting], ['色彩', analysis.colors],
     ['图片文字', analysis.readableText], ['不确定的信息', analysis.uncertainties],
   ];
   return <div className="story-reference-analysis">
+    <ComicPanelEvidence analysis={analysis} disabled={disabled} onCreatePanelReference={onCreatePanelReference} />
     {rows.map(([label, content]) => <section key={label}><h4>{label}</h4><div className="story-reference-prose">{(Array.isArray(content) ? content.join('\n') : content) || '未识别到相关信息'}</div></section>)}
     {subjectGroups(analysis).map(({ kind, subjects }) => <section key={kind}><h4>{kindLabels[kind]}（{subjects.length}）</h4>
       {subjects.length ? subjects.map((subject) => <div className="story-reference-subject-detail" key={subject.id}><strong>{subject.label}</strong><p>{subject.description}</p>
@@ -92,10 +146,11 @@ export function StoryReferenceAnalysisView({ analysis }: { analysis: StoryRefere
   </div>;
 }
 
-function ReferenceEditor({ reference, project, references, initialTab, disabled, onClose, onUpdateReference }: {
+function ReferenceEditor({ reference, project, references, initialTab, disabled, onClose, onUpdateReference, onCreatePanelReference }: {
   reference: StoryReference; project: Project; references: StoryReference[]; initialTab: 'details' | 'image'; onClose: () => void;
   disabled: boolean;
   onUpdateReference: StoryReferencePanelProps['onUpdateReference'];
+  onCreatePanelReference?: (panelId: string) => void | Promise<void>;
 }) {
   const [tab, setTab] = useState<'details' | 'bindings' | 'history' | 'image'>(initialTab);
   const [fullDescription, setFullDescription] = useState(reference.fullDescription || '');
@@ -151,7 +206,7 @@ function ReferenceEditor({ reference, project, references, initialTab, disabled,
     <div className={'story-reference-dialog-body ' + (tab === 'image' ? 'story-reference-image-body' : '')}>
       {tab === 'image' && (src ? <AssetImagePreview src={src} alt={'图' + reference.number + '参考图片'} /> : <p>图片暂时不可用，请检查资产库中的原图。</p>)}
       {tab === 'details' && <>
-        {reference.analysis ? <details open><summary>AI 原始识别 · {localDate(reference.analysis.analyzedAt)}</summary><StoryReferenceAnalysisView analysis={reference.analysis} /></details> : <p className="field-hint">还没有识别资料，请先在图片卡片上点击“AI 识图”。</p>}
+        {reference.analysis ? <details open><summary>AI 原始识别 · {localDate(reference.analysis.analyzedAt)}</summary><StoryReferenceAnalysisView analysis={reference.analysis} disabled={busy || stale} onCreatePanelReference={onCreatePanelReference} /></details> : <p className="field-hint">{reference.sourceRole === 'comic' ? '还没有漫画识别资料，请先点击“识别漫画并生成剧情”。' : '还没有识别资料，请先在图片卡片上点击“AI 识图”。'}</p>}
         <label className="story-reference-edit-field"><span>修订完整画面描述</span><textarea value={fullDescription} onChange={(event) => setFullDescription(event.target.value)} disabled={busy || stale} placeholder="可修正完整描述；留空时沿用 AI 原始描述。" /></label>
         <label className="story-reference-edit-field"><span>补充与纠正说明</span><textarea value={notes} onChange={(event) => setNotes(event.target.value)} disabled={busy || stale} placeholder="例如：图中人物名为小雨；银色物体是钥匙；本章只参考人物，不采用背景。" /></label>
         <p className="field-hint">保存后，扩写、画面转化和解析都会读取这些修订及完整识别资料。</p>
@@ -213,45 +268,130 @@ function NarratorEditor({ project, references, narrator, disabled, onClose, onBi
   </ReferenceDialog>;
 }
 
-export function StoryReferencePanel({ project, chapterId, uploading = false, disabled = false, onUpload, onAddAsset, onRecognize, onUpdateReference, onRemoveReference, onInsertReference, onBindNarrator }: StoryReferencePanelProps) {
+export function StoryReferencePanel({
+  project, chapterId, uploading = false, disabled = false, onUpload, onAddAsset, onRecognize,
+  onUpdateReference, onRemoveReference, onInsertReference, onBindNarrator,
+  onSetImageSourceMode, onSetComicSettings, onMoveComicPage, onGenerateComicStory,
+  comicGenerating = false, onUpdateComicStory, onAdoptComicStory, onCreateComicPanelReference,
+  onCancelComicGeneration,
+}: StoryReferencePanelProps) {
   const workspace = project.chapterWorkspaces?.[chapterId];
   const references = workspace?.storyReferences || [];
+  const sourceMode = workspace?.storyImageSourceMode || 'reference';
+  const isComicMode = sourceMode === 'comic';
+  const comicSettings = storyComicSettings(project, chapterId);
+  const comicPages = references.filter((reference) => reference.sourceRole === 'comic').sort((a, b) => (a.pageOrder ?? a.number) - (b.pageOrder ?? b.number) || a.number - b.number);
+  const enabledComicPages = comicPages.filter((reference) => reference.enabled);
+  const displayReferences = isComicMode ? [...comicPages, ...references.filter((reference) => reference.sourceRole !== 'comic')] : references;
+  const draft = workspace?.comicStoryDraft;
+  const draftStale = Boolean(draft && draft.sourceFingerprint !== comicSourceFingerprint(project, chapterId));
   const fileRef = useRef<HTMLInputElement>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
   const [editor, setEditor] = useState<{ id: string; tab: 'details' | 'image' }>();
   const [narratorOpen, setNarratorOpen] = useState(false);
-  useEffect(() => { setPickerOpen(false); setEditor(undefined); setNarratorOpen(false); }, [project.id, chapterId]);
+  const [uploadingFiles, setUploadingFiles] = useState(false);
+  const [localGenerating, setLocalGenerating] = useState(false);
+  const [operationError, setOperationError] = useState('');
+  const uploadGuard = useRef(false);
+  const generationGuard = useRef(false);
+  const ownerRef = useRef(project.id + ':' + chapterId);
+  ownerRef.current = project.id + ':' + chapterId;
+  const generationBusy = comicGenerating || localGenerating;
+  const uploadBusy = uploading || uploadingFiles;
+  const busy = disabled || generationBusy || uploadBusy;
+  useEffect(() => {
+    ownerRef.current = project.id + ':' + chapterId;
+    setPickerOpen(false); setEditor(undefined); setNarratorOpen(false); setOperationError('');
+    return () => { ownerRef.current = ''; };
+  }, [project.id, chapterId]);
+  const uploadFiles = async (files: File[]) => {
+    if (busy || uploadGuard.current || !files.length) return;
+    const selected = isComicMode ? files : files.slice(0, 1);
+    if (isComicMode && selected.some((file) => !/\.(png|jpe?g)$/i.test(file.name))) {
+      setOperationError('漫画来源目前支持 PNG、JPG 图片。请重新选择。'); return;
+    }
+    uploadGuard.current = true; setUploadingFiles(true); setOperationError('');
+    const role = sourceMode;
+    const owner = ownerRef.current;
+    try {
+      for (const file of selected) {
+        if (ownerRef.current !== owner) break;
+        await onUpload(file, role);
+      }
+    }
+    catch (error) { if (ownerRef.current === owner) setOperationError(error instanceof Error ? error.message : '图片上传失败，请重试。'); }
+    finally { uploadGuard.current = false; setUploadingFiles(false); }
+  };
+  const generateComicStory = async () => {
+    if (busy || generationGuard.current || !enabledComicPages.length) return;
+    generationGuard.current = true; setLocalGenerating(true); setOperationError('');
+    try { await onGenerateComicStory(); }
+    catch (error) { setOperationError(error instanceof Error ? error.message : '漫画剧情生成失败，请重试。'); }
+    finally { generationGuard.current = false; setLocalGenerating(false); }
+  };
   const editReference = references.find((item) => item.id === editor?.id);
   const imageAssets = project.assets.filter((asset) => asset.type !== 'video' && asset.type !== 'audio' && asset.mediaType !== 'video' && asset.mediaType !== 'audio' && !asset.missing && asset.referenceScope !== 'nsfw-private-profile' && Boolean(assetPreviewUrl(asset)));
-  const enabled = references.filter((item) => item.enabled);
-  const ready = enabled.filter((item) => Boolean(item.analysis));
+  const enabled = references.filter((item) => item.enabled && (isComicMode ? item.sourceRole === 'comic' : item.sourceRole !== 'comic'));
+  const ready = enabled.filter((item) => isComicMode ? Boolean(item.analysis?.comic) : Boolean(item.analysis));
+  const missingComicPages = enabledComicPages.some((reference) => {
+    const asset = project.assets.find((item) => item.id === reference.assetId);
+    return !asset || asset.missing || !assetPreviewUrl(asset);
+  });
   const imageNarrator = references.flatMap((reference) => (reference.analysis?.characters || []).filter((subject) => reference.subjectBindings.some((binding) => binding.subjectId === subject.id && binding.isNarrator)).map((subject) => referenceLabel(reference, subject)))[0];
   const narratorName = imageNarrator || workspace?.storyNarrator?.name || (workspace?.storyNarrator?.entityId ? project.characters.find((item) => item.id === workspace.storyNarrator?.entityId)?.name : '');
   return <section className="story-reference-panel" aria-label="本章参考图片">
+    <div className="story-image-source-mode" role="group" aria-label="图生视频来源">
+      <button type="button" className={'btn small ' + (!isComicMode ? 'primary' : 'ghost')} aria-pressed={!isComicMode} disabled={busy} onClick={() => onSetImageSourceMode('reference')}>参考图</button>
+      <button type="button" className={'btn small ' + (isComicMode ? 'primary' : 'ghost')} aria-pressed={isComicMode} disabled={busy} onClick={() => onSetImageSourceMode('comic')}>漫画生视频</button>
+      {isComicMode && <span className="field-hint">按原漫画故事生成连续动画；原页保留为剧情来源。</span>}
+    </div>
+    {isComicMode && <div className="story-comic-settings">
+      <label><span>阅读方向</span><select aria-label="漫画阅读方向" value={comicSettings.readingDirection} disabled={busy} onChange={(event) => onSetComicSettings({ readingDirection: event.target.value as StoryComicSettings['readingDirection'] })}><option value="rtl">右至左（漫画）</option><option value="ltr">左至右</option><option value="vertical">从上至下（条漫）</option></select></label>
+      <label><span>对白语言</span><select aria-label="漫画对白语言" value={comicSettings.dialogueMode} disabled={busy} onChange={(event) => onSetComicSettings({ dialogueMode: event.target.value as StoryComicSettings['dialogueMode'] })}><option value="original">保留原文</option><option value="chinese">中文配音</option></select></label>
+      <label><span>成片形式</span><select aria-label="漫画成片形式" value={comicSettings.renderMode} disabled={busy} onChange={(event) => onSetComicSettings({ renderMode: event.target.value as StoryComicSettings['renderMode'] })}><option value="animation">连续动画</option><option value="motion_comic">动效漫画</option></select></label>
+      <p className="field-hint">{comicSettings.renderMode === 'animation' ? '连续动画：把原漫画的事件转为连贯动作，避免同一动作在不同镜头重复。' : '动效漫画：保留纸面漫画表现，以推拉镜头和微动作为主。'}{comicSettings.dialogueMode === 'chinese' && ' 中文配音会保留原文对照，后续英文提示词只翻译画面描述。'}</p>
+    </div>}
     <div className="story-reference-toolbar"><div className="story-reference-toolbar-buttons">
-      <button type="button" className="btn small" disabled={disabled || uploading} onClick={() => fileRef.current?.click()}><Upload size={14} />{uploading ? '上传中…' : '上传一张图片'}</button>
-      <button type="button" className="btn small ghost" disabled={disabled || uploading} onClick={() => setPickerOpen(true)}><ImagePlus size={14} />从资产库添加</button>
-      <button type="button" className="btn small ghost" disabled={disabled} onClick={() => setNarratorOpen(true)} title={narratorName || '指定剧情中的第一人称角色'}><UserRound size={14} />{narratorName ? '我：' + narratorName : '设置“我”'}</button>
-    </div><span className="field-hint" role="status">已启用 {enabled.length} 张 · 已识别 {ready.length} 张</span></div>
-    <input ref={fileRef} className="story-reference-file-input" type="file" accept="image/*" aria-label="上传参考图片，一次一张" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void onUpload(file); }} />
-    {references.length ? <div className="story-reference-cards" aria-label="参考图片列表">{references.map((reference) => {
+      <button type="button" className="btn small" disabled={busy} onClick={() => fileRef.current?.click()}><Upload size={14} />{uploadBusy ? '上传中…' : isComicMode ? '上传漫画图片（可多选）' : '上传一张图片'}</button>
+      <button type="button" className="btn small ghost" disabled={busy} onClick={() => setPickerOpen(true)}><ImagePlus size={14} />从资产库添加</button>
+      <button type="button" className="btn small ghost" disabled={busy} onClick={() => setNarratorOpen(true)} title={narratorName || '指定剧情中的第一人称角色'}><UserRound size={14} />{narratorName ? '我：' + narratorName : '设置“我”'}</button>
+    </div><span className="field-hint" role="status">已启用 {enabled.length} {isComicMode ? '页' : '张'} · 已识别 {ready.length} {isComicMode ? '页' : '张'}</span></div>
+    <input ref={fileRef} className="story-reference-file-input" type="file" accept={isComicMode ? '.png,.jpg,.jpeg,image/png,image/jpeg' : 'image/*'} multiple={isComicMode} aria-label={isComicMode ? '上传漫画图片，可多选PNG或JPG' : '上传参考图片，一次一张'} onChange={(event) => { const files = Array.from(event.target.files || []); event.target.value = ''; void uploadFiles(files); }} />
+    {references.length ? <div className="story-reference-cards" aria-label="参考图片列表">{displayReferences.map((reference) => {
       const asset = project.assets.find((item) => item.id === reference.assetId);
       const src = asset && assetPreviewUrl(asset);
       const recognizing = reference.status === 'recognizing';
+      const isComic = reference.sourceRole === 'comic';
+      const pageIndex = comicPages.findIndex((page) => page.id === reference.id);
+      const hasAnalysis = isComic ? Boolean(reference.analysis?.comic) : Boolean(reference.analysis);
       const label = '图' + reference.number;
-      const status = recognizing ? '识别中…' : reference.status === 'failed' ? reference.analysis ? '重识别失败，保留原资料' : '识别失败' : reference.analysis ? '已识别' : '待识别';
+      const status = recognizing ? '识别中…' : reference.status === 'failed' ? hasAnalysis ? '重识别失败，保留原资料' : '识别失败' : hasAnalysis ? isComic ? '已识别 ' + reference.analysis!.comic!.panels.length + ' 格' : '已识别' : isComic ? '待漫画识别' : '待识别';
       return <article className={'story-reference-card ' + (!reference.enabled ? 'is-disabled' : '')} key={reference.id} aria-label={label + '参考图'}>
         <div className="story-reference-card-top"><button type="button" className="story-reference-thumbnail" disabled={!src} onClick={() => setEditor({ id: reference.id, tab: 'image' })} aria-label={'预览' + label}>{src ? <img src={src} alt={label + '：' + (asset?.name || '参考图片')} loading="lazy" /> : <span>图片缺失</span>}</button>
-          <div className="story-reference-card-meta"><strong>{label}</strong><span className="story-reference-file-name" title={asset?.name}>{asset?.name || '原图不可用'}</span><span className={'story-reference-status ' + (reference.status === 'failed' ? 'is-error' : '')} role="status">{status}</span><label className="story-reference-enabled"><input type="checkbox" checked={reference.enabled} disabled={disabled} onChange={(event) => onUpdateReference(reference.id, { enabled: event.target.checked })} />本章启用</label></div>
+          <div className="story-reference-card-meta"><strong>{isComic ? '第 ' + (pageIndex + 1) + ' 页 · ' + label : label}</strong><span className="story-reference-file-name" title={asset?.name}>{asset?.name || '原图不可用'}</span><span className={'story-reference-status ' + (reference.status === 'failed' ? 'is-error' : '')} role="status">{status}</span><label className="story-reference-enabled"><input type="checkbox" checked={reference.enabled} disabled={busy || recognizing} onChange={(event) => onUpdateReference(reference.id, { enabled: event.target.checked })} />本章启用</label></div>
         </div>
         {reference.error && <div className="story-reference-card-error" title={reference.error}>{reference.error}</div>}
-        <div className="story-reference-card-actions"><button type="button" className="btn small" disabled={disabled || recognizing || !src || asset?.missing} onClick={() => void onRecognize(reference.id)}><Brain size={13} />{recognizing ? '识别中…' : reference.analysis ? '重新识别' : 'AI 识图'}</button><button type="button" className="btn small ghost" onClick={() => setEditor({ id: reference.id, tab: 'details' })}>查看与修改</button><button type="button" className="btn small ghost" disabled={disabled} onClick={() => onRemoveReference(reference.id)} title="仅移出本章，图片保留在资产库">移除</button></div>
-        <div className="story-reference-subject-chips">{subjectGroups(reference.analysis).flatMap(({ kind, subjects }) => subjects.map((subject) => <button type="button" key={kind + subject.id} className="story-reference-subject-chip" disabled={disabled || !reference.enabled} title={'插入' + referenceLabel(reference, subject)} onClick={() => onInsertReference(referenceLabel(reference, subject))}><Link2 size={11} />{subjectName(reference, subject)}</button>))}{!reference.analysis && <span className="field-hint">识别后可点选主体写入剧情</span>}</div>
+        <div className="story-reference-card-actions">{!isComic && <button type="button" className="btn small" disabled={busy || recognizing || !src || asset?.missing} onClick={() => void onRecognize(reference.id)}><Brain size={13} />{recognizing ? '识别中…' : reference.analysis ? '重新识别' : 'AI 识图'}</button>}<button type="button" className="btn small ghost" onClick={() => setEditor({ id: reference.id, tab: 'details' })}>{isComic ? '查看图格与资料' : '查看与修改'}</button><button type="button" className="btn small ghost" disabled={busy || recognizing} onClick={() => onRemoveReference(reference.id)} title="仅移出本章，图片保留在资产库">移除</button>
+          {isComic && <><button type="button" className="btn small ghost" disabled={busy || recognizing || pageIndex === 0} aria-label={label + '漫画页上移'} onClick={() => onMoveComicPage(reference.id, -1)}><ArrowUp size={12} />上移</button><button type="button" className="btn small ghost" disabled={busy || recognizing || pageIndex === comicPages.length - 1} aria-label={label + '漫画页下移'} onClick={() => onMoveComicPage(reference.id, 1)}><ArrowDown size={12} />下移</button></>}
+        </div>
+        <label className="story-reference-source-role"><span>用途</span><select aria-label={label + '图片用途'} value={isComic ? 'comic' : 'reference'} disabled={busy || recognizing} onChange={(event) => onUpdateReference(reference.id, { sourceRole: event.target.value as 'reference' | 'comic' })}><option value="reference">视频参考图</option><option value="comic">漫画剧情来源</option></select></label>
+        <div className="story-reference-subject-chips">{subjectGroups(reference.analysis).flatMap(({ kind, subjects }) => subjects.map((subject) => <button type="button" key={kind + subject.id} className="story-reference-subject-chip" disabled={busy || !reference.enabled} title={'插入' + referenceLabel(reference, subject)} onClick={() => onInsertReference(referenceLabel(reference, subject))}><Link2 size={11} />{subjectName(reference, subject)}</button>))}{!reference.analysis && <span className="field-hint">{isComic ? '从上方统一识别漫画，按页生成连续剧情' : '识别后可点选主体写入剧情'}</span>}</div>
       </article>;
-    })}</div> : <div className="story-reference-empty"><Images size={21} /><span>添加参考图后，逐张点击“AI 识图”。每次上传一张，可继续添加多张。</span></div>}
-    <div className="story-reference-bottom-hint field-hint">图片自动进入资产库。剧情可写“让图1和图2的人物互动”；点击主体名称可插入引用。</div>
-    {pickerOpen && createPortal(<ReferenceImagePickerModal open assets={imageAssets} selectedAssetId="" busy={disabled || uploading} onClose={() => setPickerOpen(false)} onConfirm={(asset) => { setPickerOpen(false); void onAddAsset(asset.id); }} />, document.body)}
-    {editReference && editor && <ReferenceEditor key={project.id + ':' + chapterId + ':' + editReference.id} project={project} reference={editReference} references={references} initialTab={editor.tab} disabled={disabled} onClose={() => setEditor(undefined)} onUpdateReference={onUpdateReference} />}
-    {narratorOpen && <NarratorEditor project={project} references={references} narrator={workspace?.storyNarrator} disabled={disabled} onClose={() => setNarratorOpen(false)} onBindNarrator={onBindNarrator} />}
+    })}</div> : <div className="story-reference-empty"><Images size={21} /><span>{isComicMode ? '选择 PNG、JPG 漫画页或条漫，可多选上传；随后调整页序和阅读方向。' : '添加参考图后，逐张点击“AI 识图”。每次上传一张，可继续添加多张。'}</span></div>}
+    {isComicMode ? <>
+      <div className="story-comic-generation"><button type="button" className="btn small primary" disabled={busy || !enabledComicPages.length || missingComicPages} onClick={() => void generateComicStory()}><Brain size={14} />{generationBusy ? '识别漫画并生成剧情中…' : '识别漫画并生成剧情'}</button>{generationBusy && <button type="button" className="btn small ghost" onClick={onCancelComicGeneration}>取消生成</button>}<span className="field-hint">按当前页序联合识别人物、对白与动作，先预览、再采用。</span></div>
+      {missingComicPages && <p className="story-reference-warning" role="status">启用的漫画页中有原图缺失，请重新添加或取消启用后再生成。</p>}
+      <p className="story-reference-bottom-hint field-hint">页序可调整，永久“图N”编号保持不变。漫画整页用于剧情识别；单格裁图、人物参考或首帧用于视频参考。需要整页故事板时，可把整页另设为视频参考。</p>
+      {draft && <section className="story-comic-story-preview" aria-label="漫画剧情预览">
+        <div className="story-comic-preview-heading"><strong>连续剧情预览</strong><span className="field-hint">{draft.adoptedAt ? '已采用 · ' + localDate(draft.adoptedAt) : '生成于 ' + localDate(draft.generatedAt)}</span></div>
+        {draftStale && <p className="story-reference-warning" role="status">漫画来源、页序、阅读设置或资料已更改。请重新生成剧情后再采用。</p>}
+        <textarea aria-label="编辑漫画剧情预览" value={draft.storyText} disabled={busy} onChange={(event) => onUpdateComicStory(event.target.value)} placeholder="这里显示根据漫画生成的连续剧情，可编辑后采用。" />
+        <div className="story-comic-preview-actions"><span className="field-hint">采用后写入本章剧情，继续使用现有分镜和视频流程。</span><button type="button" className="btn small primary" disabled={busy || draftStale || !draft.storyText.trim()} onClick={onAdoptComicStory}>采用为本章剧情</button></div>
+      </section>}
+    </> : <div className="story-reference-bottom-hint field-hint">图片自动进入资产库。剧情可写“让图1和图2的人物互动”；点击主体名称可插入引用。</div>}
+    {operationError && <p className="story-reference-warning" role="alert">{operationError}</p>}
+    {pickerOpen && createPortal(<ReferenceImagePickerModal open assets={imageAssets} selectedAssetId="" busy={busy} onClose={() => setPickerOpen(false)} onConfirm={(asset) => { setPickerOpen(false); void onAddAsset(asset.id, sourceMode); }} />, document.body)}
+    {editReference && editor && <ReferenceEditor key={project.id + ':' + chapterId + ':' + editReference.id} project={project} reference={editReference} references={references} initialTab={editor.tab} disabled={busy} onClose={() => setEditor(undefined)} onUpdateReference={onUpdateReference} onCreatePanelReference={editReference.sourceRole === 'comic' ? (panelId) => onCreateComicPanelReference(editReference.id, panelId) : undefined} />}
+    {narratorOpen && <NarratorEditor project={project} references={references} narrator={workspace?.storyNarrator} disabled={busy} onClose={() => setNarratorOpen(false)} onBindNarrator={onBindNarrator} />}
   </section>;
 }

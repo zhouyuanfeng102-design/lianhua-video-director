@@ -27,7 +27,8 @@ import { VIDEO_ACTING_CAMERA_RULES, VIDEO_ACTING_CAMERA_TRANSLATION_RULE, VIDEO_
   LEGACY_VIDEO_ACTING_CAMERA_TRANSLATION_RULE_V1_8_1, LEGACY_VIDEO_WORLD_SPACE_CAMERA_RULE_V1_8_1,
   LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_8, LEGACY_VIDEO_ACTING_CAMERA_TRANSLATION_RULE_V1_8_8,
   LEGACY_VIDEO_WORLD_SPACE_CAMERA_RULE_V1_8_8, LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_9,
-  LEGACY_VIDEO_AI_SHOT_COVERAGE_RULE_V1_8_9 } from '../src/videoActingCameraRules';
+  LEGACY_VIDEO_AI_SHOT_COVERAGE_RULE_V1_8_9,
+  LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_0_1, LEGACY_VIDEO_CAMERA_SELECTION_RULE_V2_0_1 } from '../src/videoActingCameraRules';
 import { generateSeedanceBilingualOutput, getOfficialSeedanceSourceFingerprint } from '../src/seedancePrompt';
 import { regenerateSequenceReferencePrompt } from '../src/sequenceReferencePrompt';
 import { resolveConfirmedMasterSliceSource } from '../src/confirmedMasterSliceSource';
@@ -609,7 +610,8 @@ try {
     LEGACY_VIDEO_WORLD_SPACE_CAMERA_RULE_V1_8_8, LEGACY_VIDEO_ACTING_CAMERA_TRANSLATION_RULE_V1_8_8,
     LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_1, LEGACY_VIDEO_WORLD_SPACE_CAMERA_RULE_V1_8_1,
     LEGACY_VIDEO_ACTING_CAMERA_TRANSLATION_RULE_V1_8_1,
-    LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_9, LEGACY_VIDEO_AI_SHOT_COVERAGE_RULE_V1_8_9];
+    LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_9, LEGACY_VIDEO_AI_SHOT_COVERAGE_RULE_V1_8_9,
+    LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_0_1, LEGACY_VIDEO_CAMERA_SELECTION_RULE_V2_0_1];
   const cameraMix = [custom, ...retiredCameraBlocks, ...currentCameraBlocks, ...retiredCameraBlocks, quotedCustom].join('');
   assert.equal(stripLegacyVideoActingCameraRules(cameraMix),
     [custom, ...currentCameraBlocks, quotedCustom].join(''),

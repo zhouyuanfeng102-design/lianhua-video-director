@@ -14,14 +14,14 @@ import type { Character, ConverterPreset, H3IdentityBindings, PromptCharacterPar
 const characters: Character[] = [
   { id: 'zesshi', name: '绝死绝命', outfit: '黑白铠甲', appearance: '黑白长发' },
   { id: 'mare', name: '马雷', outfit: '白色斗篷', appearance: '金色短发' },
-].map((person) => ({ ...person, gender: '', apparentAge: '', race: '', signatureProps: '', personality: '',
+].map((person) => ({ ...person, gender: '女', apparentAge: '', race: '', signatureProps: '', personality: '',
   motionHabits: '', anchor: person.outfit, negativeContinuity: '', assetIds: [] }));
 const context = { characters, assets: [] };
 const converter: ConverterPreset = { id: 'action-converter', name: '动作排程测试', workflow: 'all', inputMode: 'all',
   scope: 'video', enabled: true, version: 'test', systemPrompt: '按本段剧情整理完整动作。', outputRules: '输出普通六字段。', updatedAt: 1 };
-const zhIdentities = ['身份：绝死绝命，黑白长发，黑白铠甲。', '身份：马雷，金色短发，白色斗篷。'];
-const enIdentities = ['Identity: 绝死绝命, long black-and-white hair and black-and-white armor.',
-  'Identity: 马雷, short blond hair and a white cloak.'];
+const zhIdentities = ['身份：绝死绝命，女性，黑白长发，黑白铠甲。', '身份：马雷，女性，金色短发，白色斗篷。'];
+const enIdentities = ['Identity: 绝死绝命, a woman with long black-and-white hair and black-and-white armor.',
+  'Identity: 马雷, a woman with short blond hair and a white cloak.'];
 const bindings = (language: 'zh' | 'en', speaking: boolean): H3IdentityBindings => ({ version: 1,
   characters: characters.map((person, index) => ({ characterId: person.id, name: person.name,
     referenceAnchor: (language === 'zh' ? zhIdentities : enIdentities)[index],
@@ -109,6 +109,13 @@ const runScenario = async (scenario: Scenario): Promise<Storyboard> => {
   assert.deepEqual(requests.map((request) => request.stage), ['convert', 'review', 'translate', 'translate'],
     'event review reuses the existing calls, with no extra model stage or semantic retry');
   const stagingReview = readData(requests[1].user, 'video_staging_review_data');
+  const conversionData = readData(requests[0].user, 'video_conversion_data');
+  assert.equal(conversionData.voiceFactScope, 'source-grounded-new-draft');
+  assert.equal(stagingReview.voiceFactScope, 'source-grounded-new-draft');
+  for (const data of [conversionData, stagingReview]) {
+    assert.equal(data.characterIdentityFacts.find((person: { id: string }) => person.id === 'mare').gender, '女',
+      'the model receives project identity even when the candidate carries a conflicting voice');
+  }
   assert.equal(stagingReview.taskAuthority, 'current-segment-staging-replan');
   assert.equal(stagingReview.canonicalPrompt, original, 'the bad four-shot candidate is supplied as review evidence');
   assert.deepEqual(stagingReview.shots.map((shot: { startSec: number; endSec: number }) => [shot.startSec, shot.endSec]),
@@ -230,4 +237,18 @@ assert.match(first.shots[1].action, /朝向身前的马雷.*左脚支撑，右�
 assert.match(first.officialPromptEn!, /gaze, chest and hips facing 马雷.*right foot kicks forward/u);
 assert.match(first.officialPromptEn!, /continuously covers contact, flight and response/u);
 console.log('PASS forward kick, named target and continuous action axis reach English through the corrected three-shot schedule');
-console.log('Video action schedule pipeline: 2 offline integration cases passed; no project data or live API used');
+const voice = await runScenario({
+  id: 'voice-source-identity', source: '少女马雷怯声问绝死绝命：“你是谁？”绝死绝命安静倾听。',
+  original: [{ start: 0, end: 15, action: '马雷开口发问，绝死绝命倾听', camera: '双人中景',
+    dialogue: '马雷 第1–3秒（低柔胆怯的少年音）：“你是谁？”' }],
+  corrected: [{ start: 0, end: 15, action: '马雷开口发问，绝死绝命倾听', camera: '双人中景',
+    dialogue: '马雷 第1–3秒（女性发声身份，怯声结巴）：“你是谁？”' }],
+  groups: [[0]], speaking: true,
+  zh: h3('zh', ['马雷 (S1)保持女性发声身份，在本段1–3秒怯声结巴地问：<d>[Chinese] 你是谁？</d>。绝死绝命倾听，不代说。']),
+  en: h3('en', ['马雷 (S1) retains her female speaking identity and asks timidly with a stammer from clip time 1–3s: <d>[Chinese] 你是谁？</d> 绝死绝命 listens without speaking the line.']),
+});
+assert.match(voice.finalPrompt, /女性发声身份/u);
+assert.match(voice.officialPromptEn!, /her female speaking identity/u);
+assert.doesNotMatch(voice.officialPromptEn!, /boyish|\bhe\b|\bhis\b/iu);
+
+console.log('Video source identity and action schedule pipeline: 3 offline integration cases passed; no project data or live API used');

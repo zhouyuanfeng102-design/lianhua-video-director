@@ -4,13 +4,13 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的 Windows 桌面工作台。
 
-当前版本：**2.0.1** · 2026-10-12 · Windows 64 位 · 便携运行
+当前版本：**2.0.3** · 2026-10-12 · Windows 64 位 · 便携运行
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows 便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-2.0.1.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-2.0.3.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
 1. 下载上面的 EXE，放在可写入的文件夹里，双击运行，无需安装 Node.js。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
@@ -26,6 +26,7 @@
 - **连续分镜规划**：支持单段制作与长剧情拆段，编辑镜头、时长、运镜及连续性。
 - **提示词生成**：生成中英文视频提示词，单独重试、修改并保存历史版本。
 - **参考图风格分析**：在导演与视觉上传单张参考图，结合自定义要求使用视觉 API 填写风格；无图沿用文本分析，参考图随章节保存。
+- **漫画生成剧情**：在剧情解析的图生视频中选择漫画生视频，上传多页 PNG/JPG 或条漫，设置页序、阅读方向与对白语言；一次识别生成可编辑剧情，采用后进入现有分镜流程。原页保留为剧情证据，单格可裁图入库供视频参考。
 - **图像与视频任务**：配置对应服务后提交任务，管理参考图、首尾帧、批量任务与结果，查看图片任务实际使用的生图规则与分类预设。
 - **自定义生图+反推图片提示词**：输入要求生成图片，或复用上传/资产库参考图，通过视觉 API 反推可复制的提示词与人物、物品、场景、风格详情。反推同步显示在聊天和资料任务，支持后台执行、停止、重试及项目保存恢复；原有生图支持原文直发或规则转换，结果自动入库。
 - **项目与资产管理**：管理图片、视频和音频，保存项目包、备份资料并导出提示词。

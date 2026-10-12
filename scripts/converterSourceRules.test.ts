@@ -29,6 +29,7 @@ const jsonBlock = (text: string, tag: string): Record<string, any> => {
   const result = await convertStoryboardDraftToFinal({ draft, converter, clean, sourceStoryContent: rawSource, request: async (_system, user) => {
     calls += 1; assert.equal(calls, 1, 'valid/no-op content must not trigger a rewrite merely for textual difference');
     const data = jsonBlock(user, 'video_conversion_data');
+    assert.equal(data.voiceFactScope, 'source-grounded-new-draft');
     assert.equal(data.sourceStoryContent, rawSource, 'do not trim raw source before applying its UTF-16 offsets');
     assert.equal(data.shotEvidence[0].sourceExcerpt, '', 'do not locally cut the story into evidence first');
     assert.equal(data.shotEvidence[0].sourceStart, draft.shots[0].sourceStart);
@@ -66,8 +67,28 @@ const jsonBlock = (text: string, tag: string): Record<string, any> => {
   draft.promptTrace = { mode: 'text-api', convertedPromptFingerprint: sourceContentHash(bare), modelRuleSetId: '', converterPresetId: converter.id, sourceDocumentIds: [], referenceAssetIds: [], generatedAt: 1 };
   const redistributed = canonical([`${cue('母巢', reply, 0.3)} ${cue('西娅', help, 4)}`, '无']);
   let calls = 0;
-  const result = await convertStoryboardDraftToFinal({ draft, converter, clean, purpose: 'reference-refresh', request: async () => { calls += 1; return redistributed; } });
+  const result = await convertStoryboardDraftToFinal({ draft, converter, clean, purpose: 'reference-refresh', request: async (_system, user) => {
+    calls += 1;
+    assert.equal(jsonBlock(user, 'video_conversion_data').voiceFactScope, 'preserve-confirmed-source');
+    return redistributed;
+  } });
   assert.equal(calls, 1); assert.equal(result.finalPrompt, redistributed, 'confirmed content may move across shots/times without a rigid per-shot quote comparison');
+}
+
+// A stale conversion stamp does not grant a reference update voice direction.
+{
+  const draft = makeDraft();
+  draft.promptTrace = { mode: 'text-api', convertedPromptFingerprint: 'stale', modelRuleSetId: '',
+    converterPresetId: converter.id, sourceDocumentIds: [], referenceAssetIds: [], generatedAt: 1 };
+  let calls = 0;
+  const result = await convertStoryboardDraftToFinal({ draft, converter, clean, purpose: 'reference-refresh',
+    request: async (_system, user) => {
+      calls += 1;
+      assert.equal(jsonBlock(user, 'video_conversion_data').voiceFactScope, 'preserve-confirmed-source');
+      return complete;
+    } });
+  assert.equal(calls, 1);
+  assert.equal(result.finalPrompt, complete);
 }
 
 // The model resolves content omissions within the original full-source

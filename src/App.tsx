@@ -307,6 +307,7 @@ import {
   requestTextModel,
   requestVisionAnalysis,
   requestStoryReferenceVisionAnalysis,
+  requestComicSourceAnalysis,
   testTextConnection,
   DEFAULT_STORY_EXPANSION_TARGET_LENGTH,
   normalizeStoryExpansionTargetLength,
@@ -320,7 +321,8 @@ import { isSemanticSequencePlan, normalizeSemanticSequenceRequestedTotalDuration
 import { officialH3ContextForStoryboard } from "./officialH3Context";
 import { buildVideoSceneContext } from "./videoSceneContext";
 import { repairH3IdentityBindings, H3IdentityRepairCancelledError } from "./h3IdentityRepair";
-import { resolvePromptCharacterParticipation, resolveStoryboardCharacterParticipation } from "./characterParticipation";
+import { resolveStoryboardCharacterParticipation } from "./characterParticipation";
+import { semanticSegmentIdentityReferenceIds } from "./semanticSegmentIdentityReferences";
 import { commitH3IdentityRepair } from "./h3IdentityRepairCommit";
 import lotusIcon from "../build/icon.png";
 import packageInfo from "../package.json";
@@ -330,7 +332,10 @@ import { assetPreviewUrl, createFrameAsset, probeAudioFile, probeVideoFile } fro
 import { imageTaskGenerationMode, imageTaskGenerationModeLabel } from "./imageTaskGenerationMode";
 import { AssetImagePreview } from "./components/AssetImagePreview";
 import { StoryInputModeSwitch, StoryReferencePanel } from "./components/StoryReferencePanel";
-import type { StoryReference, StoryReferenceContext, StoryNarrator } from "./types";
+import type { StoryReference, StoryReferenceContext, StoryNarrator, StoryComicSettings, StoryImageSourceMode } from "./types";
+import { comicSourceFingerprint, comicIdentityCatalog, orderedComicReferences, storyComicSettings, setStoryImageSourceMode, setStoryComicSettings, moveComicPage, storeComicStoryDraft, storyReferenceVideoAssetIds } from "./comicSources";
+import { beginComicRecognition, completeComicRecognition, failComicRecognition, loadComicReferenceImages, type ComicRecognitionRequest } from "./comicWorkflow";
+import { cropComicPanel, comicPanelPixelBounds } from "./comicPanelCrop";
 import {
   buildStoryReferenceContext,
   storyReferenceFingerprint,
@@ -1888,6 +1893,14 @@ export default function App() {
   const storyAnalysisOperationRef = useRef(0);
   const storyReferenceRecognitionControllersRef = useRef(new Map<string, AbortController>());
   const [storyReferenceUploading, setStoryReferenceUploading] = useState(false);
+  const storyReferenceUploadLockRef = useRef(false);
+  const comicGenerationRef = useRef<{ controller: AbortController; projectId: string; chapterId: string; epoch: number } | null>(null);
+  const [comicGenerating, setComicGenerating] = useState(false);
+  const comicCropLocksRef = useRef(new Set<string>());
+  useEffect(() => {
+    const operation = comicGenerationRef.current;
+    if (operation && (operation.projectId !== state.project.id || operation.chapterId !== state.project.activeChapterId)) operation.controller.abort();
+  }, [state.project.id, state.project.activeChapterId]);
   const storyImportOperationRef = useRef(0);
   const storyExpansionAbortRef = useRef<AbortController | null>(null);
   const storyExpansionRequestIdentityRef = useRef("");
@@ -2621,6 +2634,7 @@ export default function App() {
   }, [sequencePlanningIdentity]);
 
   useEffect(() => () => {
+    comicGenerationRef.current?.controller.abort();
     storyReferenceRecognitionControllersRef.current.forEach((controller) => controller.abort());
     storyReferenceRecognitionControllersRef.current.clear();
     storyAnalysisOperationRef.current += 1;
@@ -2809,6 +2823,7 @@ export default function App() {
 
 
   const syncWorkspaceUiState = useCallback((loadedState: AppState) => {
+    comicGenerationRef.current?.controller.abort();
     backgroundChapterRef.current = undefined;
     workspaceEpochRef.current += 1;
     storyImportOperationRef.current += 1;
@@ -6073,7 +6088,7 @@ export default function App() {
   const handleStoryInputModeChange = (mode: "text" | "image") => {
     changeStoryReferences((project, chapterId) => withStoryInputMode(project, mode, chapterId));
   };
-  const handleStoryReferenceUpdate = (referenceId: string, patch: Partial<Pick<StoryReference, "enabled" | "fullDescription" | "notes" | "subjectBindings">>) => {
+  const handleStoryReferenceUpdate = (referenceId: string, patch: Partial<Pick<StoryReference, "enabled" | "fullDescription" | "notes" | "subjectBindings" | "sourceRole" | "pageOrder">>) => {
     changeStoryReferences((project, chapterId) => updateStoryReference(project, referenceId, patch, chapterId));
   };
   const handleStoryReferenceRemove = (referenceId: string) => {
@@ -6099,24 +6114,26 @@ export default function App() {
       return withStoryNarrator(next, imageBinding ? undefined : binding as StoryNarrator | undefined, chapterId);
     });
   };
-  const handleAddStoryReferenceAsset = (assetId: string) => {
-    changeStoryReferences((project, chapterId) => addStoryReference(project, assetId, { id: createId("story_ref"), chapterId }));
+  const handleAddStoryReferenceAsset = (assetId: string, sourceRole: StoryImageSourceMode = "reference") => {
+    changeStoryReferences((project, chapterId) => addStoryReference(project, assetId, { id: createId("story_ref"), chapterId, sourceRole }));
   };
-  const handleStoryReferenceUpload = async (file: File) => {
-    if (storyReferenceUploading) return;
+  const handleStoryReferenceUpload = async (file: File, sourceRole: StoryImageSourceMode = "reference") => {
+    if (storyReferenceUploadLockRef.current) return;
     const owner = stateRef.current.project;
     const chapterId = activeChapter(owner)?.id;
     if (!chapterId) return;
     const epoch = workspaceEpochRef.current;
+    storyReferenceUploadLockRef.current = true;
     setStoryReferenceUploading(true);
     try {
       if (!file.size) throw new Error("图片文件为空，请重新选择。");
+      if (sourceRole === "comic" && !/\.(png|jpe?g)$/iu.test(file.name)) throw new Error("漫画来源请使用 PNG 或 JPG 图片。");
       if (!/^image\//iu.test(file.type) && !/\.(png|jpe?g|webp)$/iu.test(file.name)) throw new Error("请选择 PNG、JPEG 或 WebP 图片。");
       const bridge = desktopBridge();
       const managed = bridge?.importMedia ? await bridge.importMedia(file) : null;
       // Browser fallback retains the original pixels; desktop originals live in managed media.
       const dataUrl = managed ? undefined : await readImageAsDataUrl(file, Number.POSITIVE_INFINITY);
-      if (epoch !== workspaceEpochRef.current) return;
+      if (epoch !== workspaceEpochRef.current || stateRef.current.project.id !== owner.id || activeChapter(stateRef.current.project)?.id !== chapterId) return;
       const now = Date.now();
       const asset: ReferenceAsset = {
         id: createId("asset"), name: file.name, fileName: file.name,
@@ -6124,19 +6141,19 @@ export default function App() {
         dataUrl, url: managed?.url, relativePath: managed?.relativePath, checksum: managed?.checksum,
         sizeBytes: managed?.sizeBytes || file.size, managed: Boolean(managed?.managed), missing: false,
         mimeType: managed?.mimeType || (dataUrl ? referenceImageMimeType(dataUrl) : file.type),
-        tags: ["剧情参考图", "用户上传"], importedAt: now, createdAt: now, updatedAt: now,
+        tags: [sourceRole === "comic" ? "漫画剧情来源" : "剧情参考图", "用户上传"], importedAt: now, createdAt: now, updatedAt: now,
       };
       setState((current) => applyOwnedProjectUpdate(current, owner.id, (project) => {
         if (!project.sourceDocuments.some((chapter) => chapter.id === chapterId && !chapter.archived)) return project;
         const duplicate = managed?.checksum ? project.assets.find((item) => item.checksum === managed.checksum
           && !item.missing && isAssetCharacterBindingImage(item)) : undefined;
         const withAsset = duplicate ? project : { ...project, assets: [asset, ...project.assets] };
-        return addStoryReference(withAsset, duplicate?.id || asset.id, { id: createId("story_ref"), chapterId, now });
+        return addStoryReference(withAsset, duplicate?.id || asset.id, { id: createId("story_ref"), chapterId, now, sourceRole });
       }));
-      if (stateRef.current.project.id === owner.id) notify("参考图已加入本章和资产库，可点击 AI识图。");
+      if (stateRef.current.project.id === owner.id) notify(sourceRole === "comic" ? "漫画页已加入本章，请设置页序后识别漫画并生成剧情。" : "参考图已加入本章和资产库，可点击 AI识图。");
     } catch (error) {
       if (stateRef.current.project.id === owner.id) notify(error instanceof Error ? error.message : "图片上传失败。", "error");
-    } finally { setStoryReferenceUploading(false); }
+    } finally { storyReferenceUploadLockRef.current = false; setStoryReferenceUploading(false); }
   };
   const handleVideoVoicePresetsChange = (presets: ProjectVoicePresets) => {
     const projectId = stateRef.current.project.id;
@@ -6199,6 +6216,9 @@ export default function App() {
     const source = stateRef.current;
     const chapterId = activeChapter(source.project)?.id;
     if (!chapterId) return;
+    if (chapterWorkspace(source.project, chapterId).storyReferences?.find((reference) => reference.id === referenceId)?.sourceRole === "comic") {
+      notify("漫画页请使用“识别漫画并生成剧情”，按页序一起读取。"); return;
+    }
     const key = `${source.project.id}:${chapterId}:${referenceId}`;
     if (storyReferenceRecognitionControllersRef.current.has(key)) return;
     const config = { ...source.settings.visionApi };
@@ -6243,7 +6263,150 @@ export default function App() {
     }
   };
 
+  const handleStoryImageSourceModeChange = (mode: StoryImageSourceMode) => {
+    changeStoryReferences((project, chapterId) => setStoryImageSourceMode(project, mode, chapterId));
+  };
+  const handleComicSettingsChange = (patch: Partial<StoryComicSettings>) => {
+    changeStoryReferences((project, chapterId) => setStoryComicSettings(project, patch, chapterId));
+  };
+  const handleMoveComicPage = (referenceId: string, direction: -1 | 1) => {
+    changeStoryReferences((project, chapterId) => moveComicPage(project, referenceId, direction, chapterId));
+  };
+  const handleCancelComicGeneration = () => { comicGenerationRef.current?.controller.abort(); };
+  const handleGenerateComicStory = async () => {
+    if (comicGenerationRef.current || busy || storyExpansionAbortRef.current || storyReferenceUploadLockRef.current) return;
+    const source = stateRef.current;
+    const chapterId = activeChapter(source.project)?.id;
+    if (!chapterId) return;
+    const references = chapterWorkspace(source.project, chapterId).storyReferences || [];
+    if (references.some((reference) => reference.enabled && reference.status === "recognizing")) {
+      notify("请先等待本章正在进行的识图完成。", "error"); return;
+    }
+    if (references.some((reference) => reference.enabled && reference.sourceRole !== "comic" && !reference.analysis)) {
+      notify("请先完成普通人物、场景参考图的 AI 识图，再与漫画一起生成剧情。", "error"); return;
+    }
+    const config = { ...source.settings.visionApi };
+    if (!config.enabled || !config.vision || !config.baseUrl.trim() || !config.model.trim()) {
+      notify("漫画识别需要启用并配置支持多图输入的识图 API。", "error"); setView("settings"); return;
+    }
+    const operation = { controller: new AbortController(), projectId: source.project.id, chapterId, epoch: workspaceEpochRef.current };
+    comicGenerationRef.current = operation;
+    setComicGenerating(true);
+    let request: ComicRecognitionRequest | undefined;
+    let completed = false;
+    const isCurrent = () => comicGenerationRef.current === operation && !operation.controller.signal.aborted
+      && workspaceEpochRef.current === operation.epoch && stateRef.current.project.id === operation.projectId
+      && activeChapter(stateRef.current.project)?.id === chapterId
+      && JSON.stringify(stateRef.current.settings.visionApi) === JSON.stringify(config);
+    try {
+      const started = beginComicRecognition(source.project, chapterId, createId("comic_recognition"));
+      request = started.request;
+      setState((current) => applyOwnedProjectUpdate(current, operation.projectId, (project) =>
+        comicSourceFingerprint(project, chapterId) === request!.sourceFingerprint ? started.project : project));
+      const pages = orderedComicReferences(source.project, chapterId);
+      const identityReferences = references.filter((reference) => reference.enabled && reference.sourceRole !== "comic");
+      const images = await loadComicReferenceImages([...pages, ...identityReferences], (ids) => loadVideoPromptReferenceImages(ids, source.project.assets));
+      const pageImages = images.slice(0, pages.length);
+      const identityImages = images.slice(pages.length);
+      if (!isCurrent()) return;
+      const identityContext = JSON.stringify({
+        references: identityReferences.map((reference) => ({ number: reference.number, referenceId: reference.id,
+          analysis: reference.analysis, fullDescription: reference.fullDescription, notes: reference.notes, subjectBindings: reference.subjectBindings })),
+        comicCorrections: pages.map((page) => ({ referenceId: page.id, fullDescription: page.fullDescription, notes: page.notes, subjectBindings: page.subjectBindings,
+          knownSubjects: page.analysis?.characters })),
+        ...comicIdentityCatalog(source.project),
+      });
+      const result = await requestComicSourceAnalysis(config, pages.map((page, index) => ({
+        referenceId: page.id, number: page.number, dataUrl: pageImages[index],
+      })), storyComicSettings(source.project, chapterId), operation.controller.signal, identityContext, {
+        identityReferences: identityReferences.map((reference, index) => ({ referenceId: reference.id, number: reference.number, dataUrl: identityImages[index] })),
+      });
+      if (!isCurrent()) return;
+      const finishedRequest = request;
+      setState((current) => applyOwnedProjectUpdate(current, operation.projectId, (project) => {
+        const next = completeComicRecognition(project, finishedRequest, result);
+        completed = next !== project;
+        return next;
+      }));
+      notify(completed ? "漫画与跨页资料已保存，请编辑剧情预览后采用，再解析分镜。" : "漫画页、资料或阅读设置已变化，本次结果未覆盖当前内容，请重新生成。");
+    } catch (error) {
+      if (!isAbortError(error) && isCurrent()) notify(error instanceof Error ? error.message : "漫画识别失败，已有剧情保持。", "error");
+    } finally {
+      if (request && !completed) {
+        const cancelledRequest = request;
+        setState((current) => applyOwnedProjectUpdate(current, cancelledRequest.projectId, (project) =>
+          failComicRecognition(project, cancelledRequest, "本次漫画识别未完成或已取消；已有资料与预览保留，可重新生成。")));
+      }
+      if (comicGenerationRef.current === operation) { comicGenerationRef.current = null; setComicGenerating(false); }
+    }
+  };
+  const handleUpdateComicStory = (storyText: string) => {
+    const project = stateRef.current.project;
+    const chapterId = activeChapter(project)?.id;
+    const draft = chapterWorkspace(project, chapterId).comicStoryDraft;
+    if (!draft || !chapterId || comicGenerationRef.current) return;
+    setState((current) => applyOwnedProjectUpdate(current, project.id, (owner) => {
+      const currentDraft = chapterWorkspace(owner, chapterId).comicStoryDraft;
+      return currentDraft ? storeComicStoryDraft(owner, { ...currentDraft, storyText, adoptedAt: undefined }, chapterId) : owner;
+    }));
+  };
+  const handleAdoptComicStory = () => {
+    if (busy || storyExpansionAbortRef.current || comicGenerationRef.current) return;
+    const project = stateRef.current.project;
+    const chapterId = activeChapter(project)?.id;
+    const draft = chapterWorkspace(project, chapterId).comicStoryDraft;
+    if (!chapterId || !draft?.storyText.trim()) return;
+    if (draft.sourceFingerprint !== comicSourceFingerprint(project, chapterId)) {
+      notify("漫画页、资料或阅读设置已变化，请重新生成再采用。", "error"); return;
+    }
+    if (draft.storyText !== storyDraftRef.current.storyInput) setStoryPreparationUndo({ projectId: project.id, chapterId,
+      before: storyDraftRef.current.storyInput, after: draft.storyText });
+    setState((current) => applyOwnedProjectUpdate(current, project.id, (owner) => storeComicStoryDraft(owner, { ...draft, adoptedAt: Date.now() }, chapterId)));
+    setStoryInput(draft.storyText);
+    invalidateSequenceEstimate();
+    notify("漫画剧情已采用到本章编辑区，并保留逐格证据；可继续“解析并补全”与现有视频流程。");
+  };
+  const handleCreateComicPanelReference = async (referenceId: string, panelId: string) => {
+    const owner = stateRef.current.project;
+    const chapterId = activeChapter(owner)?.id;
+    const reference = chapterWorkspace(owner, chapterId).storyReferences?.find((item) => item.id === referenceId && item.sourceRole === "comic");
+    const panel = reference?.analysis?.comic?.panels.find((item) => item.id === panelId);
+    if (!chapterId || !reference || !panel?.bounds) { notify("该格没有可用的裁图区域，请选择单幅参考图。", "error"); return; }
+    const lockKey = `${owner.id}:${chapterId}:${referenceId}:${panelId}`;
+    if (comicCropLocksRef.current.has(lockKey)) return;
+    comicCropLocksRef.current.add(lockKey);
+    const epoch = workspaceEpochRef.current;
+    const fingerprint = comicSourceFingerprint(owner, chapterId);
+    const isCurrent = () => stateRef.current.project.id === owner.id && epoch === workspaceEpochRef.current
+      && activeChapter(stateRef.current.project)?.id === chapterId && comicSourceFingerprint(stateRef.current.project, chapterId) === fingerprint;
+    try {
+      const [dataUrl] = await loadVideoPromptReferenceImages([reference.assetId], owner.assets);
+      const bounds = panel.bounds;
+      const blob = await cropComicPanel(dataUrl, bounds);
+      if (!isCurrent()) return;
+      const fileName = `图${reference.number}-第${panel.order}格.png`;
+      const file = new File([blob], fileName, { type: "image/png" });
+      const managed = await desktopBridge()?.importMedia?.(file);
+      const croppedDataUrl = managed ? undefined : await readImageAsDataUrl(file, Number.POSITIVE_INFINITY);
+      if (!isCurrent()) return;
+      const now = Date.now();
+      const image = new Image(); image.src = dataUrl; await image.decode();
+      const size = comicPanelPixelBounds(bounds, image.naturalWidth, image.naturalHeight);
+      const asset: ReferenceAsset = { id: createId("asset"), name: fileName, fileName, type: "reference", role: "composition",
+        source: "derived", mediaType: "image", referenceRole: "general", mimeType: "image/png", dataUrl: croppedDataUrl,
+        url: managed?.url, relativePath: managed?.relativePath, checksum: managed?.checksum, sizeBytes: blob.size,
+        managed: Boolean(managed?.managed), width: size.width, height: size.height, tags: ["漫画单格裁图"],
+        comicPanelSource: { chapterId, referenceId, assetId: reference.assetId, assetChecksum: reference.assetChecksum, panelId, bounds },
+        createdAt: now, updatedAt: now };
+      if (!isCurrent()) return;
+      setState((current) => applyOwnedProjectUpdate(current, owner.id, (project) => ({ ...project, assets: [asset, ...project.assets], updatedAt: now })));
+      notify("单格裁图已加入资产库，可在导演台为当前片段选择参考或首帧。裁图保留原有气泡和文字。");
+    } catch (error) { if (isCurrent()) notify(error instanceof Error ? error.message : "漫画裁图失败。", "error"); }
+    finally { comicCropLocksRef.current.delete(lockKey); }
+  };
+
   const handleExpandStory = async (requestMode: StoryPreparationMode, options?: { regenerate?: boolean; paragraphId?: string }) => {
+    if (comicGenerationRef.current) return;
     if (storyExpansionAbortRef.current || busy) return;
     const requestedTargetLength = requestMode === "expand"
       ? normalizeStoryExpansionTargetLength(storyExpansionTargetLengthText)
@@ -6483,6 +6646,7 @@ export default function App() {
   };
 
   const handleAnalyzeStory = async () => {
+    if (comicGenerationRef.current) return;
     if (busy || storyExpansionAbortRef.current || storyAnalysisAbortRef.current) return;
     if (!storyInput.trim()) { notify("请先粘贴本章正文或导入小说。", "error"); return; }
     const analysisState = stateRef.current;
@@ -6784,10 +6948,10 @@ export default function App() {
       const reason = "本章参考资料已更新，请先重新解析相关剧情，再生成视频提示词。";
       reportOverrideFailure(reason); notify(reason, "error"); setView("story"); return undefined;
     }
-    const chapterStoryReferenceAssetIds = mergeReferenceAssetIds(
+    const chapterStoryReferenceAssetIds = storyReferenceVideoAssetIds(state.project, mergeReferenceAssetIds(
       sourceScenesForGeneration.flatMap((scene) => scene.storyReferenceAssetIds || []),
       sceneForGeneration.storyReferenceAssetIds || [],
-    );
+    ));
     // Capture the replacement target before any AI work. Even before the
     // first Chinese checkpoint, a user edit or deletion must win over a
     // late response from this request.
@@ -6947,20 +7111,15 @@ export default function App() {
       const generationCharacters = semanticSequenceCharacters(sourcePlanForGeneration, state.project.characters);
       const generationExtraRequirement = semanticContext?.creativeDirection.extraRequirement ?? extraRequirement;
       if (semanticContext) {
-        const segmentIdentityText = semanticContext.contentOverridden ? sceneForGeneration.content
-          : [sceneForGeneration.content, segmentForGeneration?.entryState,
-              segmentForGeneration?.exitState, ...semanticContext.segment.semanticSource.dialogues.map((item) => item.speaker)].join("\n");
-        // Model-authored IDs and confirmed aliases may establish participation;
-        // a read-only full-story dossier does not put every character in scene.
-        const causalCharacterIds = new Set(semanticContext.contentOverridden ? []
-          : semanticContext.segment.semanticSource.events.flatMap(({ causality }) => causality
-            ? [causality.certainty === "unknown" ? undefined : causality.actorCharacterId, causality.targetCharacterId]
-                .filter((id): id is string => Boolean(id)) : []));
-        const participatingIds = new Set(resolvePromptCharacterParticipation(segmentIdentityText, generationCharacters)
-          .characters.filter((item) => item.presence !== "mentioned").map((item) => item.characterId));
-        sceneForGeneration.characterIds = generationCharacters.filter((character) => causalCharacterIds.has(character.id)
-          || participatingIds.has(character.id))
-          .map((character) => character.id);
+        // Supply known identities independently of display-only participation
+        // heuristics. These references never require a character to enter frame.
+        sceneForGeneration.characterIds = semanticSegmentIdentityReferenceIds({
+          characters: generationCharacters,
+          content: sceneForGeneration.content,
+          contentOverridden: semanticContext.contentOverridden,
+          segment: semanticContext.segment,
+          savedSceneCharacterIds: sceneForGeneration.characterIds,
+        });
       }
       if (!fullTimeline && segmentForGeneration && override?.sequencePlanId) {
         const livePlan = stateRef.current.project.sequencePlans.find(
@@ -7194,6 +7353,7 @@ export default function App() {
               extraRequirement: boardExtraRequirement,
             },
             story: segmentGenerationSource.sourceStoryContent,
+            ...(chapterStoryReferenceContext ? { referenceContext: chapterStoryReferenceContext } : {}),
             sceneContext: requestSceneContext,
             ...(semanticContext ? { sequenceSegmentContext: {
               ...semanticContext,
@@ -7287,7 +7447,7 @@ export default function App() {
         chapterStoryReferenceAssetIds,
         masterBoardReferenceIds,
         (masterBoardForSegment?.globalReferenceAssetIds || []).filter((id) =>
-          !masterBoardForSegment?.storyReferenceContext?.references.some((reference) => reference.assetId === id)
+          !masterBoardForSegment?.storyReferenceContext?.references.some((reference) => reference.assetId === id && reference.sourceRole !== "comic")
           || chapterStoryReferenceAssetIds.includes(id)),
       );
       let selectedAssets = effectiveReferenceIds
@@ -9215,6 +9375,15 @@ export default function App() {
     handleStoryReferenceUpdate,
     handleStoryReferenceRemove,
     handleStoryNarratorBinding,
+    comicGenerating,
+    handleStoryImageSourceModeChange,
+    handleComicSettingsChange,
+    handleMoveComicPage,
+    handleGenerateComicStory,
+    handleCancelComicGeneration,
+    handleUpdateComicStory,
+    handleAdoptComicStory,
+    handleCreateComicPanelReference,
     directorWorkflow,
     setDirectorWorkflow: chooseWorkflow,
     selectedDirectorSceneIds,
@@ -10432,12 +10601,21 @@ interface AppContext {
   handleAnalyzeStory: () => Promise<void>;
   storyReferenceUploading: boolean;
   handleStoryInputModeChange: (mode: "text" | "image") => void;
-  handleStoryReferenceUpload: (file: File) => Promise<void>;
-  handleAddStoryReferenceAsset: (assetId: string) => void;
+  handleStoryReferenceUpload: (file: File, sourceRole?: StoryImageSourceMode) => Promise<void>;
+  handleAddStoryReferenceAsset: (assetId: string, sourceRole?: StoryImageSourceMode) => void;
   handleStoryReferenceRecognize: (referenceId: string) => Promise<void>;
-  handleStoryReferenceUpdate: (referenceId: string, patch: Partial<Pick<StoryReference, "enabled" | "fullDescription" | "notes" | "subjectBindings">>) => void;
+  handleStoryReferenceUpdate: (referenceId: string, patch: Partial<Pick<StoryReference, "enabled" | "fullDescription" | "notes" | "subjectBindings" | "sourceRole" | "pageOrder">>) => void;
   handleStoryReferenceRemove: (referenceId: string) => void;
   handleStoryNarratorBinding: (binding: { referenceId: string; subjectId: string } | StoryNarrator | undefined) => void;
+  comicGenerating: boolean;
+  handleStoryImageSourceModeChange: (mode: StoryImageSourceMode) => void;
+  handleComicSettingsChange: (patch: Partial<StoryComicSettings>) => void;
+  handleMoveComicPage: (referenceId: string, direction: -1 | 1) => void;
+  handleGenerateComicStory: () => Promise<void>;
+  handleCancelComicGeneration: () => void;
+  handleUpdateComicStory: (text: string) => void;
+  handleAdoptComicStory: () => void;
+  handleCreateComicPanelReference: (referenceId: string, panelId: string) => Promise<void>;
   storyExpansionBusy: boolean;
   storyVisualProgress: string;
   directorWorkflow: Workflow;
@@ -10764,6 +10942,15 @@ function StoryView(ctx: AppContext) {
     handleStoryReferenceUpdate,
     handleStoryReferenceRemove,
     handleStoryNarratorBinding,
+    comicGenerating,
+    handleStoryImageSourceModeChange,
+    handleComicSettingsChange,
+    handleMoveComicPage,
+    handleGenerateComicStory,
+    handleCancelComicGeneration,
+    handleUpdateComicStory,
+    handleAdoptComicStory,
+    handleCreateComicPanelReference,
     busy,
     updateProject,
     notify,
@@ -10785,6 +10972,7 @@ function StoryView(ctx: AppContext) {
   const project = state.project;
   const storyChapterId = activeChapter(project)?.id || "";
   const storyInputMode = chapterWorkspace(project, storyChapterId).storyInputMode || "text";
+  const storyIsComicMode = storyInputMode === "image" && chapterWorkspace(project, storyChapterId).storyImageSourceMode === "comic";
   const editScene = project.scenes.find(
     (scene: Scene) => scene.id === editingSceneId,
   );
@@ -10922,7 +11110,7 @@ function StoryView(ctx: AppContext) {
               <div className="row-between">
                 <div className="row">
                   <BookOpen size={18} color="var(--pink)" />
-                  <StoryInputModeSwitch value={storyInputMode} onChange={handleStoryInputModeChange} disabled={busy || storyExpansionBusy} />
+                  <StoryInputModeSwitch value={storyInputMode} onChange={handleStoryInputModeChange} disabled={busy || storyExpansionBusy || comicGenerating} />
                 </div>
                 <div className="row story-source-header-actions">
                   {hasStoryVisualConversionSource && (
@@ -10957,17 +11145,23 @@ function StoryView(ctx: AppContext) {
             </Field>
             {storyInputMode === "image" && storyChapterId && (
               <StoryReferencePanel project={project} chapterId={storyChapterId}
-                uploading={storyReferenceUploading} disabled={busy || storyExpansionBusy}
+                uploading={storyReferenceUploading} disabled={busy || storyExpansionBusy || comicGenerating}
+                comicGenerating={comicGenerating}
                 onUpload={handleStoryReferenceUpload} onAddAsset={handleAddStoryReferenceAsset}
                 onRecognize={handleStoryReferenceRecognize} onUpdateReference={handleStoryReferenceUpdate}
                 onRemoveReference={handleStoryReferenceRemove} onBindNarrator={handleStoryNarratorBinding}
+                onSetImageSourceMode={handleStoryImageSourceModeChange} onSetComicSettings={handleComicSettingsChange}
+                onMoveComicPage={handleMoveComicPage} onGenerateComicStory={handleGenerateComicStory}
+                onCancelComicGeneration={handleCancelComicGeneration}
+                onUpdateComicStory={handleUpdateComicStory} onAdoptComicStory={handleAdoptComicStory}
+                onCreateComicPanelReference={handleCreateComicPanelReference}
                 onInsertReference={(text) => { setStoryInput((current) => `${current}${current && !/\s$/u.test(current) ? " " : ""}${text}`); invalidateSequenceEstimate(); }}
               />
             )}
             <Field
               className="story-source-field"
               label="剧情原文"
-              hint={storyInputMode === "image" ? "可写图1中的人物、图1和图2互动等剧情；启用图片的完整识别资料会一起参与扩写、画面转化和解析。" : "可直接粘贴一句话、小说章节或剧本片段；AI 会自动识别场景边界。"}
+              hint={storyIsComicMode ? "先识别漫画并生成剧情，在预览中编辑、采用后继续解析；本章正文决定实际剧情与对白。" : storyInputMode === "image" ? "可写图1中的人物、图1和图2互动等剧情；启用图片的完整识别资料会一起参与扩写、画面转化和解析。" : "可直接粘贴一句话、小说章节或剧本片段；AI 会自动识别场景边界。"}
             >
               <textarea
                 className="story-source-textarea"
@@ -10976,7 +11170,7 @@ function StoryView(ctx: AppContext) {
                   setStoryInput(event.target.value);
                   invalidateSequenceEstimate();
                 }}
-                placeholder={storyInputMode === "image" ? "例如：让图1中的银发人物与图2中的人物在夜晚酒馆见面，保留人物外貌，增加自然对话……" : "例如：雨夜，年轻剑客走进山城客栈……"}
+                placeholder={storyIsComicMode ? "采用后的漫画剧情会出现在这里，也可直接编辑本章正文。" : storyInputMode === "image" ? "例如：让图1中的银发人物与图2中的人物在夜晚酒馆见面，保留人物外貌，增加自然对话……" : "例如：雨夜，年轻剑客走进山城客栈……"}
               />
             </Field>
             <div className="row-between story-input-footer">

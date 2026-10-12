@@ -391,6 +391,11 @@ export interface Seedance25Output {
 export interface ReferenceAsset extends StoryboardImageFrameMetadata {
   /** Explicit per-subject links discovered in chapter reference images. */
   storyReferenceSubjects?: Array<{ chapterId: string; referenceId: string; subjectId: string; kind: StoryReferenceEntityKind; entityId: string; label: string; analysisRevision?: number }>;
+  /** A separately saved single-panel video reference, preserving the original-page provenance. */
+  comicPanelSource?: {
+    chapterId: string; referenceId: string; assetId: string; assetChecksum?: string; panelId: string;
+    bounds: { x: number; y: number; width: number; height: number };
+  };
   id: string;
   /** Ordinary reference association copy; the original asset keeps its immutable provenance. */
   linkedFromAssetId?: string;
@@ -964,7 +969,60 @@ export interface StoryDraft {
 }
 
 export type StoryInputMode = 'text' | 'image';
+export type StoryImageSourceMode = 'reference' | 'comic';
 export type StoryReferenceEntityKind = 'character' | 'location' | 'prop';
+
+export interface StoryComicSettings {
+  readingDirection: 'rtl' | 'ltr' | 'vertical';
+  dialogueMode: 'original' | 'chinese';
+  renderMode: 'animation' | 'motion_comic';
+}
+
+export interface ComicPanelText {
+  id: string;
+  type: 'dialogue' | 'thought' | 'narration' | 'sfx' | 'unknown';
+  /** The original visible text, preserved even when Chinese dubbing is selected. */
+  text: string;
+  language: string;
+  chineseText?: string;
+  speakerId?: string;
+  uncertainty?: string;
+}
+
+export interface ComicPageAnalysis {
+  panels: Array<{
+    id: string;
+    order: number;
+    /** Panel bounds in normalized original-image coordinates. */
+    bounds?: { x: number; y: number; width: number; height: number };
+    description: string;
+    characterIds: string[];
+    texts: ComicPanelText[];
+    actions: Array<{
+      id: string;
+      eventId: string;
+      actorId?: string;
+      targetId?: string;
+      action: string;
+      result: string;
+      phase?: string;
+    }>;
+    entryState: string;
+    exitState: string;
+    uncertainties: string[];
+  }>;
+  uncertainties: string[];
+}
+
+export type ComicPanel = ComicPageAnalysis['panels'][number];
+
+export interface ComicStoryDraft {
+  storyText: string;
+  sourceFingerprint: string;
+  generatedAt: number;
+  model: string;
+  adoptedAt?: number;
+}
 
 export interface StoryReferenceSubject {
   id: string;
@@ -990,6 +1048,7 @@ export interface StoryReferenceAnalysis {
   model: string;
   analyzedAt: number;
   revision: number;
+  comic?: ComicPageAnalysis;
   rawResponse?: string;
   structuredData?: Record<string, unknown>;
 }
@@ -1018,6 +1077,9 @@ export interface StoryReference {
   /** Permanent chapter-local label, independent of display order. */
   number: number;
   assetId: string;
+  /** Comic originals are plot evidence and are not automatic video references. */
+  sourceRole?: 'reference' | 'comic';
+  pageOrder?: number;
   assetChecksum?: string;
   enabled: boolean;
   status: 'unrecognized' | 'recognizing' | 'ready' | 'failed';
@@ -1034,11 +1096,15 @@ export interface StoryReference {
 
 export interface StoryReferenceContext {
   mode: 'image';
+  sourceMode?: StoryImageSourceMode;
+  comicSettings?: StoryComicSettings;
   chapterId: string;
   references: Array<{
     referenceId: string;
     number: number;
     assetId: string;
+    sourceRole?: 'reference' | 'comic';
+    pageOrder?: number;
     assetChecksum?: string;
     analysis: StoryReferenceAnalysis;
     fullDescription?: string;
@@ -1054,6 +1120,9 @@ export interface StoryReferenceContext {
 /** Chapter-owned editor state; shared dossiers, media and jobs stay on Project. */
 export interface ChapterWorkspace {
   storyInputMode?: StoryInputMode;
+  storyImageSourceMode?: StoryImageSourceMode;
+  storyComicSettings?: StoryComicSettings;
+  comicStoryDraft?: ComicStoryDraft;
   storyReferences?: StoryReference[];
   nextStoryReferenceNumber?: number;
   storyNarrator?: StoryNarrator;

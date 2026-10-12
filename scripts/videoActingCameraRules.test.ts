@@ -22,6 +22,8 @@ import {
   VIDEO_ACTING_CAMERA_REVIEW_RULE,
   VIDEO_ACTING_CAMERA_TRANSLATION_RULE,
   VIDEO_ACTING_CAMERA_RULES,
+  LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_0_1,
+  LEGACY_VIDEO_CAMERA_SELECTION_RULE_V2_0_1,
   LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_1,
   LEGACY_VIDEO_ACTING_CAMERA_TRANSLATION_RULE_V1_8_1,
   stripLegacyVideoActingCameraRules,
@@ -83,6 +85,21 @@ test('request compatibility removes full changed legacy blocks in mixed requests
   assert.equal(stripLegacyVideoActingCameraRules(LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_1), '');
   assert.equal(stripLegacyVideoActingCameraRules(prefix + suffix), prefix + suffix,
     'custom prose is not a semantic rewriting target');
+});
+
+test('2.0.1 camera requests upgrade once without changing custom prose, translation or the saved preset', () => {
+  const custom = '用户运镜要求：保留有叙事依据的武器接触特写。';
+  for (const retired of [LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_0_1, LEGACY_VIDEO_CAMERA_SELECTION_RULE_V2_0_1]) {
+    const preset = [custom, retired, VIDEO_ACTING_CAMERA_TRANSLATION_RULE].join('\n\n');
+    const snapshot = preset;
+    const currentRequest = [stripLegacyVideoActingCameraRules(preset), VIDEO_ACTING_CAMERA_RULES].join('\n\n');
+    assert.equal(currentRequest.split(VIDEO_CAMERA_SELECTION_RULE).length - 1, 1);
+    assert.equal(currentRequest.includes(retired), false);
+    assert.ok(currentRequest.includes(custom));
+    assert.ok(currentRequest.includes(VIDEO_ACTING_CAMERA_TRANSLATION_RULE));
+    assert.equal(stripLegacyVideoActingCameraRules(currentRequest), currentRequest);
+    assert.equal(preset, snapshot, 'request compatibility does not migrate stored preset text');
+  }
 });
 
 test('performance follows story stimuli and permits warranted strong emotion without mechanical quotas', () => {
@@ -184,6 +201,23 @@ test('selected camera terms are real inputs and unselected shots still get motiv
     /在purpose或camera用简短可执行语句落实选择理由/u,
     /不强制正脸覆盖/u,
   ]) assert.match(VIDEO_CAMERA_SELECTION_RULE, requirement);
+});
+
+test('character attention and attack targets do not automatically select camera subjects or close-ups', () => {
+  for (const requirement of [
+    /分别确定人物的视线\/攻击目标与摄影的主体、取景范围和焦点/u,
+    /由剧情行动决定并写在direction\/action\/performance/u,
+    /camera依据观众需要理解的关系、接触、反应或新信息选择覆盖/u,
+    /观察、判断或寻找破绽先用关系构图及观察者的视线、表情、姿态表达/u,
+    /目光落点本身不构成推近局部、追随视线切特写或定格的摄影要求/u,
+    /局部特写在关键局部提供必要新信息、现有关系景别无法读清或用户明确指定时使用/u,
+    /原剧情确需的接触细节、线索及局部变化保留/u,
+    /裁切仍继承具名对象与方向关系/u,
+  ]) assert.match(VIDEO_CAMERA_SELECTION_RULE, requirement);
+  assert.equal(VIDEO_ACTING_CAMERA_TRANSLATION_RULE.includes(VIDEO_CAMERA_SELECTION_RULE), false,
+    'translation only preserves approved framing instead of choosing a new camera focus');
+  assert.doesNotMatch(VIDEO_CAMERA_SELECTION_RULE, /马雷|腹部|肚子|禁止(?:全部|所有)特写/u,
+    'source camera decisions are general rules, not a case-specific framing blacklist');
 });
 
 test('lighting is scene-driven with world-source continuity rather than fixed camera-side or numeric presets', () => {

@@ -60,7 +60,10 @@ export default defineConfig({
             .some((file) => normalized.endsWith(`/src/${file}`))) return 'character-dossier';
           // Visual selection only depends on the shared LLM transport and pure
           // retry contracts; keep its bounded request loop with that transport.
-          if (normalized.endsWith('/src/services/llm.ts') || normalized.endsWith('/src/videoFrameSelection.ts')
+          // The LLM rule catalog reads comic authority strings at module
+          // initialization. Keep the codec and transport in this chunk so
+          // their constants never cross the domain/LLM initialization cycle.
+          if (normalized.endsWith('/src/services/llm.ts') || normalized.endsWith('/src/services/comicRecognition.ts') || normalized.endsWith('/src/videoFrameSelection.ts')
             || normalized.endsWith('/src/services/semanticSequencePlanner.ts')) return 'llm-service';
           // These protocol/naming/planning contracts have no renderer or
           // domain runtime dependencies. Keep this leaf layer together so

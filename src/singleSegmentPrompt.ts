@@ -170,7 +170,7 @@ export async function generateSingleSegmentPrompt(
   // object cannot mix two source snapshots within one conversion/review run.
   const semanticSegmentData = input.sequenceSegmentContext
     ? untrustedJson({ sequenceSegmentContext: input.sequenceSegmentContext }) : undefined;
-  const sceneContext = structuredClone(input.sceneContext ?? input.sequenceSegmentContext?.storyUnderstandingContext?.sceneContext
+  const sceneContext = input.mode === 'translate-english' ? undefined : structuredClone(input.sceneContext ?? input.sequenceSegmentContext?.storyUnderstandingContext?.sceneContext
     ?? buildVideoSceneContext({ board: input.board, locations: input.context.locations, assets: input.context.assets,
       references: getSingleSegmentReferences(input.board, input.context), chapterId: input.board.chapterId }));
   const sceneContextData = untrustedJson({ sceneContext });
@@ -319,6 +319,7 @@ export async function generateSingleSegmentPrompt(
       candidateTimeCoordinate: input.purpose === 'continuity-repair' || input.purpose === 'reference-refresh' || dossierRefresh
         ? 'preserve-confirmed-source-expression' : 'draft-may-contain-shot-relative-details',
       shotMode: official.shotMode, shotCount: official.shotCount || official.shots.length,
+      voiceFactScope: canReplanStaging ? 'source-grounded-new-draft' : 'preserve-confirmed-source',
       characterIdentityFacts: identityCharacters.map((character) => ({
         id: character.id, name: character.name, gender: character.gender, apparentAge: character.apparentAge,
         aliases: characterParticipationAliases(character, identityCharacters),
