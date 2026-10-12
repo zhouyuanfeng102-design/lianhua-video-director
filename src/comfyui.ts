@@ -97,11 +97,16 @@ const hasDirectScalarInput = (inputs: JsonObject, inputName: string): boolean =>
   return valueType === 'string' || valueType === 'number' || valueType === 'boolean';
 };
 
-const isPromptTextNode = (node: unknown): boolean => {
-  const inputs = nodeInputs(node);
-  if (!inputs || !['text', 'text_g', 'text_l'].some((field) => typeof inputs[field] === 'string') || !isPlainObject(node)) return false;
+const isPromptEncoderNode = (node: unknown): boolean => {
+  if (!isPlainObject(node)) return false;
   const classType = String(node.class_type || '').toLowerCase();
   return classType.includes('cliptextencode') || classType.includes('t5gemmatextencoder');
+};
+
+const isPromptTextNode = (node: unknown): boolean => {
+  const inputs = nodeInputs(node);
+  return Boolean(inputs && isPromptEncoderNode(node)
+    && ['text', 'text_g', 'text_l'].some((field) => typeof inputs[field] === 'string'));
 };
 
 const nodeTitle = (node: unknown): string => {
@@ -209,6 +214,7 @@ const collectUpstreamTextNodes = (
   workflow: JsonObject,
   rootId: string,
   textNodeIds: Set<string>,
+  options: { stopAtZeroOut?: boolean; conditioningOnly?: boolean } = {},
 ): Set<string> => {
   const found = new Set<string>();
   const visited = new Set<string>();
@@ -219,6 +225,10 @@ const collectUpstreamTextNodes = (
     if (!currentId || visited.has(currentId)) continue;
     visited.add(currentId);
 
+    // A zero conditioning branch does not consume its encoder's words as
+    // negative text. That same encoder can still supply positive refinement.
+    if (options.stopAtZeroOut && normalizedClassType(workflow[currentId]) === 'conditioningzeroout') continue;
+
     if (textNodeIds.has(currentId)) {
       found.add(currentId);
       continue;
@@ -226,13 +236,54 @@ const collectUpstreamTextNodes = (
 
     const inputs = nodeInputs(workflow[currentId]);
     if (!inputs) continue;
-    Object.values(inputs).forEach((value) => {
+    Object.entries(inputs).forEach(([field, value]) => {
+      if (options.conditioningOnly && !/^(?:conditioning(?:_?(?:\d+|to|from))?|cond|positive|negative)$/u.test(field)) return;
       const upstreamId = readConnectionNodeId(value);
       if (upstreamId && !visited.has(upstreamId)) pending.push(upstreamId);
     });
   }
 
   return found;
+};
+
+interface PromptTextBinding { nodeId: string; inputName: string }
+const STRING_SOURCE_FIELDS: Readonly<Record<string, readonly string[]>> = {
+  crprompttext: ['prompt'],
+  primitivestring: ['value'],
+  primitivestringmultiline: ['value'],
+  stringconstant: ['value'],
+  string: ['value', 'string', 'text'],
+  easystring: ['value'],
+  easystringjoinlines: ['string'],
+};
+
+/** Follow only a text encoder's actual text socket and known string routes.
+ * LLM system rules, model names and preview widgets are never task inputs. */
+const encoderPromptBindings = (workflow: JsonObject, encoderId: string): PromptTextBinding[] => {
+  const visited = new Set<string>();
+  const read = (nodeId: string, inputName: string): PromptTextBinding[] => {
+    const key = `${nodeId}:${inputName}`;
+    if (visited.has(key)) return [];
+    visited.add(key);
+    const inputs = nodeInputs(workflow[nodeId]);
+    const value = inputs?.[inputName];
+    if (typeof value === 'string') return [{ nodeId, inputName }];
+    // These supported nodes expose their business string on output zero.
+    if (!Array.isArray(value) || value.length !== 2 || value[1] !== 0) return [];
+    const sourceId = readConnectionNodeId(value);
+    if (!sourceId) return [];
+    const source = workflow[sourceId];
+    const type = normalizedClassType(source);
+    if (type === 'previewany') return read(sourceId, 'source');
+    if (type === 'llamacppinstructadv') return read(sourceId, 'custom_prompt');
+    const fields = STRING_SOURCE_FIELDS[type];
+    const sourceInputs = nodeInputs(source);
+    if (!fields || !sourceInputs) return [];
+    const present = fields.filter((field) => typeof sourceInputs[field] === 'string' || Array.isArray(sourceInputs[field]));
+    // Ambiguous custom string widgets need an explicit authored placeholder.
+    return present.length === 1 ? read(sourceId, present[0]) : [];
+  };
+  return ['text', 'text_g', 'text_l'].flatMap((field) => read(encoderId, field));
 };
 
 /**
@@ -249,6 +300,10 @@ export const importComfyUIApiWorkflow = (
       .filter(([, node]) => isPromptTextNode(node))
       .map(([nodeId]) => String(nodeId)),
   );
+  const encoderNodeIds = new Set(Object.entries(workflow).filter(([, node]) => isPromptEncoderNode(node))
+    .map(([nodeId]) => nodeId));
+  const hasExplicitPositive = workflowContainsAnyToken(workflow, ['__PROMPT__', '{{prompt}}']);
+  const hasExplicitNegative = workflowContainsAnyToken(workflow, ['__NEGATIVE_PROMPT__', '{{negative_prompt}}', '{{negativePrompt}}']);
   const positiveNodeIds = new Set<string>();
   const negativeNodeIds = new Set<string>();
   const promptFieldsByNode = new Map<string, string[]>();
@@ -299,6 +354,8 @@ export const importComfyUIApiWorkflow = (
     }
   });
 
+  const positiveEncoderIds = new Set<string>();
+  const negativeEncoderIds = new Set<string>();
   Object.values(workflow).forEach((node) => {
     const inputs = nodeInputs(node);
     if (!inputs) return;
@@ -306,31 +363,52 @@ export const importComfyUIApiWorkflow = (
     const positiveRoot = readConnectionNodeId(inputs.positive);
     const negativeRoot = readConnectionNodeId(inputs.negative);
     if (positiveRoot) {
-      collectUpstreamTextNodes(workflow, positiveRoot, textNodeIds)
-        .forEach((nodeId) => positiveNodeIds.add(nodeId));
+      collectUpstreamTextNodes(workflow, positiveRoot, encoderNodeIds, { conditioningOnly: true })
+        .forEach((nodeId) => positiveEncoderIds.add(nodeId));
     }
     if (negativeRoot) {
-      collectUpstreamTextNodes(workflow, negativeRoot, textNodeIds)
-        .forEach((nodeId) => negativeNodeIds.add(nodeId));
+      collectUpstreamTextNodes(workflow, negativeRoot, encoderNodeIds, { stopAtZeroOut: true, conditioningOnly: true })
+        .forEach((nodeId) => negativeEncoderIds.add(nodeId));
     }
   });
 
-  textNodeIds.forEach((nodeId) => {
+  encoderNodeIds.forEach((nodeId) => {
     const node = workflow[nodeId];
     if (titleIncludes(node, ['negative', '负面', '负向', '反向'])) {
-      negativeNodeIds.add(nodeId);
+      negativeEncoderIds.add(nodeId);
       return;
     }
     if (titleIncludes(node, ['positive', '正面', '正向', 'prompt', '提示词'])) {
-      positiveNodeIds.add(nodeId);
+      positiveEncoderIds.add(nodeId);
     }
   });
 
-  if (positiveNodeIds.size === 0) {
-    const fallbackId = [...textNodeIds].find((nodeId) => !negativeNodeIds.has(nodeId))
-      ?? [...textNodeIds][0];
-    if (fallbackId) positiveNodeIds.add(fallbackId);
+  if (positiveEncoderIds.size === 0 && positiveNodeIds.size === 0 && !hasExplicitPositive) {
+    const fallbackId = [...encoderNodeIds].find((nodeId) => !negativeEncoderIds.has(nodeId));
+    if (fallbackId) positiveEncoderIds.add(fallbackId);
   }
+
+  const addBinding = (binding: PromptTextBinding, ids: Set<string>) => {
+    ids.add(binding.nodeId);
+    const fields = promptFieldsByNode.get(binding.nodeId) || [];
+    if (!fields.includes(binding.inputName)) fields.push(binding.inputName);
+    promptFieldsByNode.set(binding.nodeId, fields);
+  };
+  const positiveBindings = [...positiveEncoderIds].filter((id) => !negativeEncoderIds.has(id))
+    .flatMap((encoderId) => encoderPromptBindings(workflow, encoderId).map((binding) => ({ ...binding, encoderId })));
+  const unresolvedLinkedEncoder = [...positiveEncoderIds].find((id) => !negativeEncoderIds.has(id)
+    && ['text', 'text_g', 'text_l'].some((field) => Array.isArray(nodeInputs(workflow[id])?.[field]))
+    && !positiveBindings.some((binding) => binding.encoderId === id && binding.nodeId !== id));
+  if (!hasExplicitPositive && unresolvedLinkedEncoder) {
+    throw new Error(`正面编码器 ${unresolvedLinkedEncoder} 的文字来源无法安全识别。请在业务文字入口填写 __PROMPT__ 后重新导入；不会替换系统规则或模型配置。`);
+  }
+  // A business string routed into the primary encoder is authoritative. Other
+  // encoders' literal words remain fixed refinement/style instructions.
+  const linkedPositiveBindings = positiveBindings.filter((binding) => binding.nodeId !== binding.encoderId);
+  if (!hasExplicitPositive) (linkedPositiveBindings.length ? linkedPositiveBindings : positiveBindings)
+    .forEach((binding) => addBinding(binding, positiveNodeIds));
+  if (!hasExplicitNegative) [...negativeEncoderIds].flatMap((id) => encoderPromptBindings(workflow, id))
+    .forEach((binding) => addBinding(binding, negativeNodeIds));
 
   let positiveCount = 0;
   let negativeCount = 0;
@@ -355,19 +433,16 @@ export const importComfyUIApiWorkflow = (
 
     const textFields = promptFieldsByNode.get(nodeId) || [];
     if (textFields.length) {
-      if (negativeNodeIds.has(nodeId)) {
+      if (!hasExplicitNegative && negativeNodeIds.has(nodeId)) {
         textFields.forEach((field) => { inputs[field] = '__NEGATIVE_PROMPT__'; });
-        negativeCount += 1;
-      } else if (positiveNodeIds.has(nodeId)) {
+      } else if (!hasExplicitPositive && positiveNodeIds.has(nodeId)) {
         textFields.forEach((field) => { inputs[field] = '__PROMPT__'; });
-        positiveCount += 1;
       }
-    } else {
-      const values = Object.values(inputs).filter((value): value is string => typeof value === 'string');
-      if (values.some((value) => value.includes('__PROMPT__') || value.includes('{{prompt}}'))) positiveCount += 1;
-      if (values.some((value) => value.includes('__NEGATIVE_PROMPT__')
-        || value.includes('{{negative_prompt}}') || value.includes('{{negativePrompt}}'))) negativeCount += 1;
     }
+    const values = Object.values(inputs).filter((value): value is string => typeof value === 'string');
+    if (values.some((value) => value.includes('__PROMPT__') || value.includes('{{prompt}}'))) positiveCount += 1;
+    if (values.some((value) => value.includes('__NEGATIVE_PROMPT__')
+      || value.includes('{{negative_prompt}}') || value.includes('{{negativePrompt}}'))) negativeCount += 1;
 
     const dimensions = dimensionInputsByNode.get(nodeId);
     if (dimensions?.has('width') && hasDirectScalarInput(inputs, 'width')) {

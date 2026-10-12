@@ -1,7 +1,9 @@
 import type { ChapterWorkspace, GenerationTask, Project, ReferenceAsset, Scene, SourceDocument, Storyboard, VideoSequencePlan } from './types';
-import { normalizeStoryReferenceWorkspace } from './storyReferences';
+import { normalizeStoryReferenceWorkspace, storyReferenceFingerprint } from './storyReferences';
 import { sourceContentHash } from './sourceContentHash';
 import { normalizeDirectorLookDraft } from './directorLookDraft';
+import { isSemanticSequencePlan, semanticSegmentStoryContent, validateSemanticSequencePlan } from './semanticSequencePlan';
+import { officialH3CanonicalSourceMatches } from './officialH3SourceIdentity';
 
 type ChapterProject = Pick<Project, 'sourceDocuments'> & Partial<Pick<Project, 'activeChapterId' | 'chapterWorkspaces' | 'storyDraft'>>;
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -118,6 +120,65 @@ export const chapterScenes = (project: Project, chapterId = activeChapter(projec
 export const chapterBoards = (project: Project, chapterId = activeChapter(project)?.id): Storyboard[] => project.storyboards.filter((board) => chapterIdForStoryboard(project, board) === chapterId);
 export const chapterPlans = (project: Project, chapterId = activeChapter(project)?.id): VideoSequencePlan[] => project.sequencePlans.filter((plan) => chapterIdForPlan(project, plan) === chapterId);
 
+/** Semantic plans own the exact edited source even before that text is saved
+ * as the chapter document. Recover only that provable source identity, never
+ * an old scene-based plan or a plan whose image evidence has changed. */
+const planMatchesChapterSource = (project: Project, plan: VideoSequencePlan, chapter: SourceDocument): boolean => {
+  if (plan.chapterId !== chapter.id || !isSemanticSequencePlan(plan)
+    || !plan.sourceStoryContent?.trim() || plan.sourceStoryContent !== chapter.content
+    || plan.sourceStoryTitle !== chapter.name || validateSemanticSequencePlan(plan).length
+    || plan.segments.some((segment) => segment.sourceSceneIds.length > 0)) return false;
+  const hash = sourceContentHash(chapter.content);
+  if (plan.sourceContentHash !== hash || chapter.contentHash && chapter.contentHash !== hash) return false;
+  const original = plan.semanticPlanningSnapshot?.originalSourceContext;
+  if (original && original.chapterId !== chapter.id) return false;
+  const contexts = [plan.storyReferenceContext, original?.storyReferenceContext].filter((context) => context !== undefined);
+  const fingerprints = [plan.storyReferenceFingerprint, original?.referenceFingerprint,
+    ...contexts.map((context) => context.fingerprint)].filter((fingerprint) => fingerprint !== undefined);
+  const workspace = project.chapterWorkspaces?.[chapter.id];
+  if (workspace?.storyInputMode === 'image' && !contexts.length) return false;
+  if (contexts.some((context) => context.chapterId !== chapter.id || !context.fingerprint)
+    || fingerprints.some((fingerprint) => !fingerprint || fingerprint !== storyReferenceFingerprint(project, chapter.id))) return false;
+  return true;
+};
+
+/** A restored ready marker needs an exact live result. Saved prompts, IDs and
+ * media remain unchanged; an absent or stale result remains work to generate. */
+const currentSemanticSegmentBoard = (project: Project, plan: VideoSequencePlan, segment: VideoSequencePlan['segments'][number]): Storyboard | undefined => {
+  const board = project.storyboards.find((candidate) => candidate.id === segment.storyboardId);
+  const source = semanticSegmentStoryContent(segment);
+  if (!board || board.chapterId !== plan.chapterId || board.sequencePlanId !== plan.id || board.segmentId !== segment.id
+    || board.sourceStale || board.characterDossierDirty || board.durationSec !== segment.durationSec
+    || board.sourceStoryContent !== source || board.sourceContentHash !== sourceContentHash(source)
+    || !board.finalPrompt?.trim() || board.promptTrace?.mode !== 'text-api' || board.promptTrace.shotPlanMode !== 'ai-complete'
+    || board.promptTrace.convertedPromptFingerprint !== sourceContentHash(board.finalPrompt)) return undefined;
+  if (board.storyReferenceContext?.chapterId && board.storyReferenceContext.chapterId !== plan.chapterId) return undefined;
+  const referenceFingerprint = board.storyReferenceFingerprint || board.storyReferenceContext?.fingerprint;
+  if (referenceFingerprint && referenceFingerprint !== storyReferenceFingerprint(project, plan.chapterId)) return undefined;
+  if (board.officialPromptZh?.trim() && (board.targetOutput?.prompt !== board.officialPromptZh
+    || !officialH3CanonicalSourceMatches(board))) return undefined;
+  return board;
+};
+
+const recoverSourceMatchedSequencePlans = (project: Project): Project => {
+  let changed = false;
+  const sequencePlans = project.sequencePlans.map((plan) => {
+    if (plan.sourceStale !== true) return plan;
+    const chapter = project.sourceDocuments.find((item) => item.id === plan.chapterId && !item.archived);
+    if (!chapter || !planMatchesChapterSource(project, plan, chapter)) return plan;
+    changed = true;
+    const { sourceStale: _sourceStale, ...rest } = plan;
+    return { ...rest, segments: plan.segments.map((segment) => {
+      if (segment.status !== 'stale' && segment.status !== 'ready') return segment;
+      const status = currentSemanticSegmentBoard(project, plan, segment) ? 'ready' as const : 'planned' as const;
+      if (segment.status === status) return segment;
+      const { failureReason: _failureReason, ...saved } = segment;
+      return { ...saved, status };
+    }) };
+  });
+  return changed ? { ...project, sequencePlans } : project;
+};
+
 /** A read-only editor view. Do not persist it or pass it to background workers. */
 export const chapterScopeProject = (project: Project, chapterId = activeChapter(project)?.id): Project => {
   const chapter = project.sourceDocuments.find((item) => item.id === chapterId);
@@ -215,7 +276,7 @@ export const migrateProjectChapters = (project: Project): Project => {
     ...compatibilityControls,
   };
   if (workspace.directorLookReferenceAssetId === undefined) delete result.directorLookReferenceAssetId;
-  return result;
+  return recoverSourceMatchedSequencePlans(result);
 };
 
 export interface ChapterImportPiece {
@@ -328,8 +389,16 @@ export const replaceChapterSourceDocument = (project: Project, sourceDocument: S
   const chapterId = currentSource.id;
   const nextHash = sourceContentHash(sourceDocument.content);
   const sourceChanged = sourceContentHash(currentSource.content) !== nextHash;
-  const boardIds = new Set(sourceChanged ? chapterBoards(normalized, chapterId).map((board) => board.id) : []);
-  const planIds = new Set(sourceChanged ? chapterPlans(normalized, chapterId).map((plan) => plan.id) : []);
+  const nextSource = { ...currentSource, ...sourceDocument, id: chapterId, contentHash: nextHash };
+  const matchingPlans = sourceChanged ? chapterPlans(normalized, chapterId)
+    .filter((plan) => planMatchesChapterSource(normalized, plan, nextSource)) : [];
+  const matchingPlanIds = new Set(matchingPlans.map((plan) => plan.id));
+  const matchingBoardIds = new Set(matchingPlans.flatMap((plan) => plan.segments.flatMap((segment) => {
+    const board = currentSemanticSegmentBoard(normalized, plan, segment);
+    return board ? [board.id] : [];
+  })));
+  const boardIds = new Set(sourceChanged ? chapterBoards(normalized, chapterId).filter((board) => !matchingBoardIds.has(board.id)).map((board) => board.id) : []);
+  const planIds = new Set(sourceChanged ? chapterPlans(normalized, chapterId).filter((plan) => !matchingPlanIds.has(plan.id)).map((plan) => plan.id) : []);
   const sceneIds = new Set(sourceChanged ? chapterScenes(normalized, chapterId).map((scene) => scene.id) : []);
   const workspacePatch: Partial<ChapterWorkspace> = { storyDraft: undefined, ...(sourceChanged ? { directorSettingsConfirmedFingerprint: undefined, directorSettingsConfirmedAt: undefined } : {}) };
   const next = withChapterWorkspace({ ...normalized,
@@ -339,7 +408,7 @@ export const replaceChapterSourceDocument = (project: Project, sourceDocument: S
     sequencePlans: normalized.sequencePlans.map((plan) => planIds.has(plan.id) ? { ...plan, sourceStale: true, segments: (plan.segments ?? []).map((segment) => ({ ...segment, status: 'stale' as const })) } : plan),
     ...(activeChapter(normalized)?.id === chapterId ? { storyDraft: undefined, ...(sourceChanged ? { directorSettingsConfirmedFingerprint: undefined, directorSettingsConfirmedAt: undefined } : {}) } : {}),
   }, workspacePatch, chapterId);
-  return { project: next, sourceChanged, invalidatedStoryboardIds: [...boardIds], invalidatedPlanIds: [...planIds] };
+  return { project: recoverSourceMatchedSequencePlans(next), sourceChanged, invalidatedStoryboardIds: [...boardIds], invalidatedPlanIds: [...planIds] };
 };
 
 export const chapterIdsForEntity = (project: Project, kind: 'character' | 'location' | 'prop', id: string): string[] => {

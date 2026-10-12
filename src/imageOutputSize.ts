@@ -1,5 +1,7 @@
 import type { ImageApiConfig, ImageVariant } from './types';
-import { IMAGE_RESOLUTION_TECHNICAL_MAX_SIDE, imageResolutionAspectRatio, resolveImageResolution, type ImageResolutionPlan } from './imageResolution';
+import { IMAGE_RESOLUTION_TECHNICAL_MAX_SIDE, imageResolutionAspectRatio, resolveImageResolution, resolveImageResolutionCapabilities, runningHubImageDimensionOverrideIssue, type ImageResolutionPlan } from './imageResolution';
+import { selectedRunningHubImageWorkflow } from './runningHubImage';
+import { readRunningHubVideoRequest } from './runningHubVideo';
 
 export type ImageOutputSizeMode = 'default' | '1x' | '2x' | '1k' | '2k' | '4k' | 'custom';
 export type ImageOutputAspect = 'variant' | '1:1' | '3:4' | '4:3' | '9:16' | '16:9' | '3:2' | '2:3';
@@ -75,6 +77,24 @@ export interface ResolvedImageOutputSize {
   resolutionPlan?: ImageResolutionPlan;
 }
 
+const runningHubDefaultImageSize = (api: ImageApiConfig['backend'] | ImageApiConfig): { width: number; height: number } | undefined => {
+  if (typeof api === 'string' || api.backend !== 'runninghub') return undefined;
+  const workflow = selectedRunningHubImageWorkflow(api);
+  if (!workflow?.mapping.parameters?.width || !workflow.mapping.parameters.height) return undefined;
+  try {
+    const nodes = readRunningHubVideoRequest(workflow.requestTemplate).nodeInfoList;
+    const values = ['width', 'height'].map((key) => {
+      const binding = workflow.mapping.parameters![key];
+      const matches = nodes.filter((node) => node.nodeId === binding.nodeId && node.fieldName === binding.inputName);
+      if (matches.length !== 1) return NaN;
+      const value = matches[0].fieldValue;
+      return typeof value === 'number' ? value : typeof value === 'string' && /^\d+$/u.test(value.trim()) ? Number(value) : NaN;
+    });
+    return values.every((value) => Number.isSafeInteger(value) && value >= 64 && value <= IMAGE_OUTPUT_MAX_SIDE)
+      ? { width: values[0], height: values[1] } : undefined;
+  } catch { return undefined; }
+};
+
 /** One computation supplies the task and request. Never silently round,
  * clamp, reduce resolution or resize the returned image. */
 export const resolveImageOutputSize = (
@@ -86,8 +106,10 @@ export const resolveImageOutputSize = (
   const locked = imageOutputAspectLocked(variant);
   const backend = typeof api === 'string' ? api : api.backend;
   const sizeOverride = preference.mode !== 'default';
+  const useRunningHubDefaults = backend === 'runninghub' && !sizeOverride;
+  const cloudDefaultSize = useRunningHubDefaults ? runningHubDefaultImageSize(api) : undefined;
   const aspect = IMAGE_OUTPUT_ASPECTS.find((item) => item.value === preference.aspect);
-  const base = !sizeOverride || !aspect || aspect.value === 'variant' ? canvas : aspect;
+  const base = !sizeOverride || !aspect || aspect.value === 'variant' ? cloudDefaultSize || canvas : aspect;
   if (['1k', '2k', '4k'].includes(preference.mode) || preference.mode === 'custom' && preference.resolutionVersion === 1) {
     const custom = preference.mode === 'custom';
     const logicalAspectRatio = !custom ? imageResolutionAspectRatio(base.width, base.height)
@@ -107,8 +129,9 @@ export const resolveImageOutputSize = (
   const scale = preference.mode === '2x' ? 2 : 1;
   const width = preference.mode === 'custom' ? preference.width : base.width * scale;
   const height = preference.mode === 'custom' ? preference.height : base.height * scale;
-  let issue = '';
+  let issue = sizeOverride ? runningHubImageDimensionOverrideIssue(api) : '';
   const warnings: string[] = [];
+  if (useRunningHubDefaults && !cloudDefaultSize) warnings.push('云端模板未完整声明默认宽高，此处仅显示版式估算；生成保留工作流默认尺寸，不覆盖云端参数。');
   if (!Number.isSafeInteger(width) || !Number.isSafeInteger(height) || width < 64 || height < 64 || width > IMAGE_OUTPUT_MAX_SIDE || height > IMAGE_OUTPUT_MAX_SIDE) {
     issue = `宽、高须为64–${IMAGE_OUTPUT_MAX_SIDE}之间的整数像素；不会自动降档。`;
   } else {
@@ -123,11 +146,16 @@ export const resolveImageOutputSize = (
       warnings.push('NovelAI宽、高建议为64的倍数；本次按输入原样提交，由后端决定是否支持。');
     } else if (sizeOverride && backend === 'sd_webui' && (width % 8 || height % 8)) {
       warnings.push('SD WebUI宽、高建议为8的倍数；本次按输入原样提交，由后端决定是否支持。');
+    } else if (sizeOverride && backend === 'runninghub') {
+      const step = resolveImageResolutionCapabilities(api).pixelStep;
+      if (width % step || height % step) warnings.push(`RunningHub云端工作流宽、高建议为${step}的倍数；本次按输入原样提交，由工作流决定是否支持。`);
     }
   }
-  return { width, height, sizeOverride, issue, ...(warnings.length ? { warning: warnings.join(' ') } : {}), layoutNote: locked
+  const layoutNote = locked
     ? variant === 'grid' ? '九宫格推荐1:1' : variant === 'private-full-body' ? '私密全身推荐2:3竖图' : '多视图推荐3:2'
-    : '' };
+    : '';
+  return { width, height, sizeOverride, issue, ...(warnings.length ? { warning: warnings.join(' ') } : {}),
+    layoutNote: [layoutNote, useRunningHubDefaults ? '使用云端工作流默认尺寸，不覆盖云端参数' : ''].filter(Boolean).join(' · ') };
 };
 
 export const imageReturnedSizeWarning = (requested: { width: number; height: number; resolutionPlan?: ImageResolutionPlan }, actual: { width: number; height: number } | undefined): string => {

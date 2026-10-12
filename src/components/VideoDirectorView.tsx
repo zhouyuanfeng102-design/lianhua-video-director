@@ -717,12 +717,12 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
   onRepairIdentityBindings?: VideoDirectorViewProps['onRepairIdentityBindings'];
   onImportAudio?: () => void;
 }) {
-  const plans = useMemo(() => [...(chapterId ? chapterPlans(project, chapterId) : project.sequencePlans)].filter((plan) => plan.segments.length && !plan.sourceStale).sort((left, right) => right.updatedAt - left.updatedAt), [project, chapterId]);
+  const plans = useMemo(() => [...(chapterId ? chapterPlans(project, chapterId) : project.sequencePlans)].filter((plan) => plan.segments.length).sort((left, right) => right.updatedAt - left.updatedAt), [project, chapterId]);
   const retryEntries = useMemo(() => videoBatchRetryEntries(project, retryTaskIds).filter((entry) => plans.some((plan) => plan.id === entry.planId)), [project, retryTaskIds, plans]);
   const retryPrimary = retryEntries[0];
   const initialBatch = !retryPrimary ? savedBatch : undefined;
   const retryParameterBaselineText = retryPrimary ? JSON.stringify(retryPrimary.draft.parameters, null, 2) : '';
-  const [planId, setPlanId] = useState(() => plans.find((plan) => plan.id === (retryPrimary?.planId || initialBatch?.planId || initialDraft.source?.sequencePlanId))?.id || plans[0]?.id || '');
+  const [planId, setPlanId] = useState(() => retryPrimary?.planId || initialBatch?.planId || initialDraft.source?.sequencePlanId || plans.find((plan) => !plan.sourceStale)?.id || plans[0]?.id || '');
   const [backend, setBackend] = useState(retryPrimary?.draft.backend || initialBatch?.backend || initialDraft.backend);
   const [workflowId, setWorkflowId] = useState(() => retryPrimary
     ? retryPrimary.draft.workflowId || ''
@@ -789,6 +789,12 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
   useEffect(() => { onSubmittingChange(interactionLocked); }, [interactionLocked, onSubmittingChange]);
   useEffect(() => () => onSubmittingChange(false), [onSubmittingChange]);
   const plan = plans.find((item) => item.id === planId);
+  const sourceIssue = plan?.sourceStale ? '此计划对应原文已变化，请先在提示词导演台更新分段与提示词。已有分段和原稿仍保留，暂不能提交视频。' : '';
+  const planPromptBoard = plan?.segments.map((segment) => project.storyboards.find((board) => board.id === segment.storyboardId)).find(Boolean)
+    || project.storyboards.find((board) => board.id === plan?.masterStoryboardId);
+  const openPlanPrompt = () => {
+    if (planPromptBoard) onOpenPrompt?.(planPromptBoard.id, { chapterId, sequencePlanId: plan?.id, segmentId: planPromptBoard.segmentId, language: 'zh', promptFormat });
+  };
   const sequenceFingerprint = videoTailSequenceFingerprint(project, planId);
   const images = useMemo(() => project.assets.filter(isVideoDirectorImage), [project.assets]);
   const retryConnectionActive = Boolean(retryPrimary
@@ -856,7 +862,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
         zh: row.zh && { ...row.zh, draft: { ...row.zh.draft, referenceSlotRoles: [...roles] } },
         en: row.en && { ...row.en, draft: { ...row.en.draft, referenceSlotRoles: [...roles] } },
       };
-      const retry = reviewFrozenFormats ? retryEntriesBySegment.get(row.segmentId) : undefined;
+      const retry = !plan.sourceStale && reviewFrozenFormats ? retryEntriesBySegment.get(row.segmentId) : undefined;
       if (!retry) return row;
       const useFrozenSnapshot = retry.draft.backend === backend
         && retry.draft.runningHubWorkflowId === runningHubWorkflowId
@@ -1081,12 +1087,12 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
       : !settings.comfyuiVideo?.enabled || !settings.comfyuiVideo.baseUrl.trim() || !workflow ? '请先启用 ComfyUI 并选择视频工作流。' : ''
     : !api?.enabled || !api.endpoint.trim() ? '请先启用并设置视频 API。' : '');
   const selectedReferencePreview = referencePreviews.find((entry) => selectedKeys.has(videoPromptChoiceKey(entry.storyboardId, entry.language)));
-  const selectedIssue = selectedKeys.size !== selected.length ? selectedReferencePreview
+  const selectedIssue = sourceIssue || (selectedKeys.size !== selected.length ? selectedReferencePreview
     ? `第 ${selectedReferencePreview.segmentIndex || '?'} 段：${selectedReferencePreview.referenceNotice}`
     : '部分已选稿件已变化或不存在，请重新选择。' : pending.map((candidate) => {
     const frozen = candidate.draft.reuseTaskId ? findReusableVideoTask(project, candidate.draft.reuseTaskId)?.videoJob?.snapshot : undefined;
     const issue = referenceIssue(candidate) || validateVideoAudioReferences(project, candidate.draft, usageContextForDraft(candidate.draft).api, frozen?.audios)[0]; return issue ? `第 ${candidate.segmentIndex} 段：${issue}` : '';
-  }).find(Boolean) || '';
+  }).find(Boolean) || '');
   const selectLanguage = (row: VideoBatchRow, language: 'zh' | 'en') => {
     const candidate = row[language];
     if (!candidate) {
@@ -1105,9 +1111,15 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
     const keys = allVideoBatchChoiceKeys(rows, language); setSelectedKeys(keys);
     setNotice(`已选择当前计划的 ${keys.size} 段${language === 'zh' ? '中文' : '英文描述'}；${rows.length - keys.size} 段尚无可用稿件。`);
   };
-  const changePlan = (nextId: string) => {
-    setPlanId(nextId); setSelectedKeys(new Set()); setLanguages({}); setReferenceOverrides({}); setAutomaticTails({}); setTailCharacterModes({}); setPreviewSegmentId(''); setImageSegmentId(''); setConfirmation(undefined); setQuery(''); setError(''); setNotice('切换计划后已清空本轮选择与自动衔接；原分镜和提示词未改动。');
+  const changePlan = (nextId: string, noticeText = '切换计划后已清空本轮选段、参考图、音频与自动衔接；原分镜和提示词未改动。') => {
+    setPlanId(nextId); setSelectedKeys(new Set()); setLanguages({}); setPromptFormats({}); setReferenceOverrides({}); setReferenceRoleOverrides({}); setAudioOverrides({}); setAutomaticTails({}); setTailCharacterModes({}); setPreviewSegmentId(''); setImageSegmentId(''); setConfirmation(undefined); setFeeConfirmed(false); setRegenerateSucceeded(false); setReviewFrozenFormats(false); setReviewLegacyDraft(false); setQuery(''); setError(''); setNotice(noticeText);
   };
+  useEffect(() => {
+    if (plans.some((item) => item.id === planId)) return;
+    const nextId = plans.find((item) => !item.sourceStale)?.id || plans[0]?.id || '';
+    if (nextId === planId) return;
+    changePlan(nextId, nextId ? '计划列表已更新，已选择当前可用计划并清空上一计划的选段、参考图、音频与自动衔接。尚未提交视频。' : '原全片计划已不存在，当前章节尚无已分段计划。已清空本轮选择，历史结果保留。');
+  }, [plans, planId]);
   const clearAutomaticTails = (segmentIds: readonly string[]) => {
     setAutomaticTails((current) => {
       const next = { ...current }; segmentIds.forEach((id) => { delete next[id]; }); return next;
@@ -1321,18 +1333,19 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
         <strong>批量设置</strong><span>{settingsCollapsed ? '展开设置' : '收起设置'}<span aria-hidden="true">{settingsCollapsed ? '▾' : '▴'}</span></span>
       </button>
       {settingsCollapsed && <div className="vd-batch-settings-summary" aria-label="当前批量设置摘要">
-        <span>计划：{plan ? `${plan.title || plan.sourceStoryTitle} · ${plan.segments.length} 段` : '尚无已分段计划'}</span>
+        <span>计划：{plan ? `${plan.title || plan.sourceStoryTitle} · ${plan.segments.length} 段${plan.sourceStale ? ' · 原文已变化，需更新' : ''}` : plans.length ? '正在同步全片计划' : '当前章节尚无已分段计划'}</span>
         <span>{connectionLabel}</span>
         <span className={parameters.issue ? 'vd-batch-settings-wide vd-batch-settings-warning' : 'vd-batch-settings-wide'}>{parameters.issue ? '公共参数 JSON 有误，请展开设置修正；原文本已保留。' : retryEntriesBySegment.size > 0 && parameterText === retryParameterBaselineText ? '失败重试项保留各段原参数；生成参数请在确认清单逐段核对。' : videoOutputParameterSummary(parameters.value, presentationApi) || '生成参数：保留接口 / 工作流原值'}</span>
         {query.trim() && <span className="vd-batch-settings-wide">筛选：“{query.trim()}” · 显示 {visibleRows.length} / {rows.length} 段，已有选择保留</span>}
         {regenerateSucceeded && <span className="vd-batch-settings-wide vd-batch-settings-warning">已开启重新生成已成功项（保留原视频，可能再次收费）</span>}
       </div>}
+      {sourceIssue && <div className="vd-error" role="status"><span>{sourceIssue}</span>{onOpenPrompt && planPromptBoard && <button type="button" className="btn small" disabled={interactionLocked} onClick={openPlanPrompt}>打开提示词导演台更新</button>}</div>}
     </div>
     <div id="vd-batch-settings-content" className="vd-batch-controls" hidden={settingsCollapsed}>
       <label className="field"><span>批量提示词格式</span><select aria-label="批量提示词格式" value={promptFormat} disabled={interactionLocked} onChange={(event) => changePromptFormat(event.target.value as VideoPromptFormat)}><option value="h3">H3</option><option value="seedance">Seedance</option><option value="ordinary">普通稿</option></select></label>
       <p className="field-hint">格式决定本次提交的正文，可在每段单独选择；接口模型继续使用下方连接设置。{reviewFrozenFormats ? '当前复核失败任务的原始快照；切换格式后需重新选段。' : reviewLegacyDraft ? '当前保留旧草稿来源；切换格式后需重新选段。' : ''}</p>
       <div className="vd-batch-configuration">
-        <label className="field"><span>全片计划</span><select aria-label="批量全片计划" value={planId} disabled={submitting} onChange={(event) => changePlan(event.target.value)}>{!plans.length && <option value="">尚无已分段计划</option>}{plans.map((item) => <option key={item.id} value={item.id}>{item.title || item.sourceStoryTitle} · {item.segments.length} 段</option>)}</select></label>
+        <label className="field"><span>全片计划</span><select aria-label="批量全片计划" value={planId} disabled={submitting} onChange={(event) => changePlan(event.target.value)}>{!plans.length && <option value="">当前章节尚无已分段计划</option>}{plans.map((item) => <option key={item.id} value={item.id}>{item.title || item.sourceStoryTitle} · {item.segments.length} 段{item.sourceStale ? ' · 原文已变化，需更新' : ''}</option>)}</select></label>
         <label className="field"><span>生成方式</span><select aria-label="批量生成方式" value={sourceKind} disabled={submitting} onChange={(event) => { const source = event.target.value as 'api' | 'comfyui' | 'runninghub'; switchParameterConnection({ backend: source === 'comfyui' ? 'comfyui' : 'api', runningHubWorkflowId: source === 'runninghub' ? settings.runningHubVideo?.activeWorkflowId || '__runninghub_unselected__' : undefined, apiProfileId: source === 'runninghub' ? '' : apiProfileId }); }}><option value="api">视频 API</option><option value="comfyui">ComfyUI</option><option value="runninghub">RunningHub 云端</option></select></label>
         <label className="field"><span>{sourceKind === 'runninghub' ? '云端工作流' : backend === 'comfyui' ? '视频工作流' : '视频 API 配置'}</span>{sourceKind === 'runninghub' ? <select aria-label="批量 RunningHub 云端工作流" value={runningHubWorkflowId || '__runninghub_unselected__'} disabled={submitting} onChange={(event) => switchParameterConnection({ runningHubWorkflowId: event.target.value })}>{retryConnection?.api ? <option value={runningHubWorkflowId}>原失败批次云端快照 · {retryConnection.api.model}</option> : <option value="__runninghub_unselected__" disabled>请选择云端工作流</option>}{settings.runningHubVideo?.workflows.filter((item) => !(retryConnection?.api && item.id === runningHubWorkflowId)).map((item) => <option key={item.id} value={item.id} disabled={!isRunningHubVideoWorkflowReady(item)}>{item.name}</option>)}</select> : backend === 'comfyui' ? <select aria-label="批量视频工作流" value={workflowId} disabled={submitting} onChange={(event) => switchParameterConnection({ workflowId: event.target.value })}>{retryConnection?.backend === 'comfyui' && retryConnection.workflow ? <option value={workflowId}>原失败批次快照 · {retryConnection.workflow.name}</option> : <option value="" disabled>请选择工作流</option>}{settings.comfyuiVideo?.workflows.filter((item) => !(retryConnection?.backend === 'comfyui' && item.id === workflowId)).map((item) => <option key={item.id} value={item.id}>{item.name} · {item.mapping.images.length} 个图片槽</option>)}</select> : <select aria-label="批量视频 API 配置" value={apiProfileId} disabled={submitting} onChange={(event) => switchParameterConnection({ apiProfileId: event.target.value })}>{retryConnection?.backend === 'api' && retryConnection.api ? <option value={apiProfileId}>原失败批次 API 快照 · {retryConnection.api.model || '未记录模型'}</option> : <option value="">当前视频 API 配置</option>}{settings.videoApiProfiles?.filter((item) => !(retryConnection?.backend === 'api' && item.id === apiProfileId)).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>}</label>
       </div>
@@ -1360,7 +1373,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
           const characterMode = tailCharacterModes[row.segmentId];
           const previousRow = rows[rows.indexOf(row) - 1]; const previousChoice = previousRow && rowChoice(previousRow);
           const savedPreview = !candidate ? rowReferencePreview(row, rowLanguage(row)) : undefined;
-          const issue = candidate ? referenceIssue(candidate) : savedPreview?.referenceNotice || '当前语言尚无可用提示词';
+          const issue = candidate ? referenceIssue(candidate) : plan?.sourceStale ? '原文已变化，需更新本段提示词后才能生成' : savedPreview?.referenceNotice || '当前语言尚无可用提示词';
           const rowPromptFormat = candidate ? candidate.choice.promptFormat : promptFormats[row.segmentId] || promptFormat;
           const referenceCount = candidate ? intendedReferenceCount(candidate) : 0;
           return <article className={`vd-batch-row ${selectedRow ? 'selected' : ''} ${previewRow?.segmentId === row.segmentId ? 'previewing' : ''}`} key={row.segmentId} data-segment-id={row.segmentId}>
@@ -1405,7 +1418,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
             </details>
           </article>;
         })}
-        {!visibleRows.length && <div className="vd-empty">{rows.length ? '没有匹配的分段；已有选择仍保留。' : '请先在提示词导演台完成长剧情分段，并生成各段提示词。全片母版不会作为单段视频提交。'}</div>}
+        {!visibleRows.length && <div className="vd-empty">{rows.length ? '没有匹配的分段；已有选择仍保留。' : plans.length ? '正在同步当前全片计划，请稍候。' : '当前章节尚无已分段计划，请先在提示词导演台完成本章长剧情分段，并生成各段提示词。全片母版不会作为单段视频提交。'}</div>}
       </div>
       <aside className="vd-batch-preview" aria-label="所选段预览">
         <div className="vd-batch-preview-head"><strong>{previewRow ? `第 ${previewRow.segmentIndex} 段 · ${previewRow.title}` : '分段预览'}</strong><div className="vd-mode-tabs" role="tablist" aria-label="批量段预览内容"><button role="tab" aria-selected={previewPane === 'prompt'} className={`btn small ${previewPane === 'prompt' ? 'primary' : ''}`} onClick={() => setPreviewPane('prompt')}>完整提示词</button><button role="tab" aria-selected={previewPane === 'references'} className={`btn small ${previewPane === 'references' ? 'primary' : ''}`} onClick={() => setPreviewPane('references')}>参考图与用途</button></div></div>

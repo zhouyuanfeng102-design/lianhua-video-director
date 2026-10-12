@@ -1,0 +1,236 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { buildRunningHubImageRequest, importRunningHubImageWorkflow, isRunningHubImageWorkflowReady,
+  normalizeRunningHubImageConfig, selectedRunningHubImageWorkflow, validateRunningHubImageConfig } from '../src/runningHubImage';
+import { requestRunningHubImage } from '../src/services/runningHubImage';
+import { createInitialState, normalizeState, serializeStateForStorage } from '../src/storage';
+import type { ImageApiConfig } from '../src/types';
+import { requestImageModel } from '../src/services/llm';
+import { captureImageApiSnapshot, resolveImageApiForRegeneration } from '../src/imageApiSelection';
+import { normalizeRunningHubVideoConfig } from '../src/runningHubVideo';
+
+const body = { nodeInfoList: [
+  { nodeId: '95', fieldName: 'value', fieldValue: '1464', description: '宽度' },
+  { nodeId: '96', fieldName: 'value', fieldValue: 1016, description: '高度' },
+  { nodeId: '115', fieldName: 'prompt', fieldValue: 'original business prompt' },
+], instanceType: 'default', usePersonalQueue: false };
+const curl = `curl --request POST 'https://www.runninghub.ai/openapi/v2/run/ai-app/2070152175753453569' --header 'Authorization: Bearer EXAMPLE_NOT_REAL' --header 'Content-Type: application/json' --data '${JSON.stringify(body)}'`;
+const config = (): ImageApiConfig => {
+  const imported = importRunningHubImageWorkflow(curl, 'Krea AI image');
+  return { ...createInitialState().settings.imageApi, enabled: true, backend: 'runninghub', baseUrl: imported.baseUrl!, apiKey: 'LOCAL_FAKE_KEY',
+    runningHubWorkflows: [imported.workflow], activeRunningHubWorkflowId: imported.workflow.id };
+};
+const response = (payload: unknown, status = 200) => ({ status, body: JSON.stringify(payload) });
+
+test('official AI-app import safely binds only business prompt and documented width/height, preserving original request', () => {
+  const imported = importRunningHubImageWorkflow(curl, 'Krea AI image');
+  assert.equal(imported.workflow.remoteId, '2070152175753453569');
+  assert.equal(imported.workflow.runKind, 'ai-app');
+  assert.deepEqual(imported.workflow.mapping.prompt, [{ nodeId: '115', inputName: 'prompt' }]);
+  assert.deepEqual(imported.workflow.mapping.parameters, { width: { nodeId: '95', inputName: 'value' }, height: { nodeId: '96', inputName: 'value' } });
+  assert.deepEqual(JSON.parse(imported.workflow.requestTemplate), body);
+  assert.equal(isRunningHubImageWorkflowReady(imported.workflow), true);
+  assert.ok(!JSON.stringify(imported).includes('EXAMPLE_NOT_REAL'));
+  assert.equal(curl.includes('EXAMPLE_NOT_REAL'), true, 'original input remains unchanged');
+});
+
+test('normalization preserves independent image library and null/deleted selections without fallback', () => {
+  const current = config();
+  assert.equal(normalizeRunningHubImageConfig(current).runningHubWorkflows.length, 1);
+  assert.equal(normalizeRunningHubImageConfig({ ...current, activeRunningHubWorkflowId: null }).activeRunningHubWorkflowId, null);
+  assert.equal(selectedRunningHubImageWorkflow({ ...current, activeRunningHubWorkflowId: 'deleted' }), undefined);
+  assert.match(validateRunningHubImageConfig({ ...current, activeRunningHubWorkflowId: 'deleted' })!, /不会改用其他/u);
+});
+
+test('only mapped business fields change; dimensions stay at cloud defaults unless explicitly overridden', () => {
+  const current = config();
+  const before = JSON.stringify(current);
+  const request = buildRunningHubImageRequest(current, { prompt: '中文 business prompt\nEnglish', width: 1024, height: 1024 });
+  assert.equal(request.endpoint, 'https://www.runninghub.ai/openapi/v2/run/ai-app/2070152175753453569');
+  assert.equal(request.queryEndpoint, 'https://www.runninghub.ai/openapi/v2/query');
+  assert.equal(request.headers.Authorization, 'Bearer LOCAL_FAKE_KEY');
+  assert.deepEqual(request.body, { ...body, nodeInfoList: body.nodeInfoList.map(node => node.nodeId === '115' ? { ...node, fieldValue: '中文 business prompt\nEnglish' } : node) });
+  const sized = buildRunningHubImageRequest(current, { prompt: 'authored', width: 1536, height: 1024, sizeOverride: true });
+  const fields = sized.body.nodeInfoList as typeof body.nodeInfoList;
+  assert.equal(fields[0].fieldValue, '1536'); assert.equal(fields[1].fieldValue, 1024);
+  assert.equal(JSON.stringify(current), before);
+});
+
+test('unmapped/ambiguous prompt, secrets, unsupported references and explicit unmapped sizes fail before submission', () => {
+  const current = config();
+  assert.match(validateRunningHubImageConfig(current, 1)!, /不会忽略已选图片/u);
+  assert.match(validateRunningHubImageConfig({ ...current, apiKey: '' })!, /密钥/u);
+  const workflow = importRunningHubImageWorkflow(JSON.stringify({ endpoint: 'https://www.runninghub.ai/openapi/v2/run/ai-app/123',
+    nodeInfoList: [...body.nodeInfoList, { nodeId: '109', fieldName: 'system', fieldValue: 'do not rewrite' },
+      { nodeId: '201', fieldName: 'prompt', fieldValue: 'ambiguous' }] }));
+  assert.deepEqual(workflow.workflow.mapping.prompt, []);
+  assert.equal(isRunningHubImageWorkflowReady(workflow.workflow), false);
+  const missing = structuredClone(current); missing.runningHubWorkflows![0].mapping.parameters = {};
+  assert.throws(() => buildRunningHubImageRequest(missing, { prompt: 'safe', width: 1024, height: 1024, sizeOverride: true }), /尚未绑定/u);
+});
+
+test('one paid submission followed by original-task polling selects image output and downloads via existing image transport', async () => {
+  const calls: Array<{ url: string; body: any }> = [];
+  let starts = 0, waits = 0; const downloads: string[] = [];
+  const result = await requestRunningHubImage(config(), { prompt: 'authored' }, {
+    request: async (url, init) => {
+      calls.push({ url, body: JSON.parse(init.body!) });
+      return response(calls.length === 1 ? { taskId: 'cloud-original', status: 'QUEUED' }
+        : calls.length === 2 ? { taskId: 'cloud-original', status: 'RUNNING' }
+          : { taskId: 'cloud-original', status: 'SUCCESS', results: [
+            { outputType: 'mp4', url: 'https://cdn.example.test/video.mp4' },
+            { outputType: 'png', nodeId: '12', url: 'https://cdn.example.test/final.png' },
+          ] });
+    }, wait: async () => { waits += 1; }, downloadImage: async url => { downloads.push(url); return 'data:image/png;base64,QQ=='; },
+  }, () => { starts += 1; });
+  assert.equal(starts, 1); assert.equal(waits, 2);
+  assert.equal(calls.filter(call => call.url.includes('/run/')).length, 1);
+  assert.deepEqual(calls.slice(1).map(call => call.body), [{ taskId: 'cloud-original' }, { taskId: 'cloud-original' }]);
+  assert.deepEqual(downloads, ['https://cdn.example.test/final.png']);
+  assert.equal(result.dataUrl, 'data:image/png;base64,QQ==');
+});
+
+test('preferred output node cannot fall back to another image or a non-image output', async () => {
+  const current = config(); current.runningHubWorkflows![0].outputNodeId = 'final';
+  let downloaded = false;
+  await assert.rejects(requestRunningHubImage(current, { prompt: 'authored' }, {
+    request: async () => response({ taskId: 'original', status: 'SUCCESS', results: [{ nodeId: 'preview', outputType: 'png', url: 'https://cdn.example.test/preview.png' }] }),
+    downloadImage: async () => { downloaded = true; return ''; },
+  }), /所选输出节点没有/u);
+  assert.equal(downloaded, false);
+});
+
+test('failed/uncertain submission and remote failures never replay POST and redact key from errors', async () => {
+  for (const failure of ['network', 'auth', 'remote']) {
+    let creates = 0;
+    await assert.rejects(requestRunningHubImage(config(), { prompt: 'authored' }, {
+      request: async () => {
+        creates += 1;
+        if (failure === 'network') throw new Error('network lost Authorization=LOCAL_FAKE_KEY');
+        return failure === 'auth' ? response({ errorMessage: 'Bearer LOCAL_FAKE_KEY rejected' }, 401)
+          : response({ taskId: 'original', status: 'FAILED', errorMessage: 'LOCAL_FAKE_KEY error' });
+      },
+    }), error => error instanceof Error && !error.message.includes('LOCAL_FAKE_KEY'));
+    assert.equal(creates, 1);
+  }
+});
+
+test('pre-submit durability failure and reference-image rejection perform zero requests', async () => {
+  let requests = 0;
+  const transport = { request: async () => { requests += 1; return response({}); } };
+  await assert.rejects(requestRunningHubImage(config(), { prompt: 'authored' }, transport, async () => { throw new Error('save barrier failed'); }), /save barrier failed/u);
+  await assert.rejects(requestRunningHubImage(config(), { prompt: 'authored', referenceCount: 1 }, transport), /不会忽略已选图片/u);
+  assert.equal(requests, 0);
+});
+
+test('cancellation and bounded timeout stop observation without replaying original submission', async () => {
+  const controller = new AbortController(); let requests = 0;
+  await assert.rejects(requestRunningHubImage(config(), { prompt: 'authored', signal: controller.signal }, {
+    request: async () => { requests += 1; return response({ taskId: 'original', status: 'QUEUED' }); },
+    wait: async () => { controller.abort(); },
+  }), error => error instanceof Error && error.name === 'AbortError');
+  assert.equal(requests, 1);
+  let clock = 0; requests = 0;
+  await assert.rejects(requestRunningHubImage(config(), { prompt: 'authored' }, {
+    request: async () => { requests += 1; return response({ taskId: 'original', status: 'RUNNING' }); },
+    now: () => clock, timeoutMs: 20, wait: async () => { clock = 21; },
+  }), /等待超时/u);
+  assert.equal(requests, 1);
+});
+
+const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+Z6k9WQAAAABJRU5ErkJggg==';
+const imageConfig = () => {
+  const current = config();
+  const workflow = current.runningHubWorkflows![0];
+  const template = JSON.parse(workflow.requestTemplate);
+  template.nodeInfoList.push({ nodeId: '201', fieldName: 'image', fieldValue: 'keep-default-a.png' },
+    { nodeId: '202', fieldName: 'image', fieldValue: 'keep-default-b.png' });
+  workflow.requestTemplate = JSON.stringify(template);
+  workflow.mapping.images = [{ nodeId: '201', inputName: 'image' }, { nodeId: '202', inputName: 'image' }];
+  return current;
+};
+
+test('image-to-image uploads each selected file once and binds returned fileName, retaining unused slots and cloud settings', async () => {
+  for (const count of [1, 2]) {
+    const current = imageConfig(); let uploads = 0, creates = 0, starts = 0;
+    await requestRunningHubImage(current, { prompt: 'authored', referenceImages: Array(count).fill(image), referenceCount: count }, {
+      request: async (url, init) => {
+        if (url.endsWith('/media/upload/binary')) {
+          uploads += 1;
+          assert.equal(init.headers.Authorization, 'Bearer LOCAL_FAKE_KEY');
+          assert.equal(init.headers['Content-Type'], undefined, 'multipart transport supplies its own boundary');
+          assert.equal(init.multipart!.files.length, 1);
+          assert.equal(init.multipart!.files[0].name, 'file');
+          assert.equal(init.multipart!.files[0].dataUrl, image);
+          return response({ code: 0, data: { fileName: `uploaded-${uploads}.png`, download_url: `https://cdn.example.test/uploaded-${uploads}.png` } });
+        }
+        creates += 1;
+        const sent = JSON.parse(init.body!);
+        assert.equal(sent.instanceType, 'default'); assert.equal(sent.usePersonalQueue, false);
+        assert.deepEqual(sent.nodeInfoList.slice(0, 2), body.nodeInfoList.slice(0, 2));
+        assert.equal(sent.nodeInfoList[3].fieldValue, 'uploaded-1.png');
+        assert.equal(sent.nodeInfoList[4].fieldValue, count === 2 ? 'uploaded-2.png' : 'keep-default-b.png');
+        return response({ taskId: 'image-task', status: 'SUCCESS', results: [{ outputType: 'png', url: 'https://cdn.example.test/final.png' }] });
+      },
+    }, () => { starts += 1; });
+    assert.equal(uploads, count); assert.equal(creates, 1); assert.equal(starts, 1);
+  }
+});
+
+test('upload failure or over-capacity references never start a paid image task', async () => {
+  let calls = 0, starts = 0;
+  const current = imageConfig();
+  const transport = { request: async () => { calls += 1; return response({ code: 401, message: 'invalid LOCAL_FAKE_KEY' }); } };
+  await assert.rejects(requestRunningHubImage(current, { prompt: 'authored', referenceImages: [image] }, transport, () => { starts += 1; }), /请求失败/u);
+  assert.equal(calls, 1); assert.equal(starts, 0);
+  calls = 0;
+  await assert.rejects(requestRunningHubImage(current, { prompt: 'authored', referenceImages: [image, image, image] }, transport), /不能接收 3 张/u);
+  assert.equal(calls, 0);
+});
+
+test('llm dispatch routes RunningHub image generation through existing serial HTTP/download transport', async () => {
+  const previous = globalThis.window;
+  let requests = 0, downloads = 0, starts = 0;
+  Object.assign(globalThis, { window: { lianhuaDesktop: {
+    request: async (payload: any) => {
+      requests += 1;
+      assert.match(payload.url, /\/run\/ai-app\/2070152175753453569$/u);
+      assert.equal(JSON.parse(payload.body).nodeInfoList[2].fieldValue, 'verbatim Chinese 中文');
+      return response({ taskId: 'llm-image-task', status: 'SUCCESS', results: [{ outputType: 'png', url: 'https://cdn.example.test/final.png' }] });
+    }, downloadImage: async () => { downloads += 1; return image; },
+  } } });
+  try {
+    const result = await requestImageModel(config(), { prompt: 'verbatim Chinese 中文', promptMode: 'verbatim' }, () => { starts += 1; });
+    assert.equal(result.dataUrl, image); assert.equal(requests, 1); assert.equal(downloads, 1); assert.equal(starts, 1);
+  } finally { if (previous === undefined) delete (globalThis as any).window; else Object.assign(globalThis, { window: previous }); }
+});
+
+test('save/reload retains image workflow, profile and request options while keeping video library independent', () => {
+  const state = createInitialState(); const current = config();
+  state.settings.imageApi = current;
+  state.settings.imageApiProfiles = [{ ...structuredClone(current), id: 'image-rh-profile', name: 'RH profile', createdAt: 1, updatedAt: 1 }];
+  state.settings.activeImageApiProfileId = 'image-rh-profile';
+  state.settings.runningHubVideo = normalizeRunningHubVideoConfig({ enabled: false, baseUrl: 'https://www.runninghub.ai', apiKey: 'VIDEO_FAKE',
+    workflows: [{ ...structuredClone(current.runningHubWorkflows![0]), id: 'video-independent', name: 'Independent video' }], activeWorkflowId: null });
+  const videoBefore = structuredClone(state.settings.runningHubVideo);
+  const reloaded = normalizeState(JSON.parse(serializeStateForStorage(state).serialized));
+  assert.equal(reloaded.settings.imageApi.backend, 'runninghub');
+  assert.equal(reloaded.settings.imageApi.activeRunningHubWorkflowId, current.activeRunningHubWorkflowId);
+  assert.deepEqual(reloaded.settings.imageApi.runningHubWorkflows, normalizeRunningHubImageConfig(current).runningHubWorkflows);
+  assert.equal(reloaded.settings.imageApiProfiles[0].backend, 'runninghub');
+  assert.equal(reloaded.settings.imageApiProfiles[0].activeRunningHubWorkflowId, current.activeRunningHubWorkflowId);
+  assert.deepEqual(reloaded.settings.runningHubVideo, videoBefore);
+  assert.deepEqual(normalizeRunningHubImageConfig({ ...current, runningHubWorkflows: [] }), { runningHubWorkflows: [], activeRunningHubWorkflowId: null });
+});
+
+test('regeneration snapshots retain RunningHub identity and refuse later workflow edits or profile deletion', async () => {
+  const state = createInitialState(); const current = config(); state.settings.imageApi = current;
+  const snapshot = await captureImageApiSnapshot(current, null);
+  assert.equal(snapshot.config.backend, 'runninghub');
+  assert.deepEqual((await resolveImageApiForRegeneration(state.settings, snapshot)).runningHubWorkflows, current.runningHubWorkflows);
+  const changed = structuredClone(state.settings);
+  changed.imageApi.runningHubWorkflows![0].requestTemplate = JSON.stringify({ ...body, instanceType: 'plus' });
+  await assert.rejects(resolveImageApiForRegeneration(changed, snapshot), /工作流已改变/u);
+  const profileSnapshot = await captureImageApiSnapshot(current, 'deleted-profile');
+  await assert.rejects(resolveImageApiForRegeneration(state.settings, profileSnapshot), /配置已删除/u);
+});

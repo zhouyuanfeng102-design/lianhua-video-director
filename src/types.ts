@@ -5,7 +5,7 @@ import type {
 } from './continuity';
 import type { ComfyVideoConfig, VideoApiProfile, VideoGenerationJob, VideoGenerationBackend } from './videoGenerationTypes';
 import type { VideoGenerationSource } from './videoGenerationTypes';
-import type { RunningHubVideoConfig, RunningHubVideoFieldControl } from './runningHubVideoTypes';
+import type { RunningHubVideoConfig, RunningHubVideoFieldControl, RunningHubVideoWorkflow } from './runningHubVideoTypes';
 import type {
   ImagePromptAssetKind,
   ImagePromptFormat,
@@ -1426,7 +1426,7 @@ export interface ComfyUIWorkflowPreset {
 
 export interface ImageApiConfig {
   enabled: boolean;
-  backend: 'openai' | 'sd_webui' | 'comfyui' | 'novelai';
+  backend: 'openai' | 'sd_webui' | 'comfyui' | 'novelai' | 'runninghub';
   baseUrl: string;
   apiKey: string;
   model: string;
@@ -1443,6 +1443,9 @@ export interface ImageApiConfig {
   comfyuiPromptPath?: string;
   comfyuiWorkflows?: ComfyUIWorkflowPreset[];
   activeComfyuiWorkflowId?: string | null;
+  /** Independent cloud image workflow library; video settings remain separate. */
+  runningHubWorkflows?: RunningHubVideoWorkflow[];
+  activeRunningHubWorkflowId?: string | null;
 }
 
 export interface ImageApiExecutionSnapshot {

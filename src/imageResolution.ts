@@ -1,4 +1,5 @@
 import type { ImageApiConfig } from './types';
+import type { RunningHubVideoWorkflow } from './runningHubVideoTypes';
 import { resolveImageProtocol, type ImageProtocolSetting, type ResolvedImageProtocol } from './imageProtocol';
 
 export type ImageResolutionTier = '1K' | '2K' | '4K';
@@ -32,6 +33,8 @@ type ResolutionConfig = Pick<ImageApiConfig, 'backend' | 'model'> & {
   imageResolutionProfile?: ImageResolutionProfile;
   imageSupportedResolutions?: ImageResolutionTier[];
   imagePixelStep?: number;
+  runningHubWorkflows?: RunningHubVideoWorkflow[];
+  activeRunningHubWorkflowId?: string | null;
 };
 export type ImageResolutionConfigInput = ImageApiConfig | ImageApiConfig['backend'];
 
@@ -94,6 +97,23 @@ const canonicalAspect = (value: string): string => {
   }) || aspect.label;
 };
 const configFields = (input: ImageResolutionConfigInput): ResolutionConfig => typeof input === 'string' ? { backend: input, model: '' } : input;
+/** Pixel overrides need the author's two explicit cloud bindings. Omission
+ * means use the workflow defaults, never invent a node or a request field. */
+export const runningHubImageDimensionOverrideIssue = (input: ImageResolutionConfigInput): string => {
+  const config = configFields(input);
+  if (config.backend !== 'runninghub') return '';
+  const workflow = config.runningHubWorkflows?.find((item) => item.id === config.activeRunningHubWorkflowId);
+  if (!workflow) return '请先选择 RunningHub 图像工作流，再设置生图宽高。';
+  const parameters = workflow.mapping?.parameters;
+  if (!['width', 'height'].every((key) => {
+    const binding = parameters?.[key];
+    return binding && typeof binding.nodeId === 'string' && binding.nodeId.trim()
+      && typeof binding.inputName === 'string' && binding.inputName.trim();
+  })) {
+    return '当前 RunningHub 工作流未同时绑定宽度和高度，请使用工作流默认尺寸或先绑定云端宽高字段；不会忽略所选像素。';
+  }
+  return '';
+};
 export interface ImageResolutionCapabilities {
   profile: Exclude<ImageResolutionProfile, 'auto'>;
   protocol: ResolvedImageProtocol;
@@ -108,7 +128,8 @@ export const resolveImageResolutionCapabilities = (input: ImageResolutionConfigI
   const model = config.model.trim().toLowerCase();
   const explicit = config.imageResolutionProfile && config.imageResolutionProfile !== 'auto' && PROFILES.includes(config.imageResolutionProfile);
   let profile: Exclude<ImageResolutionProfile, 'auto'> = 'pixel-long-edge';
-  if (explicit) profile = config.imageResolutionProfile as Exclude<ImageResolutionProfile, 'auto'>;
+  if (config.backend === 'runninghub') profile = 'pixel-long-edge';
+  else if (explicit) profile = config.imageResolutionProfile as Exclude<ImageResolutionProfile, 'auto'>;
   else if (config.backend === 'openai') {
     if (/^gemini-2\.5-flash-image(?:-preview)?$|^nano[-_ ]?banana$/u.test(model)) profile = 'gemini-1k';
     else if (/gemini.*image|nano[-_ ]?banana/u.test(model) || protocol === 'gemini') profile = 'gemini-k';
@@ -119,19 +140,23 @@ export const resolveImageResolutionCapabilities = (input: ImageResolutionConfigI
   const step = Number.isSafeInteger(config.imagePixelStep) && config.imagePixelStep! >= 1 && config.imagePixelStep! <= 1024
     ? config.imagePixelStep!
     : profile === 'gpt-image-modern' ? 16 : config.backend === 'novelai' ? 64
-      : config.backend === 'sd_webui' || config.backend === 'comfyui' ? 8 : 1;
+      : config.backend === 'sd_webui' || config.backend === 'comfyui' || config.backend === 'runninghub' ? 8 : 1;
   const nativeTiers: ImageResolutionTier[] = profile === 'gemini-1k' || profile === 'gpt-image-legacy' ? ['1K']
     : profile === 'grok-k' ? ['1K', '2K'] : [...TIERS];
   const declared = config.imageSupportedResolutions;
-  const localBackend = config.backend === 'comfyui' || config.backend === 'sd_webui' || config.backend === 'novelai';
-  const supportedTiers = Array.isArray(declared) ? nativeTiers.filter((tier) => declared.includes(tier))
+  const localBackend = config.backend === 'comfyui' || config.backend === 'sd_webui' || config.backend === 'novelai' || config.backend === 'runninghub';
+  const supportedTiers = config.backend === 'runninghub' && runningHubImageDimensionOverrideIssue(input) ? []
+    : Array.isArray(declared) ? nativeTiers.filter((tier) => declared.includes(tier))
     : localBackend ? ['1K' as const] : nativeTiers;
   const official = protocol === 'gemini' && /^gemini-(?:3|3\.1)-(?:pro|flash)-image(?:-preview)?$/u.test(model)
     || protocol === 'gemini' && /^gemini-2\.5-flash-image(?:-preview)?$/u.test(model)
     || protocol === 'openai-images' && model === 'gpt-image-2'
     || protocol === 'openai-images' && /^gpt-image-1(?:\.5|-mini)?$/u.test(model);
   const verified = profile !== 'pixel-long-edge' && Boolean(official);
-  const note = profile === 'pixel-long-edge'
+  const note = config.backend === 'runninghub'
+    ? supportedTiers.length ? `按长边1024/2048/4096及${step}像素步长映射到已绑定的云端宽高字段；档位仅作像素映射，实际支持范围由所选工作流决定。`
+      : '当前云端工作流没有完整宽高映射，可保留工作流默认尺寸；显式像素设置需先绑定宽高字段。'
+    : profile === 'pixel-long-edge'
     ? `本机档位按长边1024/2048/4096映射；${config.backend === 'comfyui' ? '模型支持范围仍由当前工作流决定' : '通道实际支持范围尚未验证'}。`
     : verified ? '按当前模型的原生分辨率规格提交。'
       : protocol === 'openai-chat' ? '采用聊天生图兼容通道的比例与档位扩展；支持范围由中转服务决定，实际尺寸以返回图片为准。'
@@ -202,7 +227,8 @@ const dimensionEncoding = (capabilities: ImageResolutionCapabilities, config: Re
 export const resolveImageResolution = (input: ResolveImageResolutionInput): ResolvedImageResolution => {
   const config = configFields(input.config); const capabilities = resolveImageResolutionCapabilities(input.config);
   let aspect = parseAspect(input.logicalAspectRatio);
-  let width = input.width ?? 0; let height = input.height ?? 0; let issue = protocolIssue(capabilities, config.backend); let alignment = '';
+  let width = input.width ?? 0; let height = input.height ?? 0;
+  let issue = protocolIssue(capabilities, config.backend) || runningHubImageDimensionOverrideIssue(input.config); let alignment = '';
   const warnings: string[] = [];
   let encodedTier: ImageResolutionTier | undefined = input.tier === 'custom' ? undefined : input.tier;
   if (issue) return { width, height, issue, layoutNote: '' };
@@ -291,7 +317,7 @@ export const resolveImageResolution = (input: ResolveImageResolutionInput): Reso
   const capabilityWarning = !issue ? pixelWarning(width, height, capabilities) : '';
   if (capabilityWarning) warnings.push(capabilityWarning);
   if (!issue && input.tier === 'custom' && capabilities.profile === 'pixel-long-edge'
-    && ['comfyui', 'sd_webui', 'novelai'].includes(config.backend)) {
+    && ['comfyui', 'sd_webui', 'novelai', 'runninghub'].includes(config.backend)) {
     const maxEdge = Math.max(0, ...capabilities.supportedTiers.map((tier) => EDGES[tier]));
     if (Math.max(width, height) > maxEdge) warnings.push(`自定义尺寸超出当前已声明最高原生生图档位（长边${maxEdge}px）；仍按输入像素提交，由后端决定是否支持，不自动降档或执行放大。`);
   }
@@ -303,7 +329,7 @@ export const resolveImageResolution = (input: ResolveImageResolutionInput): Reso
   if (!issue && capabilities.profile === 'grok-k' && !['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9'].includes(canonicalAspect(aspect!.label))) {
     warnings.push('当前 Grok 档案未声明该画面比例；仍按所选比例提交，由后端决定是否支持。');
   }
-  const layoutNote = `${input.tier === 'custom' ? '自定义生图' : input.tier} · 画幅${aspect.label}${capabilities.profile === 'pixel-long-edge' && input.tier !== 'custom' ? ` · 本机长边目标${EDGES[input.tier]}px` : !capabilityWarning && (encodedTier && capabilities.supportedTiers.includes(encodedTier) || capabilities.profile.startsWith('gpt')) ? ' · 模型原生规格' : ' · 按所选像素提交'}${alignment} · ${capabilities.note}`;
+  const layoutNote = `${input.tier === 'custom' ? '自定义生图' : input.tier} · 画幅${aspect.label}${capabilities.profile === 'pixel-long-edge' && input.tier !== 'custom' ? ` · ${config.backend === 'runninghub' ? '像素' : '本机'}长边目标${EDGES[input.tier]}px` : !capabilityWarning && (encodedTier && capabilities.supportedTiers.includes(encodedTier) || capabilities.profile.startsWith('gpt')) ? ' · 模型原生规格' : ' · 按所选像素提交'}${alignment} · ${capabilities.note}`;
   if (issue) return { width, height, issue, layoutNote };
   const resolutionPlan: ImageResolutionPlan = { version: 1, tier: input.tier, logicalAspectRatio: canonicalAspect(aspect!.label), expected: { width, height },
     encoding: dimensionEncoding(capabilities, config, width, height, encodedTier), profile: capabilities.profile, verified: capabilities.verified && !warnings.length };
@@ -318,6 +344,8 @@ export const assertImageResolutionPlanForConfig = (plan: ImageResolutionPlan, in
   const capabilities = resolveImageResolutionCapabilities(input);
   const configIssue = protocolIssue(capabilities, input.backend);
   if (configIssue) throw new Error(configIssue);
+  const dimensionIssue = runningHubImageDimensionOverrideIssue(input);
+  if (dimensionIssue) throw new Error(dimensionIssue);
   if (saved.profile.startsWith('gemini') && saved.encoding.kind === 'tier') {
     const nativeTier = TIERS.find((candidate) => {
       const size = nativeSize(saved.profile as ImageResolutionCapabilities['profile'], candidate, saved.logicalAspectRatio);

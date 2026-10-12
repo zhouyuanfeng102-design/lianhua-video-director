@@ -13,7 +13,7 @@ const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const executionKeyCache = new WeakMap<object, string>();
 const unavailableConfig = (): ImageApiConfig => ({ enabled: false, backend: 'openai', baseUrl: '', apiKey: '', model: '' });
 const backendLabels: Record<ImageApiConfig['backend'], string> = {
-  openai: 'Images API', sd_webui: 'SD WebUI', comfyui: 'ComfyUI', novelai: 'NovelAI',
+  openai: 'Images API', sd_webui: 'SD WebUI', comfyui: 'ComfyUI', novelai: 'NovelAI', runninghub: 'RunningHub 云端',
 };
 const endpointKey = (value: string): string => value.trim().replace(/\/+$/u, '');
 const sameConnection = (left: Pick<ImageApiConfig, 'backend' | 'baseUrl'>, right: Pick<ImageApiConfig, 'backend' | 'baseUrl'>): boolean => (
@@ -24,6 +24,8 @@ const sameConnection = (left: Pick<ImageApiConfig, 'backend' | 'baseUrl'>, right
 export const imageApiChoiceLabel = (config: ImageApiConfig, name = ''): string => {
   const model = config.backend === 'comfyui'
     ? config.comfyuiWorkflows?.find((workflow) => workflow.id === config.activeComfyuiWorkflowId)?.name || '当前工作流'
+    : config.backend === 'runninghub'
+      ? config.runningHubWorkflows?.find((workflow) => workflow.id === config.activeRunningHubWorkflowId)?.name || '未选择工作流'
     : config.model.trim() || '未设模型';
   return [name, backendLabels[config.backend], model, config.enabled ? '' : '已停用'].filter(Boolean).join(' · ');
 };
@@ -104,7 +106,7 @@ export const normalizeImageApiSnapshot = (value: unknown): ImageApiExecutionSnap
   if (!isRecord(value) || value.version !== 1 || (value.profileId !== null && typeof value.profileId !== 'string')) return invalid();
   const config = value.config;
   if (!isRecord(config) || typeof config.enabled !== 'boolean'
-    || !['openai', 'sd_webui', 'comfyui', 'novelai'].includes(String(config.backend))
+    || !['openai', 'sd_webui', 'comfyui', 'novelai', 'runninghub'].includes(String(config.backend))
     || typeof config.model !== 'string'
     || typeof value.connectionFingerprint !== 'string' || !/^[a-f0-9]{64}$/u.test(value.connectionFingerprint)
     || typeof value.executionFingerprint !== 'string' || !/^[a-f0-9]{64}$/u.test(value.executionFingerprint)

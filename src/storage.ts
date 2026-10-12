@@ -28,6 +28,7 @@ import { normalizeProjectVoicePresets } from './videoAudioReferences';
 import { repairSequencePlanResults } from './appEffects';
 import { normalizeCharacterDossier } from './characterDossierPolicy';
 import { normalizeComfyUIImageConfig } from './comfyui';
+import { normalizeRunningHubImageConfig } from './runningHubImage';
 import { defaultImageOutputSize, normalizeImageOutputSizes } from './imageOutputSize';
 import { IMAGE_RESOLUTION_TECHNICAL_MAX_SIDE, normalizeImageResolutionPlan } from './imageResolution';
 import type { ImageResolutionPlan } from './imageResolution';
@@ -1564,7 +1565,7 @@ const imageTaskVariants = new Set([
   'private-four-in-one',
   'private-close-up',
 ]);
-const imageTaskBackends = new Set(['openai', 'sd_webui', 'comfyui', 'novelai']);
+const imageTaskBackends = new Set(['openai', 'sd_webui', 'comfyui', 'novelai', 'runninghub']);
 const imagePromptFormats = new Set(['natural-language', 'sd-tags', 'nai-tags']);
 
 const normalizeImagePromptRuleSelections = (
@@ -1583,6 +1584,8 @@ const normalizeImagePromptRuleSelections = (
     nai: 'novelai',
     novelai: 'novelai',
     'novel-ai': 'novelai',
+    runninghub: 'runninghub',
+    'running-hub': 'runninghub',
   };
   const normalized: AppSettings['imagePromptRuleSetIdByBackend'] = {};
   Object.entries(incoming).forEach(([rawBackend, rawRuleSetId]) => {
@@ -3108,6 +3111,10 @@ export const normalizeState = (raw: unknown): AppState => {
     mergeDefined(fallback.settings.imageApi, incomingSettings.imageApi),
     0,
   ));
+  if (imageApi.backend === 'runninghub' || imageApi.runningHubWorkflows !== undefined
+    || imageApi.activeRunningHubWorkflowId !== undefined) {
+    Object.assign(imageApi, normalizeRunningHubImageConfig(imageApi));
+  }
   const videoTaskApi = mergeDefined(fallback.settings.videoTaskApi, incomingSettings.videoTaskApi);
   const comfyuiVideo = mergeDefined(defaultComfyVideoConfig, incomingSettings.comfyuiVideo);
   comfyuiVideo.workflows = Array.isArray(comfyuiVideo.workflows) ? comfyuiVideo.workflows : [];
@@ -3150,12 +3157,15 @@ export const normalizeState = (raw: unknown): AppState => {
       fallback.settings.imageApi,
       profile,
     ) as ImageApiProfile;
-    return withoutImageProtocolRuntime(normalizeComfyUIImageConfig(
+    const normalizedProfile = withoutImageProtocolRuntime(normalizeComfyUIImageConfig(
       withImageDefaults,
       typeof profile.createdAt === 'number' && Number.isFinite(profile.createdAt) && profile.createdAt >= 0
         ? profile.createdAt
         : 0,
     ));
+    return normalizedProfile.backend === 'runninghub' || normalizedProfile.runningHubWorkflows !== undefined
+      || normalizedProfile.activeRunningHubWorkflowId !== undefined
+      ? { ...normalizedProfile, ...normalizeRunningHubImageConfig(normalizedProfile) } : normalizedProfile;
   });
   const activeProfileId = (requested: unknown, profiles: Array<{ id: string }>): string | null => {
     if (requested === null) return null;

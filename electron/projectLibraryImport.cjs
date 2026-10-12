@@ -92,6 +92,7 @@ const remapMediaRecords = (state, replacements) => {
   const task = (value) => {
     if (value?.kind === 'image' || value?.kind === 'image-prompt-reverse') imageSnapshot(value);
     if (Array.isArray(value?.videoJob?.snapshot?.images)) value.videoJob.snapshot.images.forEach(media);
+    if (Array.isArray(value?.videoJob?.snapshot?.audios)) value.videoJob.snapshot.audios.forEach(media);
     media(value?.videoJob?.tailPreparation?.selection?.frame);
     const preparation = value?.videoJob?.tailPreparation;
     if (typeof preparation?.sourceRelativePath === 'string') {

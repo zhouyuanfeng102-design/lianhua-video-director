@@ -26,6 +26,7 @@ import type {
   VideoSegment,
   VideoSequencePlan,
 } from '../types';
+import { requestRunningHubImage } from './runningHubImage';
 import {
   MAX_SEQUENCE_SEGMENT_DURATION_SEC,
   validateSequencePlan,
@@ -6836,6 +6837,16 @@ const requestImageModelOnce = async (config: ImageApiConfig, input: string | Ima
   if (!config.enabled) throw new Error('图像生成接口未启用');
   if (!config.baseUrl.trim()) throw new Error('请先填写图像 API 地址');
   if ((config.backend === 'openai' || config.backend === 'novelai') && !config.model.trim()) throw new Error('请先填写图像模型名称');
+  if (config.backend === 'runninghub') {
+    const desktop = typeof window !== 'undefined'
+      ? (window as Window & { lianhuaDesktop?: { downloadImage?: (url: string) => Promise<string> } }).lianhuaDesktop : undefined;
+    const referenceImages = normalizedReferenceImages(options);
+    return requestRunningHubImage(config, { prompt, width, height, sizeOverride: options.sizeOverride,
+      referenceCount: referenceImages.length, referenceImages, signal: options.signal }, {
+      request: requestHttp,
+      ...(desktop?.downloadImage ? { downloadImage: (url: string) => desktop.downloadImage!(url) } : {}),
+    }, onStart);
+  }
   if (config.backend === 'comfyui') return requestComfyUiImage(config, options, width, height, onStart);
   if (config.backend === 'novelai') return requestNovelAiImage(config, options, width, height, onStart);
   // Resolve locally once; retries retain the saved transport through a runtime
@@ -6952,7 +6963,7 @@ export const requestImageModel = (
   input: string | ImageGenerationOptions,
   onStart?: ImageGenerationStartHandler,
 ): Promise<ImageGenerationResult> => {
-  const signal = config.backend === 'comfyui' && typeof input !== 'string' ? input.signal : undefined;
+  const signal = (config.backend === 'comfyui' || config.backend === 'runninghub') && typeof input !== 'string' ? input.signal : undefined;
   if (signal?.aborted) return Promise.reject(createAbortError());
   const pending = enqueueImageGeneration(async () => {
     if (signal?.aborted) throw createAbortError();

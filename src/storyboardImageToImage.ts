@@ -10,6 +10,7 @@ import { readStoryboardImageH3Source } from './storyboardImageH3Source';
 import { buildStoryboardImageBaseName, createStoryboardImageNameAllocator } from './storyboardImageNames';
 import { resolveStoryboardImageOutputSize, defaultStoryboardImageOutputSize } from './storyboardImageOutputSize';
 import { assertComfyUIWorkflowCanBindReferenceImages } from './comfyui';
+import { validateRunningHubImageConfig } from './runningHubImage';
 import { canUseNsfwPrivateProfileAssetForStoryboardShot } from './nsfwPrivateAssets';
 import { parseStoryboardImageFramePlan, validateStoryboardImagePlanCount, type StoryboardImageFramePlan } from './storyboardImagePlan';
 import { buildStoryboardImagePromptWithReferences, stripStoryboardImageReferenceMetadata, storyboardImageFramingInstruction, type StoryboardImageReferenceContext } from './storyboardImageReferences';
@@ -373,6 +374,10 @@ export const buildDirectStoryboardImageRequests = (
 export const assertDirectStoryboardImageApiSupport = (config: ImageApiConfig, referenceCount: number): void => {
   if (!Number.isInteger(referenceCount) || referenceCount < 1) throw new Error('直接图生图必须提交至少一张真实参考图。');
   if (!config.enabled) throw new Error('尚未启用生图 API，无法提交直接图生图。');
+  if (config.backend === 'runninghub') {
+    const issue = validateRunningHubImageConfig(config, referenceCount);
+    if (issue) throw new Error(issue);
+  }
   if (config.backend === 'novelai') {
     throw new Error('当前 NovelAI 接口未实现真实参考图输入，不能用于分镜图生图；不会退回文生图。');
   }

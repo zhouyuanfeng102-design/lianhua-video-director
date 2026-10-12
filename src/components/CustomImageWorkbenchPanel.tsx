@@ -17,6 +17,7 @@ import { ImageOutputSizeControls } from './ImageOutputSizeControls';
 import { AssetImagePreview } from './AssetImagePreview';
 import { submitImagePromptReverse, stopImagePromptReverse, retryImagePromptReverse, imagePromptReverseStatusLabel } from '../imagePromptReverse';
 import { ImagePromptReverseResultView, ImagePromptReverseReferencePreview, formatImagePromptReverseResult } from './ImagePromptReverseResult';
+import { validateRunningHubImageConfig } from '../runningHubImage';
 import '../customImageWorkbench.css';
 
 export const defaultCustomImageDraft = (): CustomImageDraft => ({
@@ -59,7 +60,9 @@ export function CustomImageWorkbenchPanel({ state, context, onOpenAssets, onMana
     try { captureCustomImageRule(state.imagePromptRules.ruleSets, draft.ruleSetId || '', selection.config); return ''; }
     catch (error) { return error instanceof Error ? error.message : '所选生图规则不可用。'; }
   }, [draft.promptMode, draft.ruleSetId, state.imagePromptRules.ruleSets, selection.config]);
-  const apiIssue = selection.issue || (!selection.config.enabled ? '请在 API 设置中启用生图接口。' : '');
+  const configProblem = selection.config.backend === 'runninghub'
+    ? validateRunningHubImageConfig(selection.config, draft.referenceAssetIds.length) || '' : '';
+  const apiIssue = selection.issue || (!selection.config.enabled ? '请在 API 设置中启用生图接口。' : '') || configProblem;
   const textIssue = draft.promptMode === 'rules' && (!state.settings.textApi.enabled || !state.settings.textApi.model.trim() || !state.settings.textApi.baseUrl.trim())
     ? '使用规则转换需要配置并启用文本 API。' : '';
   const issue = apiIssue || resolvedSize.issue || ruleIssue || textIssue;

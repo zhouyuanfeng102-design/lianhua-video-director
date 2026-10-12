@@ -16,6 +16,7 @@ import { withCustomImageRegenerationSnapshot } from './imageAssetRegenerationSna
 import { readGeneratedImageDimensions } from './imageDimensions';
 import { getSafeErrorDiagnostics } from './errorDiagnostics';
 import { resolveImageAssetRegenerationTask } from './imageRegeneration';
+import { validateRunningHubImageConfig, selectedRunningHubImageWorkflow } from './runningHubImage';
 
 type Update = (updater: (state: AppState) => AppState) => void;
 type ImageGenerationResult = Awaited<ReturnType<typeof requestImageModel>>;
@@ -66,6 +67,11 @@ const findOwner = (state: AppState, task: ImageGenerationTask) => {
       && asset.imageRegenerationSnapshot?.sourceKind === 'custom'));
 };
 const validateImageApi = (api: ImageApiConfig, referenceCount: number) => {
+  if (api.backend === 'runninghub') {
+    const issue = validateRunningHubImageConfig(api, referenceCount);
+    if (issue) throw new Error(issue);
+    return;
+  }
   if (!api.enabled || !api.baseUrl.trim() || ['openai', 'novelai'].includes(api.backend) && !api.model.trim()) {
     throw new Error('请先配置并启用生图 API。');
   }
@@ -259,7 +265,7 @@ export const submitCustomImage = async (ctx: CustomImageGenerationContext, input
       width: size.width, height: size.height, sizeOverride: size.sizeOverride, resolutionPlan: size.resolutionPlan,
       backend: api.backend, model: api.backend === 'comfyui'
         ? api.comfyuiWorkflows?.find((workflow) => workflow.id === api.activeComfyuiWorkflowId)?.name || 'ComfyUI Workflow'
-        : api.model, imageApiSnapshot,
+        : api.backend === 'runninghub' ? selectedRunningHubImageWorkflow(api)?.name || 'RunningHub 图像工作流' : api.model, imageApiSnapshot,
       referenceAssetIds: ids, primaryReferenceAssetIds: ids, referenceAssetSnapshots: [],
       ...(ids.length ? { preparationStage: 'reference' } : {}),
     }, Date.now(), 'queued');

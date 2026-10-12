@@ -98,7 +98,7 @@ const backendForAsset = (asset: ReferenceAsset, imageApi: ImageApiConfig): Image
   // language, SD tags or NAI tags. A saved physical backend wins; an older
   // ambiguous asset uses the user's current API instead of guessing from text.
   if (asset.imageBackend === 'openai' || asset.imageBackend === 'sd_webui'
-    || asset.imageBackend === 'comfyui' || asset.imageBackend === 'novelai') return asset.imageBackend;
+    || asset.imageBackend === 'comfyui' || asset.imageBackend === 'novelai' || asset.imageBackend === 'runninghub') return asset.imageBackend;
   return imageApi.backend;
 };
 

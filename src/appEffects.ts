@@ -59,6 +59,7 @@ import {
   hasNarrativeFirstPersonActor,
 } from './semanticEvents';
 import { normalizeComfyUIImageConfig } from './comfyui';
+import { normalizeRunningHubImageConfig } from './runningHubImage';
 import {
   applyConvertedPromptToShots,
   parseMasterTimelinePrompt,
@@ -2992,6 +2993,8 @@ const IMAGE_API_IMPORT_KEYS = [
   'ComfyUI工作流列表',
   'activeComfyuiWorkflowId',
   '当前ComfyUI工作流ID',
+  'runningHubWorkflows',
+  'activeRunningHubWorkflowId',
   'comfyuiPathMode',
   '接口路径模式',
   'comfyuiPromptPath',
@@ -3100,7 +3103,7 @@ const patchImportedImageApi = (
   const incoming = importedApiRecord(incomingValue);
   if (!incoming) return current;
   const backends = new Set<AppSettings['imageApi']['backend']>([
-    'openai', 'sd_webui', 'comfyui', 'novelai',
+    'openai', 'sd_webui', 'comfyui', 'novelai', 'runninghub',
   ]);
   const backendCandidate = incoming.backend ?? incoming.后端类型;
   const importedWorkflowJson = importedApiString(
@@ -3174,8 +3177,16 @@ const patchImportedImageApi = (
       ? { comfyuiPathMode: pathModeCandidate }
       : {}),
     ...(promptPath ? { comfyuiPromptPath: promptPath } : {}),
+    ...(Array.isArray(incoming.runningHubWorkflows) ? {
+      runningHubWorkflows: incoming.runningHubWorkflows,
+      activeRunningHubWorkflowId: typeof incoming.activeRunningHubWorkflowId === 'string'
+        ? incoming.activeRunningHubWorkflowId : null,
+    } : {}),
   };
-  return normalizeComfyUIImageConfig(patched, updatedAt);
+  const normalized = normalizeComfyUIImageConfig(patched, updatedAt);
+  return normalized.backend === 'runninghub' || normalized.runningHubWorkflows !== undefined
+    || normalized.activeRunningHubWorkflowId !== undefined
+    ? { ...normalized, ...normalizeRunningHubImageConfig(normalized) } : normalized;
 };
 
 /** Merge MoRan API fields into live configs and the matching active profiles. */

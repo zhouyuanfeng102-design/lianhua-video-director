@@ -3,7 +3,7 @@ export type ImageProtocolSetting = 'auto' | 'openai-compatible' | 'openai-compat
 export type ResolvedImageProtocol = 'openai-compatible' | 'openai-images' | 'openai-chat' | 'gemini' | 'xai';
 
 export interface ImageProtocolConfig {
-  backend: 'openai' | 'sd_webui' | 'comfyui' | 'novelai';
+  backend: 'openai' | 'sd_webui' | 'comfyui' | 'novelai' | 'runninghub';
   model: string;
   baseUrl?: string;
   imageProtocol?: ImageProtocolSetting;
@@ -23,7 +23,7 @@ export const isResolvedImageProtocol = (value: unknown): value is ResolvedImageP
 
 /** Local inference only: no API probes, generations, retries or model renaming. */
 export const inspectImageProtocol = (config: ImageProtocolConfig): ImageProtocolDecision => {
-  if (config.backend !== 'openai') return { protocol: 'openai-compatible', automatic: true, reason: '使用所选本机后端的原生接口' };
+  if (config.backend !== 'openai') return { protocol: 'openai-compatible', automatic: true, reason: '使用所选后端的原生接口' };
   if (isResolvedImageProtocol(config.imageProtocolRuntime)) {
     return { protocol: config.imageProtocolRuntime, automatic: false, reason: '沿用本次任务保存的生图协议' };
   }

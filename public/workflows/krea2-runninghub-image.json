@@ -1,0 +1,10 @@
+{
+  "endpoint": "https://www.runninghub.ai/openapi/v2/run/ai-app/2070152175753453569",
+  "nodeInfoList": [
+    { "nodeId": "95", "fieldName": "value", "fieldValue": "1920", "description": "Width" },
+    { "nodeId": "96", "fieldName": "value", "fieldValue": "1280", "description": "High" },
+    { "nodeId": "115", "fieldName": "prompt", "fieldValue": "描述要生成的画面", "description": "Simple prompt description" }
+  ],
+  "instanceType": "default",
+  "usePersonalQueue": false
+}

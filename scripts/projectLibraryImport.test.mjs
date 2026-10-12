@@ -80,6 +80,56 @@ test('same-name different local image stays intact and only typed asset/frozen-i
   assert.deepEqual(JSON.parse(f.read()), after, 'repeat import reuses the verified imported content');
 });
 
+test('audio conflicts remap frozen task and asset-provenance locators while preserving metadata and request bodies', (t) => {
+  const audioBytes = Buffer.from('exact original reference audio bytes');
+  const audio = { id: 'voice-audio', type: 'audio', mediaType: 'audio', relativePath: 'audio/reference.wav',
+    checksum: digest(audioBytes), name: '人物声音原名', fileName: '声音原名.wav', mimeType: 'audio/wav',
+    durationSec: 2, managed: true, url: 'lianhua-asset://local/audio/reference.wav' };
+  const frozenAudio = { ...audio, assetId: audio.id, bindingId: '["203","audio"]', slotIndex: 2,
+    target: { kind: 'character', characterId: 'hero' }, retainMode: 'partially_copy', notes: '保留原声音',
+    freezeState: 'frozen', frozenAt: 12 };
+  const video = { id: 'audio-video-task', kind: 'video',
+    requestBody: { audio: { relativePath: audio.relativePath, url: audio.url, checksum: audio.checksum }, prompt: 'original audio request' },
+    videoJob: { snapshot: { projectId: 'active', images: [], audios: [frozenAudio] } } };
+  const f = fixture(t, (state) => ({ ...state,
+    project: { ...state.project, assets: [...state.project.assets, audio, {
+      id: 'video-result', type: 'video', relativePath: 'video/result.mp4', videoSourceTask: structuredClone(video),
+    }], generationTasks: [...state.project.generationTasks, video] },
+    projects: [state.projects[0], { ...state.projects[1], assets: [...state.projects[1].assets, structuredClone(audio)],
+      generationTasks: [{ ...structuredClone(video), id: 'archived-audio-video-task' }] }],
+  }));
+  const sourceAudio = path.join(f.source, 'assets', audio.relativePath);
+  fs.mkdirSync(path.dirname(sourceAudio), { recursive: true });
+  fs.writeFileSync(sourceAudio, audioBytes);
+  fs.mkdirSync(path.join(f.source, 'assets', 'video'), { recursive: true });
+  fs.writeFileSync(path.join(f.source, 'assets', 'video/result.mp4'), 'original video bytes');
+  const original = path.join(f.assetRoot, audio.relativePath);
+  fs.mkdirSync(path.dirname(original), { recursive: true });
+  fs.writeFileSync(original, 'different local audio must remain');
+  const originalBlocks = fs.readdirSync(path.join(f.source, 'project-library')).map((name) => ({
+    name, bytes: fs.readFileSync(path.join(f.source, 'project-library', name)),
+  }));
+
+  const after = JSON.parse(f.read());
+  const expected = `audio/${digest(audioBytes)}.wav`;
+  const expectedUrl = `lianhua-asset://local/${expected}`;
+  assert.deepEqual(after.project.assets[1], { ...audio, relativePath: expected, url: expectedUrl });
+  assert.deepEqual(after.projects[1].assets[1], { ...audio, relativePath: expected, url: expectedUrl });
+  const importedTasks = [after.project.generationTasks[2], after.project.assets[2].videoSourceTask,
+    after.projects[1].generationTasks[0]];
+  for (const task of importedTasks) {
+    assert.deepEqual(task.videoJob.snapshot.audios[0], { ...frozenAudio, relativePath: expected, url: expectedUrl },
+      'only the local audio locator changes; frozen checksum, slots, target, retention and timestamps stay intact');
+    assert.deepEqual(task.requestBody, video.requestBody, 'frozen HTTP body remains unchanged');
+  }
+  assert.deepEqual(fs.readFileSync(path.join(f.assetRoot, expected)), audioBytes);
+  assert.equal(fs.readFileSync(original, 'utf8'), 'different local audio must remain');
+  assert.deepEqual(fs.readFileSync(sourceAudio), audioBytes);
+  assert.equal(fs.readFileSync(f.filePath, 'utf8'), f.payload);
+  for (const block of originalBlocks) assert.deepEqual(fs.readFileSync(path.join(f.source, 'project-library', block.name)), block.bytes);
+  assert.deepEqual(JSON.parse(f.read()), after, 'repeat audio import reuses the same verified content and remapping');
+});
+
 test('legacy JSON/text is returned byte for byte without any media copy', () => {
   for (const raw of ['not json', '{"project": {"id":"old"}, "settings":{}}\n']) {
     assert.equal(readProjectLibraryImport(raw, {}), raw);

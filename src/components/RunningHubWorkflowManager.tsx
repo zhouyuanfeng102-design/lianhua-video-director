@@ -21,6 +21,10 @@ import '../videoWorkflowManager.css';
 import '../runningHubVideoSettings.css';
 
 export interface RunningHubWorkflowManagerProps {
+  mediaKind?: 'video' | 'image';
+  importWorkflow?: typeof importRunningHubVideoWorkflow;
+  isWorkflowReady?: typeof isRunningHubVideoWorkflowReady;
+  validateWorkflow?: typeof validateRunningHubVideoWorkflow;
   config: RunningHubVideoConfig;
   getCurrentConfig?: () => RunningHubVideoConfig;
   onChange: (next: RunningHubVideoConfig) => void;
@@ -64,7 +68,7 @@ const jsonKey = (value: unknown) => JSON.stringify(value);
 const errorText = (cause: unknown) => cause instanceof Error ? cause.message : '操作未完成，请检查云端工作流设置。';
 const valueText = (value: unknown) => typeof value === 'string' ? value : value === undefined ? '' : JSON.stringify(value);
 const bindingKey = (binding: RunningHubVideoInputBinding) => JSON.stringify([binding.nodeId, binding.inputName]);
-const prepareWorkflowDraft = (workflow: RunningHubVideoWorkflow) => syncRunningHubAudioSlots(syncRunningHubImageSlots(runningHubVideoOutputDraft(workflow).workflow));
+const prepareVideoWorkflowDraft = (workflow: RunningHubVideoWorkflow) => syncRunningHubAudioSlots(syncRunningHubImageSlots(runningHubVideoOutputDraft(workflow).workflow));
 const uiFontScale = () => {
   if (typeof document === 'undefined') return '1';
   const shell = document.querySelector('.app-shell') || document.documentElement;
@@ -79,7 +83,10 @@ function Pager({ label, total, page, size, onChange }: { label: string; total: n
 }
 
 /** A draft editor: merely highlighting/importing a workflow never submits or activates it. */
-export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, onClose }: RunningHubWorkflowManagerProps) {
+export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, onClose, mediaKind = 'video', importWorkflow, isWorkflowReady, validateWorkflow }: RunningHubWorkflowManagerProps) {
+  const isImage = mediaKind === 'image';
+  const isReady = isWorkflowReady || isRunningHubVideoWorkflowReady;
+  const prepareWorkflowDraft = (workflow: RunningHubVideoWorkflow) => isImage ? workflow : prepareVideoWorkflowDraft(workflow);
   const initial = config.workflows.find((workflow) => workflow.id === config.activeWorkflowId) || config.workflows[0];
   const [draft, setDraft] = useState<RunningHubVideoWorkflow | undefined>(() => initial ? prepareWorkflowDraft(structuredClone(initial)) : undefined);
   const [baseline, setBaseline] = useState(() => initial ? jsonKey(initial) : '');
@@ -137,10 +144,10 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
   const currentLibraryPage = Math.min(libraryPage, Math.max(0, Math.ceil(filtered.length / 4) - 1));
   const parsed = useMemo(() => {
     if (!draft) return { request: undefined, issues: [] as string[] };
-    const issues = validateRunningHubVideoWorkflow(draft);
+    const issues = (validateWorkflow || validateRunningHubVideoWorkflow)(draft);
     try { return { request: readRunningHubVideoRequest(draft.requestTemplate), issues }; }
     catch { return { request: undefined, issues }; }
-  }, [draft]);
+  }, [draft, validateWorkflow]);
   // Invalid drafts stay inspectable in JSON; malformed rows must not crash the editor.
   const nodeRows = useMemo(() => listRunningHubVideoNodes(draft?.requestTemplate || '', draft?.nodeCatalog), [draft?.requestTemplate, draft?.nodeCatalog]);
   const imageProtocol = draft ? resolveRunningHubVideoImageProtocol(draft) : undefined;
@@ -309,12 +316,13 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
       if (baseStoredRef.current && (!persisted || jsonKey(persisted) !== baseStoredRef.current)) throw new Error('这份工作流已在其他位置变化，请重新打开，避免覆盖新的设置。');
       const next = saveRunningHubVideoWorkflow(current, workflow);
       apply(next); loadDraft(next.workflows.find((entry) => entry.id === workflow.id));
-      setMessage(isRunningHubVideoWorkflowReady(workflow) ? '已保存云端工作流；未提交云端任务，也未修改历史任务快照。' : '已保存为待配置草稿；补齐 ID、请求 JSON 与输入映射后才能设为当前。');
+      setMessage(isReady(workflow) ? '已保存云端工作流；未提交云端任务，也未修改历史任务快照。' : '已保存为待配置草稿；补齐 ID、请求 JSON 与输入映射后才能设为当前。');
     } catch (cause) { setError(errorText(cause)); }
   }
   function activate() {
     if (!draft) return;
     if (dirty) { setError('请先保存，再设为当前云端工作流。'); return; }
+    if (!isReady(draft)) { setError('工作流输入映射尚未配置完成，请先核对提示词、参数与媒体节点。'); return; }
     try {
       const current = currentConfig();
       const persisted = current.workflows.find((entry) => entry.id === draft.id);
@@ -327,20 +335,24 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
     if (!draft || !savedDraft) return;
     const id = draft.id; const before = currentConfig(); const beforeEntry = before.workflows.find((entry) => entry.id === id);
     const removingActive = before.activeWorkflowId === id;
-    const preview = deleteRunningHubVideoWorkflow(before, id);
+    const deletedConfig = (current: RunningHubVideoConfig) => {
+      const next = deleteRunningHubVideoWorkflow(current, id);
+      return isImage && current.activeWorkflowId === id ? { ...next, activeWorkflowId: null, enabled: false } : next;
+    };
+    const preview = deletedConfig(before);
     const fallback = preview.workflows.find((entry) => entry.id === preview.activeWorkflowId);
-    const note = !removingActive ? '当前工作流不变。' : fallback ? `删除后当前工作流切换为“${fallback.name}”。` : '删除后会关闭云端视频开关；请补齐并重新选择工作流后启用。';
+    const note = !removingActive ? '当前工作流不变。' : fallback ? `删除后当前工作流切换为“${fallback.name}”。` : `删除后会关闭云端${isImage ? '图片' : '视频'}开关；请补齐并重新选择工作流后启用。`;
     setConfirmation({ title: `删除“${savedDraft.name}”？`, body: `${note}仅删除这份本地配置，不删除 RunningHub 云端工作流、项目素材或历史任务。${dirty ? '尚未保存的编辑也会放弃。' : ''}`, actionLabel: '确认删除云端工作流', danger: true, action: () => {
       const current = currentConfig(); const entry = current.workflows.find((item) => item.id === id);
-      if (!entry || jsonKey(entry) !== jsonKey(beforeEntry) || current.activeWorkflowId !== before.activeWorkflowId || deleteRunningHubVideoWorkflow(current, id).activeWorkflowId !== preview.activeWorkflowId) { setError('工作流或当前选择已变化，请重新确认；没有删除设置。'); return; }
-      const next = deleteRunningHubVideoWorkflow(current, id); apply(next);
+      if (!entry || jsonKey(entry) !== jsonKey(beforeEntry) || current.activeWorkflowId !== before.activeWorkflowId || deletedConfig(current).activeWorkflowId !== preview.activeWorkflowId) { setError('工作流或当前选择已变化，请重新确认；没有删除设置。'); return; }
+      const next = deletedConfig(current); apply(next);
       loadDraft(next.workflows.find((item) => item.id === next.activeWorkflowId) || next.workflows[0]); setMessage('已删除所选本地配置，云端工作流与历史素材未改动。');
     } });
   }
   function acceptImport(source: string, name: string) {
     clearNotice();
     try {
-      const imported = importRunningHubVideoWorkflow(source, name);
+      const imported = (importWorkflow || importRunningHubVideoWorkflow)(source, name);
       guardDiscard(() => {
         try {
           const current = currentConfig();
@@ -589,12 +601,12 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
 
   const runtimeRequest: Record<string, unknown> = parsed.request || {};
   const modal = <div className="vwm-backdrop rhv-backdrop" style={{ '--ui-font-scale': fontScale } as CSSProperties}>
-    <section className={`vwm-dialog rhv-manager${tab === 'output' ? ' rhv-output-editor' : ''}`} ref={dialogRef} role="dialog" aria-modal="true" aria-label="RunningHub 云端视频工作流管理">
-      <header className="vwm-header"><div><h2>RunningHub 云端视频工作流管理</h2><p>多份工作流独立保存 · 明确绑定提示词与参考图 · 这里只配置，不提交任务</p></div><button type="button" className="btn" aria-label="关闭 RunningHub 工作流管理" onClick={requestClose}>关闭</button></header>
+    <section className={`vwm-dialog rhv-manager${tab === 'output' ? ' rhv-output-editor' : ''}`} ref={dialogRef} role="dialog" aria-modal="true" aria-label={isImage ? "RunningHub 云端图片工作流管理" : "RunningHub 云端视频工作流管理"}>
+      <header className="vwm-header"><div><h2>RunningHub 云端{isImage ? "图片" : "视频"}工作流管理</h2><p>多份工作流独立保存 · 明确绑定提示词与参考图 · 这里只配置，不提交任务</p></div><button type="button" className="btn" aria-label="关闭 RunningHub 工作流管理" onClick={requestClose}>关闭</button></header>
       <div className="vwm-body">
         <aside className="vwm-library"><div className="vwm-library-heading"><h3>工作流库</h3><span>{config.workflows.length} 个</span></div><input aria-label="搜索 RunningHub 工作流" placeholder="搜索名称或云端 ID" value={search} onChange={(event) => { setSearch(event.target.value); setLibraryPage(0); }} />
-          <div className="vwm-library-tools"><button type="button" className="btn small" onClick={() => create()}>新建</button><button type="button" className="btn small" onClick={() => { setImportOpen(true); clearNotice(); }}>导入 cURL / JSON</button><button type="button" className="btn small" onClick={() => create(true)}>教程结构样板</button></div>
-          <div className="vwm-library-list">{filtered.slice(currentLibraryPage * 4, (currentLibraryPage + 1) * 4).map((workflow) => <button type="button" key={workflow.id} className={`vwm-library-item${draft?.id === workflow.id ? ' selected' : ''}`} aria-label={`编辑云端工作流 ${workflow.name}`} onClick={() => guardDiscard(() => { loadDraft(currentConfig().workflows.find((entry) => entry.id === workflow.id)); setTab('basic'); })}><strong>{workflow.name}</strong><span>{workflow.runKind === 'ai-app' ? 'AI 应用' : 'ComfyUI 工作流'} · {workflow.id === active?.id ? '当前使用' : isRunningHubVideoWorkflowReady(workflow) ? '可用' : '待配置'}</span></button>)}{!filtered.length && <p className="vwm-empty">尚无匹配工作流。导入 RunningHub 页面提供的 cURL 或请求 JSON 即可新增。</p>}</div>
+          <div className="vwm-library-tools"><button type="button" className="btn small" onClick={() => create()}>新建</button><button type="button" className="btn small" onClick={() => { setImportOpen(true); clearNotice(); }}>导入 cURL / JSON</button>{!isImage && <button type="button" className="btn small" onClick={() => create(true)}>教程结构样板</button>}</div>
+          <div className="vwm-library-list">{filtered.slice(currentLibraryPage * 4, (currentLibraryPage + 1) * 4).map((workflow) => <button type="button" key={workflow.id} className={`vwm-library-item${draft?.id === workflow.id ? ' selected' : ''}`} aria-label={`编辑云端工作流 ${workflow.name}`} onClick={() => guardDiscard(() => { loadDraft(currentConfig().workflows.find((entry) => entry.id === workflow.id)); setTab('basic'); })}><strong>{workflow.name}</strong><span>{workflow.runKind === 'ai-app' ? 'AI 应用' : 'ComfyUI 工作流'} · {workflow.id === active?.id ? '当前使用' : isReady(workflow) ? '可用' : '待配置'}</span></button>)}{!filtered.length && <p className="vwm-empty">尚无匹配工作流。导入 RunningHub 页面提供的 cURL 或请求 JSON 即可新增。</p>}</div>
           <Pager label="云端工作流库" total={filtered.length} page={currentLibraryPage} size={4} onChange={setLibraryPage} />
           <div className="vwm-current"><span>当前实际生效</span><strong>{active?.name || '尚未选择'}</strong><small>选中编辑 ≠ 设为当前</small></div>
         </aside>
@@ -607,13 +619,13 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
             {tab === 'output' && outputSection !== 'common' && <RunningHubGenerationExtras key={`${draft.id}-${outputSection}`} section={outputSection} workflow={draft} nodeEdits={nodeEdits} onDefaultChange={(binding, text) => { setNodeEdits((current) => ({ ...current, [bindingKey(binding)]: text })); clearNotice(); }} onWorkflowChange={(next) => { setDraft(prepareWorkflowDraft(next)); clearNotice(); }} onReadNodes={() => { void readCloudNodes(); }} onImportNodes={() => openNodeDialog('json')} onManualNode={() => openNodeDialog('manual')} discovering={discovering} onDialogOpenChange={(open, close) => { extrasDialogClose.current = open ? close : null; }} />}
             {tab === 'output' && outputSection === 'common' && <>
               <div className="rhv-field-filters"><label className="field"><span>显示范围</span><select aria-label="生成参数字段范围" value={outputRange} onChange={(event) => setOutputRange(event.target.value === 'all' ? 'all' : 'common')}><option value="common">常用候选及已绑定</option><option value="all">全部字段（高级）</option></select></label><label className="field"><span>搜索节点（已绑定项保留）</span><input aria-label="搜索生成参数字段" value={outputSearch} onChange={(event) => setOutputSearch(event.target.value)} placeholder="节点 ID / 字段名 / 标题" /></label></div>
-              <div className="rhv-output-fields">{outputField('duration')}{outputField('aspect_ratio')}{outputField('resolution')}{outputField('steps')}</div>
+              <div className="rhv-output-fields">{isImage ? <>{outputField('width')}{outputField('height')}{outputField('resolution')}{outputField('steps')}</> : <>{outputField('duration')}{outputField('aspect_ratio')}{outputField('resolution')}{outputField('steps')}</>}</div>
               {outputDraftIssue && <p className="vd-error">{outputDraftIssue}</p>}
               <p className="vwm-help">比例按云端字段提供的完整选项值提交；MP 使用单个像素选项；采样步数绑定真实字段。生成时留空使用原值；解除绑定保留请求字段。</p>
             </>}
-            {tab === 'basic' && <><label className="field"><span>工作流名称（可直接重命名后保存）</span><input aria-label="RunningHub 工作流名称" value={draft.name} onChange={(event) => patchDraft({ name: event.target.value })} /></label><div className="rhv-two-fields"><label className="field"><span>云端调用类型</span><select aria-label="RunningHub 云端调用类型" value={draft.runKind} onChange={(event) => patchDraft({ runKind: event.target.value as RunningHubVideoWorkflow['runKind'] })}><option value="ai-app">AI 应用 · run/ai-app</option><option value="workflow">ComfyUI 工作流 · run/workflow</option></select></label><label className="field"><span>{draft.runKind === 'ai-app' ? 'AI 应用 ID' : '云端工作流 ID'}</span><input aria-label="RunningHub 云端 ID" value={draft.remoteId} inputMode="numeric" placeholder="从 RunningHub 调用地址中复制 ID" onChange={(event) => patchDraft({ remoteId: event.target.value })} /></label></div><label className="field"><span>最终视频输出节点 ID（可选）</span><input aria-label="RunningHub 视频输出节点 ID" value={draft.outputNodeId || ''} placeholder="留空：自动收集视频结果；多输出时可指定最终成片节点" onChange={(event) => patchDraft({ outputNodeId: event.target.value || undefined })} /></label><div className="vwm-info"><strong>只注入你明确绑定的输入</strong><p>当前视频提示词 → 提示词映射；选择的参考图 → 按顺序上传并填入图片槽。选择的参考音频 → 填入明确的音频槽，未选音频保留原值。工作流其余常量、LoRA 与自定义字段保持原值。</p><p>云端 ID 按文字保存，不会将 19 位 ID 转成浮点数。工作流须在 RunningHub 云端已存在，本软件不创建或上传本地 ComfyUI 画布。</p></div>{parsed.issues.length > 0 && <div className="rhv-issues"><strong>待配置项</strong><p>{parsed.issues.slice(0, 3).join('；')}</p></div>}</>}
+            {tab === 'basic' && <><label className="field"><span>工作流名称（可直接重命名后保存）</span><input aria-label="RunningHub 工作流名称" value={draft.name} onChange={(event) => patchDraft({ name: event.target.value })} /></label><div className="rhv-two-fields"><label className="field"><span>云端调用类型</span><select aria-label="RunningHub 云端调用类型" value={draft.runKind} onChange={(event) => patchDraft({ runKind: event.target.value as RunningHubVideoWorkflow['runKind'] })}><option value="ai-app">AI 应用 · run/ai-app</option><option value="workflow">ComfyUI 工作流 · run/workflow</option></select></label><label className="field"><span>{draft.runKind === 'ai-app' ? 'AI 应用 ID' : '云端工作流 ID'}</span><input aria-label="RunningHub 云端 ID" value={draft.remoteId} inputMode="numeric" placeholder="从 RunningHub 调用地址中复制 ID" onChange={(event) => patchDraft({ remoteId: event.target.value })} /></label></div><label className="field"><span>最终{isImage ? "图片" : "视频"}输出节点 ID（可选）</span><input aria-label={isImage ? "RunningHub 图片输出节点 ID" : "RunningHub 视频输出节点 ID"} value={draft.outputNodeId || ''} placeholder={isImage ? "留空：自动收集图片结果" : "留空：自动收集视频结果；多输出时可指定最终成片节点"} onChange={(event) => patchDraft({ outputNodeId: event.target.value || undefined })} /></label><div className="vwm-info"><strong>只注入你明确绑定的输入</strong><p>{isImage ? "当前生图提示词映射到明确的文本字段；宽高通过生成参数页绑定实际像素字段。参考图片按明确的图片槽上传；没有图片槽时仅支持文生图，不会忽略已选图片。图像入口不提交音频，工作流其它常量、模型与采样参数保持原值。" : "当前视频提示词 → 提示词映射；选择的参考图 → 按顺序上传并填入图片槽。选择的参考音频 → 填入明确的音频槽，未选音频保留原值。工作流其余常量、LoRA 与自定义字段保持原值。"}</p><p>云端 ID 按文字保存，不会将 19 位 ID 转成浮点数。工作流须在 RunningHub 云端已存在，本软件不创建或上传本地 ComfyUI 画布。</p></div>{parsed.issues.length > 0 && <div className="rhv-issues"><strong>待配置项</strong><p>{parsed.issues.slice(0, 3).join('；')}</p></div>}</>}
             {tab === 'mapping' && <>
-              <div className="vwm-section-tabs" role="tablist" aria-label="云端输入映射类别"><button type="button" role="tab" aria-selected={mappingTab === 'prompt'} className={mappingTab === 'prompt' ? 'active' : ''} onClick={() => { setMappingTab('prompt'); setMappingPage(0); setMappingRange('common'); setMappingSearch(''); }}>提示词输入 {draft.mapping.prompt.length}</button><button type="button" role="tab" aria-selected={mappingTab === 'images'} className={mappingTab === 'images' ? 'active' : ''} onClick={() => { setMappingTab('images'); setMappingPage(0); setMappingRange('common'); setMappingSearch(''); }}>参考图片槽 {draft.mapping.images.length}</button><button type="button" role="tab" aria-selected={mappingTab === 'audios'} className={mappingTab === 'audios' ? 'active' : ''} onClick={() => { setMappingTab('audios'); setMappingPage(0); setMappingRange('common'); setMappingSearch(''); }}>参考音频槽 {draft.mapping.audios?.length || 0}</button></div>
+              <div className="vwm-section-tabs" role="tablist" aria-label="云端输入映射类别"><button type="button" role="tab" aria-selected={mappingTab === 'prompt'} className={mappingTab === 'prompt' ? 'active' : ''} onClick={() => { setMappingTab('prompt'); setMappingPage(0); setMappingRange('common'); setMappingSearch(''); }}>提示词输入 {draft.mapping.prompt.length}</button><button type="button" role="tab" aria-selected={mappingTab === 'images'} className={mappingTab === 'images' ? 'active' : ''} onClick={() => { setMappingTab('images'); setMappingPage(0); setMappingRange('common'); setMappingSearch(''); }}>参考图片槽 {draft.mapping.images.length}</button>{!isImage && <button type="button" role="tab" aria-selected={mappingTab === 'audios'} className={mappingTab === 'audios' ? 'active' : ''} onClick={() => { setMappingTab('audios'); setMappingPage(0); setMappingRange('common'); setMappingSearch(''); }}>参考音频槽 {draft.mapping.audios?.length || 0}</button>}</div>
               {mappingTab === 'audios' ? <>
                 <div className="vwm-info compact">音频文件输入按真实节点列出。每段视频单独选择声音、关联人物或旁白；未选音频的槽位保留工作流原值。</div>
                 <div className="rhv-image-slot-grid rhv-audio-slot-grid" aria-label="全部云端音频槽">{(draft.mapping.audios || []).map((binding, index) => {
@@ -629,7 +641,7 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
                 {!draft.mapping.audios?.length && <div className="vwm-empty">尚未找到可上传的音频输入。读取云端节点或导入 API 节点 JSON 后自动识别；自定义字段可在“手动添加字段”中明确选择音频输入。</div>}
                 <p className="vwm-help">共 {draft.mapping.audios?.length || 0} 个音频槽。这里只配置节点；声音属于谁由分段选择明确指定，槽位数量不代表云端支持多人独立配音。点击“保存工作流”后生效。</p>
               </> : mappingTab === 'images' ? <>
-                <div className="vwm-info compact">每段视频的图片数量和用途可在“生成视频 → 选择参考图”中单独设置。{imageProtocol?.verifiedProfile && imageCount ? '当前工作流按实际图片数量运行，未使用的图片槽会按云端支持的方式留空。' : '能否留空及如何跳过未使用图片，以云端工作流支持的规则为准。'}</div>
+                <div className="vwm-info compact">{isImage ? "所选参考图片按以下图片槽顺序上传；当前应用没有图片槽时只支持文生图。" : "每段视频的图片数量和用途可在“生成视频 → 选择参考图”中单独设置。"}{imageProtocol?.verifiedProfile && imageCount ? '当前工作流按实际图片数量运行，未使用的图片槽会按云端支持的方式留空。' : '能否留空及如何跳过未使用图片，以云端工作流支持的规则为准。'}</div>
                 <div className="vwm-mapping-item">
                   <label className="field"><span>图片数量字段（每个工作流配置一次）</span><select aria-label="RunningHub 图片数量字段" value={draft.mapping.imageCount === null ? 'none' : draft.mapping.imageCount ? bindingKey(draft.mapping.imageCount) : 'auto'} onChange={(event) => updateImageCountBinding(event.target.value)}>
                     <option value="auto">自动识别（仅已核实的云端应用）</option>
@@ -648,11 +660,11 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
                   const node = nodeRows.find((entry) => entry.nodeId === binding.nodeId && entry.fieldName === binding.inputName);
                   return <div className="rhv-image-slot-card" key={`${bindingKey(binding)}-${index}`}>
                     <div className="rhv-image-slot-heading"><strong>图片槽 {index + 1}</strong><code aria-label={`云端图片槽 ${index + 1} 节点字段`} title={`${binding.nodeId}.${binding.inputName}`}>{binding.nodeId}.{binding.inputName}</code></div>
-                    <small className="rhv-slot-hint">用途在生成视频时按当前分段选择</small>
+                    <small className="rhv-slot-hint">{isImage ? "生图时按所选图片顺序上传" : "用途在生成视频时按当前分段选择"}</small>
                     {!node && <><small className="rhv-slot-warning">节点目录中缺失，请重新读取节点核对。</small><button type="button" className="btn small" aria-label={`移除失效云端图片槽 ${index + 1}`} onClick={() => patchMapping({ images: draft.mapping.images.filter((_, position) => position !== index) })}>移除失效映射</button></>}
                   </div>;
                 })}</div>
-                {!draft.mapping.images.length && <div className="vwm-empty">尚未找到图片输入槽。文生视频可不选图；图生视频请先“读取云端节点”或导入节点 JSON，识别后会全部显示。自定义字段可在“手动添加字段”中明确标为图片输入。</div>}
+                {!draft.mapping.images.length && <div className="vwm-empty">{isImage ? "当前工作流没有参考图片槽，仅支持文生图。需要图生图时请选择具有明确图片输入的云端应用，再绑定真实节点。" : "尚未找到图片输入槽。文生视频可不选图；图生视频请先“读取云端节点”或导入节点 JSON，识别后会全部显示。自定义字段可在“手动添加字段”中明确标为图片输入。"}</div>}
                 <p className="vwm-help">共 {draft.mapping.images.length} 个图片槽。此处维护槽位顺序、节点字段及图片数量绑定；每段选图独立保存。点击“保存工作流”后生效；必填图片和可选空槽须符合云端工作流规则。</p>
               </> : <>
                 <div className="vwm-info compact">{mappingRange === 'all' ? '高级列表包含工作流内部配置，请核对字段用途；不自动绑定提示词，提示词映射需要文本字段。' : '按字段名与标题显示提示词候选，排除常见图片和技术参数。仅辅助查找，选择后才绑定，不自动判断用途。'}</div>
@@ -660,7 +672,7 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
                 <div className="vwm-mapping-list">{draft.mapping.prompt.slice(currentMappingPage * pageSize, (currentMappingPage + 1) * pageSize).map((binding, localIndex) => {
                   const index = currentMappingPage * pageSize + localIndex; const label = `云端提示词 ${index + 1} `;
                   return <div className="vwm-mapping-item" key={`prompt-${index}`}><div className="vwm-row"><strong>{label}</strong><button type="button" className="btn small" aria-label={`移除${label.trim()}`} onClick={() => patchMapping({ prompt: draft.mapping.prompt.filter((_, position) => position !== index) })}>移除</button></div>{bindingSelect(binding, label, (next) => patchMapping({ prompt: draft.mapping.prompt.map((item, position) => position === index ? { ...item, ...next } : item) }))}</div>;
-                })}{!draft.mapping.prompt.length && <div className="vwm-empty">添加需要替换为当前视频提示词的真实节点字段。</div>}</div>
+                })}{!draft.mapping.prompt.length && <div className="vwm-empty">添加需要替换为当前{isImage ? "生图" : "视频"}提示词的真实节点字段。</div>}</div>
                 <div className="vwm-collection-footer"><button type="button" className="btn small" onClick={() => { patchMapping({ prompt: [...draft.mapping.prompt, { nodeId: '', inputName: '' }] }); setMappingPage(Math.floor(draft.mapping.prompt.length / pageSize)); }}>添加云端提示词输入</button><Pager label="云端输入映射" total={draft.mapping.prompt.length} page={currentMappingPage} size={pageSize} onChange={setMappingPage} /></div>
                 <p className="vwm-help">{nodeRows.length && !mappingCommon.length ? '未识别到常用候选，可切换“全部字段（高级）”查找自定义输入。' : '常用候选仅辅助查找；自定义输入可切换“全部字段（高级）”。'} 筛选不会修改请求。</p>
               </>}
@@ -703,7 +715,7 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
         <p className="vwm-help">{nodeDialog === 'json' ? '导入 ComfyUI API 格式（inputs / class_type）、RunningHub 节点列表或读取结构响应。仅补充当前工作流的候选字段，不上传画布、不提交生成。普通画布的控件顺序不能代替真实字段名。' : '请从云端工作流中复制真实节点 ID 和字段名。名称可以相同，节点 ID 不能用显示标题代替。提示词和素材上传文件名使用文本类型。'}</p>
         {nodeDialog === 'json' ? <label className="field rhv-import-source"><span>节点 JSON</span><textarea aria-label="RunningHub 节点 JSON" spellCheck={false} value={nodeSource} onChange={(event) => setNodeSource(event.target.value)} placeholder={'{"12":{"class_type":"CLIPTextEncode","inputs":{"text":"提示词"}}}\n或 {"nodeInfoList":[{"nodeId":"12","fieldName":"text","fieldValue":""}]}'} /></label> : <div className="rhv-manual-fields">
           <div className="rhv-two-fields"><label className="field"><span>节点 ID（nodeId）</span><input aria-label="手动节点 ID" value={manualNode.nodeId} onChange={(event) => setManualNode({ ...manualNode, nodeId: event.target.value })} placeholder="复制实际节点 ID" /></label><label className="field"><span>字段名（fieldName）</span><input aria-label="手动节点字段名" value={manualNode.fieldName} onChange={(event) => setManualNode({ ...manualNode, fieldName: event.target.value })} placeholder="例如 text / image / audio / seed" /></label></div>
-          <div className="rhv-two-fields"><label className="field"><span>字段类型</span><select aria-label="手动节点字段类型" value={manualNode.type} onChange={(event) => setManualNode({ ...manualNode, type: event.target.value, value: event.target.value === 'boolean' ? 'false' : manualNode.value })}><option value="string">文本 string</option><option value="image">图片输入（高级自定义）</option><option value="audio">音频输入（高级自定义）</option><option value="number">数字 number</option><option value="boolean">开关 boolean</option></select></label><label className="field"><span>云端默认值（文本可留空）</span>{manualNode.type === 'boolean' ? <select aria-label="手动节点默认值" value={manualNode.value} onChange={(event) => setManualNode({ ...manualNode, value: event.target.value })}><option value="false">false</option><option value="true">true</option></select> : <input aria-label="手动节点默认值" value={manualNode.value} onChange={(event) => setManualNode({ ...manualNode, value: event.target.value })} />}</label></div>
+          <div className="rhv-two-fields"><label className="field"><span>字段类型</span><select aria-label="手动节点字段类型" value={manualNode.type} onChange={(event) => setManualNode({ ...manualNode, type: event.target.value, value: event.target.value === 'boolean' ? 'false' : manualNode.value })}><option value="string">文本 string</option><option value="image">图片输入（高级自定义）</option>{!isImage && <option value="audio">音频输入（高级自定义）</option>}<option value="number">数字 number</option><option value="boolean">开关 boolean</option></select></label><label className="field"><span>云端默认值（文本可留空）</span>{manualNode.type === 'boolean' ? <select aria-label="手动节点默认值" value={manualNode.value} onChange={(event) => setManualNode({ ...manualNode, value: event.target.value })}><option value="false">false</option><option value="true">true</option></select> : <input aria-label="手动节点默认值" value={manualNode.value} onChange={(event) => setManualNode({ ...manualNode, value: event.target.value })} />}</label></div>
           <p className="vwm-help">图片和音频文件字段自动列为素材槽。自定义名称无法识别时可明确选择“图片输入”或“音频输入”；字段必须接受上传文件名，不能是节点连线或音频处理 tensor。</p>
         </div>}
         <div className="rhv-import-feedback" role={error ? 'alert' : 'status'}>{error || '图片和音频文件字段会补齐为编辑稿槽位；其他字段只补目录，既有槽位顺序与参数值保留，用途及人物在生成视频时按分段设置。'}</div>

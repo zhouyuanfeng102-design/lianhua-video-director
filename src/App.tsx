@@ -421,6 +421,8 @@ import { cloneImageBatchConfig, createImageBatchSeeds, enqueueImageBatchMembers,
 import { captureImageApiSnapshot, imageApiChoiceLabel, imageApiRegenerationSourceIdentity, resolveImageApiForRegeneration, resolveWorkbenchImageApi } from "./imageApiSelection";
 import { assertComfyUIWorkflowCanBindReferenceImages } from "./comfyui";
 import { ComfyUISettings } from "./components/ComfyUISettings";
+import { RunningHubImageSettings } from "./components/RunningHubImageSettings";
+import { selectedRunningHubImageWorkflow, validateRunningHubImageConfig } from "./runningHubImage";
 import { ReferenceImagePickerModal } from "./components/ReferenceImagePickerModal";
 import { StoryboardImageToImagePanel } from "./components/StoryboardImageToImagePanel";
 import { normalizeStoryboardImageToImageSettings, resolveDirectStoryboardReferenceImages, assertDirectStoryboardImageApiSupport } from "./storyboardImageToImage";
@@ -645,10 +647,14 @@ const imagePromptAssetKindLabels: Record<ImagePromptAssetKind, string> = {
 const imagePromptBackendForApi = (
   backend: AppState["settings"]["imageApi"]["backend"],
 ): Exclude<ImagePromptBackend, "all"> => (
-  backend === "sd_webui" ? "sd-webui" : backend
+  backend === "sd_webui" ? "sd-webui" : backend === "runninghub" ? "openai" : backend
 );
 
-type ImageSettingsBackend = "openai" | "sd_webui" | "comfyui" | "novelai";
+const imagePromptModelForApi = (api: ImageApiConfig): string => api.backend === "runninghub"
+  ? selectedRunningHubImageWorkflow(api)?.name || ""
+  : api.model;
+
+type ImageSettingsBackend = "openai" | "sd_webui" | "comfyui" | "novelai" | "runninghub";
 
 const imageSettingsBackendKey = (
   backend: ImagePromptBackend,
@@ -663,7 +669,7 @@ const imageSettingsBackendKey = (
 const imageRuleBackendFromSettings = (
   backend: ImageSettingsBackend,
 ): Exclude<ImagePromptBackend, "all"> => (
-  backend === "sd_webui" ? "sd-webui" : backend
+  backend === "sd_webui" ? "sd-webui" : backend === "runninghub" ? "openai" : backend
 );
 
 const converterSupportsWorkflow = (
@@ -12717,7 +12723,7 @@ function reserveStoryboardImagePreparationTasks(input: {
       sourceStoryboardId: input.storyboard.id, sourceShotId: request.shotId,
       width: request.width, height: request.height, sizeOverride: request.sizeOverride, resolutionPlan: request.resolutionPlan,
       backend: input.api.backend,
-      model: input.api.backend === "comfyui"
+      model: input.api.backend === "runninghub" ? selectedRunningHubImageWorkflow(input.api)?.name || "RunningHub 云端图片" : input.api.backend === "comfyui"
         ? input.api.comfyuiWorkflows?.find((workflow) => workflow.id === input.api.activeComfyuiWorkflowId)?.name || "ComfyUI Workflow"
         : input.api.model.trim(),
       prompt: "", preparationStage: "identity",
@@ -13587,6 +13593,10 @@ function DirectorView(ctx: AppContext) {
     }
     const imageApi = { ...state.settings.imageApi };
     const imageModelRequired = imageApi.backend === "openai" || imageApi.backend === "novelai";
+    if (imageApi.backend === "runninghub") {
+      const issue = validateRunningHubImageConfig(imageApi, globalReferenceAssetIds.length);
+      if (issue) { notify(issue, "error"); setView("settings"); return; }
+    }
     const activeComfyWorkflowJson = imageApi.backend === "comfyui"
       ? imageApi.comfyuiWorkflows?.find(
           (item) => item.id === imageApi.activeComfyuiWorkflowId,
@@ -13658,7 +13668,7 @@ function DirectorView(ctx: AppContext) {
     try {
       imagePromptSelection = resolveImagePromptSelection({
         backend: imagePromptBackendForApi(imageApi.backend),
-        model: imageApi.model,
+        model: imagePromptModelForApi(imageApi),
         assetKind: "storyboard",
         manualRuleSetId: state.settings.imagePromptRuleSetIdByBackend?.[imageApi.backend],
         manualPresetId: state.settings.imagePromptPresetIdByAssetKind?.storyboard,
@@ -13933,7 +13943,7 @@ function DirectorView(ctx: AppContext) {
       sizeOverride: request.sizeOverride,
       resolutionPlan: request.resolutionPlan,
       backend: imageApi.backend,
-      model: imageApi.backend === "comfyui"
+      model: imageApi.backend === "runninghub" ? selectedRunningHubImageWorkflow(imageApi)?.name || "RunningHub 云端图片" : imageApi.backend === "comfyui"
         ? imageApi.comfyuiWorkflows?.find((item) => item.id === imageApi.activeComfyuiWorkflowId)?.name || "ComfyUI Workflow"
         : imageApi.model.trim(),
       sourceStoryboardId: sourceBoard.id,
@@ -14268,7 +14278,7 @@ function DirectorView(ctx: AppContext) {
       if (isCurrentProjectOperation(requestedProjectId, getCurrentProjectId())) notify(message, cancelled ? "normal" : "error");
       if (!cancelled) reportRuntimeError(imageBatchStage, safeError, imageBatchStage === "image-frame-plan" || imageBatchStage === "image-identity-enrich"
         ? imagePlanningErrorContext
-        : { ...imagePlanningErrorContext, provider: imageApi.backend, model: imageApi.model, endpoint: imageApi.baseUrl });
+        : { ...imagePlanningErrorContext, provider: imageApi.backend, model: imagePromptModelForApi(imageApi), endpoint: imageApi.baseUrl });
     } finally {
       storyboardImageBatchLifecycle.finish(batchLease);
       setStoryboardImagePreparation((current) => current === imagePreparation ? undefined : current);
@@ -17506,14 +17516,18 @@ function ImageWorkbenchView(ctx: AppContext) {
           ? state.project.props
           : [];
   const backendCapability =
-    imageWorkbenchApi.backend === "sd_webui"
+    imageWorkbenchApi.backend === "runninghub"
+      ? selectedRunningHubImageWorkflow(imageWorkbenchApi)?.mapping.images.length
+        ? "RunningHub 云端生图、明确图片槽参考图上传、任务查询与图片保存"
+        : "RunningHub 云端文生图；当前应用没有参考图片槽，不能提交参考图"
+      : imageWorkbenchApi.backend === "sd_webui"
       ? "文生图、真实参考图图生图、负面提示词"
       : imageWorkbenchApi.backend === "openai"
         ? "文生图、参考图编辑；所选资产会作为真实图片上传"
         : imageWorkbenchApi.backend === "comfyui"
           ? "API Workflow 文生图、真实参考图上传与 LoadImage/IPAdapter 链路、任务轮询取图"
           : "NovelAI 原生 NAI 标签生图与负面提示词；当前不接收参考图像素";
-  const supportsReferenceImageInput = ["openai", "sd_webui", "comfyui"].includes(
+  const supportsReferenceImageInput = (imageWorkbenchApi.backend === "runninghub" && Boolean(selectedRunningHubImageWorkflow(imageWorkbenchApi)?.mapping.images.length)) || ["openai", "sd_webui", "comfyui"].includes(
     imageWorkbenchApi.backend,
   );
   const privateVariantSelected = imageGenerationMode === "private"
@@ -18810,6 +18824,10 @@ function ImageWorkbenchView(ctx: AppContext) {
     const requestedReferenceAssetIds = requestedUseReferenceImage
       ? [state.project.assets.find((asset) => assetPreviewUrl(asset) === requestedUploadedPreview)?.id || selectedReferenceAssetId].filter(Boolean)
       : [];
+    if (requestedImageApi.enabled && requestedImageApi.backend === "runninghub") {
+      const issue = validateRunningHubImageConfig(requestedImageApi, requestedUseReferenceImage && requestedUploadedPreview ? 1 : 0);
+      if (issue) { notify(issue, "error"); setView("settings"); return; }
+    }
     const requestedTextApi = cloneImageBatchConfig(state.settings.textApi);
     const requestedImagePromptAssetKind: ImagePromptAssetKind =
       requestedNsfwPrivatePart
@@ -18938,7 +18956,7 @@ function ImageWorkbenchView(ctx: AppContext) {
     try {
       imagePromptSelection = cloneImageBatchConfig(resolveImagePromptSelection({
         backend: imagePromptBackendForApi(requestedImageApi.backend),
-        model: requestedImageApi.model,
+        model: imagePromptModelForApi(requestedImageApi),
         assetKind: requestedImagePromptAssetKind,
         imageVariant: requestedImageVariant,
         manualRuleSetId: activeImagePromptRuleSetId || undefined,
@@ -19059,7 +19077,7 @@ function ImageWorkbenchView(ctx: AppContext) {
       resolutionPlan: requestedOutputSize.resolutionPlan,
       backend: requestedImageApi.backend,
       ...(requestedImageApiSnapshot ? { imageApiSnapshot: requestedImageApiSnapshot } : {}),
-      model: requestedImageApi.backend === "comfyui"
+      model: requestedImageApi.backend === "runninghub" ? selectedRunningHubImageWorkflow(requestedImageApi)?.name || "RunningHub 云端图片" : requestedImageApi.backend === "comfyui"
         ? requestedImageApi.comfyuiWorkflows?.find(
             (item) => item.id === requestedImageApi.activeComfyuiWorkflowId,
           )?.name || "ComfyUI Workflow"
@@ -19354,6 +19372,10 @@ function ImageWorkbenchView(ctx: AppContext) {
     }
     const imageApi = { ...state.settings.imageApi };
     const imageModelRequired = imageApi.backend === "openai" || imageApi.backend === "novelai";
+    if (imageApi.backend === "runninghub") {
+      const issue = validateRunningHubImageConfig(imageApi);
+      if (issue) { notify(issue, "error"); setView("settings"); return; }
+    }
     const comfyWorkflowReady = imageApi.backend !== "comfyui"
       || Boolean(
         imageApi.comfyuiWorkflows?.some(
@@ -19406,7 +19428,7 @@ function ImageWorkbenchView(ctx: AppContext) {
     try {
       imagePromptSelection = resolveImagePromptSelection({
         backend: imagePromptBackendForApi(imageApi.backend),
-        model: imageApi.model,
+        model: imagePromptModelForApi(imageApi),
         assetKind: "storyboard",
         manualRuleSetId: activeImagePromptRuleSetId || undefined,
         manualPresetId: activeImagePromptPresetId || undefined,
@@ -19537,7 +19559,7 @@ function ImageWorkbenchView(ctx: AppContext) {
         sizeOverride: request.sizeOverride,
         resolutionPlan: request.resolutionPlan,
         backend: imageApi.backend,
-        model: imageApi.backend === "comfyui"
+        model: imageApi.backend === "runninghub" ? selectedRunningHubImageWorkflow(imageApi)?.name || "RunningHub 云端图片" : imageApi.backend === "comfyui"
           ? imageApi.comfyuiWorkflows?.find((item) => item.id === imageApi.activeComfyuiWorkflowId)?.name || "ComfyUI Workflow"
           : imageApi.model.trim(),
         sourceStoryboardId: sourceBoard.id,
@@ -20408,7 +20430,7 @@ function ImageWorkbenchView(ctx: AppContext) {
                   name={`use-reference-image-${imageGenerationMode}`}
                   type="checkbox"
                   checked={useReferenceImage}
-                  disabled={!uploadedPreview || !supportsReferenceImageInput || busy || autofillBusy}
+                  disabled={!uploadedPreview || (!supportsReferenceImageInput && !useReferenceImage) || busy || autofillBusy}
                   onChange={(event) => {
                     setUseReferenceImage(event.target.checked);
                     clearImageGenerationOutputs(imageGenerationMode);
@@ -20655,7 +20677,7 @@ function AssetsView(ctx: AppContext) {
   const [mediaFilter, setMediaFilter] = useState<"all" | NonNullable<ReferenceAsset["mediaType"]>>(state.settings.assetFilter || "all");
   const [checkingAssets, setCheckingAssets] = useState(false);
   const [uploadEntityId, setUploadEntityId] = useState("");
-  const [editingAssetId, setEditingAssetId] = useState("");
+  const [editingAssetTarget, setEditingAssetTarget] = useState<{ projectId: string; assetId: string } | null>(null);
   const [characterBindingTarget, setCharacterBindingTarget] = useState<{ projectId: string; assetId: string } | null>(null);
   const [characterBindingId, setCharacterBindingId] = useState("");
   const [assetPreviewAsset, setAssetPreviewAsset] = useState<ReferenceAsset | null>(null);
@@ -20693,6 +20715,7 @@ function AssetsView(ctx: AppContext) {
     }
   };
   useEffect(() => {
+    setEditingAssetTarget(null);
     setVideoImageSelection([]);
     setAssetPage(1);
     setMediaFilter("all");
@@ -21010,7 +21033,7 @@ function AssetsView(ctx: AppContext) {
     notify(`声音台账已加入：${asset.name}`);
   };
   const editAsset = (asset: ReferenceAsset) => {
-    setEditingAssetId(asset.id);
+    setEditingAssetTarget({ projectId: state.project.id, assetId: asset.id });
     setAssetDraft({
       name: asset.name,
       tags: asset.tags.join("、"),
@@ -21023,35 +21046,44 @@ function AssetsView(ctx: AppContext) {
     });
   };
   const saveAsset = () => {
-    if (!editingAssetId) return;
-    setState((current: AppState) => ({
-      ...current,
-      project: {
-        ...current.project,
-        assets: current.project.assets.map((asset) =>
-          asset.id === editingAssetId
-            ? {
-                ...asset,
-                name: assetDraft.name.trim() || asset.name,
-                tags: assetDraft.tags
-                  .split(/[、,，]/)
-                  .map((item) => item.trim())
-                  .filter(Boolean),
-                visualAnchor: assetDraft.visualAnchor.trim() || undefined,
-                prompt: assetDraft.prompt.trim() || undefined,
-                mediaType: assetDraft.mediaType,
-                referenceRole: assetDraft.referenceRole,
-                durationSec: assetDraft.durationSec > 0 ? assetDraft.durationSec : undefined,
-                targetBindings: assetDraft.targetBindings.split(/[、,，]/u).map((item) => item.trim()).filter(Boolean),
-                updatedAt: Date.now(),
-              }
-            : asset,
-        ),
-        updatedAt: Date.now(),
-      },
-    }));
-    setEditingAssetId("");
-    notify("资产资料已保存，后续绑定和提示词会使用新名称与视觉锚点。");
+    if (!editingAssetTarget) return;
+    try {
+      setState((current: AppState) => {
+        if (current.project.id !== editingAssetTarget.projectId) throw new Error("项目已切换，请在当前项目重新编辑资产。");
+        if (!current.project.assets.some((asset) => asset.id === editingAssetTarget.assetId)) throw new Error("资产已不存在，未保存修改。");
+        return {
+          ...current,
+          project: {
+            ...current.project,
+            assets: current.project.assets.map((asset) =>
+              asset.id === editingAssetTarget.assetId
+                ? {
+                    ...asset,
+                    name: assetDraft.name.trim() || asset.name,
+                    tags: assetDraft.tags
+                      .split(/[、,，]/)
+                      .map((item) => item.trim())
+                      .filter(Boolean),
+                    visualAnchor: assetDraft.visualAnchor.trim() || undefined,
+                    prompt: assetDraft.prompt.trim() || undefined,
+                    mediaType: assetDraft.mediaType,
+                    referenceRole: assetDraft.referenceRole,
+                    durationSec: assetDraft.durationSec > 0 ? assetDraft.durationSec : undefined,
+                    targetBindings: assetDraft.targetBindings.split(/[、,，]/u).map((item) => item.trim()).filter(Boolean),
+                    updatedAt: Date.now(),
+                  }
+                : asset,
+            ),
+            updatedAt: Date.now(),
+          },
+        };
+      });
+      setEditingAssetTarget(null);
+      notify("资产资料已保存，后续绑定和提示词会使用新名称与视觉锚点。");
+    } catch (error) {
+      setEditingAssetTarget(null);
+      notify(error instanceof Error ? error.message : "资产资料未保存，请重新编辑。", "error");
+    }
   };
   const openAssetPreview = (asset: ReferenceAsset) => {
     const previewUrl = assetPreviewUrl(asset);
@@ -21522,10 +21554,10 @@ function AssetsView(ctx: AppContext) {
           </div>
         </div>
       </div>}
-      {editingAssetId && (
+      {editingAssetTarget?.projectId === state.project.id && (
         <div
           className="modal-backdrop"
-          onMouseDown={() => setEditingAssetId("")}
+          onMouseDown={() => setEditingAssetTarget(null)}
         >
           <div
             className="modal"
@@ -21537,7 +21569,7 @@ function AssetsView(ctx: AppContext) {
                 small
                 variant="ghost"
                 icon={<X size={14} />}
-                onClick={() => setEditingAssetId("")}
+                onClick={() => setEditingAssetTarget(null)}
               >
                 关闭
               </Button>
@@ -23390,6 +23422,10 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
     return;
   }
   state = liveState;
+  if (imageApi.backend === "runninghub") {
+    const issue = validateRunningHubImageConfig(imageApi, originalTask.referenceAssetIds?.length || 0);
+    if (issue) { notify(issue, "error"); storyboardImageBatchLifecycle.finish(lease); setView("settings"); return; }
+  }
   if (!imageApi.enabled || !imageApi.baseUrl.trim()
     || ((imageApi.backend === "openai" || imageApi.backend === "novelai") && !imageApi.model.trim())) {
     notify("请先启用并配置图像 API，再重新生图。", "error");
@@ -23462,7 +23498,7 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
       if (!textApi.enabled || !textApi.baseUrl.trim() || !textApi.model.trim()) throw new Error("此任务尚未生成最终提示词，请先配置文本 API 后重试。");
       if (privateRegeneration || landscapeRepair || !source.converterSystemPrompt || !effectiveTask.imagePromptFormat) {
         const selection = resolveImagePromptSelection({
-          backend: imagePromptBackendForApi(imageApi.backend), model: imageApi.model, assetKind: promptKind,
+          backend: imagePromptBackendForApi(imageApi.backend), model: imagePromptModelForApi(imageApi), assetKind: promptKind,
           imageVariant: effectiveTask.imageVariant,
           manualRuleSetId: currentShotRegeneration ? state.settings.imagePromptRuleSetIdByBackend?.[imageApi.backend]
             : state.imagePromptRules.ruleSets.some((rule) => rule.id === originalTask.imagePromptRuleSetId && rule.enabled)
@@ -23501,7 +23537,7 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
     const task = {
       ...buildImageRegenerationTask(effectiveTask, state.project, {
         id: createId("image_task"), timestamp: Date.now(), backend: imageApi.backend,
-        model: imageApi.backend === "comfyui"
+        model: imageApi.backend === "runninghub" ? selectedRunningHubImageWorkflow(imageApi)?.name || "RunningHub 云端图片" : imageApi.backend === "comfyui"
           ? imageApi.comfyuiWorkflows?.find((workflow) => workflow.id === imageApi.activeComfyuiWorkflowId)?.name || "ComfyUI Workflow"
           : imageApi.model.trim(),
         source,
@@ -24809,6 +24845,8 @@ function SettingsView(ctx: AppContext) {
       ...(target === "image"
         ? {
             workflowJson: "",
+            runningHubWorkflows: [],
+            activeRunningHubWorkflowId: null,
             comfyuiWorkflows: [],
             activeComfyuiWorkflowId: "",
             comfyuiPathMode: "preset",
@@ -24873,7 +24911,9 @@ function SettingsView(ctx: AppContext) {
           ...(target === "image"
             ? {
                 workflowJson: "",
-                comfyuiWorkflows: [],
+                runningHubWorkflows: [],
+            activeRunningHubWorkflowId: null,
+            comfyuiWorkflows: [],
                 activeComfyuiWorkflowId: "",
                 comfyuiPathMode: "preset",
                 comfyuiPromptPath: "/prompt",
@@ -25616,20 +25656,22 @@ function SettingsView(ctx: AppContext) {
                         imageProtocol: "auto",
                         imageSupportedResolutions: undefined,
                         imagePixelStep: undefined,
+                        ...(event.target.value === "runninghub" ? { baseUrl: "https://www.runninghub.ai", model: "" } : {}),
                       })
                     }
                   >
                     <option value="openai">OpenAI 兼容</option>
                     <option value="sd_webui">Stable Diffusion WebUI</option>
                     <option value="comfyui">ComfyUI</option>
+                    <option value="runninghub">RunningHub 云端图片</option>
                     <option value="novelai">NovelAI</option>
                   </select>
                 </Field>
-                <Field label={settings.imageApi.backend === "comfyui" ? "ComfyUI API 根地址" : "API 地址"}>
+                <Field label={settings.imageApi.backend === "comfyui" ? "ComfyUI API 根地址" : settings.imageApi.backend === "runninghub" ? "RunningHub API 根地址" : "API 地址"}>
                   <input
                     value={settings.imageApi.baseUrl}
                     onChange={(event) => patchImage({ baseUrl: event.target.value })}
-                    placeholder={settings.imageApi.backend === "comfyui"
+                    placeholder={settings.imageApi.backend === "runninghub" ? "https://www.runninghub.ai" : settings.imageApi.backend === "comfyui"
                       ? "http://127.0.0.1:8188"
                       : settings.imageApi.backend === "novelai"
                         ? "NovelAI 官方根地址或完整 /ai/generate-image 端点"
@@ -25646,7 +25688,7 @@ function SettingsView(ctx: AppContext) {
               </section>
               <section className="image-api-section image-api-generation" aria-labelledby="image-api-generation-heading">
                 <h3 id="image-api-generation-heading">模型与输出</h3>
-                {settings.imageApi.backend !== "comfyui" && <Field label="模型 / 工作流">
+                {settings.imageApi.backend !== "comfyui" && settings.imageApi.backend !== "runninghub" && <Field label="模型 / 工作流">
                   <div className="model-control">
                     <input
                       value={settings.imageApi.model}
@@ -25724,14 +25766,16 @@ function SettingsView(ctx: AppContext) {
                   {settings.imageApi.imageSupportedResolutions !== undefined && <Button small onClick={() => patchImage({ imageSupportedResolutions: undefined })}>恢复模型默认</Button>}
                 </div>
                 <div className="field-hint">{resolveImageResolutionCapabilities(settings.imageApi).note}</div>
-                {settings.imageApi.backend !== "openai" && <div className="field-hint">本机工作流默认只启用1K；确认模型和工作流支持原生2K／4K后再勾选。勾选不会安装模型、添加放大节点或改变工作流。</div>}
+                {settings.imageApi.backend !== "openai" && <div className="field-hint">{settings.imageApi.backend === "runninghub" ? "云端输出通过明确的宽高节点映射设置；只选择应用支持的像素规格。" : "本机工作流默认只启用1K；确认模型和工作流支持原生2K／4K后再勾选。勾选不会安装模型、添加放大节点或改变工作流。"}</div>}
               </Field>
               {settings.imageApi.backend !== "openai" && <Field label="宽高像素步长">
                 <input type="number" min={1} max={1024} step={1}
                   value={settings.imageApi.imagePixelStep ?? (settings.imageApi.backend === "novelai" ? 64 : 8)}
                   onChange={(event) => patchImage({ imagePixelStep: Number(event.target.value) })} />
               </Field>}
-              {settings.imageApi.backend === "comfyui" ? (
+              {settings.imageApi.backend === "runninghub" ? (
+                  <RunningHubImageSettings config={settings.imageApi} onChange={patchImage} />
+              ) : settings.imageApi.backend === "comfyui" ? (
                   <ComfyUISettings
                     config={settings.imageApi}
                     allowPrivateNetwork={Boolean(ctx.recoveryStatus?.recovery.allowPrivateNetwork)}

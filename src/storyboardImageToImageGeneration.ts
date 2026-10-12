@@ -21,6 +21,7 @@ import { withDirectImageRegenerationSnapshot } from './imageAssetRegenerationSna
 import { imagePromptOutputSpecificationRule } from './imageGeneration';
 import { authoredStoryboardImageSourceFingerprint, failImagePreparationTasks, updateImagePreparationTasks } from './imageTaskPreparation';
 import { sourceContentHash } from './sourceContentHash';
+import { selectedRunningHubImageWorkflow, validateRunningHubImageConfig } from './runningHubImage';
 
 type Update = (updater: (state: AppState) => AppState) => void;
 
@@ -72,7 +73,7 @@ const planningSourceIdentity = (project: AppState['project'], board: Storyboard)
 const imagePromptBackendForApi = (
   backend: AppState['settings']['imageApi']['backend'],
 ): Exclude<ImagePromptBackend, 'all'> => (
-  backend === 'sd_webui' ? 'sd-webui' : backend
+  backend === 'sd_webui' ? 'sd-webui' : backend === 'runninghub' ? 'openai' : backend
 );
 
 const directReferenceConversionRule = [
@@ -149,6 +150,10 @@ export const generateDirectStoryboardImages = async (
     const api = cloneImageBatchConfig(selection.config);
     imageErrorContext = { ...projectContextSnapshot, provider: api.backend, model: api.model, endpoint: api.baseUrl };
     failureDetail = { stage: 'image-preparation', context: imageErrorContext };
+    if (api.backend === 'runninghub') {
+      const issue = validateRunningHubImageConfig(api, settings.referenceAssetIds.length);
+      if (issue) throw new Error(issue);
+    }
     if (!api.enabled || !api.baseUrl.trim() || (api.backend === 'openai' && !api.model.trim())) {
       throw new Error('请先配置并启用可用的生图 API。');
     }
@@ -170,7 +175,7 @@ export const generateDirectStoryboardImages = async (
     try {
       const imagePromptSelection = resolveImagePromptSelection({
         backend: imagePromptBackendForApi(api.backend),
-        model: api.model,
+        model: api.backend === 'runninghub' ? selectedRunningHubImageWorkflow(api)?.name || '' : api.model,
         assetKind: 'storyboard',
         manualRuleSetId: initial.settings.imagePromptRuleSetIdByBackend?.[api.backend],
         manualPresetId: initial.settings.imagePromptPresetIdByAssetKind?.storyboard,
@@ -281,6 +286,7 @@ export const generateDirectStoryboardImages = async (
         ...(directPromptConversion ? { conversionIdentityContext, converterSystemPrompt: imagePromptConverterRules } : {}),
         backend: api.backend, model: api.backend === 'comfyui'
           ? api.comfyuiWorkflows?.find((item) => item.id === api.activeComfyuiWorkflowId)?.name || 'ComfyUI Workflow'
+          : api.backend === 'runninghub' ? selectedRunningHubImageWorkflow(api)?.name || 'RunningHub 云端图片'
           : api.model.trim(),
         sourceStoryboardId: board.id, sourceShotId: request?.shotId,
         referenceAssetIds: [...settings.referenceAssetIds], primaryReferenceAssetIds: [...settings.referenceAssetIds],
