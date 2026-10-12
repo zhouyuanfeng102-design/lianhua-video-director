@@ -49,7 +49,7 @@ import {
 } from '../videoCreativeDirection';
 import { VIDEO_ACTING_CAMERA_RULES } from '../videoActingCameraRules';
 import { VIDEO_SCENE_CONTEXT_RULE, type VideoSceneContext } from '../videoSceneContext';
-import { VIDEO_ACTION_CHOREOGRAPHY_RULE, VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE } from '../videoActionChoreographyRules';
+import { VIDEO_ACTION_CHOREOGRAPHY_RULE, VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE, VIDEO_ACTION_EVENT_REVIEW_RULE } from '../videoActionChoreographyRules';
 import { DIRECTED_ACTION_RELATION_RULE, IMAGE_STORY_SPATIAL_STATE_RULE, SPATIAL_COORDINATE_RULE, SPATIAL_CONTINUITY_REVIEW_RULE, STORYBOARD_SPATIAL_FRAME_RULE } from '../spatialContinuityRules';
 import { getStoryPreparationParagraphs, normalizeStoryPreparationResult, type StoryPreparationResult } from '../storyPreparationReview';
 import {
@@ -4088,6 +4088,7 @@ export const requestShotRecommendation = async (
           VIDEO_ACTING_CAMERA_RULES,
           VIDEO_SCENE_CONTEXT_RULE,
           VIDEO_ACTION_CHOREOGRAPHY_RULE,
+          VIDEO_ACTION_EVENT_REVIEW_RULE,
           STORYBOARD_STABLE_SUBJECT_CONTRACT,
           VIDEO_DIALOGUE_STAGING_RULE,
           VIDEO_SPATIAL_CONTINUITY_RULE,

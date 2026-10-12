@@ -158,16 +158,17 @@ test('world-space direction carries named body sides, screen projection and scen
 
 test('AI selects shot coverage by information and space while confirmed conversion boundaries stay fixed', () => {
   for (const requirement of [
-    /剧情信息、动作因果、对白回应、空间变化、情绪转折和可用时长/u,
-    /不默认三镜、不为凑固定镜数机械等分/u,
-    /用户指定镜数或允许范围内/u,
-    /自动模式按需要决定镜数与镜长/u,
-    /规划JSON已有reason（保存后对应shotCountReason）和每镜purpose\/transition/u,
-    /不新增JSON属性/u,
-    /一个连续镜头可以成立/u,
-    /对白不自动等于正面面部近景/u,
+    /先排本段各事件的实际起止、完整对白与必要反应，再决定摄影覆盖/u,
+    /不预设三镜或其他镜数，不按15秒等分/u,
+    /用户exact镜数严格保持/u,
+    /auto从能清楚表现全部因果的最少必要视角开始/u,
+    /规划JSON沿用reason（保存后对应shotCountReason）以及purpose\/transition/u,
+    /每次新增切镜要对应具体的信息揭示、视点或空间变化/u,
+    /一个连续镜头已能看清接触、轨迹与回应时，优先在镜内调整关注/u,
+    /多人对白可以用关系构图、说话者近景或单镜关注交接/u,
+    /镜头时长不等于事件持续时长/u,
     /保留既定镜数、顺序和切点/u,
-    /不借自主导演之名重切整段或裁掉对白/u,
+    /不重切已确认稿或裁掉对白/u,
   ]) assert.match(VIDEO_AI_SHOT_COVERAGE_RULE, requirement);
 });
 

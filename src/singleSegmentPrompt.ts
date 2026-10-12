@@ -36,7 +36,7 @@ import {
 } from './videoCreativeDirection';
 import { VIDEO_ACTING_CAMERA_RULES, VIDEO_ACTING_CAMERA_TRANSLATION_RULE, stripLegacyVideoActingCameraRules } from './videoActingCameraRules';
 import { buildVideoSceneContext, VIDEO_SCENE_CONTEXT_RULE, type VideoSceneContext } from './videoSceneContext';
-import { VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE, withVideoActionChoreographyScope } from './videoActionChoreographyRules';
+import { VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE, VIDEO_ACTION_EVENT_REVIEW_RULE, withVideoActionChoreographyScope } from './videoActionChoreographyRules';
 import { STORY_CAUSALITY_RULE, STORY_CAUSALITY_TRANSLATION_RULE, STORY_UNDERSTANDING_CONTEXT_RULE } from './storyCausalityRules';
 import { CHARACTER_PARTICIPATION_RULE, characterParticipationAliases, resolvePromptCharacterParticipation, stampCharacterParticipation } from './characterParticipation';
 import type { ConverterPreset, H3IdentityBindings, RuleSet, Storyboard } from './types';
@@ -353,6 +353,7 @@ export async function generateSingleSegmentPrompt(
       VIDEO_DIALOGUE_STAGING_RULE,
       VIDEO_SPATIAL_CONTINUITY_RULE,
       VIDEO_STAGING_REVIEW_RULE,
+      ...(canReplanStaging ? [VIDEO_ACTION_EVENT_REVIEW_RULE] : []),
       VIDEO_PROMPT_FOCUS_RULE,
       H3_CLIP_TIME_RULE,
       DIALOGUE_LANGUAGE_RULE,

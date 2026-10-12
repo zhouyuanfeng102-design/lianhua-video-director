@@ -1,4 +1,4 @@
-import type { Character, H3IdentityBindings, Location, Project, ReferenceAsset, VideoTaskApiConfig } from './types';
+import type { Character, H3IdentityBindings, Location, Project, ReferenceAsset, ReferenceRole, VideoTaskApiConfig } from './types';
 import type { VideoGenerationDraft, VideoImageReference } from './videoGenerationTypes';
 import type { VideoReferenceUsageContext } from './videoReferenceUsage';
 import { videoReferenceSlotIndex } from './videoReferenceSlots';
@@ -323,6 +323,47 @@ const participationReferenceEdit = (
     text: ` Visual identity reference for ${label}: ${numbers.map((number) => `<Picture ${number}>`).join(', ')}.` };
 };
 
+/** Describe an explicitly selected image's use, never infer its subjects or
+ * rewrite shot actions. These are composition references in multi-image
+ * requests: a picker label does not prove first/last-frame conditioning in
+ * the remote workflow. Existing authored Picture uses remain authoritative. */
+const videoH3ReferenceUsageEdit = (
+  prompt: string, references: readonly VideoImageReference[], numbers: readonly number[],
+  language: 'zh' | 'en', authoredPictureNumbers: ReadonlySet<number>,
+): VideoPictureReferenceEdit | undefined => {
+  const masked = maskReferenceLiterals(prompt);
+  const uses: Partial<Record<ReferenceRole, readonly [string, string]>> = {
+    'first-frame': ['开场构图参考', 'opening composition reference'],
+    'last-frame': ['结束构图参考', 'ending composition reference'],
+    scene: ['场景空间与光照参考', 'environment layout and lighting reference'],
+    prop: ['道具外观参考', 'prop appearance reference'],
+    style: ['视觉风格参考', 'visual style reference'],
+    motion: ['动作姿态参考', 'action pose reference'],
+    composition: ['画面构图参考', 'composition reference'],
+    camera: ['摄影构图参考', 'camera composition reference'],
+    'clay-render': ['形体与空间结构参考', 'form and spatial structure reference'],
+    creative: ['视觉创意参考', 'visual concept reference'],
+  };
+  const selectedUses = references.flatMap((reference, index) => {
+    const number = numbers[index];
+    const use = uses[reference.role];
+    return number && use && !authoredPictureNumbers.has(number)
+      ? [`<Picture ${number}> ${use[language === 'zh' ? 0 : 1]}`] : [];
+  });
+  if (!selectedUses.length) return undefined;
+  const description = /^(?:integrated_multimodal_description|detailed_description):/mu.exec(masked);
+  if (!description) return undefined;
+  const sectionStart = description.index + description[0].length;
+  const nextSection = /^(?:overall_soundscape|non_diegetic_music):/mu.exec(masked.slice(sectionStart));
+  const sectionEnd = nextSection ? sectionStart + nextSection.index : masked.length;
+  const firstShot = /\[Shot[ \t]*1\]/u.exec(masked.slice(sectionStart, sectionEnd));
+  if (!firstShot) return undefined;
+  const start = sectionStart + firstShot.index + firstShot[0].length;
+  return { start, end: start, text: language === 'zh'
+    ? ` 本段参考图用途：${selectedUses.join('；')}。人物朝向与动作时序按正文推进，静态姿态不延长动作。`
+    : ` Reference uses for this clip: ${selectedUses.join('; ')}. Facing and action timing follow the written sequence; still poses do not prolong actions.` };
+};
+
 /** Pure serialization of explicit identity anchors. Warning-only failures
  * return the untouched text and never ask a model to regenerate a story. */
 export const prepareVideoH3ReferenceDraft = (
@@ -505,6 +546,15 @@ export const prepareVideoH3ReferenceDraft = (
   }
   let prompt = binding.basePrompt;
   for (const edit of edits.sort((a, b) => b.start - a.start)) prompt = prompt.slice(0, edit.start) + edit.text + prompt.slice(edit.end);
+  const language = binding.sourceLanguage || draft.source?.language;
+  // Missing old manifest entries cannot authorize a competing new mapping.
+  // With no old Picture tokens, however, the selected roles and proven input
+  // slots are sufficient; an empty historical manifest must not drop uses.
+  if (!pictureSourceIssues.length && plan.numbers && language) {
+    const authoredPictureNumbers = new Set([...pictureNumbers.values()].flatMap((numbers) => numbers || []));
+    const usage = videoH3ReferenceUsageEdit(prompt, draft.references, plan.numbers, language, authoredPictureNumbers);
+    if (usage) prompt = prompt.slice(0, usage.start) + usage.text + prompt.slice(usage.end);
+  }
   const changedKnownMapping = [...pictureNumbers].some(([number, mapped]) => mapped !== null && (mapped.length !== 1 || mapped[0] !== number));
   const issue = pictureSourceIssues.length && changedKnownMapping
     ? `旧 H3 图片清单仅能证明部分引用，本次已同步已知图片编号，但剩余 ${[...unresolvedPictureNumbers].map((number) => `<Picture ${number}>`).join('、')} 的来源尚未证明；不能将这份混合编号稿提交。请恢复原图片清单或明确更新本段参考图引用后重试。`

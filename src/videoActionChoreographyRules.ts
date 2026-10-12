@@ -126,9 +126,8 @@ export const LEGACY_VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE_V1_8_8 = [
   '保持 Seedance 自然语言章节、连续时间轴、全部确认起止时间、段长、镜数、实际 @Image/@Video/@Audio/@Clay Render 编号、具名声源和逐字原语言对白。图像身份与静态构图不替代动作，不虚构动作参考，不增加动作schema、规则附录、审核调用、参数调整、本地语义效验、拦截或重试。',
 ].join('\n\n');
 
-/** Compose the existing request contracts with concrete action instructions;
- * this does not read, validate or rewrite generated or saved prompt prose. */
-const VIDEO_ACTION_EVENT_UNDERSTANDING = [
+/** Exact 1.8.9 contracts remain recognizable in saved first-party presets. */
+const LEGACY_VIDEO_ACTION_EVENT_UNDERSTANDING_V1_8_9 = [
   LEGACY_VIDEO_ACTION_EVENT_UNDERSTANDING_V1_8_8,
   '关键动作不能只给方向和结果：在对应镜头写明起手时头部与视线关注的具名目标、胸部和髋部相对对手的朝向、发力侧与受力物位置，再写实际执行的踢、抛、挥击方式及结束姿态。踢物时说明物体位于人物哪一侧、哪只脚支撑、另一只脚以什么脚部接触物体、摆腿轨迹如何将它送向具名目标；按当前事件选择可执行的前踢、侧踢或原文已定踢法，不能由“踢飞”自行变成背对目标的后踢。头部、胸部、髋部与武器不必机械同向，但侧身、旋转、回头或背身动作须有当前事件依据并写出可见过程；原文明确的后踢、旋转踢及非人结构照原意保留。身体侧别按已确认姿态承接，缺失时只在获准新稿中安排，不固定所有角色使用同一只脚。',
   '先选定当前位移的实际方式，再把它写成可见身体过程：自主退步或侧移写清承重脚、重心转移与另一只脚换步；蹬地后跃写出屈膝与足部蹬地启动、身体离地、腾空时的躯干和腿部姿态、空中持械或招架、落地后的支撑与下一动作。只在本段实际发生的范围写这些阶段，正在腾空的段尾不补落地。被击退或倒飞说明已成立的受力来源与身体方向；滑退说明脚或其他真实部位接触地面、惯性来源和制动/转接状态。后退、后跃、倒飞、滑退和原设悬浮不是同一动作，不能统一写成身体贴地平移、脚不换步而全人滑走，或用一道影子替代移动人物。移动中保留与来袭轨迹对应的视线、上身防御姿态和武器位置，不能只让腿移动而招架凭空完成；连续招架从上一挡击偏转与握持状态继续。幻想飞行、瞬移或能量化按已设能力表达，不因高速自行增造。',
@@ -137,15 +136,15 @@ const VIDEO_ACTION_EVENT_UNDERSTANDING = [
   '动作时间与所写速度保持一致：接触、启动、飞行、避让与到达按同一事件的真实先后连续推进，切镜观察同一动作的当前阶段，不把物体停在空中等待下一镜的回应。没有已设悬浮、持续飞行或明确慢动作时，短距离后跃/倒飞不为填满镜长拖成数秒匀速空中平移，瞬时高速飞行也不延迟数秒后才发生避让或撞击。规划及获准新稿先按已有事件、完整对白和必要反应安排自然时间，空余用于剧情有依据的后续状态，不用延长飞行凑时；不加固定腾空秒数或距离公式，不删台词、不新增事件。固定时间边界已确认的翻译及保真阶段只保留原稿时间与动作，不自行重新排程。',
 ].join('\n\n');
 
-export const VIDEO_ACTION_CHOREOGRAPHY_RULE = LEGACY_VIDEO_ACTION_CHOREOGRAPHY_RULE_V1_8_8
-  .split(LEGACY_VIDEO_ACTION_EVENT_UNDERSTANDING_V1_8_8).join(VIDEO_ACTION_EVENT_UNDERSTANDING);
+export const LEGACY_VIDEO_ACTION_CHOREOGRAPHY_RULE_V1_8_9 = LEGACY_VIDEO_ACTION_CHOREOGRAPHY_RULE_V1_8_8
+  .split(LEGACY_VIDEO_ACTION_EVENT_UNDERSTANDING_V1_8_8).join(LEGACY_VIDEO_ACTION_EVENT_UNDERSTANDING_V1_8_9);
 
-export const VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE = [
+export const LEGACY_VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE_V1_8_9 = [
   LEGACY_VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE_V1_8_8,
   '保真当前正文已经写出的头部/视线目标、胸髋朝向、踢法与接触脚部、物体实体形态和擦身/遮挡后路径及终点、位移方式、起跳/腾空/落地阶段、承重换步与同步招架姿态、关键身体可见范围、速度变化和事件先后。本次只处理已确认稿时，不因新规则另选踢法、把滑退改成后跃、补落地、补物体撞击或添加原稿未写的动作细节；缺失信息留待明确授权的中文新稿或源头规划，不由参考更新、衔接或格式修复代为重编。',
 ].join('\n\n');
 
-export const VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE = [
+export const LEGACY_VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE_V1_8_9 = [
   LEGACY_VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE_V1_8_8.split('\n\n')[0]
     + '准确保留头部/视线目标、胸髋朝向、具体踢法、支撑与发力脚及接触脚部，实体物的可辨轮廓与材质、飞行高度、擦身一侧、遮挡后连续路径及已有终点；不得把有实体的物体译成shadow、energy streak或无形冲击，也不把从人物旁边掠过译成穿过身体。中文确为非实体或穿透能力时照实保持。',
   LEGACY_VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE_V1_8_8.split('\n\n')[1]
@@ -153,12 +152,60 @@ export const VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE = [
   LEGACY_VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE_V1_8_8.split('\n\n')[2],
 ].join('\n\n');
 
-export const VIDEO_ACTION_CAUSALITY_RULE = LEGACY_VIDEO_ACTION_CAUSALITY_RULE_V1_8_8
-  .split(LEGACY_VIDEO_ACTION_EVENT_UNDERSTANDING_V1_8_8).join(VIDEO_ACTION_EVENT_UNDERSTANDING);
+export const LEGACY_VIDEO_ACTION_CAUSALITY_RULE_V1_8_9 = LEGACY_VIDEO_ACTION_CAUSALITY_RULE_V1_8_8
+  .split(LEGACY_VIDEO_ACTION_EVENT_UNDERSTANDING_V1_8_8).join(LEGACY_VIDEO_ACTION_EVENT_UNDERSTANDING_V1_8_9);
+
+export const LEGACY_VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE_V1_8_9 = [
+  ...LEGACY_VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE_V1_8_9.split('\n\n').slice(0, 2),
+  LEGACY_VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE_V1_8_8.split('\n\n')[2],
+].join('\n\n');
+
+/** One event-first writing procedure, replacing the accumulated historical
+ * paragraphs above. It uses existing fields and adds no local semantic gate. */
+const VIDEO_ACTION_EVENT_UNDERSTANDING = [
+  '先按实际发生次数编排事件，再选择摄影覆盖。完整理解本段原剧情、当前用户正文和只读上下文，锁定具名行动者、对手或直接受力物、武器与能力、意图、已有招式与次数、先后、命中/落空、伤情和结果；用户已改正文时不恢复被删改的旧剧情。为每次实际发生的事件明确进入状态、施力或启动、接触/经过、结束状态，以及它与下一事件的承接或并行关系。同一事件只发生一次，其他镜头观察它当前的阶段，人物介绍、performance和result不能再发出一次执行命令。原文概述的同一次交战可补足必要的可见轨迹与身体行为，不能增加攻击次数、人物、武器、能力、伤情、胜负或另一事件；静止、蓄势、观察、普通交谈仍按剧情保留。',
+  '先建立世界中的行动轴线，再写每个相关动作的朝向。用稳定姓名明确谁面向谁、直接受力物在谁的哪一侧、目标相对地标的位置；在关键发力处写出头部/视线目标、胸部和髋部相对对手的朝向、支撑与发力肢体、接触部位及结束姿态。踢物写清“具名施力者 → 发力脚接触的实体物及部位 → 飞行路径 → 袭向的具名目标 → 对方回应及终点”；支撑脚踩地与另一脚踢中物体分开表达，接触前物体不自行启动。原文只写向对手踢物而未规定背身招式时，在新稿让目标位于施力者身前或侧前、视线保持目标，按物体位置选定可执行的前踢或侧踢，不能靠转髋或为露正脸变成背对目标后踢；原定背踢、回旋与非人结构照实保留。身体侧别、转身与视线变化由事件决定，镜头换位不把目标改成摄影机、观众、前方或门墙。',
+  '区分镜头覆盖时间与事件实际持续时间。先按原意确定短促接触、起跳/倒飞、飞行、避让/格挡、落地或下一状态的起止，再围绕事件安排镜界；切镜不是重新启动，也不是自动延长。必要时在现有action正文写明事件的起止时间或明确结束点，跨镜事件沿用同一连续时间轴，本镜相对时刻加startSec才是段内时刻。普通速度的短距离倒飞/抛物在一个短促时间窗内完成位移并进入剧情已有的后续状态，不能把“仍悬空”续写到每个镜尾凑满D；原文明确空中交锋则让追击与招架在同一次短促腾空过程中连续发生，保留已有幻想飞行、悬浮和明确慢动作，不擅自改成落地交战或固定现实物理秒数。段尾本来未完成的动作保留未完状态。',
+  '连续双方动作从上一招末态推进：双方从哪里怎样接近或退避，哪一肢体/武器沿什么轨迹攻向哪位具名对手的哪个部位，对方怎样挡、接、闪或承受，接触后双方的握持、重心、距离、轨迹如何变化，下一招怎样利用这些变化接续。自主退步、蹬地后跃、受力倒飞、接地滑退和原设悬浮分别写出启动来源、必要支撑/离地及转接过程，移动防守者保持与来袭相应的持械姿态。连击按原定次数逐次表达接触和衔接，不把同一起手、同一挥击、同一格挡复制成等间隔循环；变化来自真实招架偏转与余势，原定同向重复攻击仍保留但要交代如何回收或再次衔接。快速连击采用正常播放速度下短促连续的动作，不把“高速摄影”当作速度说明。原定慢动作、停顿与幻想速度照其范围保留。',
+  '直接受力物从接触到终点始终是同一个可辨实体，保留已知必要轮廓、体积和材质；模糊、火花、碎屑只是附随效果，不能代替人物或物体。格挡、命中和落空各保留原结果，物体被避开后从具名人物已说明的一侧掠过并沿原路径继续，不穿身、自行追踪或凭空消失；原设穿透、能量化与非接触施力除外。攻向对手时的墙地损坏属于同一武器轨迹的附带结果，不另排一段朝墙地空挥而让对手等待。多人动作分别写清主要交互、换目标与其他参与者同步状态，不删人、不限人数。',
+  '事件时序确定后，auto选择能完整辨认关系、接触、路径和回应的最少必要视角，每次切换对应确实新增的信息；可在同镜转移关注，不为每一招、每个表情或每个阶段新增At切点，也不按段长平均分镜。关键动作优先连续呈现，侧面或斜侧面关系镜应覆盖必要的头胸朝向、支撑/发力肢体、受力物和目标路径，局部特写不能遮没方向关系；并非每镜全身或一律固定机位。跟随保持真实交点可读，不与每次碰撞机械重复推拉、切脸或晃动。正常速度完成短动作后，镜头可继续覆盖原剧情有意义的回应、恢复与观察，不能延长腾空、重演动作或新增停顿来填满镜长。',
+  '完整原对白按自然发话区间、原语言和具名声源保留；追击、位移及不妨碍发音的动作可与对白并行，不把腾空维持到说完才结束，口部互斥动作仍错开。固定durationSec与exact镜数保持；只有源头规划或获准未确认新稿可重排镜界，auto不预设三镜或其他配额。只在本段事件范围安排，原有幻想逻辑和合理留白保留。参考图按实际身份、服装、场景或构图职责使用，不继承身份图面向观众的静态展示姿势，不虚构实际未接收的Picture/Video/Audio素材。',
+].join('\n\n');
+
+export const VIDEO_ACTION_CHOREOGRAPHY_RULE = [
+  'VIDEO_ACTION_CHOREOGRAPHY_V1：本次源头规划或获准中文新稿先完成事件时间与世界关系，再安排镜头；把结果落实在正文，不让视频模型自行猜测动作关系。',
+  VIDEO_ACTION_EVENT_UNDERSTANDING,
+  '规划沿用action、space、direction、performance、camera、transition、result：action写发生一次的事件与实际起止，result交代供下一镜继承的双方位置、姿态、运动阶段和武器状态，camera覆盖该事件。普通稿保留六字段，H3把对应内容写入各[Shot N]的现有正文，同步canonicalPrompt、H3及受影响时间字段。保持现有section、Subject/Picture/Video/Audio标签、S声源、<d>、完整对白和合法切点，不新增动作schema、combat_plan、action_sequence、negative_prompt、规则或审核附录，不增加独立调用、本地语义门禁、重试或收费视频测试，不自动改历史稿。',
+].join('\n\n');
+
+/** Supplied to the existing review request only. This requests observable
+ * evidence from the candidate, never an internal reasoning transcript. */
+export const VIDEO_ACTION_EVENT_REVIEW_RULE = [
+  'VIDEO_ACTION_EVENT_REVIEW_V1：在现有复核中读取候选稿实际写出的动作证据，不能凭reason、shotCountReason或候选自称“已核对”判断通过。仅对当前实际存在且影响辨认的定向发力、位移或连击检查对应证据，无此类动作不强加攻击、身体阶段或时窗。检查action/direction/performance/result/transition、canonicalPrompt及目标正文对应镜头：朝向证据必须说明具名目标与头胸髋关系；时间证据必须能定位同一事件的启动、接触/经过、结束或确实未完的段尾；连击证据必须能区分每次接触及前招末态怎样进入下一招。缺失或矛盾直接在本次授权字段内补正，不把证据换成“轴线一致、速度很快、连续攻防”等总结。',
+  '跨镜核对同一事件的完整跨度：统一本镜相对时刻与段内时刻，读取首次启动到真正结束之间的时间，检查后镜是否用“仍悬空/继续飞行”无因延长短促事件、是否每次从同一起手重演、是否误把一个镜长当作一次接触或位移的时长。对白、追击、招架与位移在允许并行处同时推进，原定落空/格挡/命中及幻想能力保持。再验证所写机位可见的头胸朝向、接触点、目标路径是否支持这条轴线，切镜是否引入必要信息而非重复覆盖；仅在auto有重排权限时合并多余镜头，exact保留镜数。',
+  '源头规划或taskAuthority=current-segment-staging-replan可在固定段长和当前镜数权限内修复未确认事件时窗与镜界，同时更新普通正文、H3和时间字段。taskAuthority=preserve-confirmed-schedule只在既定切点内落实本次获准的动作展开，不借此改确认镜界；已有稿保真、参考更新、衔接、格式修复和翻译只核对本次允许的保留或修复内容，不补写缺失事件、不重新导演、不自动修正历史排程。只返回现有交付格式的完整修正结果，不新增审核字段、事件表、推理链或独立模型调用。',
+].join('\n\n');
+
+export const VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE = [
+  LEGACY_VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE_V1_8_9,
+  '已有正文中同一事件的启动与结束、跨镜进度、动作实际持续时间、连击各次接触及末态承接分别保真，镜头时长不替代事件时长；已确认的并行关系不改成串行。只保留已写事实，不能借事件复核补造起止、收缩悬空时长或合并镜头。',
+].join('\n\n');
+
+export const VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE = [
+  ...LEGACY_VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE_V1_8_9.split('\n\n').slice(0, 2),
+  '镜界与事件起止分别保持，跨镜的同一次事件只延续当前进度，不能翻译成重新启动或持续占满新镜。逐次保留连击的接触、偏转、回收与承接以及已有并行关系，正常播放速度下快速动作不译成high-speed photography或slow motion；中文确实要求高速摄影或慢动作时忠实保留。缺失或不合理时序仍无权在译文中重编。',
+  LEGACY_VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE_V1_8_9.split('\n\n')[2],
+].join('\n\n');
+
+export const VIDEO_ACTION_CAUSALITY_RULE = [
+  'VIDEO_ACTION_CAUSALITY_V1：在本次获准规划或中文新稿内，先区分各次事件、世界关系和事件时窗，再选择摄影覆盖。',
+  VIDEO_ACTION_EVENT_UNDERSTANDING,
+  '将上述结果融入目标格式的现有正文和时间轴，保持固定段长、exact镜数、当前授权边界、完整原对白及真实参考标签；不新增动作schema或审核附录，不增加独立调用、本地语义门禁、重试或历史改写。',
+].join('\n\n');
 
 export const VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE = [
-  ...VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE.split('\n\n').slice(0, 2),
-  LEGACY_VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE_V1_8_8.split('\n\n')[2],
+  ...VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE.split('\n\n').slice(0, 3),
+  LEGACY_VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE_V1_8_9.split('\n\n')[2],
 ].join('\n\n');
 
 export type VideoActionChoreographyScope = 'planning' | 'generation' | 'existing' | 'translation' | 'format-only';
@@ -176,6 +223,9 @@ export const withVideoActionChoreographyScope = (systemPrompt: string, scope: Vi
   // prefix, which must never be stripped independently from a user addition.
   const firstPartyBlocks = [VIDEO_ACTION_CHOREOGRAPHY_RULE, VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE,
     VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE, VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE, VIDEO_ACTION_CAUSALITY_RULE,
+    LEGACY_VIDEO_ACTION_CHOREOGRAPHY_RULE_V1_8_9, LEGACY_VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE_V1_8_9,
+    LEGACY_VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE_V1_8_9, LEGACY_VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE_V1_8_9,
+    LEGACY_VIDEO_ACTION_CAUSALITY_RULE_V1_8_9,
     LEGACY_VIDEO_ACTION_CHOREOGRAPHY_RULE_V1_8_8, LEGACY_VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE_V1_8_8,
     LEGACY_VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE_V1_8_8, LEGACY_VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE_V1_8_8,
     LEGACY_VIDEO_ACTION_CAUSALITY_RULE_V1_8_8,

@@ -407,7 +407,7 @@ try {
     };
   })()`);
   if (
-    !updateLogSidebar.updateText.startsWith('更新日志')
+    !updateLogSidebar.updateText.startsWith('更新日志及项目地址')
     || !updateLogSidebar.errorText.startsWith('报错日志')
     || !updateLogSidebar.updateAboveError
     || !updateLogSidebar.immediatelyBeforeError
@@ -417,7 +417,7 @@ try {
   ) {
     throw new Error(`Sidebar log controls must be half-height and ordered correctly: ${JSON.stringify(updateLogSidebar)}`);
   }
-  await clickButton('更新日志', true);
+  await clickButton('更新日志及项目地址', true);
   await delay(100);
   const updateLog = await evaluate(`(() => {
     const dialog = document.querySelector('.update-log-modal[role="dialog"]');

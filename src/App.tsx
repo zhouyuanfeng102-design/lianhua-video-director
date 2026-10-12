@@ -9550,7 +9550,7 @@ export default function App() {
               title={`查看 v${packageInfo.version} 与近期版本更新`}
             >
               <BookOpen size={16} />
-              <span>更新日志</span>
+              <span>更新日志及项目地址</span>
               <span className="update-log-version">v{packageInfo.version}</span>
             </button>
             <div className={`runtime-error-log-slot ${runtimeErrorLog.length ? "has-errors" : ""}`}>

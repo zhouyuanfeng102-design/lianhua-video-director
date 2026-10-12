@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { requestShotRecommendation, requestStoryDurationEstimate } from '../src/services/llm';
 import { STORY_PACING_RULE, type StoryPacingContext } from '../src/storyPacing';
+import { VIDEO_ACTION_EVENT_REVIEW_RULE } from '../src/videoActionChoreographyRules';
 import type { StoryBeat } from '../src/storySegmentation';
 import type { TextApiConfig } from '../src/types';
 
@@ -177,6 +178,53 @@ test('compactness guidance leaves the existing explicit fixed segment grid untou
   assert.equal(dataOf('storyboard_planning_data').durationSec, 30);
   assert.match(systemOf(), /固定分段时长为 15 秒/u);
   assert.equal(calls.length, 1);
+});
+
+test('the existing review can shorten an event across cuts, reduce auto coverage and retain exact coverage', async () => {
+  const actionStory = '林舟格挡后被震退离地，陆青马上追上，在空中连续攻击三次，林舟分别挡住。二人落地后保持十余秒的警惕观察，没有再次出招，也没有对白。';
+  const actionShot = { ...shot, subject: '林舟与陆青', dialogue: '无', sound: '格挡撞击与足部落地声' };
+  const oldCuts = [0, 3.5, 7.5, 11.5, 15];
+  const staleShots = oldCuts.slice(0, -1).map((startSec, index) => ({ ...actionShot,
+    startSec, endSec: oldCuts[index + 1], sourceExcerpt: actionStory,
+    action: index < 3 ? '林舟持续悬空倒飞，陆青重复同向挥击。' : '二人落地。',
+    camera: '随每次碰撞重复推拉', result: index < 3 ? '林舟仍悬空，姿态保持不变' : '二人已落地',
+  }));
+  const eventAction = '本段0.4秒格挡接触，林舟受力离地；陆青同时追进，0.9、1.2、1.5秒完成原定三次接挡，后一招从上一挡击偏转继续；1.9秒二人落地。';
+  for (const requiredShotCount of [undefined, 4]) {
+    const corrected = requiredShotCount === undefined ? [
+      { ...actionShot, sourceExcerpt: actionStory, startSec: 0, endSec: 2.4, action: eventAction,
+        camera: '侧向关系镜连续覆盖追击和接触', result: '二人已落地，武器停在第三次接挡后的实际位置' },
+      { ...actionShot, sourceExcerpt: actionStory, startSec: 2.4, endSec: 15,
+        action: '二人保持落地后的关系，按原文持续警惕观察对方。', camera: '关系中景覆盖原定观察', result: '原定观察完成，无新增攻击' },
+    ] : [
+      { ...actionShot, sourceExcerpt: actionStory, startSec: 0, endSec: 1.0,
+        action: '本镜0.4秒格挡后林舟受力离地，陆青同时追进，0.9秒完成第一次接挡。', result: '首次挡击已使武器偏转，二人仍在此次短促腾空中' },
+      { ...actionShot, sourceExcerpt: actionStory, startSec: 1.0, endSec: 2.4,
+        action: '承接同一次腾空和武器偏转，本镜0.2、0.5秒完成第二、三次接挡，0.9秒二人落地。', result: '同一次离地事件已经结束，二人站稳' },
+      { ...actionShot, sourceExcerpt: actionStory, startSec: 2.4, endSec: 8,
+        action: '林舟保持落地后的姿态，按原文警惕观察。', result: '警惕观察持续，无再次攻击' },
+      { ...actionShot, sourceExcerpt: actionStory, startSec: 8, endSec: 15,
+        action: '陆青按原文警惕观察对方，没有重新出招。', result: '原定观察结束' },
+    ];
+    const original = { reason: '动作均已复核', shots: staleShots };
+    const reviewed = { reason: '短促腾空只执行一次，后续覆盖原定观察', shots: corrected };
+    const before = structuredClone({ original, reviewed });
+    installModel([original, reviewed]);
+    const result = await requestShotRecommendation(config, { durationSec: 15, workflow: 'action', pace: 'tight',
+      story: actionStory, ...(requiredShotCount === undefined ? {} : { requiredShotCount }) }, { reviewWithAi: true });
+    const review = dataOf('storyboard_ai_review_data', 1);
+    assert.ok(systemOf(1).includes(VIDEO_ACTION_EVENT_REVIEW_RULE));
+    assert.deepEqual(JSON.parse(review.originalStoryboardResponse as string), original,
+      'the reviewer sees the actual long-flight candidate, including its misleading self-review claim');
+    assert.equal((review.sourcePlanningAuthority as { shotCountAuthority: string }).shotCountAuthority,
+      requiredShotCount === undefined ? 'ai-auto' : 'user-fixed');
+    assert.equal(result.count, requiredShotCount ?? 2, 'only automatic coverage can adopt the reduced cut count');
+    assert.deepEqual(result.shots.map((value) => [value.startSec, value.endSec, value.action, value.result]),
+      corrected.map((value) => [value.startSec, value.endSec, value.action, value.result]),
+      'event endpoints and cross-cut progress survive materialization without stretching to fill shot duration');
+    assert.deepEqual({ original, reviewed }, before, 'saved/request source facts remain untouched');
+    assert.equal(calls.length, 2, 'event evidence is checked in the existing review, without another content gate');
+  }
 });
 
 test('source event progression and adaptive end-gap repair rules reach the existing planning, review and repair calls', async () => {

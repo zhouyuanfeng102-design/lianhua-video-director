@@ -27,7 +27,9 @@ export const VIDEO_WORLD_SPACE_CAMERA_RULE = [
   VIDEO_INTERACTION_RULES,
 ].join('\n\n');
 
-export const VIDEO_AI_SHOT_COVERAGE_RULE = '镜数与覆盖方式由你先分析剧情信息、动作因果、对白回应、空间变化、情绪转折和可用时长后决定，不默认三镜、不为凑固定镜数机械等分，也不因每句对白或每个人物都必须露正脸而切镜。规划阶段在用户指定镜数或允许范围内，选择足以清楚表现当前剧情的镜头数量；自动模式按需要决定镜数与镜长，在规划JSON已有reason（保存后对应shotCountReason）和每镜purpose/transition说明具体依据，不新增JSON属性，也不只复述“电影感”。分段时长窗口不等于一个镜头：15秒可以包含多个有叙事动机的镜头，先安排完整对白区间、换人交接和必要动作，再选择覆盖方式，不先把每段做成一镜后硬塞全部事件。多人轮流接话时明确当前具名发话者和口型可见性，可采用关系构图、说话者中近景或单镜内有动机的关注转移；观察重点须与当前话轮和动作一致，不让后面的亲吻提前成为开场正在执行的焦点。一个连续镜头可以成立，有必要的信息揭示、反应或空间建立也可以拆镜，不为镜头多样性制造事件。选择建立空间、双人关系、侧面行进、背后跟随、主观观察或反应近景等覆盖方式须服务当前情节，不把这些例子变成每段必做清单；对白不自动等于正面面部近景，正面跟拍也不被一律禁止。转换、H3复核和翻译阶段若镜数与时间边界已经确认，则保留既定镜数、顺序和切点，在现有镜头内改善调度，不借自主导演之名重切整段或裁掉对白。';
+export const LEGACY_VIDEO_AI_SHOT_COVERAGE_RULE_V1_8_9 = '镜数与覆盖方式由你先分析剧情信息、动作因果、对白回应、空间变化、情绪转折和可用时长后决定，不默认三镜、不为凑固定镜数机械等分，也不因每句对白或每个人物都必须露正脸而切镜。规划阶段在用户指定镜数或允许范围内，选择足以清楚表现当前剧情的镜头数量；自动模式按需要决定镜数与镜长，在规划JSON已有reason（保存后对应shotCountReason）和每镜purpose/transition说明具体依据，不新增JSON属性，也不只复述“电影感”。分段时长窗口不等于一个镜头：15秒可以包含多个有叙事动机的镜头，先安排完整对白区间、换人交接和必要动作，再选择覆盖方式，不先把每段做成一镜后硬塞全部事件。多人轮流接话时明确当前具名发话者和口型可见性，可采用关系构图、说话者中近景或单镜内有动机的关注转移；观察重点须与当前话轮和动作一致，不让后面的亲吻提前成为开场正在执行的焦点。一个连续镜头可以成立，有必要的信息揭示、反应或空间建立也可以拆镜，不为镜头多样性制造事件。选择建立空间、双人关系、侧面行进、背后跟随、主观观察或反应近景等覆盖方式须服务当前情节，不把这些例子变成每段必做清单；对白不自动等于正面面部近景，正面跟拍也不被一律禁止。转换、H3复核和翻译阶段若镜数与时间边界已经确认，则保留既定镜数、顺序和切点，在现有镜头内改善调度，不借自主导演之名重切整段或裁掉对白。';
+
+export const VIDEO_AI_SHOT_COVERAGE_RULE = '先排本段各事件的实际起止、完整对白与必要反应，再决定摄影覆盖。auto从能清楚表现全部因果的最少必要视角开始，每次新增切镜要对应具体的信息揭示、视点或空间变化；一个连续镜头已能看清接触、轨迹与回应时，优先在镜内调整关注，不为每个动作阶段、每次碰撞、每句对白或每张正脸各切一镜。不预设三镜或其他镜数，不按15秒等分，也不把每个事件拉长到铺满分配的镜头；确有信息变化时可增加镜头，用户exact镜数严格保持，不能借最少必要视角减少用户固定镜数。世界行动关系先于摄影：关键接触发生时让必要的身体朝向、发力部位、物体与目标路径可读，切换后从同一事件当前阶段和速度继续，不能为换景别重置起手或让受力人物等待下一镜。短促事件完成后可继续覆盖剧情已有的反应，镜头时长不等于事件持续时长。多人对白可以用关系构图、说话者近景或单镜关注交接，具名声源、口型与话轮对应；选择侧面、越肩、反打或正面跟拍均须有信息目的，原定慢节奏与有依据的停顿保留。规划JSON沿用reason（保存后对应shotCountReason）以及purpose/transition，说明哪些事件连续覆盖、为何确需切换，不用“已复核”或“电影感”替代依据。转换、H3复核、参考更新和翻译若镜界已经确认，保留既定镜数、顺序和切点，仅在本次明确授权范围内处理，不重切已确认稿或裁掉对白。';
 
 export const VIDEO_CAMERA_SELECTION_RULE = '先把本镜的具名双方、动作对象、进入状态、连续动作和退出状态落实在现有action/space/direction，再以观众需要看清的关系、接触和反应选择camera；角色动作安排先于镜头覆盖，不能把“朝镜头冲来”“正面挥砍”当作缺失对手关系的替代。用户实际选择的cameraTerms及具体运镜要求是真实创作输入，不是可忽略的装饰；结合剧情逐镜判断它们适合表达什么，明确的必选或指定镜头要求按其范围遵守，普通多选偏好在适用镜头中合理分配。选择了多个效果不等于每镜同时叠加所有推拉、环绕、摇移或手持；不能把术语整串复制到所有镜头，也不能把用户选择全部丢掉再声称自主决定。未选择运镜时，仍由你按本镜信息目标自主选择固定、跟随或其他适合的拍法，不能回退为每镜固定同一种默认跟拍。每镜在现有camera写出景别、必要的机位/视角、相对于交互轴线的侧别、固定或运动方式及其观察目标，在purpose或camera用简短可执行语句落实选择理由，transition交代有意义的切换依据。跟随打斗时写清摄影机沿哪条路径跟上谁和哪段交点，人物依剧情看向对手、武器或事件目标，镜头平移、推近或绕行本身不让人物转身、改换攻击目标或缩短世界距离。不只写“电影级运镜”“智能选择”或罗列术语；不强制正脸覆盖，不把角色身份参考图当作必须朝镜头表演的构图命令。';
 
@@ -54,13 +56,16 @@ export const VIDEO_ACTING_CAMERA_RULES = [
   VIDEO_ACTING_CAMERA_REVIEW_RULE,
 ].join('\n\n');
 
+export const LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_9 = VIDEO_ACTING_CAMERA_RULES
+  .split(VIDEO_AI_SHOT_COVERAGE_RULE).join(LEGACY_VIDEO_AI_SHOT_COVERAGE_RULE_V1_8_9);
+
 /** Exact 1.8.8 combinations share unchanged camera text, with the original
  * interaction contracts restored only for recognizing old request blocks. */
 export const LEGACY_VIDEO_WORLD_SPACE_CAMERA_RULE_V1_8_8 = VIDEO_WORLD_SPACE_CAMERA_RULE
   .split(VIDEO_INTERACTION_RULES).join(LEGACY_VIDEO_INTERACTION_RULES_V1_8_8);
 export const LEGACY_VIDEO_ACTING_CAMERA_TRANSLATION_RULE_V1_8_8 = VIDEO_ACTING_CAMERA_TRANSLATION_RULE
   .split(VIDEO_INTERACTION_TRANSLATION_RULE).join(LEGACY_VIDEO_INTERACTION_TRANSLATION_RULE_V1_8_8);
-export const LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_8 = VIDEO_ACTING_CAMERA_RULES
+export const LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_8 = LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_9
   .split(VIDEO_WORLD_SPACE_CAMERA_RULE).join(LEGACY_VIDEO_WORLD_SPACE_CAMERA_RULE_V1_8_8);
 
 /** Exact 1.8.1 first-party text, composed with legacy dependencies. */
@@ -121,6 +126,8 @@ export const stripLegacyVideoActingCameraRules = (value: string): string => {
     SPATIAL_CONTINUITY_REVIEW_RULE, SPATIAL_TRANSLATION_RULE, SPATIAL_COORDINATE_RULE,
   ];
   const legacyRules = [
+    LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_9,
+    LEGACY_VIDEO_AI_SHOT_COVERAGE_RULE_V1_8_9,
     LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_8,
     LEGACY_VIDEO_ACTING_CAMERA_TRANSLATION_RULE_V1_8_8,
     LEGACY_VIDEO_WORLD_SPACE_CAMERA_RULE_V1_8_8,
