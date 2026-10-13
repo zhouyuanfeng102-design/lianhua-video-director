@@ -26,6 +26,41 @@ check('explicit text input names are prompt candidates without reading their con
   assert.equal(classifyRunningHubVideoField(field('custom_field', 'prompt', '提示词相关内部配置')), 'other');
 });
 
+check('string-valued switches with text labels are not recommended as generic prompt inputs', () => {
+  const switchField = field('value', 'false', 'Other proportions (Text-to-image must be enabled)', '195');
+  const promptField = field('text', 'a synthetic scene', 'Prompt', '107');
+  assert.equal(classifyRunningHubVideoField(switchField), 'other');
+  assert.equal(classifyRunningHubVideoField(promptField), 'prompt');
+  assert.deepEqual(ids(selectRunningHubVideoFieldChoices([switchField, promptField], 'prompt')), ['107.text']);
+  for (const description of ['Text enable', 'Text enabled', 'Text disable', 'Text disabled', 'Text switch', '文本开关', '文本开启', '文本启用', '文本禁用']) {
+    for (const name of ['value', 'string', 'input', 'textValue', '内容']) {
+      assert.equal(classifyRunningHubVideoField(field(name, 'arbitrary cloud default', description)), 'other', `${name}: ${description}`);
+    }
+  }
+  for (const fieldType of ['BOOL', 'BOOLEAN', ' boolean ']) {
+    assert.equal(classifyRunningHubVideoField({ ...field('value', 'string default', 'Prompt'), fieldType }), 'other', fieldType);
+  }
+  for (const value of ['false', 'true']) {
+    assert.equal(classifyRunningHubVideoField(field('text', value, 'Prompt')), 'prompt', value);
+    assert.equal(classifyRunningHubVideoField(field('prompt', value)), 'prompt', value);
+    assert.equal(classifyRunningHubVideoField(field('value', value, 'Prompt')), 'prompt', 'a declared text label still ignores its body');
+  }
+});
+
+check('old switch bindings remain inspectable through advanced and retained choices without mutating metadata', () => {
+  const switchField = field('value', 'false', 'Other proportions (Text-to-image must be enabled)', '195');
+  const nodes = [switchField, field('text', 'synthetic prompt', 'Prompt', '107'), field('string', 'cloud string', undefined, '200')];
+  const catalog: RunningHubVideoNodeCatalogEntry[] = [{ nodeId: '200', fieldName: 'string', fieldValue: 'catalog value', description: 'Text input', fieldType: 'BOOLEAN' }];
+  nodes.forEach(Object.freeze); catalog.forEach(Object.freeze); Object.freeze(nodes); Object.freeze(catalog);
+  const before = JSON.stringify({ nodes, catalog });
+  assert.deepEqual(ids(selectRunningHubVideoFieldChoices(nodes, 'prompt', { catalog })), ['107.text']);
+  assert.deepEqual(ids(selectRunningHubVideoFieldChoices(nodes, 'prompt', { showAll: true, catalog })), ['195.value', '107.text', '200.string']);
+  const kept = selectRunningHubVideoFieldChoices(nodes, 'prompt', { keepBindings: [binding(switchField)], search: 'no matches', catalog });
+  assert.deepEqual(ids(kept), ['195.value']); assert.equal(kept[0].fieldValue, 'false');
+  assert.equal(kept[0].description, switchField.description);
+  assert.equal(JSON.stringify({ nodes, catalog }), before);
+});
+
 check('image slots are separated from text input suggestions', () => {
   for (const name of ['image', 'images', 'image1', 'image_1', 'first_image', 'reference_image', 'reference_image_2', 'first_frame', 'last_frame_image', 'imagePath', 'image_url', '参考图像', '尾帧']) {
     assert.equal(classifyRunningHubVideoField(field(name)), 'images', name);

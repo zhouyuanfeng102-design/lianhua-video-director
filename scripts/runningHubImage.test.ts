@@ -8,6 +8,8 @@ import type { ImageApiConfig } from '../src/types';
 import { requestImageModel } from '../src/services/llm';
 import { captureImageApiSnapshot, resolveImageApiForRegeneration } from '../src/imageApiSelection';
 import { normalizeRunningHubVideoConfig } from '../src/runningHubVideo';
+import { syncRunningHubImageSlots } from '../src/runningHubImageSlots';
+import { IMAGE_V3_BODY, IMAGE_V3_CURL } from './fixtures/runningHubImageV3';
 
 const body = { nodeInfoList: [
   { nodeId: '95', fieldName: 'value', fieldValue: '1464', description: '宽度' },
@@ -32,6 +34,42 @@ test('official AI-app import safely binds only business prompt and documented wi
   assert.equal(isRunningHubImageWorkflowReady(imported.workflow), true);
   assert.ok(!JSON.stringify(imported).includes('EXAMPLE_NOT_REAL'));
   assert.equal(curl.includes('EXAMPLE_NOT_REAL'), true, 'original input remains unchanged');
+});
+
+test('V3 API import binds its unique labelled text prompt; editor slots submit zero to three references without changing cloud options', () => {
+  const imported = importRunningHubImageWorkflow(IMAGE_V3_CURL, 'V3 三参考图');
+  assert.equal(imported.workflow.remoteId, '2079381758411587586');
+  assert.deepEqual(imported.workflow.mapping.prompt, [{ nodeId: '107', inputName: 'text' }]);
+  assert.deepEqual(imported.workflow.mapping.images, [], 'image slots are synchronized in the editor, not persisted during import');
+  const original = JSON.stringify(imported.workflow);
+  const prepared = syncRunningHubImageSlots(imported.workflow);
+  assert.deepEqual(prepared.mapping.images, ['181', '182', '183'].map(nodeId => ({ nodeId, inputName: 'image', role: 'general' })));
+  assert.equal(prepared.mapping.imageCount, undefined, 'Quantity/Piece is not an inferred reference-count input');
+  assert.equal(JSON.stringify(imported.workflow), original, 'editor preparation must not mutate the saved input');
+  const current: ImageApiConfig = { ...createInitialState().settings.imageApi, enabled: true, backend: 'runninghub',
+    baseUrl: imported.baseUrl!, apiKey: 'LOCAL_FAKE_KEY', runningHubWorkflows: [prepared], activeRunningHubWorkflowId: prepared.id };
+  const unchanged = JSON.stringify(current);
+  for (const count of [0, 1, 2, 3]) {
+    const uploadedImages = Array.from({ length: count }, (_, index) => `uploaded-v3-${index + 1}.png`);
+    const request = buildRunningHubImageRequest(current, { prompt: '本次图像正文', uploadedImages });
+    assert.equal(request.endpoint, 'https://www.runninghub.ai/openapi/v2/run/ai-app/2079381758411587586');
+    assert.deepEqual(request.body, { ...IMAGE_V3_BODY, usePersonalQueue: false, nodeInfoList: IMAGE_V3_BODY.nodeInfoList.map(node =>
+      node.nodeId === '107' ? { ...node, fieldValue: '本次图像正文' }
+        : ['181', '182', '183'].indexOf(node.nodeId) >= 0 && Number(node.nodeId) - 181 < count
+          ? { ...node, fieldValue: uploadedImages[Number(node.nodeId) - 181] } : node) });
+    assert.equal(JSON.stringify(current), unchanged);
+  }
+});
+
+test('text prompt auto-binding requires an explicit Prompt label and a unique candidate', () => {
+  const endpoint = 'https://www.runninghub.ai/openapi/v2/run/ai-app/2079381758411587586';
+  const imported = (nodeInfoList: unknown[]) => importRunningHubImageWorkflow(JSON.stringify({ endpoint, nodeInfoList })).workflow;
+  assert.deepEqual(imported([{ nodeId: '107', fieldName: 'text', fieldValue: '内部文本' }]).mapping.prompt, []);
+  assert.deepEqual(imported([{ nodeId: '107', fieldName: 'text', fieldValue: '内部文本', description: 'Text-to-image switch' }]).mapping.prompt, []);
+  const duplicate = [...IMAGE_V3_BODY.nodeInfoList, { nodeId: '108', fieldName: 'prompt', fieldValue: '另一个正文' }];
+  assert.deepEqual(imported(duplicate).mapping.prompt, []);
+  const literal = imported([{ nodeId: '107', fieldName: 'text', fieldValue: 'false', description: 'Prompt' }]);
+  assert.deepEqual(literal.mapping.prompt, [{ nodeId: '107', inputName: 'text' }]);
 });
 
 test('normalization preserves independent image library and null/deleted selections without fallback', () => {

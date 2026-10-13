@@ -22,6 +22,7 @@ const advancedName = /(?:^|_)(?:model|models|checkpoint|ckpt|lora|vae|clip|unet|
 const advancedCompactNames = new Set(['filenameprefix', 'fileprefix', 'outputprefix', 'outputpath', 'savepath', 'modelname', 'ckptname', 'loraname', 'samplername', 'schedulername', 'uploadimage', 'imageupload', 'imagemode', 'resizemethod']);
 const negativeLabel = /(?:^|_)(?:negative|neg)(?:_|$)|negativeprompt|negprompt|负向|反向|负面|反面/iu;
 const genericNames = new Set(['value', 'string', 'input', 'stringvalue', 'inputvalue', 'textvalue', 'textinput', '内容', '文本', '输入', '值']);
+const switchDescription = /开关|开启|启用|禁用|(?:^|_)(?:enable|enabled|disable|disabled|switch)(?:_|$)/iu;
 const promptName = /^(?:(?:positive|video|main|user|input|scene)_)?(?:prompt|text|caption)(?:_(?:text|prompt|input|g|l)|_?\d+)?$|^positive$|^(?:正向)?提示词(?:\d+)?$|^字幕$/iu;
 const imageName = /^(?:(?:input|reference|ref|first|last|start|end|source|init)_)?images?(?:_?(?:\d+)|_(?:path|url|file|input))?$|^(?:first|last|start|end)_frame(?:_image)?$|^(?:reference|input)_image_\d+$|^(?:参考)?(?:图片|图像)(?:\d+)?$|^[首尾]帧$/iu;
 const technicalDescription = /(?:^|_)(?:width|height|size|resolution|fps|seed|steps|duration|model|checkpoint|lora|sampler|scheduler|resize|interpolation|format)(?:_|$)|宽度|高度|尺寸|分辨率|帧率|种子|步数|时长|模型|采样器|调度器|缩放方式/iu;
@@ -64,6 +65,10 @@ export const classifyRunningHubVideoField = (
   if (promptName.test(name)) return 'prompt';
   if (imageName.test(name)) return 'images';
   if (!genericNames.has(flatName) || technicalDescription.test(description)) return 'other';
+  // Cloud switches may carry string values and mention "text-to-image" in
+  // their labels. Use declared metadata; never inspect a prompt's body.
+  if ((typeof node.fieldType === 'string' && /^(?:bool|boolean)$/iu.test(node.fieldType.trim()))
+    || switchDescription.test(description)) return 'other';
   if (promptDescription.test(description)) return 'prompt';
   if (imageDescription.test(description)) return 'images';
   return 'other';

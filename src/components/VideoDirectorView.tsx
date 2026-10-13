@@ -122,12 +122,14 @@ function VideoH3ReferenceNotices({ project, draft, warnings = [], onRepair, onRe
   };
   if (!issues.length && !information.length && !canRepair && !repairError) return null;
   return <div className="vd-h3-reference-notices" aria-label="人物图片绑定状态">
-    <div className="vd-h3-reference-actions">
+    {canRepair && <div className="vd-h3-reference-actions">
+      <button type="button" className="btn small" disabled={disabled || repairing} onClick={() => { void repair(); }} title="修复源稿的人物图片绑定；修复中文时会同步已有的有效英文，保留剧情、对白和镜头，不提交视频">{repairing ? '正在修复人物图片绑定…' : '修复人物图片绑定'}</button>
+    </div>}
+    <div className="vd-h3-reference-details">
       {issues.length > 0 && <details className="vd-h3-reference-issues"><summary>{issues.length} 项图片绑定提示 · 展开查看</summary><ul>{issues.map((warning) => <li key={warning}>{warning}</li>)}</ul></details>}
-      {canRepair && <button type="button" className="btn small" disabled={disabled || repairing} onClick={() => { void repair(); }} title="修复源稿的人物图片绑定；修复中文时会同步已有的有效英文，保留剧情、对白和镜头，不提交视频">{repairing ? '正在修复人物图片绑定…' : '修复人物图片绑定'}</button>}
+      {information.length > 0 && <details className="vd-h3-reference-info"><summary>RunningHub 图片槽映射说明</summary>{information.map((message) => <p key={message}>{message}</p>)}</details>}
+      {repairError && <p className="vd-error" role="alert">{repairError}</p>}
     </div>
-    {information.length > 0 && <details className="vd-h3-reference-info"><summary>RunningHub 图片槽映射说明</summary>{information.map((message) => <p key={message}>{message}</p>)}</details>}
-    {repairError && <p className="vd-error" role="alert">{repairError}</p>}
   </div>;
 }
 
@@ -1342,10 +1344,10 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
       </div>}
       {sourceIssue && <div className="vd-error" role="status"><span>{sourceIssue}</span>{onOpenPrompt && planPromptBoard && <button type="button" className="btn small" disabled={interactionLocked} onClick={openPlanPrompt}>打开提示词导演台更新</button>}</div>}
     </div>
-    <div id="vd-batch-settings-content" className="vd-batch-controls" hidden={settingsCollapsed}>
+    <div id="vd-batch-settings-content" className="vd-batch-controls" data-format-review={reviewFrozenFormats || reviewLegacyDraft || undefined} hidden={settingsCollapsed}>
       <div className="vd-batch-format-row">
-        <label className="field vd-batch-format"><span>批量提示词格式</span><select aria-label="批量提示词格式" value={promptFormat} disabled={interactionLocked} onChange={(event) => changePromptFormat(event.target.value as VideoPromptFormat)}><option value="h3">H3</option><option value="seedance">Seedance</option><option value="ordinary">普通稿</option></select></label>
-        <p className="field-hint">默认使用 H3 视频提示词；普通稿与 Seedance 可主动切换。可在每段单独选择；接口模型使用下方连接设置。{reviewFrozenFormats ? '当前复核失败任务的原始快照；切换格式后需重新选段。' : reviewLegacyDraft ? '当前保留旧草稿来源；切换格式后需重新选段。' : ''}</p>
+        <label className="field vd-batch-format" title="默认使用 H3 视频提示词；普通稿与 Seedance 可主动切换。可在每段单独选择；接口模型使用下方连接设置。"><span>批量提示词格式</span><select aria-label="批量提示词格式" aria-describedby="vd-batch-format-help" value={promptFormat} disabled={interactionLocked} onChange={(event) => changePromptFormat(event.target.value as VideoPromptFormat)}><option value="h3">H3</option><option value="seedance">Seedance</option><option value="ordinary">普通稿</option></select></label>
+        <p id="vd-batch-format-help" className="field-hint">默认使用 H3 视频提示词；普通稿与 Seedance 可主动切换。可在每段单独选择；接口模型使用下方连接设置。{reviewFrozenFormats ? '当前复核失败任务的原始快照；切换格式后需重新选段。' : reviewLegacyDraft ? '当前保留旧草稿来源；切换格式后需重新选段。' : ''}</p>
       </div>
       <div className="vd-batch-configuration">
         <label className="field"><span>全片计划</span><select aria-label="批量全片计划" value={planId} disabled={submitting} onChange={(event) => changePlan(event.target.value)}>{!plans.length && <option value="">当前章节尚无已分段计划</option>}{plans.map((item) => <option key={item.id} value={item.id}>{item.title || item.sourceStoryTitle} · {item.segments.length} 段{item.sourceStale ? ' · 原文已变化，需更新' : ''}</option>)}</select></label>
@@ -1365,7 +1367,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
         <label className="check-row vd-batch-regenerate-success"><input type="checkbox" aria-label="重新生成已成功项" checked={regenerateSucceeded} disabled={submitting} onChange={(event) => setRegeneration(event.target.checked)} />重新生成已成功项（保留原视频，可能再次收费）</label>
       </div>
       <VideoOutputParameters scope="batch" source={sourceKind} parameterText={parameterText} availableKeys={parameterKeys} {...videoOutputParameterPresentation(presentationApi, parameters.value)} requiresMapping={sourceKind !== 'api' || api?.provider === 'runninghub'} disabled={interactionLocked} onChange={updateParameter} onOpenSettings={onOpenSettings} />
-      <details className="vd-batch-advanced"><summary>高级公共参数 JSON · 不填写则保持接口 / 工作流原值</summary><div><p>显式填写的覆盖值用于本批次全部所选段；未填写的时长、种子与采样参数保持原值。每段参考图独立，不继承单段草稿选图。</p><textarea aria-label="批量公共参数 JSON" className="vd-code" rows={3} value={parameterText} disabled={submitting} onChange={(event) => setParameterText(event.target.value)} /></div></details>
+      <details className="vd-batch-advanced"><summary title="高级公共参数 JSON · 不填写则保持接口 / 工作流原值">高级公共参数 JSON · 不填写则保持接口 / 工作流原值</summary><div><p title="显式填写的覆盖值用于本批次全部所选段；未填写的时长、种子与采样参数保持原值。每段参考图独立，不继承单段草稿选图。">显式填写的覆盖值用于本批次全部所选段；未填写的时长、种子与采样参数保持原值。每段参考图独立，不继承单段草稿选图。</p><textarea aria-label="批量公共参数 JSON" className="vd-code" rows={3} value={parameterText} disabled={submitting} onChange={(event) => setParameterText(event.target.value)} /></div></details>
     </div>
     <div className="vd-batch-responsive-tabs" role="tablist" aria-label="批量工作区域"><button role="tab" aria-selected={compactPane === 'list'} className={`btn small ${compactPane === 'list' ? 'primary' : ''}`} onClick={() => setCompactPane('list')}>分段清单</button><button role="tab" aria-selected={compactPane === 'preview'} className={`btn small ${compactPane === 'preview' ? 'primary' : ''}`} onClick={() => setCompactPane('preview')}>当前段预览</button></div>
     <div className="vd-batch-columns" data-pane={compactPane}>

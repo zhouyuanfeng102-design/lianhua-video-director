@@ -4,13 +4,13 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的 Windows 桌面工作台。
 
-当前版本：**2.0.7** · 2026-10-13 · Windows 64 位 · 便携运行
+当前版本：**2.1.0** · 2026-10-13 · Windows 64 位 · 便携运行
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows 便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-2.0.7.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-2.1.0.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
 1. 下载上面的 EXE，放在可写入的文件夹里，双击运行，无需安装 Node.js。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
@@ -89,6 +89,12 @@
 2.0.6 收紧视频导演台“长剧情批量”的设置布局，将批量提示词格式改为行内选择，并缩小字体、控件和间距。取消批量设置内部滚动，格式、计划、连接、选段和生成参数可一起查看；修正普通稿误报 H3 图片绑定与“待关联”的提示。新建或未选格式的单段、批量及从提示词导演台重新选择的入口默认使用 H3，没有可用 H3 稿时明确提示；已有显式选择与失败任务快照保留。详见[本版更新说明](docs/releases/发布说明-2.0.6.md)。
 
 2.0.7 收紧视频导演台“长剧情批量”的分段卡片，收起及展开分段设置时的常规高度约缩至原来一半；重新排列格式、语言、参考图衔接及音频入口，字体随可用空间缩小，让同屏显示更多片段。详见[本版更新说明](docs/releases/发布说明-2.0.7.md)。
+
+2.0.8 将视频导演台“长剧情批量”的批量设置高度约缩至原来一半，整合提示词格式与连接配置，生成参数与公共 JSON 紧凑并排，字号随可用空间缩小。右侧预览底部完整显示“修复人物图片绑定”和“本段图片应用到全部已选”按钮，长提示词及绑定详情按可用空间显示，保留原有操作行为。详见[本版更新说明](docs/releases/发布说明-2.0.8.md)。
+
+2.0.9 修正 RunningHub 图片工作流的字段识别：导入应用 `2079381758411587586` 的 API 资料后，工作流草稿自动同步 3 个真实参考图片槽；唯一且说明明确为 Prompt 的文本字段可识别为提示词入口，通用 `value` 开关不再误推荐为提示词。新导入使用 `107.text`，保留 `195.value` 的 `false` 与 `191.value`（Quantity/Piece）原值；已有显式绑定保留。实际验证和交付结果见[本版更新说明](docs/releases/发布说明-2.0.9.md)。
+
+2.1.0 为 RunningHub 图片及视频工作流的参考图片槽增加删除操作，同时清理仅此槽使用的本地请求字段；保存并重新打开后不会被自动加回，其余图片槽顺序、映射和参数保留。针对性删除检查、隔离界面检查及便携包打包通过，详见[本版更新说明](docs/releases/发布说明-2.1.0.md)。
 
 ## 从源码运行
 

@@ -104,7 +104,7 @@ async function assertReadOnlySlots(expectedFields, _expectedRoles = [], recovery
     assert.equal(await field.evaluate((element) => element.tagName), 'CODE', 'the node binding is read-only text, not a select/input');
     assert.equal(await field.innerText(), expected);
     assert.equal(await page.getByLabel(`云端图片槽 ${offset + 1} 用途`, { exact: true }).count(), 0, 'slot purpose is configured per video segment, not in API settings');
-    assert.equal(await slots().nth(offset).locator('button').count(), recoverySlots.includes(offset + 1) ? 1 : 0, 'only an invalid legacy binding may expose its explicit recovery control');
+    assert.equal(await slots().nth(offset).locator('button').count(), 1, 'each local image slot exposes its deletion or legacy recovery control');
   }
   assert.equal(await slots().locator('input,textarea').count(), 0, 'auto-listed node/field bindings are not editable controls');
 }

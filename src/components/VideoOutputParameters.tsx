@@ -41,31 +41,33 @@ export function VideoOutputParameters({ scope, source, parameterText, availableK
     const optionLabel = (option: string) => `${option}${unit}${control?.optionLabels?.[option] ? `（${control.optionLabels[option]}）` : ''}`;
     const defaultOption = options.find((option) => option === defaultValue || fixedMpChoices && defaultValue.trim() !== '' && Number(option) === Number(defaultValue));
     const defaultLabel = defaultValue ? `使用默认值（${optionLabel(defaultOption ?? defaultValue)}）` : '使用默认值';
+    const compactDefaultValue = key === 'aspect_ratio' ? defaultValue.match(/\d+(?:\.\d+)?\s*[:：]\s*\d+(?:\.\d+)?/u)?.[0] || defaultValue : defaultValue;
+    const displayedDefaultLabel = scope === 'batch' ? defaultValue ? `默认：${compactDefaultValue}${unit}` : '默认' : defaultLabel;
+    const controlHint = (unit ? fixedMpChoices ? 'MP 为百万像素；按工作流档位选择。' : 'MP 为百万像素；可直接输入小数。' : '可选择选项或直接输入。')
+      + ((control?.min !== undefined || control?.max !== undefined) ? ` 范围 ${control.min ?? '不限'}–${control.max ?? '不限'}${unit}。` : '')
+      + (control?.step !== undefined ? ` 步长 ${control.step}。` : '')
+      + (control?.optionLabels && control.optionLabelAspectRatio ? ` 尺寸按 ${control.optionLabelAspectRatio}，二采后以成片为准。` : '');
+    const controlTitle = `${hasValue(key) ? value : defaultLabel} ${controlHint}`;
     return <div className="field vop-field" key={key}>
     <div className="vop-field-label"><span>{unit ? '像素（MP）' : label}</span>{hasValue(key) && <button type="button" className="vop-clear" aria-label={`清除${prefix}${ariaLabel}覆盖`} disabled={disabled || Boolean(parsed.issue)} onClick={() => onChange(key, '')}>清除该覆盖</button>}</div>
     <div className="vop-value-editor">
-      {options.length > 0 && <select aria-label={`${prefix}${ariaLabel}选项`} disabled={locked}
+      {options.length > 0 && <select aria-label={`${prefix}${ariaLabel}选项`} title={controlTitle} disabled={locked}
         value={!hasValue(key) ? '__default__' : selectedOption !== undefined ? `value:${selectedOption}` : '__custom__'}
         onChange={(event) => {
           if (event.target.value === '__default__') onChange(key, '');
           else if (event.target.value.startsWith('value:') && options.includes(event.target.value.slice(6))) onChange(key, event.target.value.slice(6));
         }}>
-        <option value="__default__">{defaultLabel}</option>
+        <option value="__default__">{displayedDefaultLabel}</option>
         {options.map((option) => <option key={option} value={`value:${option}`}>{optionLabel(option)}</option>)}
-        <option value="__custom__" disabled>{fixedMpChoices ? `已保存原值：${value}${unit}` : '自定义值（在下方输入）'}</option>
+        <option value="__custom__" disabled>{fixedMpChoices ? `已保存原值：${value}${unit}` : scope === 'batch' ? '自定义值' : '自定义值（在下方输入）'}</option>
       </select>}
-      {!fixedMpChoices && <input aria-label={`${prefix}${ariaLabel}`} type={key === 'steps' && (!control || control.kind === 'number') ? 'number' : 'text'} inputMode={control?.kind === 'number' || key !== 'resolution' ? 'decimal' : 'text'}
+      {!fixedMpChoices && <input aria-label={`${prefix}${ariaLabel}`} title={controlTitle} type={key === 'steps' && (!control || control.kind === 'number') ? 'number' : 'text'} inputMode={control?.kind === 'number' || key !== 'resolution' ? 'decimal' : 'text'}
         min={key === 'steps' ? control?.min : undefined} max={key === 'steps' ? control?.max : undefined} step={key === 'steps' ? control?.step ?? 'any' : undefined}
         value={value} disabled={locked}
-        placeholder={supported(key) ? defaultValue ? defaultLabel : '保留原值' : requiresMapping ? source === 'api' ? '模板未配置此参数' : '请先绑定节点' : '使用高级 JSON'}
+        placeholder={supported(key) ? scope === 'batch' && options.length > 0 ? '自定义' : defaultValue ? displayedDefaultLabel : '保留原值' : requiresMapping ? source === 'api' ? '模板未配置此参数' : '请先绑定节点' : '使用高级 JSON'}
         onChange={(event) => onChange(key, event.target.value)} />}
-      {(unit || control?.min !== undefined || control?.max !== undefined || options.length > 0) && <small className="vop-control-hint">
-        {unit ? fixedMpChoices ? 'MP 为百万像素；按工作流档位选择。' : 'MP 为百万像素；可直接输入小数。' : '可选择选项或直接输入。'}
-        {(control?.min !== undefined || control?.max !== undefined) && ` 范围 ${control.min ?? '不限'}–${control.max ?? '不限'}${unit}。`}
-        {control?.step !== undefined && ` 步长 ${control.step}。`}
-        {control?.optionLabels && control.optionLabelAspectRatio && ` 尺寸按 ${control.optionLabelAspectRatio}，二采后以成片为准。`}
-      </small>}
-      {key === 'steps' && defaultValue && supported(key) && <small className="vop-control-hint">工作流默认 {defaultValue} 步；留空使用默认值。</small>}
+      {(unit || control?.min !== undefined || control?.max !== undefined || options.length > 0) && <small className="vop-control-hint" title={controlHint}>{controlHint}</small>}
+      {key === 'steps' && defaultValue && supported(key) && <small className="vop-control-hint vop-default-hint">工作流默认 {defaultValue} 步；留空使用默认值。</small>}
     </div>
     {requiresMapping && hasValue(key) && !available.has(key) && <small className="vop-stale">{source === 'api' ? '接口模板未提供此参数，请清除或修改模板' : '当前工作流未绑定，请清除或重新绑定'}</small>}
   </div>;

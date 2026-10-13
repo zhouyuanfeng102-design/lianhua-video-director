@@ -1,5 +1,5 @@
 import type { RunningHubVideoInputBinding, RunningHubVideoNodeInfo, RunningHubVideoWorkflow } from './runningHubVideoTypes';
-import { ensureRunningHubVideoRequestNode, readRunningHubVideoRequest } from './runningHubVideo';
+import { ensureRunningHubVideoRequestNode, readRunningHubVideoRequest, removeRunningHubVideoRequestNode } from './runningHubVideo';
 import { listRunningHubVideoNodes } from './runningHubVideoNodes';
 import { selectRunningHubVideoFieldChoices } from './runningHubVideoFieldChoices';
 import { resolveRunningHubVideoImageProtocol } from './runningHubImageProtocol';
@@ -34,6 +34,22 @@ export const bindRunningHubImageCount = (
     .find((entry) => entry.nodeId === binding.nodeId && entry.fieldName === binding.inputName);
   if (!node || !isRunningHubImageCountField(node)) throw new Error('图片数量请绑定实际的非负整数字段或整数字符串字段。');
   return { ...workflow, mapping, requestTemplate: ensureRunningHubVideoRequestNode(workflow.requestTemplate, node) };
+};
+
+/** Delete a local slot and its unused field so editor synchronization cannot recreate it. */
+export const removeRunningHubImageSlot = (workflow: RunningHubVideoWorkflow, binding: RunningHubVideoInputBinding): RunningHubVideoWorkflow => {
+  const key = keyOf(binding.nodeId, binding.inputName);
+  const matches = (entry: RunningHubVideoInputBinding) => keyOf(entry.nodeId, entry.inputName) === key;
+  if (!workflow.mapping.images.some(matches)) return workflow;
+  const mapping = { ...workflow.mapping, images: workflow.mapping.images.filter((entry) => !matches(entry)) };
+  const imageCount = resolveRunningHubVideoImageProtocol(workflow).imageCount;
+  const shared = [...mapping.prompt, ...(mapping.audios || []), ...Object.values(mapping.parameters || {}), ...(imageCount ? [imageCount] : [])].some(matches);
+  if (shared) return { ...workflow, mapping };
+  return { ...workflow, mapping,
+    requestTemplate: removeRunningHubVideoRequestNode(workflow.requestTemplate, binding),
+    ...(workflow.nodeCatalog ? { nodeCatalog: workflow.nodeCatalog.filter((node) => keyOf(node.nodeId, node.fieldName) !== key) } : {}),
+    ...(workflow.fieldControls ? { fieldControls: Object.fromEntries(Object.entries(workflow.fieldControls).filter(([fieldKey]) => fieldKey !== key)) } : {}),
+  };
 };
 
 /** Editor-only synchronization. Loading the application or compiling a saved

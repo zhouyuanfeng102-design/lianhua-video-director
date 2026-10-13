@@ -18,11 +18,14 @@ import * as tailCharacters from '../src/videoTailCharacters';
 import * as h3ReferenceBinding from '../src/videoH3ReferenceBinding';
 import * as referenceUsage from '../src/videoReferenceUsage';
 import * as referenceSlots from '../src/videoReferenceSlots';
+import * as audioReferences from '../src/videoAudioReferences';
 import * as errorDiagnostics from '../src/errorDiagnostics';
 import * as videoTaskErrorDiagnostics from '../src/videoTaskErrorDiagnostics';
 import { buildVideoApiBody } from '../src/videoGenerationApi';
 import { bindComfyVideoWorkflow } from '../src/comfyuiVideo';
 import { createInitialState } from '../src/storage';
+import { buildOfficialH3SourceFingerprint } from '../src/officialPrompt';
+import { officialH3ContextForStoryboard } from '../src/officialH3Context';
 import type { AppSettings, Project, Storyboard, VideoGenerationTask, VideoSequencePlan } from '../src/types';
 import type { VideoBatchStartInput, VideoGenerationDraft } from '../src/videoGenerationTypes';
 import type { VideoOutputParametersProps } from '../src/components/VideoOutputParameters';
@@ -240,6 +243,10 @@ function harness(kind: 'single' | 'batch', initial = fixture(), extras: Props = 
     './TaskErrorDetails': { TaskErrorDetails: () => null },
     './ReferenceImageName': { ReferenceImageName: ({ name }: { name: string }) => React.createElement('strong', null, name) },
     './VideoExecutionControls': { VideoExecutionControls: () => null },
+    // These editors are unrelated to output parameter callbacks; their JSX
+    // props remain inspectable without running their own hooks or effects.
+    './VideoAudioReferences': { ProjectVoicePresetEditor: () => null, VideoAudioReferenceEditor: () => null },
+    '../videoAudioReferences': audioReferences,
     '../videoResultRecovery': {}, '../comfyuiVideo': {}, '../videoGenerationSource': source, '../runningHubVideo': runningHub, '../runningHubPromptPictures': runningHubPromptPictures,
     '../videoOutputParameters': output, './VideoOutputParameters': { VideoOutputParameters: Output }, '../videoRuntimeStore': {},
     '../videoProvenance': provenance, '../videoDirectorReferences': references, '../videoDirectorDraft': drafts,
@@ -284,6 +291,14 @@ function harness(kind: 'single' | 'batch', initial = fixture(), extras: Props = 
   };
 }
 
+// These parameter fixtures contain ordinary drafts. Select their actual format
+// through the real callback rather than relying on the application's old default.
+const ordinaryBatchHarness = (initial = fixture(), extras: Props = {}) => {
+  const h = harness('batch', initial, extras);
+  h.change('select', '批量提示词格式', 'ordinary');
+  return h;
+};
+
 const batchSettingsRegion = (h: ReturnType<typeof harness>, collapsed: boolean) => {
   const toggle = h.required('button', collapsed ? '展开批量设置' : '收起批量设置');
   assert.equal(toggle.props.type, 'button', 'a native non-submit button supports keyboard activation');
@@ -316,7 +331,7 @@ const applyBatchReferences = (h: ReturnType<typeof harness>, segment: number, re
 test('批量折叠默认展开，所有配置保持挂载，折叠外的选段和预览仍可操作', () => {
   const initial = fixture();
   initial.project.assets.push({ id: 'fold-image', name: '折叠测试参考图', type: 'reference', role: 'style', mediaType: 'image', tags: [], createdAt: 1, updatedAt: 1 });
-  const originalProject = JSON.stringify(initial.project); const h = harness('batch', initial);
+  const originalProject = JSON.stringify(initial.project); const h = ordinaryBatchHarness(initial);
   batchSettingsRegion(h, false);
   h.click('全选中文'); h.change('textarea', '批量公共参数 JSON', '{"seed":"9223372036854775807","custom":{"keep":true}}');
   h.change('input', '批量视频时长（秒）', '8'); h.change('input', '批量视频分辨率', '1080P');
@@ -355,7 +370,7 @@ test('批量折叠默认展开，所有配置保持挂载，折叠外的选段�
 test('收起设置后仍可确认批量提交，参数、勾选和各段独立参考图不丢失', () => {
   const initial = fixture();
   initial.project.assets.push({ id: 'fold-submit-image', name: '首帧', type: 'first-frame', role: 'first-frame', mediaType: 'image', tags: [], createdAt: 1, updatedAt: 1 });
-  const h = harness('batch', initial);
+  const h = ordinaryBatchHarness(initial);
   h.click('全选中文'); h.change('textarea', '批量公共参数 JSON', '{"seed":42,"custom":{"keep":"原值"}}');
   h.change('input', '批量视频时长（秒）', '6'); h.change('input', '批量视频分辨率', '720P');
   applyBatchReferences(h, 1, [{ assetId: 'fold-submit-image', role: 'first-frame' }]);
@@ -370,7 +385,7 @@ test('收起设置后仍可确认批量提交，参数、勾选和各段独立�
 });
 
 test('错误JSON收起后仍有可见修复提醒，原文本不丢且不能绕过提交检查', () => {
-  const h = harness('batch'); h.click('全选中文'); h.change('textarea', '批量公共参数 JSON', '{"seed":');
+  const h = ordinaryBatchHarness(); h.click('全选中文'); h.change('textarea', '批量公共参数 JSON', '{"seed":');
   h.click('收起批量设置'); batchSettingsRegion(h, true);
   const summary = visibleTextOf(h.required('div', '当前批量设置摘要'));
   assert.match(summary, /JSON/u); assert.match(summary, /展开/u); assert.match(summary, /原文本已保留/u);
@@ -405,7 +420,7 @@ test('单段与批量明确提交也拒绝裸长数，不绕过读取保护', ()
   const text = '{"nested":{"seed":9223372036854775807},"duration":8}';
   const single = harness('single'); single.change('textarea', '本次生成使用的完整提示词', '原文'); single.change('textarea', '本次额外参数 JSON', text); single.click('生成视频');
   assert.equal(single.starts.length, 0); assert.equal(single.required('textarea', '本次额外参数 JSON').props.value, text); assert.match(single.text(), /安全精度/u); single.dispose();
-  const multi = harness('batch'); multi.click('全选中文'); multi.change('textarea', '批量公共参数 JSON', text);
+  const multi = ordinaryBatchHarness(); multi.click('全选中文'); multi.change('textarea', '批量公共参数 JSON', text);
   assert.equal(multi.required('button', '检查并生成 2 段视频').props.disabled, true);
   multi.required('button', '检查并生成 2 段视频').props.onClick(); multi.render(); assert.equal(multi.batches.length, 0); assert.match(multi.text(), /安全精度/u); multi.dispose();
 });
@@ -455,10 +470,17 @@ test('单段冻结云端重试使用原映射能力，不受当前工作流解�
   assert.equal(saved.videoJob!.snapshot.draft.parameters.duration, 8); h.dispose();
 });
 test('批量真实组件：逐段参数覆盖与确认摘要一致，不改原稿和原计划时长', () => {
-  const initial = fixture(); const original = JSON.stringify(initial.project); const h = harness('batch', initial);
+  const initial = fixture(); const original = JSON.stringify(initial.project); const h = ordinaryBatchHarness(initial);
   h.change('textarea', '批量公共参数 JSON', '{"seed":42,"custom":"keep"}'); h.change('input', '批量视频时长（秒）', '8'); h.change('input', '批量视频分辨率', '1080P');
-  h.click('全选中文'); assert.match(h.text(), /原分段计划 10 秒/u); assert.match(h.text(), /请求时长 8 秒 · 请求分辨率 1080P/u);
-  h.click('检查并生成 2 段视频'); assert.match(h.text(), /请求时长 8 秒 · 请求分辨率 1080P/u);
+  h.click('全选中文');
+  const rows = h.nodes().filter((node) => String(node.props.className || '').split(' ').includes('vd-batch-row'));
+  assert.equal(rows.length, 2);
+  for (const row of rows) {
+    const status = nodesOf(row).find((node) => node.props.className === 'vd-batch-row-main');
+    assert.ok(status); assert.match(textOf(status), /10 秒 · 尚未生成/u);
+  }
+  assert.match(h.text(), /请求时长 8 秒 · 请求分辨率 1080P/u);
+  h.click('检查并生成 2 段视频'); assert.match(h.text(), /原分段计划 10 秒/u); assert.match(h.text(), /请求时长 8 秒 · 请求分辨率 1080P/u);
   assert.equal(h.batches.length, 0); h.change('input', '确认批量生成费用', true); h.click('确认生成 2 段');
   assert.equal(h.batches.length, 1); assert.equal(h.batches[0].items.length, 2);
   for (const item of h.batches[0].items) { assert.deepEqual(item.draft.parameters, { seed: 42, custom: 'keep', duration: 8, resolution: '1080P' }); assert.match(item.draft.prompt, /保持原文/u); }
@@ -466,7 +488,7 @@ test('批量真实组件：逐段参数覆盖与确认摘要一致，不改原�
 });
 test('单段与批量初次继承后独立，快捷参数不会反向改写单段', () => {
   const initial = fixture(); const single = harness('single', initial); single.change('input', '本次视频时长（秒）', '8');
-  single.click('长剧情批量'); const pane = harness('batch', initial, { initialParameterText: single.required('textarea', '本次额外参数 JSON').props.value });
+  single.click('长剧情批量'); const pane = ordinaryBatchHarness(initial, { initialParameterText: single.required('textarea', '本次额外参数 JSON').props.value });
   assert.equal(pane.required('input', '批量视频时长（秒）').props.value, '8'); pane.change('input', '批量视频时长（秒）', '6');
   assert.equal(single.required('input', '本次视频时长（秒）').props.value, '8'); single.dispose(); pane.dispose();
 });
@@ -484,7 +506,7 @@ test('冻结失败批次折叠往返不转换成公共覆盖，确认仍保留�
   const baseline = h.required('textarea', '批量公共参数 JSON').props.value;
   h.click('收起批量设置'); batchSettingsRegion(h, true);
   const summary = visibleTextOf(h.required('div', '当前批量设置摘要'));
-  assert.match(summary, /失败重试项保留各段原参数；时长与分辨率请在确认清单逐段核对。/u);
+  assert.match(summary, /失败重试项保留各段原参数；生成参数请在确认清单逐段核对。/u);
   assert.doesNotMatch(summary, /请求时长 8 秒|请求分辨率 1080P/u, 'the first retry item must not be presented as a batch-wide override');
   h.click('展开批量设置'); batchSettingsRegion(h, false);
   h.click('收起批量设置'); batchSettingsRegion(h, true);
@@ -540,7 +562,10 @@ test('H3真实组件显示、复制、提交同一份引用绑定稿，移除和
   const prompt = `integrated_multimodal_description:\n[Shot 1] ${anchor} 本段1–4秒：合成人物 (S1) says <d>[Chinese] 原话保持不变。</d>\noverall_soundscape: N/A\nnon_diegetic_music: N/A`;
   initial.project.characters = [{ id: 'person', name: '合成人物', assetIds: ['identity'], gender: '', race: '人类', apparentAge: '成年', appearance: '', outfit: '', signatureProps: '', personality: '', motionHabits: '', anchor: '', negativeContinuity: '' }];
   initial.project.assets = [{ id: 'identity', name: '身份图', type: 'character', role: 'character', sourceEntityId: 'person', sourceEntityKind: 'character', tags: [], createdAt: 1, updatedAt: 1 }];
-  Object.assign(board, { officialPromptZh: prompt, finalPrompt: prompt, globalReferenceAssetIds: ['identity'], h3IdentityBindings: { version: 1, characters: [{ characterId: 'person', name: '合成人物', speakerToken: '(S1)', referenceAnchor: anchor }] } });
+  Object.assign(board, { targetModelId: 'minimax-h3', officialPromptZh: prompt, finalPrompt: prompt, globalReferenceAssetIds: ['identity'],
+    targetOutput: { targetId: 'minimax-h3', prompt, parameters: {}, referenceManifest: [], warnings: [], generatedAt: 1 },
+    h3IdentityBindings: { version: 1, characters: [{ characterId: 'person', name: '合成人物', speakerToken: '(S1)', referenceAnchor: anchor }] } });
+  board.officialPromptSource = buildOfficialH3SourceFingerprint(board, officialH3ContextForStoryboard(initial.project, board));
   const h = harness('single', initial, { launchRequest: { id: `h3-copy-${initial.project.id}`, storyboardId: board.id } });
   const displayed = h.required('textarea', '本次生成使用的完整提示词').props.value;
   assert.match(displayed, /合成人物 \(S1\): <Picture 1>/u);
@@ -638,7 +663,7 @@ test('MP真实控件固定0.1档位并显示像素，历史非档位值只展示
 
 test('单段与批量MP/720P互切隔离草稿，恢复原覆盖，默认不覆盖请求', () => {
   for (const mode of ['single', 'batch'] as const) {
-    const initial = mpFixture(); const h = harness(mode, initial); const prefix = mode === 'single' ? '本次' : '批量';
+    const initial = mpFixture(); const h = mode === 'batch' ? ordinaryBatchHarness(initial) : harness(mode, initial); const prefix = mode === 'single' ? '本次' : '批量';
     const workflowLabel = mode === 'single' ? 'RunningHub 云端工作流' : '批量 RunningHub 云端工作流';
     const jsonLabel = mode === 'single' ? '本次额外参数 JSON' : '批量公共参数 JSON';
     h.change('select', `${prefix}视频分辨率选项`, 'value:1.0');
@@ -668,7 +693,7 @@ test('单段和批量比例覆盖即时隐藏不匹配尺寸，切回16:9恢复�
   for (const mode of ['single', 'batch'] as const) {
     const initial = mpFixture(); const workflow = initial.settings.runningHubVideo!.workflows[0];
     workflow.mapping.parameters!.aspect = { nodeId: 'mp', inputName: 'aspect_ratio' };
-    const h = harness(mode, initial); const prefix = mode === 'single' ? '本次' : '批量';
+    const h = mode === 'batch' ? ordinaryBatchHarness(initial) : harness(mode, initial); const prefix = mode === 'single' ? '本次' : '批量';
     const jsonLabel = mode === 'single' ? '本次额外参数 JSON' : '批量公共参数 JSON';
     h.change('select', `${prefix}视频分辨率选项`, 'value:0.5');
     assert.match(textOf(h.required('select', `${prefix}视频分辨率选项`)), /960 × 544/u);
@@ -696,7 +721,7 @@ test('默认竖屏改为16:9显示已保存的尺寸表，清除覆盖后恢复�
     const initial = mpFixture(); const workflow = initial.settings.runningHubVideo!.workflows[0];
     workflow.mapping.parameters!.aspect = { nodeId: 'mp', inputName: 'aspect_ratio' };
     workflow.requestTemplate = runningHub.updateRunningHubVideoNodeValue(workflow.requestTemplate, { nodeId: 'mp', inputName: 'aspect_ratio' }, '9:16 (Portrait Widescreen)');
-    const h = harness(mode, initial); const prefix = mode === 'single' ? '本次' : '批量';
+    const h = mode === 'batch' ? ordinaryBatchHarness(initial) : harness(mode, initial); const prefix = mode === 'single' ? '本次' : '批量';
     const jsonLabel = mode === 'single' ? '本次额外参数 JSON' : '批量公共参数 JSON';
     assert.doesNotMatch(textOf(h.required('select', `${prefix}视频分辨率选项`)), /960 × 544/u);
     h.change('textarea', jsonLabel, '{"aspect":"16:9 (Widescreen)"}');
@@ -760,7 +785,7 @@ test('MP摘要读取当前或冻结API的单位尺寸，默认选项也展示尺
 });
 
 test('批量段清单与确认摘要显示MP，提交原值不受展示改变', () => {
-  const initial = mpFixture(); const h = harness('batch', initial);
+  const initial = mpFixture(); const h = ordinaryBatchHarness(initial);
   h.change('select', '批量视频分辨率选项', 'value:0.5');
   assert.match(h.text(), /请求像素 0\.5 MP（960 × 544）/u);
   assert.doesNotMatch(h.text(), /请求分辨率 0\.5|请求宽度 0\.5 像素/u);

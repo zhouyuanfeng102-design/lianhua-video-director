@@ -21,15 +21,17 @@ export const selectedRunningHubImageWorkflow = (config: ImageApiConfig): Running
   return fields.runningHubWorkflows.find(workflow => workflow.id === fields.activeRunningHubWorkflowId);
 };
 
-/** Only a unique API prompt field is a business prompt; system instructions and
- * arbitrary local ComfyUI graph strings are never inferred as prompt inputs. */
+/** Only a unique API prompt field, or text explicitly labelled Prompt, is a
+ * business prompt. System instructions and arbitrary local graph strings are
+ * never inferred as prompt inputs. */
 export const importRunningHubImageWorkflow = (text: string, name?: string): RunningHubVideoImportResult => {
   const imported = importRunningHubVideoWorkflow(text, name);
   const workflow = imported.workflow;
   if (!name && workflow.remoteId === RUNNINGHUB_IMAGE_APP_ID && workflow.name === '导入的云端工作流') workflow.name = 'Krea2';
   const nodes = readRunningHubVideoRequest(workflow.requestTemplate).nodeInfoList;
   if (!workflow.mapping.prompt.length) {
-    const prompts = nodes.filter(node => node.fieldName === 'prompt' && typeof node.fieldValue === 'string');
+    const prompts = nodes.filter(node => typeof node.fieldValue === 'string' && (node.fieldName === 'prompt'
+      || node.fieldName === 'text' && /^(?:(?:positive\s+)?prompt|(?:正向)?提示词)$/iu.test(typeof node.description === 'string' ? node.description.trim() : '')));
     if (prompts.length === 1) workflow.mapping.prompt = [{ nodeId: prompts[0].nodeId, inputName: prompts[0].fieldName }];
   }
   const parameters = { ...workflow.mapping.parameters };

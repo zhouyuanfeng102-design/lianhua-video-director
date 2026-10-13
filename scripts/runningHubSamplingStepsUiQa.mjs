@@ -172,7 +172,7 @@ const run = async () => {
   const expand = batch.getByRole('button', { name: '展开批量设置', exact: true }); if (await expand.isVisible()) await expand.click();
   const batchSteps = batch.getByLabel('批量采样步数（步）', { exact: true });
   assert.equal(await batchSteps.isEnabled(), true); assert.equal(await batchSteps.inputValue(), '');
-  assert.equal(await batchSteps.getAttribute('placeholder'), '使用默认值（10）');
+  assert.equal(await batchSteps.getAttribute('placeholder'), '默认：10');
   await batchSteps.fill('24');
   const batchJson = batch.getByLabel('批量公共参数 JSON', { exact: true });
   assert.equal(JSON.parse(await batchJson.inputValue()).steps, 24);

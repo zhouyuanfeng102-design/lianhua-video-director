@@ -222,6 +222,23 @@ export const ensureRunningHubVideoRequestNode = (text: string, node: RunningHubV
   return text.slice(0, at) + `${request.nodeInfoList.length ? ',' : ''}\n    ${JSON.stringify(requestNode)}\n  ` + text.slice(at);
 };
 
+/** Remove an explicitly deleted local field without reserializing other values. */
+export const removeRunningHubVideoRequestNode = (text: string, binding: RunningHubVideoInputBinding): string => {
+  let current = text;
+  for (;;) {
+    const request = readRunningHubVideoRequest(current);
+    const spans = jsonSpans(current);
+    const containers = spans.filter((span) => span.path.length === 1 && span.path[0] === 'nodeInfoList');
+    if (containers.length !== 1 || containers[0].kind !== 'array') throw new Error('请求中的 nodeInfoList 不唯一或不是数组，请先修复 JSON 结构。');
+    const index = request.nodeInfoList.findIndex((node) => isRecord(node) && node.nodeId === binding.nodeId && node.fieldName === binding.inputName);
+    if (index < 0) return current;
+    const span = spans.find((entry) => entry.path.length === 2 && entry.path[0] === 'nodeInfoList' && entry.path[1] === index)!;
+    const start = span.delimiterAfter !== undefined ? span.start : span.delimiterBefore ?? span.start;
+    const end = span.delimiterAfter !== undefined ? span.delimiterAfter + 1 : span.end;
+    current = current.slice(0, start) + current.slice(end);
+  }
+};
+
 export const updateRunningHubVideoRequestField = (text: string, name: string, value: unknown | undefined): string => {
   const allowed = ['instanceType', 'usePersonalQueue', 'retainSeconds', 'webhookUrl'];
   if (!allowed.includes(name)) throw new Error('此快捷编辑只支持云端运行参数；请在请求 JSON 中编辑其他字段。');

@@ -11,7 +11,7 @@ import {
 import { listRunningHubVideoNodes, mergeRunningHubVideoNodeCatalog, parseRunningHubVideoNodes } from '../runningHubVideoNodes';
 import { discoverRunningHubVideoNodes } from '../services/runningHubVideoDiscovery';
 import { selectRunningHubVideoFieldChoices } from '../runningHubVideoFieldChoices';
-import { bindRunningHubImageCount, isRunningHubImageCountField, runningHubImageCountConflict, syncRunningHubImageSlots } from '../runningHubImageSlots';
+import { bindRunningHubImageCount, isRunningHubImageCountField, removeRunningHubImageSlot, runningHubImageCountConflict, syncRunningHubImageSlots } from '../runningHubImageSlots';
 import { resolveRunningHubVideoImageProtocol } from '../runningHubImageProtocol';
 import { syncRunningHubAudioSlots } from '../runningHubAudioSlots';
 import { listRunningHubLoraSlots, listRunningHubOtherFields } from '../runningHubGenerationExtras';
@@ -86,7 +86,7 @@ function Pager({ label, total, page, size, onChange }: { label: string; total: n
 export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, onClose, mediaKind = 'video', importWorkflow, isWorkflowReady, validateWorkflow }: RunningHubWorkflowManagerProps) {
   const isImage = mediaKind === 'image';
   const isReady = isWorkflowReady || isRunningHubVideoWorkflowReady;
-  const prepareWorkflowDraft = (workflow: RunningHubVideoWorkflow) => isImage ? workflow : prepareVideoWorkflowDraft(workflow);
+  const prepareWorkflowDraft = (workflow: RunningHubVideoWorkflow) => isImage ? syncRunningHubImageSlots(workflow) : prepareVideoWorkflowDraft(workflow);
   const initial = config.workflows.find((workflow) => workflow.id === config.activeWorkflowId) || config.workflows[0];
   const [draft, setDraft] = useState<RunningHubVideoWorkflow | undefined>(() => initial ? prepareWorkflowDraft(structuredClone(initial)) : undefined);
   const [baseline, setBaseline] = useState(() => initial ? jsonKey(initial) : '');
@@ -264,6 +264,14 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
       setDraft((value) => value ? prepareWorkflowDraft({ ...value, requestTemplate, mapping }) : value); clearNotice();
     } catch (cause) { setError(errorText(cause)); }
   }
+  function removeImageSlot(binding: RunningHubVideoInputBinding) {
+    if (!draft) return;
+    try {
+      const next = prepareWorkflowDraft(removeRunningHubImageSlot(draft, binding));
+      setDraft(next); clearNotice();
+      setMessage(`已删除本地图片槽 ${binding.nodeId}.${binding.inputName}，点击“保存工作流”后生效。`);
+    } catch (cause) { setError(errorText(cause)); }
+  }
   function guardDiscard(action: () => void, body = '切换后会放弃当前尚未保存的编辑，已保存版本和历史任务保持不变。') {
     if (!latest.current.dirty) { action(); return; }
     setConfirmation({ title: '有未保存的云端工作流编辑', body, actionLabel: '放弃编辑并继续', danger: true, action });
@@ -398,7 +406,9 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
       const result = await discoverRunningHubVideoNodes(identity, controller.signal);
       if (!stillCurrent()) return;
       setDraft((value) => value ? prepareWorkflowDraft({ ...value, nodeCatalog: mergeRunningHubVideoNodeCatalog(value.nodeCatalog, result.nodes) }) : value);
-      setMessage(`已读取 ${result.nodes.length} 个节点字段；图片和音频文件输入已列为草稿槽位。用途及人物在生成视频时按分段设置，已有映射保留，保存后生效，未提交生成。${result.warnings.length ? ` ${result.warnings.join(' ')}` : ''}`);
+      setMessage(`${isImage
+        ? `已读取 ${result.nodes.length} 个节点字段；图片文件输入已列为草稿槽位。已有槽位顺序和参数保留，保存后生效，未提交生成。`
+        : `已读取 ${result.nodes.length} 个节点字段；图片和音频文件输入已列为草稿槽位。用途及人物在生成视频时按分段设置，已有映射保留，保存后生效，未提交生成。`}${result.warnings.length ? ` ${result.warnings.join(' ')}` : ''}`);
     } catch (cause) { if (stillCurrent()) setError(errorText(cause)); }
     finally { if (mountedRef.current && epoch === discoveryEpoch.current) { setDiscovering(false); discoveryController.current = undefined; } }
   }
@@ -411,7 +421,9 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
       if (!result.nodes.length) throw new Error('这份资料没有可选节点字段。请导出包含 inputs / class_type 的 API 格式，或手动填写实际节点 ID 和字段名。');
       setDraft((value) => value ? prepareWorkflowDraft({ ...value, nodeCatalog: mergeRunningHubVideoNodeCatalog(value.nodeCatalog, result.nodes) }) : value);
       closeNodeDialog(); setNodeSource(''); setManualNode({ nodeId: '', fieldName: '', value: '', type: 'string' }); setNodeSearch(''); setParameterPage(0);
-        setMessage(`已加入 ${result.nodes.length} 个候选字段，图片和音频文件输入自动列为草稿槽位；既有槽位顺序和参数保留，用途及人物在生成视频时按分段设置，保存后才生效。${result.warnings.length ? ` ${result.warnings.join(' ')}` : ''}`);
+      setMessage(`${isImage
+        ? `已加入 ${result.nodes.length} 个候选字段，图片文件输入自动列为草稿槽位；既有槽位顺序和参数保留，保存后才生效。`
+        : `已加入 ${result.nodes.length} 个候选字段，图片和音频文件输入自动列为草稿槽位；既有槽位顺序和参数保留，用途及人物在生成视频时按分段设置，保存后才生效。`}${result.warnings.length ? ` ${result.warnings.join(' ')}` : ''}`);
       return true;
     } catch (cause) { setError(errorText(cause)); return false; }
   }
@@ -661,7 +673,8 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
                   return <div className="rhv-image-slot-card" key={`${bindingKey(binding)}-${index}`}>
                     <div className="rhv-image-slot-heading"><strong>图片槽 {index + 1}</strong><code aria-label={`云端图片槽 ${index + 1} 节点字段`} title={`${binding.nodeId}.${binding.inputName}`}>{binding.nodeId}.{binding.inputName}</code></div>
                     <small className="rhv-slot-hint">{isImage ? "生图时按所选图片顺序上传" : "用途在生成视频时按当前分段选择"}</small>
-                    {!node && <><small className="rhv-slot-warning">节点目录中缺失，请重新读取节点核对。</small><button type="button" className="btn small" aria-label={`移除失效云端图片槽 ${index + 1}`} onClick={() => patchMapping({ images: draft.mapping.images.filter((_, position) => position !== index) })}>移除失效映射</button></>}
+                    {!node && <small className="rhv-slot-warning">节点目录中缺失，请重新读取节点核对。</small>}
+                    <button type="button" className="btn small danger" aria-label={node ? `删除云端图片槽 ${index + 1}` : `移除失效云端图片槽 ${index + 1}`} title="删除本地图片槽并清理仅此槽使用的节点字段；保存工作流后生效" onClick={() => removeImageSlot(binding)}>{node ? '删除' : '移除失效映射'}</button>
                   </div>;
                 })}</div>
                 {!draft.mapping.images.length && <div className="vwm-empty">{isImage ? "当前工作流没有参考图片槽，仅支持文生图。需要图生图时请选择具有明确图片输入的云端应用，再绑定真实节点。" : "尚未找到图片输入槽。文生视频可不选图；图生视频请先“读取云端节点”或导入节点 JSON，识别后会全部显示。自定义字段可在“手动添加字段”中明确标为图片输入。"}</div>}
@@ -716,9 +729,9 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
         {nodeDialog === 'json' ? <label className="field rhv-import-source"><span>节点 JSON</span><textarea aria-label="RunningHub 节点 JSON" spellCheck={false} value={nodeSource} onChange={(event) => setNodeSource(event.target.value)} placeholder={'{"12":{"class_type":"CLIPTextEncode","inputs":{"text":"提示词"}}}\n或 {"nodeInfoList":[{"nodeId":"12","fieldName":"text","fieldValue":""}]}'} /></label> : <div className="rhv-manual-fields">
           <div className="rhv-two-fields"><label className="field"><span>节点 ID（nodeId）</span><input aria-label="手动节点 ID" value={manualNode.nodeId} onChange={(event) => setManualNode({ ...manualNode, nodeId: event.target.value })} placeholder="复制实际节点 ID" /></label><label className="field"><span>字段名（fieldName）</span><input aria-label="手动节点字段名" value={manualNode.fieldName} onChange={(event) => setManualNode({ ...manualNode, fieldName: event.target.value })} placeholder="例如 text / image / audio / seed" /></label></div>
           <div className="rhv-two-fields"><label className="field"><span>字段类型</span><select aria-label="手动节点字段类型" value={manualNode.type} onChange={(event) => setManualNode({ ...manualNode, type: event.target.value, value: event.target.value === 'boolean' ? 'false' : manualNode.value })}><option value="string">文本 string</option><option value="image">图片输入（高级自定义）</option>{!isImage && <option value="audio">音频输入（高级自定义）</option>}<option value="number">数字 number</option><option value="boolean">开关 boolean</option></select></label><label className="field"><span>云端默认值（文本可留空）</span>{manualNode.type === 'boolean' ? <select aria-label="手动节点默认值" value={manualNode.value} onChange={(event) => setManualNode({ ...manualNode, value: event.target.value })}><option value="false">false</option><option value="true">true</option></select> : <input aria-label="手动节点默认值" value={manualNode.value} onChange={(event) => setManualNode({ ...manualNode, value: event.target.value })} />}</label></div>
-          <p className="vwm-help">图片和音频文件字段自动列为素材槽。自定义名称无法识别时可明确选择“图片输入”或“音频输入”；字段必须接受上传文件名，不能是节点连线或音频处理 tensor。</p>
+          <p className="vwm-help">{isImage ? '图片文件字段自动列为图片槽。自定义名称无法识别时可明确选择“图片输入”；字段必须接受上传文件名，不能是节点连线。' : '图片和音频文件字段自动列为素材槽。自定义名称无法识别时可明确选择“图片输入”或“音频输入”；字段必须接受上传文件名，不能是节点连线或音频处理 tensor。'}</p>
         </div>}
-        <div className="rhv-import-feedback" role={error ? 'alert' : 'status'}>{error || '图片和音频文件字段会补齐为编辑稿槽位；其他字段只补目录，既有槽位顺序与参数值保留，用途及人物在生成视频时按分段设置。'}</div>
+        <div className="rhv-import-feedback" role={error ? 'alert' : 'status'}>{error || (isImage ? '图片文件字段会补齐为编辑稿图片槽；其他字段只补目录，既有槽位顺序与参数值保留，保存后生效。' : '图片和音频文件字段会补齐为编辑稿槽位；其他字段只补目录，既有槽位顺序与参数值保留，用途及人物在生成视频时按分段设置。')}</div>
         <footer><div>{nodeDialog === 'json' && <button type="button" className="btn" disabled={nodeFileBusy} onClick={() => nodeFileRef.current?.click()}>{nodeFileBusy ? '读取文件中…' : '选择节点文件'}</button>}</div><div><button type="button" className="btn" onClick={closeNodeDialog}>取消</button><button type="button" className="btn primary" disabled={nodeFileBusy || (nodeDialog === 'json' ? !nodeSource.trim() : !manualNode.nodeId.trim() || !manualNode.fieldName.trim())} onClick={() => nodeDialog === 'json' ? acceptNodeSource(nodeSource) : addManualNode()}>{nodeDialog === 'json' ? '加入节点目录' : '添加字段'}</button></div></footer>
       </section></div>}
       {importOpen && <div className="rhv-import-backdrop"><section className="rhv-import-dialog" role="dialog" aria-modal="true" aria-label="导入 RunningHub cURL 或 JSON"><header><h3>导入 RunningHub cURL / JSON</h3><button type="button" className="btn small" onClick={cancelImport}>关闭导入</button></header><p className="vwm-help">只读取文本，不会执行 cURL。连接密钥不从教程导入；nodeInfoList 以外的本地 ComfyUI 图不会被猜测转换。</p><label className="field"><span>新工作流名称（可选）</span><input aria-label="导入的 RunningHub 工作流名称" value={importName} onChange={(event) => setImportName(event.target.value)} placeholder="例如 长剧情图生视频" /></label><label className="field rhv-import-source"><span>粘贴 RunningHub 请求 cURL、请求 JSON 或本软件导出的配置</span><textarea aria-label="RunningHub 导入文本" spellCheck={false} value={importText} onChange={(event) => setImportText(event.target.value)} placeholder={'curl --request POST \'https://www.runninghub.ai/openapi/v2/run/ai-app/你的应用ID\' ...\n或 { "nodeInfoList": [...] }'} /></label><div className="rhv-import-feedback" role={error ? 'alert' : 'status'}>{error || '导入仅新增配置，不覆盖已有工作流，也不自动设为当前。'}</div><footer><button type="button" className="btn" disabled={importing} onClick={() => fileRef.current?.click()}>{importing ? '读取文件中…' : '选择文件'}</button><div><button type="button" className="btn" onClick={cancelImport}>取消</button><button type="button" className="btn primary" disabled={!importText.trim() || importing} onClick={() => acceptImport(importText, importName)}>导入为新工作流</button></div></footer></section></div>}
