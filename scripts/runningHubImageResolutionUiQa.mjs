@@ -26,7 +26,8 @@ async function prepareAndAssert(resolution) {
   const body = await page.evaluate(() => window.__rhImageSizeQa.body);
   const value = (id) => body.nodeInfoList.find((node) => node.nodeId === id).fieldValue;
   assert.equal(value('189'), resolution);
-  assert.equal(value('194'), '3:4'); assert.equal(value('195'), 'false'); assert.equal(value('191'), '1'); assert.equal(value('186'), 'false');
+  assert.equal(value('194'), '3:4'); assert.equal(value('195'), 'true'); assert.equal(value('191'), '1'); assert.equal(value('186'), 'false');
+  for (const id of ['181', '182', '183']) assert.equal(value(id), 'None');
   assert.equal(value('107'), '隔离图片正文');
 }
 try {
@@ -146,7 +147,7 @@ try {
   await page.getByRole('tab', { name: '请求 JSON', exact: true }).click();
   const nodes = JSON.parse(await page.getByLabel('RunningHub 请求 JSON 编辑稿', { exact: true }).inputValue()).nodeInfoList;
   assert.equal(nodes.find((node) => node.nodeId === '194').fieldValue, '16:9', 'draft retains the full colon-separated option');
-  assert.equal(nodes.find((node) => node.nodeId === '195').fieldValue, 'false', 'conditional switch is never opened automatically');
+  assert.equal(nodes.find((node) => node.nodeId === '195').fieldValue, 'false', 'saved defaults stay unchanged; the V3 dependency is enabled only in the submitted request');
   assert.equal(nodes.find((node) => node.nodeId === '191').fieldValue, '1');
   await page.getByRole('button', { name: '关闭 RunningHub 工作流管理', exact: true }).click();
   await page.getByRole('button', { name: '放弃编辑并继续', exact: true }).click();

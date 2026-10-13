@@ -33,7 +33,9 @@ export function ImageOutputSizeControls({ lane, value, resolved, disabled, capab
       </select></label>}
     </div>
     {resolved.workflowAspect && <p className="field-hint" style={{ margin: '4px 0 0' }}>比例由云端工作流决定；指定比例需先绑定真实比例字段，并确认工作流的条件开关。</p>}
-    {workflowSize && !resolved.workflowAspect && <p className="field-hint" style={{ margin: '4px 0 0' }}>涉及比例条件开关时，请在工作流中明确配置，不会自动开启。</p>}
+    {workflowSize && !resolved.workflowAspect && <p className="field-hint" style={{ margin: '4px 0 0' }}>{resolved.workflowAspectGate
+      ? 'V3 应用指定比例时同步启用“其他比例”；未选参考图时使用文生图。'
+      : '涉及比例条件开关时，请在工作流中明确配置，不会自动开启。'}</p>}
     <div className="image-output-size-summary"><span>{workflowDefault ? '工作流默认尺寸' : `${sizeLabel} ${resolved.width} × ${resolved.height} px`}{resolved.layoutNote ? ` · ${resolved.layoutNote}` : ''}</span>
       <details><summary>尺寸说明</summary><p>{capabilityNote} 1K、2K、4K是生图分辨率档位；原生模型按其规格提交，自由像素后端按本机档位映射。实际请求宽高和必要的对齐显示于此。各视图数量与位置保持所选版式，画幅按当前请求尺寸生成；模型能力和版式提醒不阻止提交。旧规格保留原尺寸；自定义宽高按输入提交。</p></details>
     </div>

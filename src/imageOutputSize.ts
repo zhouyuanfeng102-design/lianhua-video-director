@@ -3,6 +3,7 @@ import { IMAGE_RESOLUTION_TECHNICAL_MAX_SIDE, imageResolutionAspectRatio, resolv
 import { selectedRunningHubImageWorkflow } from './runningHubImage';
 import { readRunningHubVideoRequest } from './runningHubVideo';
 import { runningHubImageSizeMode } from './runningHubImageSize';
+import { isRunningHubImageV3Workflow } from './runningHubImageV3';
 
 export type ImageOutputSizeMode = 'default' | '1x' | '2x' | '1k' | '2k' | '4k' | 'custom';
 export type ImageOutputAspect = 'variant' | '1:1' | '3:4' | '4:3' | '9:16' | '16:9' | '3:2' | '2:3';
@@ -78,13 +79,15 @@ export interface ResolvedImageOutputSize {
   resolutionPlan?: ImageResolutionPlan;
   workflowSizeMode?: 'pixels' | 'tier' | 'default';
   workflowAspect?: boolean;
+  workflowAspectGate?: boolean;
 }
 
-export const runningHubImageSizeContext = (api: ImageApiConfig['backend'] | ImageApiConfig): Pick<ResolvedImageOutputSize, 'workflowSizeMode' | 'workflowAspect'> => {
+export const runningHubImageSizeContext = (api: ImageApiConfig['backend'] | ImageApiConfig): Pick<ResolvedImageOutputSize, 'workflowSizeMode' | 'workflowAspect' | 'workflowAspectGate'> => {
   if ((typeof api === 'string' ? api : api.backend) !== 'runninghub') return {};
   const workflow = typeof api === 'string' ? undefined : selectedRunningHubImageWorkflow(api);
   const workflowSizeMode = runningHubImageSizeMode(workflow);
-  return { workflowSizeMode, workflowAspect: workflowSizeMode !== 'pixels' && !workflow?.mapping.parameters?.aspect_ratio };
+  return { workflowSizeMode, workflowAspect: workflowSizeMode !== 'pixels' && !workflow?.mapping.parameters?.aspect_ratio,
+    ...(isRunningHubImageV3Workflow(workflow) ? { workflowAspectGate: true } : {}) };
 };
 
 const runningHubDefaultImageSize = (api: ImageApiConfig['backend'] | ImageApiConfig): { width: number; height: number } | undefined => {

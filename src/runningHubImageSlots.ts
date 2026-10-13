@@ -3,6 +3,7 @@ import { ensureRunningHubVideoRequestNode, readRunningHubVideoRequest, removeRun
 import { listRunningHubVideoNodes } from './runningHubVideoNodes';
 import { selectRunningHubVideoFieldChoices } from './runningHubVideoFieldChoices';
 import { resolveRunningHubVideoImageProtocol } from './runningHubImageProtocol';
+import { isRunningHubImageV3Workflow } from './runningHubImageV3';
 
 const keyOf = (nodeId: string, inputName: string) => JSON.stringify([nodeId, inputName]);
 
@@ -50,6 +51,26 @@ export const removeRunningHubImageSlot = (workflow: RunningHubVideoWorkflow, bin
     ...(workflow.nodeCatalog ? { nodeCatalog: workflow.nodeCatalog.filter((node) => keyOf(node.nodeId, node.fieldName) !== key) } : {}),
     ...(workflow.fieldControls ? { fieldControls: Object.fromEntries(Object.entries(workflow.fieldControls).filter(([fieldKey]) => fieldKey !== key)) } : {}),
   };
+};
+
+/** Repair the legacy V3 image import that saved its prompt without image slots.
+ * Limit this to the documented app and actual retained request fields; neither
+ * other templates' static images nor explicitly deleted slots are recovered. */
+export const repairRunningHubImageV3LegacySlots = (workflow: RunningHubVideoWorkflow): RunningHubVideoWorkflow => {
+  if (!isRunningHubImageV3Workflow(workflow) || workflow.mapping.images.length
+    || workflow.mapping.prompt.length !== 1 || workflow.mapping.prompt[0].nodeId !== '107' || workflow.mapping.prompt[0].inputName !== 'text') return workflow;
+  try {
+    const nodes = readRunningHubVideoRequest(workflow.requestTemplate).nodeInfoList;
+    const occupied = new Set([...(workflow.mapping.audios || []), ...Object.values(workflow.mapping.parameters || {}),
+      ...(workflow.mapping.imageCount ? [workflow.mapping.imageCount] : [])].map((binding) => keyOf(binding.nodeId, binding.inputName)));
+    const images: typeof workflow.mapping.images = [];
+    for (const nodeId of ['181', '182', '183']) {
+      const matches = nodes.filter((node) => node.nodeId === nodeId && node.fieldName === 'image');
+      if (matches.length > 1 || matches.length === 1 && typeof matches[0].fieldValue !== 'string') return workflow;
+      if (matches.length === 1 && !occupied.has(keyOf(nodeId, 'image'))) images.push({ nodeId, inputName: 'image', role: 'general' });
+    }
+    return images.length ? { ...workflow, mapping: { ...workflow.mapping, images } } : workflow;
+  } catch { return workflow; }
 };
 
 /** Editor-only synchronization. Loading the application or compiling a saved

@@ -84,6 +84,8 @@ export interface RunningHubVideoRequest extends Record<string, unknown> {
 export interface RunningHubVideoImportResult {
   workflow: RunningHubVideoWorkflow;
   warnings: string[];
+  /** A local backup already carries the user's explicit input mappings. */
+  sourceKind?: 'backup';
   /** A tutorial URL may suggest a connection origin; it never changes the saved connection. */
   baseUrl?: string;
 }

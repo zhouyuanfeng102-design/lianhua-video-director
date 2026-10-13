@@ -1,6 +1,8 @@
 import type { ImageApiConfig } from './types';
 import type { ImageResolutionPlan } from './imageResolution';
 import { runningHubImageTierParameters } from './runningHubImageSize';
+import { repairRunningHubImageV3LegacySlots, syncRunningHubImageSlots } from './runningHubImageSlots';
+import { applyRunningHubImageV3AspectGate, isRunningHubImageV3Workflow, runningHubImageV3OptionalImage } from './runningHubImageV3';
 import type { RunningHubVideoImportResult, RunningHubVideoWorkflow } from './runningHubVideoTypes';
 import { bindRunningHubVideoRequest, compileRunningHubVideoApi, importRunningHubVideoWorkflow,
   normalizeRunningHubVideoConfig, readRunningHubVideoRequest, validateRunningHubVideoWorkflow } from './runningHubVideo';
@@ -15,7 +17,7 @@ export const normalizeRunningHubImageConfig = (raw: unknown): RunningHubImageCon
   const value = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
   const normalized = normalizeRunningHubVideoConfig({ workflows: value.runningHubWorkflows,
     activeWorkflowId: value.activeRunningHubWorkflowId });
-  return { runningHubWorkflows: normalized.workflows, activeRunningHubWorkflowId: normalized.activeWorkflowId ?? null };
+  return { runningHubWorkflows: normalized.workflows.map(repairRunningHubImageV3LegacySlots), activeRunningHubWorkflowId: normalized.activeWorkflowId ?? null };
 };
 
 export const selectedRunningHubImageWorkflow = (config: ImageApiConfig): RunningHubVideoWorkflow | undefined => {
@@ -28,6 +30,7 @@ export const selectedRunningHubImageWorkflow = (config: ImageApiConfig): Running
  * never inferred as prompt inputs. */
 export const importRunningHubImageWorkflow = (text: string, name?: string): RunningHubVideoImportResult => {
   const imported = importRunningHubVideoWorkflow(text, name);
+  if (imported.sourceKind === 'backup') return imported;
   const workflow = imported.workflow;
   if (!name && workflow.remoteId === RUNNINGHUB_IMAGE_APP_ID && workflow.name === '导入的云端工作流') workflow.name = 'Krea2';
   const nodes = readRunningHubVideoRequest(workflow.requestTemplate).nodeInfoList;
@@ -48,8 +51,13 @@ export const importRunningHubImageWorkflow = (text: string, name?: string): Runn
     });
     if (candidates.length === 1) parameters[dimension] = { nodeId: candidates[0].nodeId, inputName: candidates[0].fieldName };
   }
+  if (isRunningHubImageV3Workflow(workflow)) {
+    // These are published inputs of this exact app, not guessed graph fields.
+    parameters.resolution ??= { nodeId: '189', inputName: 'value' };
+    parameters.aspect_ratio ??= { nodeId: '194', inputName: 'aspect_ratio' };
+  }
   workflow.mapping.parameters = parameters;
-  return { ...imported, workflow, warnings: imported.warnings.filter(warning =>
+  return { ...imported, workflow: syncRunningHubImageSlots(workflow), warnings: imported.warnings.filter(warning =>
     !workflow.mapping.prompt.length || !warning.includes('导入没有自动猜测提示词')) };
 };
 
@@ -104,11 +112,19 @@ export const buildRunningHubImageRequest = (config: ImageApiConfig, input: Runni
     { prompt: input.prompt, parameters }, input.uploadedImages ?? []);
   const original = readRunningHubVideoRequest(workflow.requestTemplate);
   const bound = body.nodeInfoList as typeof original.nodeInfoList;
+  const v3 = isRunningHubImageV3Workflow(workflow);
   workflow.mapping.images.slice(referenceCount).forEach(binding => {
     const source = original.nodeInfoList.find(node => node.nodeId === binding.nodeId && node.fieldName === binding.inputName)!;
     const target = bound.find(node => node.nodeId === binding.nodeId && node.fieldName === binding.inputName)!;
-    target.fieldValue = source.fieldValue;
+    target.fieldValue = v3 && runningHubImageV3OptionalImage(binding.nodeId, binding.inputName) ? 'None' : source.fieldValue;
   });
+  if (v3) {
+    const used = new Set(workflow.mapping.images.slice(0, referenceCount).map(binding => JSON.stringify([binding.nodeId, binding.inputName])));
+    for (const node of bound) {
+      if (runningHubImageV3OptionalImage(node.nodeId, node.fieldName) && !used.has(JSON.stringify([node.nodeId, node.fieldName]))) node.fieldValue = 'None';
+    }
+  }
+  applyRunningHubImageV3AspectGate(workflow, bound, referenceCount, Object.prototype.hasOwnProperty.call(parameters, 'aspect_ratio'));
   // Import metadata identifies a configuration; it is not part of the cloud request.
   for (const key of ['endpoint', 'remoteId', 'runKind', 'workflowId', 'webappId', 'appId']) delete body[key];
   return { endpoint: compiled.endpoint, queryEndpoint: compiled.statusEndpointTemplate!, uploadEndpoint: compiled.imageUploadEndpoint!,

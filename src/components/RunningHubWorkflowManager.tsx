@@ -13,6 +13,7 @@ import { discoverRunningHubVideoNodes } from '../services/runningHubVideoDiscove
 import { selectRunningHubVideoFieldChoices } from '../runningHubVideoFieldChoices';
 import { bindRunningHubImageCount, isRunningHubImageCountField, removeRunningHubImageSlot, runningHubImageCountConflict, syncRunningHubImageSlots } from '../runningHubImageSlots';
 import { resolveRunningHubVideoImageProtocol } from '../runningHubImageProtocol';
+import { isRunningHubImageV3Workflow } from '../runningHubImageV3';
 import { syncRunningHubAudioSlots } from '../runningHubAudioSlots';
 import { listRunningHubLoraSlots, listRunningHubOtherFields } from '../runningHubGenerationExtras';
 import { RunningHubGenerationExtras } from './RunningHubGenerationExtras';
@@ -582,7 +583,7 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
         const custom = event.target.value === '__custom__'; setCustomOutputDefaults({ ...customOutputDefaults, [id]: custom }); if (!custom) setDefault(event.target.value);
       }}>{!options.includes(value) && <option value={value} disabled={strictOptions}>当前值：{value || '空'}</option>}{options.map((option) => <option key={option} value={option}>{option}{control.unit === 'MP' ? ' MP' : ''}{control.optionLabels?.[option] ? `（${control.optionLabels[option]}）` : ''}</option>)}{!strictOptions && <option value="__custom__">自定义值…</option>}</select> : <input aria-label={`${label}默认值`} type={numeric ? 'number' : 'text'} inputMode={numeric ? 'decimal' : 'text'} min={numeric ? numberProp('min') : undefined} max={numeric ? numberProp('max') : undefined} step={numeric ? numberProp('step') ?? 'any' : undefined} disabled={!supported} value={value} placeholder="先选择实际节点字段" onChange={(event) => setDefault(event.target.value)} />}</label>
       {edit.kind === 'select' && !strictOptions && customOutputDefaults[id] && <label className="field"><span>自定义默认值</span><input aria-label={`${label}自定义默认值`} value={value} onChange={(event) => setDefault(event.target.value)} /></label>}
-      <p className="vwm-help">{control.unit === 'MP' ? `MP 为百万像素，按节点数值提交。${control.optionLabels ? `括号为 ${control.optionLabelAspectRatio || '当前比例'} 节点尺寸，二采后以成片为准。` : ''}` : isImage && (key === 'width' || key === 'height') ? '可选映射。自定义精确像素需要同时绑定宽高；使用分辨率档位或工作流默认尺寸时，无需强行绑定宽高。' : isImage && key === 'aspect_ratio' ? '可选映射。按节点完整选项值提交；未绑定时保留工作流比例。条件开关须由工作流明确配置，不会自动开启。' : definition.hint}</p>
+      <p className="vwm-help">{control.unit === 'MP' ? `MP 为百万像素，按节点数值提交。${control.optionLabels ? `括号为 ${control.optionLabelAspectRatio || '当前比例'} 节点尺寸，二采后以成片为准。` : ''}` : isImage && (key === 'width' || key === 'height') ? '可选映射。自定义精确像素需要同时绑定宽高；使用分辨率档位或工作流默认尺寸时，无需强行绑定宽高。' : isImage && key === 'aspect_ratio' ? isRunningHubImageV3Workflow(draft) ? '按完整比例选项提交，生成时同步启用 V3 的“其他比例”；有参考图且使用工作流默认尺寸时保留原开关。' : '可选映射。按节点完整选项值提交；未绑定时保留工作流比例。条件开关须由工作流明确配置，不会自动开启。' : definition.hint}</p>
       {(key === 'resolution' || key === 'aspect_ratio' || key === 'steps') && binding && supported && <button type="button" className="vwm-text-button rhv-control-settings-button" aria-label={`${label}输入选项设置`} onClick={() => setOutputControlKey(key)}>输入选项设置</button>}
     </div>;
   }

@@ -19,6 +19,7 @@ type ComfyUISettingsConfig = ImageApiConfig & {
 export interface ComfyUISettingsProps {
   config: ComfyUISettingsConfig;
   allowPrivateNetwork: boolean;
+  privateNetworkSaving?: boolean;
   onChange: (patch: Partial<ComfyUISettingsConfig>) => void;
   onPrivateNetworkChange: (allowed: boolean) => void;
 }
@@ -38,6 +39,7 @@ const workflowNameFromFile = (fileName: string, fallbackIndex: number): string =
 export function ComfyUISettings({
   config,
   allowPrivateNetwork,
+  privateNetworkSaving = false,
   onChange,
   onPrivateNetworkChange,
 }: ComfyUISettingsProps) {
@@ -176,6 +178,7 @@ export function ComfyUISettings({
         <input
           type="checkbox"
           checked={allowPrivateNetwork}
+          disabled={privateNetworkSaving}
           onChange={(event) => onPrivateNetworkChange(event.target.checked)}
         />
         允许访问本机与局域网模型端点

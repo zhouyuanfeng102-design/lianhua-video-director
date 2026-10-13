@@ -168,7 +168,7 @@ try {
   await page.getByRole('button', { name: '导入为新工作流', exact: true }).click();
   await page.waitForFunction(() => window.__rhImageManagerV3Qa.saves === 1 && !document.querySelector('.rhv-import-dialog'));
   const imported = await workflowSnapshot(); assertImageOnly(imported);
-  assert.equal(imported.mapping.images.length, 0, 'new import persists its existing explicit mappings; listing image slots is draft-only');
+  assert.equal(imported.mapping.images.length, 3, 'new image imports persist declared image slots for immediate reference submission');
   before = await configSnapshot(); await openImages(); await assertSlots(['181', '182', '183']);
   assert.equal(await configSnapshot(), before, 'viewing discovered slots does not save them');
   await capture('curl-import-three-draft-image-slots'); await assertPromptChoices();

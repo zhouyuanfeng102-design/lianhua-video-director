@@ -36,7 +36,9 @@ export function StoryboardImageOutputSizeControls({ value, resolved, aspectRatio
       <span>{workflowDefault ? '工作流默认尺寸' : `${sizeLabel} ${resolved.width} × ${resolved.height} px`}{resolved.layoutNote ? ` · ${resolved.layoutNote}` : ''}</span>
       <details><summary>尺寸说明</summary><p>{capabilityNote ? `${capabilityNote} ` : ''}1K、2K、4K是生图分辨率档位；原生模型按自身规格提交，自由像素后端按本机档位映射。实际请求宽高及比例对齐显示于此，不同模型的同名档位可有不同像素。模型能力和画幅提醒不阻止提交；生图分辨率独立于视频分辨率，自定义宽高按输入提交。</p></details>
     </div>
-    {workflowSize && <p className="storyboard-image-output-size-note">比例字段的条件开关需在工作流中明确配置，不会自动开启。</p>}
+    {workflowSize && <p className="storyboard-image-output-size-note">{resolved.workflowAspectGate
+      ? 'V3 应用指定比例时同步启用“其他比例”；未选参考图时使用文生图。'
+      : '比例字段的条件开关需在工作流中明确配置，不会自动开启。'}</p>}
     <p className="storyboard-image-output-size-note">提示词导演台的分镜图和首尾帧图片同步使用；已排队任务不追溯改变。</p>
     {resolved.warning && <p className="storyboard-image-output-size-note image-output-size-warning" role="status">{resolved.warning}</p>}
     {resolved.issue && <p className="image-output-size-error" role="alert">{resolved.issue}</p>}

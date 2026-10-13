@@ -2313,6 +2313,35 @@ export default function App() {
   const restoringSnapshotRef = useRef(false);
   const restoreCompletionRef = useRef<Promise<void>>();
   const [recoveryStatus, setRecoveryStatus] = useState<RecoveryStatus | null>(null);
+  const [allowPrivateNetwork, setAllowPrivateNetwork] = useState(false);
+  const [privateNetworkSaving, setPrivateNetworkSaving] = useState(false);
+  const privateNetworkWriteRef = useRef(false);
+  const recoveryConfigRevisionRef = useRef(0);
+  const recoveryConfigRef = useRef<RecoveryStatus['recovery'] | null>(null);
+  const acceptRecoveryConfig = useCallback((recovery: RecoveryStatus['recovery']) => {
+    recoveryConfigRef.current = recovery;
+    recoveryConfigRevisionRef.current += 1;
+    setAllowPrivateNetwork(recovery.allowPrivateNetwork === true);
+    setRecoveryStatus(current => current ? { ...current, recovery } : current);
+  }, []);
+  const receiveRecoveryStatus = useCallback((status: RecoveryStatus, readRevision: number) => {
+    const current = recoveryConfigRef.current;
+    const stale = readRevision !== recoveryConfigRevisionRef.current;
+    const recovery = stale && current ? { ...status.recovery, allowPrivateNetwork: current.allowPrivateNetwork } : status.recovery;
+    setRecoveryStatus({ ...status, recovery });
+    if (!stale) acceptRecoveryConfig(recovery);
+  }, [acceptRecoveryConfig]);
+
+  useEffect(() => {
+    let active = true;
+    const readRevision = recoveryConfigRevisionRef.current;
+    // This reads the small desktop config without waiting for project saves or
+    // the full library/snapshot scan performed by recoveryStatus.
+    void window.lianhuaDesktop?.storagePaths?.().then(paths => {
+      if (active && paths.recovery && readRevision === recoveryConfigRevisionRef.current) acceptRecoveryConfig(paths.recovery);
+    }).catch(() => undefined);
+    return () => { active = false; };
+  }, [acceptRecoveryConfig]);
 
   const storyAnalysisIdentity = buildStoryAnalysisRequestIdentity(
     editorProject,
@@ -3056,11 +3085,12 @@ export default function App() {
 
   useEffect(() => {
     if (!desktopStateReady || !desktopBridge()?.recoveryStatus) return;
+    const readRevision = recoveryConfigRevisionRef.current;
     void desktopBridge()?.recoveryStatus?.().then((status) => {
-      setRecoveryStatus(status);
+      receiveRecoveryStatus(status, readRevision);
       if (status.lastRecoveryNotice) setNotice({ text: status.lastRecoveryNotice, tone: "error" });
-    });
-  }, [desktopStateReady]);
+    }).catch(() => undefined);
+  }, [desktopStateReady, receiveRecoveryStatus]);
 
   useEffect(() => {
     if (notice) {
@@ -3509,6 +3539,27 @@ export default function App() {
 
   const notify = (text: string, tone: Notice["tone"] = "normal") =>
     setNotice({ text, tone });
+
+  const updatePrivateNetworkAccess = async (allowed: boolean) => {
+    if (privateNetworkWriteRef.current) return;
+    const bridge = desktopBridge();
+    if (!bridge?.updateRecoveryConfig) {
+      notify("本机与局域网访问开关仅在桌面应用中生效。", "error");
+      return;
+    }
+    privateNetworkWriteRef.current = true;
+    setPrivateNetworkSaving(true);
+    try {
+      const recovery = await bridge.updateRecoveryConfig({ allowPrivateNetwork: allowed });
+      acceptRecoveryConfig(recovery);
+      notify(recovery.allowPrivateNetwork === true ? "已允许访问本机与局域网模型端点。" : "已关闭本机与局域网模型端点访问。");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "本机网络访问设置保存失败。", "error");
+    } finally {
+      privateNetworkWriteRef.current = false;
+      setPrivateNetworkSaving(false);
+    }
+  };
 
   const reportRuntimeError = useCallback((stage: string, error: unknown, context?: RuntimeErrorLogContext): void => {
     const current = stateRef.current;
@@ -9548,12 +9599,16 @@ export default function App() {
     setSelectedImagePresetId,
     recoveryStatus,
     setRecoveryStatus,
+    allowPrivateNetwork,
+    privateNetworkSaving,
+    updatePrivateNetworkAccess,
   } satisfies AppContext;
   const stateDiagnostic = useMemo(() => recoveryOpen ? diagnoseState(state) : undefined, [state, recoveryOpen]);
 
   const refreshRecoveryStatus = async () => {
+    const readRevision = recoveryConfigRevisionRef.current;
     const next = await desktopBridge()?.recoveryStatus?.();
-    if (next) setRecoveryStatus(next);
+    if (next) receiveRecoveryStatus(next, readRevision);
   };
 
   const createRestorePoint = async () => {
@@ -10789,6 +10844,9 @@ interface AppContext {
   setSelectedImagePresetId: React.Dispatch<React.SetStateAction<string>>;
   recoveryStatus: RecoveryStatus | null;
   setRecoveryStatus: React.Dispatch<React.SetStateAction<RecoveryStatus | null>>;
+  allowPrivateNetwork: boolean;
+  privateNetworkSaving: boolean;
+  updatePrivateNetworkAccess: (allowed: boolean) => Promise<void>;
 }
 
 function DashboardView(ctx: AppContext) {
@@ -24658,7 +24716,7 @@ function GenerationTasksView(ctx: AppContext) {
 }
 
 function SettingsView(ctx: AppContext) {
-  const { state, setState, notify } = ctx;
+  const { state, setState, notify, updatePrivateNetworkAccess } = ctx;
   type ApiTarget = "text" | "vision" | "image";
   type SettingsPanel = "image" | "text" | "vision" | "video" | "credentials";
   const [testing, setTesting] = useState(false);
@@ -24768,22 +24826,6 @@ function SettingsView(ctx: AppContext) {
         ),
       },
     }));
-  const updatePrivateNetworkAccess = async (allowed: boolean) => {
-    const bridge = desktopBridge();
-    if (!bridge?.updateRecoveryConfig) {
-      notify("本机与局域网访问开关仅在桌面应用中生效。", "error");
-      return;
-    }
-    try {
-      const recovery = await bridge.updateRecoveryConfig({ allowPrivateNetwork: allowed });
-      ctx.setRecoveryStatus((current: RecoveryStatus | null) => (
-        current ? { ...current, recovery } : current
-      ));
-      notify(allowed ? "已允许访问本机与局域网模型端点。" : "已关闭本机与局域网模型端点访问。");
-    } catch (error) {
-      notify(error instanceof Error ? error.message : "本机网络访问设置保存失败。", "error");
-    }
-  };
 
   const profileMeta = {
     text: {
@@ -25316,7 +25358,8 @@ function SettingsView(ctx: AppContext) {
       {settingsPanel === "video" && (
         <VideoGenerationSettings settings={settings} onChange={patchSettings}
           getCurrentSettings={() => ctx.getCurrentState().settings}
-          allowPrivateNetwork={Boolean(ctx.recoveryStatus?.recovery.allowPrivateNetwork)}
+          allowPrivateNetwork={ctx.allowPrivateNetwork}
+          privateNetworkSaving={ctx.privateNetworkSaving}
           onPrivateNetworkChange={(allowed) => { void updatePrivateNetworkAccess(allowed); }} />
       )}
 
@@ -25778,7 +25821,8 @@ function SettingsView(ctx: AppContext) {
               ) : settings.imageApi.backend === "comfyui" ? (
                   <ComfyUISettings
                     config={settings.imageApi}
-                    allowPrivateNetwork={Boolean(ctx.recoveryStatus?.recovery.allowPrivateNetwork)}
+                    allowPrivateNetwork={ctx.allowPrivateNetwork}
+                    privateNetworkSaving={ctx.privateNetworkSaving}
                     onChange={patchImage}
                     onPrivateNetworkChange={(allowed) => void updatePrivateNetworkAccess(allowed)}
                   />

@@ -7,8 +7,8 @@ import { createInitialState, normalizeState, serializeStateForStorage } from '..
 import type { ImageApiConfig } from '../src/types';
 import { requestImageModel } from '../src/services/llm';
 import { captureImageApiSnapshot, resolveImageApiForRegeneration } from '../src/imageApiSelection';
-import { normalizeRunningHubVideoConfig } from '../src/runningHubVideo';
-import { syncRunningHubImageSlots } from '../src/runningHubImageSlots';
+import { exportRunningHubVideoWorkflow, normalizeRunningHubVideoConfig } from '../src/runningHubVideo';
+import { removeRunningHubImageSlot, syncRunningHubImageSlots } from '../src/runningHubImageSlots';
 import { IMAGE_V3_BODY, IMAGE_V3_CURL } from './fixtures/runningHubImageV3';
 
 const body = { nodeInfoList: [
@@ -36,14 +36,15 @@ test('official AI-app import safely binds only business prompt and documented wi
   assert.equal(curl.includes('EXAMPLE_NOT_REAL'), true, 'original input remains unchanged');
 });
 
-test('V3 API import binds its unique labelled text prompt; editor slots submit zero to three references without changing cloud options', () => {
+test('V3 API import binds labelled prompt and references immediately; direct requests submit zero to three references', () => {
   const imported = importRunningHubImageWorkflow(IMAGE_V3_CURL, 'V3 三参考图');
   assert.equal(imported.workflow.remoteId, '2079381758411587586');
   assert.deepEqual(imported.workflow.mapping.prompt, [{ nodeId: '107', inputName: 'text' }]);
-  assert.deepEqual(imported.workflow.mapping.images, [], 'image slots are synchronized in the editor, not persisted during import');
+  assert.deepEqual(imported.workflow.mapping.images, ['181', '182', '183'].map(nodeId => ({ nodeId, inputName: 'image', role: 'general' })),
+    'the direct-import path must accept selected references without opening the workflow editor');
   const original = JSON.stringify(imported.workflow);
   const prepared = syncRunningHubImageSlots(imported.workflow);
-  assert.deepEqual(prepared.mapping.images, ['181', '182', '183'].map(nodeId => ({ nodeId, inputName: 'image', role: 'general' })));
+  assert.equal(prepared, imported.workflow, 'opening the editor does not add more inputs to a freshly imported workflow');
   assert.equal(prepared.mapping.imageCount, undefined, 'Quantity/Piece is not an inferred reference-count input');
   assert.equal(JSON.stringify(imported.workflow), original, 'editor preparation must not mutate the saved input');
   const current: ImageApiConfig = { ...createInitialState().settings.imageApi, enabled: true, backend: 'runninghub',
@@ -55,10 +56,65 @@ test('V3 API import binds its unique labelled text prompt; editor slots submit z
     assert.equal(request.endpoint, 'https://www.runninghub.ai/openapi/v2/run/ai-app/2079381758411587586');
     assert.deepEqual(request.body, { ...IMAGE_V3_BODY, usePersonalQueue: false, nodeInfoList: IMAGE_V3_BODY.nodeInfoList.map(node =>
       node.nodeId === '107' ? { ...node, fieldValue: '本次图像正文' }
-        : ['181', '182', '183'].indexOf(node.nodeId) >= 0 && Number(node.nodeId) - 181 < count
-          ? { ...node, fieldValue: uploadedImages[Number(node.nodeId) - 181] } : node) });
+        : ['181', '182', '183'].includes(node.nodeId)
+          ? { ...node, fieldValue: Number(node.nodeId) - 181 < count ? uploadedImages[Number(node.nodeId) - 181] : 'None' }
+          : node.nodeId === '195' && count === 0 ? { ...node, fieldValue: 'true' } : node) });
     assert.equal(JSON.stringify(current), unchanged);
   }
+});
+
+test('V3 hand-mapped second image receives the reference and clears all unselected examples', () => {
+  const imported = importRunningHubImageWorkflow(IMAGE_V3_CURL);
+  imported.workflow.mapping.images = [{ nodeId: '182', inputName: 'image', role: 'character' }];
+  const current: ImageApiConfig = { ...createInitialState().settings.imageApi, enabled: true, backend: 'runninghub',
+    baseUrl: imported.baseUrl!, apiKey: 'LOCAL_FAKE_KEY', runningHubWorkflows: [imported.workflow], activeRunningHubWorkflowId: imported.workflow.id };
+  const snapshot = JSON.stringify(current);
+  const fields = (input: Parameters<typeof buildRunningHubImageRequest>[1]) => buildRunningHubImageRequest(current, input).body.nodeInfoList as typeof IMAGE_V3_BODY.nodeInfoList;
+  const read = (nodes: ReturnType<typeof fields>, id: string) => nodes.find(node => node.nodeId === id)!.fieldValue;
+  const one = fields({ prompt: '手动第二图槽', uploadedImages: ['uploaded-second-slot.png'], sizeOverride: false });
+  assert.deepEqual(['181', '182', '183'].map(id => read(one, id)), ['None', 'uploaded-second-slot.png', 'None']);
+  assert.equal(read(one, '195'), 'false', 'reference generation preserves the cloud switch when no output size is overridden');
+  const zero = fields({ prompt: '无参考图', uploadedImages: [], sizeOverride: false });
+  assert.deepEqual(['181', '182', '183'].map(id => read(zero, id)), ['None', 'None', 'None']);
+  assert.equal(read(zero, '195'), 'true', 'text-to-image requires the proportions switch even at the cloud default size');
+  assert.equal(JSON.stringify(current), snapshot, 'submitted empty-slot and switch values never rewrite the saved template');
+});
+
+test('V3 legacy empty mappings recover retained request slots without expanding static templates or restoring deletions', () => {
+  const imported = importRunningHubImageWorkflow(IMAGE_V3_CURL).workflow;
+  const normalize = (workflow: typeof imported) => normalizeRunningHubImageConfig({ runningHubWorkflows: [workflow], activeRunningHubWorkflowId: workflow.id }).runningHubWorkflows[0];
+  const legacy = { ...imported, mapping: { ...imported.mapping, images: [] } };
+  const snapshot = JSON.stringify(legacy);
+  assert.deepEqual(normalize(legacy).mapping.images, imported.mapping.images);
+  assert.equal(JSON.stringify(legacy), snapshot, 'legacy repair must not mutate saved settings');
+  assert.deepEqual(normalize({ ...legacy, remoteId: 'other-app' }).mapping.images, []);
+  assert.deepEqual(normalize({ ...legacy, runKind: 'workflow' }).mapping.images, []);
+  assert.deepEqual(normalize({ ...legacy, mapping: { ...legacy.mapping, prompt: [] } }).mapping.images, []);
+  const manual = { ...imported, mapping: { ...imported.mapping, images: [{ nodeId: '182', inputName: 'image', role: 'character' as const }] } };
+  assert.deepEqual(normalize(manual).mapping.images, manual.mapping.images, 'an existing manual selection stays authoritative');
+  let deleted = imported;
+  for (const binding of imported.mapping.images) deleted = removeRunningHubImageSlot(deleted, binding);
+  assert.deepEqual(normalize(deleted).mapping.images, [], 'deleted request fields must not be recovered from the catalogue');
+  const partial = removeRunningHubImageSlot(imported, imported.mapping.images[0]);
+  partial.mapping = { ...partial.mapping, images: [] };
+  assert.deepEqual(normalize(partial).mapping.images.map(binding => binding.nodeId), ['182', '183']);
+  const duplicate = JSON.parse(legacy.requestTemplate); duplicate.nodeInfoList.push({ ...duplicate.nodeInfoList[0] });
+  assert.deepEqual(normalize({ ...legacy, requestTemplate: JSON.stringify(duplicate) }).mapping.images, [], 'ambiguous request slots stay invalid');
+});
+
+test('explicit image-workflow backups retain hand mappings and omitted size mappings during import', () => {
+  const workflow = importRunningHubImageWorkflow(IMAGE_V3_CURL).workflow;
+  workflow.mapping.images = [{ nodeId: '182', inputName: 'image', role: 'character' }];
+  workflow.mapping.parameters = {};
+  const backup = exportRunningHubVideoWorkflow(workflow);
+  const savedMapping = JSON.parse(backup).workflow.mapping;
+  const restored = importRunningHubImageWorkflow(backup).workflow;
+  assert.deepEqual(restored.mapping, savedMapping, 'backup mappings are explicit and must not be expanded by API auto-binding');
+  assert.equal(restored.requestTemplate, workflow.requestTemplate);
+  const fenced = importRunningHubImageWorkflow('```json\n' + backup + '\n```').workflow;
+  assert.deepEqual(fenced.mapping, savedMapping, 'the backup marker survives fenced input as well');
+  const noPrompt = { ...workflow, mapping: { ...workflow.mapping, prompt: [] } };
+  assert.deepEqual(importRunningHubImageWorkflow(exportRunningHubVideoWorkflow(noPrompt)).workflow.mapping.prompt, [], 'a disabled prompt mapping must stay disabled');
 });
 
 test('text prompt auto-binding requires an explicit Prompt label and a unique candidate', () => {

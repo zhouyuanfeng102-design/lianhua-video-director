@@ -17,6 +17,7 @@ const originalWindow = globalThis.window;
 Object.defineProperty(globalThis, 'window', { configurable: true, writable: true, value: { lianhuaDesktop: {
   request: async (request: Request) => {
     requests.push(request);
+    if (request.url.includes('/openapi/v2/media/upload/binary')) return { status: 200, body: JSON.stringify({ code: 0, data: { fileName: `openapi/uploaded-${requests.filter(item => item.url.includes('/media/upload/binary')).length}.png` } }) };
     if (request.url.includes('/openapi/v2/run/ai-app/')) return { status: 200, body: JSON.stringify({ taskId: 'mock-runninghub-image', status: 'SUCCESS', results: [{ url: 'https://image.example.test/native-runninghub.png', outputType: 'png' }] }) };
     if (request.url.includes(':generateContent')) return { status: 200, body: JSON.stringify({ candidates: [{ content: { parts: [
       { text: 'A generated image.' }, { inlineData: { mimeType: 'image/png', data: png } },
@@ -42,8 +43,6 @@ const json = (request = requests.at(-1)!) => JSON.parse(request.body || '{}');
 
 try {
   const cloudImported = importRunningHubImageWorkflow(IMAGE_V3_CURL);
-  cloudImported.workflow.mapping.parameters = { resolution: { nodeId: '189', inputName: 'value' }, aspect_ratio: { nodeId: '194', inputName: 'aspect_ratio' } };
-  cloudImported.workflow.mapping.images = ['181', '182', '183'].map(nodeId => ({ nodeId, inputName: 'image' }));
   const runningHub = { ...config('runninghub'), runningHubWorkflows: [cloudImported.workflow], activeRunningHubWorkflowId: cloudImported.workflow.id };
   const cloudPlan = planned(runningHub, '2K', '3:4');
   assert.deepEqual(cloudPlan.resolutionPlan.encoding, { kind: 'tier', value: '2K' });
@@ -54,8 +53,18 @@ try {
   const cloudNodes = json().nodeInfoList as Array<{ nodeId: string; fieldName: string; fieldValue: unknown }>;
   const cloudValue = (id: string) => cloudNodes.find(node => node.nodeId === id)!.fieldValue;
   assert.equal(cloudValue('189'), '2048'); assert.equal(cloudValue('194'), '3:4');
-  assert.equal(cloudValue('195'), 'false'); assert.equal(cloudValue('191'), '1');
+  assert.equal(cloudValue('195'), 'true'); assert.equal(cloudValue('191'), '1');
+  for (const id of ['181', '182', '183']) assert.equal(cloudValue(id), 'None');
   assert.ok(cloudNodes.every(node => !['width', 'height'].includes(node.fieldName)));
+  for (const count of [1, 2, 3]) {
+    const before = requests.length;
+    const totalUploads = requests.filter(item => item.url.includes('/media/upload/binary')).length;
+    await requestImageModel(runningHub, { ...planned(runningHub, '1K', '16:9'), referenceImages: Array(count).fill(reference), preserveReferenceImageOrder: true });
+    assert.equal(requests.length, before + count + 1, 'selected references upload once each before one generation request');
+    const values = Object.fromEntries(json().nodeInfoList.map((node: { nodeId: string; fieldValue: unknown }) => [node.nodeId, node.fieldValue]));
+    for (let index = 0; index < 3; index++) assert.equal(values[String(181 + index)], index < count ? `openapi/uploaded-${totalUploads + index + 1}.png` : 'None');
+    assert.equal(values['194'], '16:9'); assert.equal(values['195'], 'true'); assert.equal(values['189'], '1024');
+  }
   const beforeInvalidCloud = requests.length;
   await assert.rejects(() => requestImageModel(runningHub, { prompt: 'exact custom request', width: 1025, height: 1023, sizeOverride: true, referenceImages: [reference] }), /width.*不能忽略/u);
   assert.equal(requests.length, beforeInvalidCloud, 'unsupported custom pixels fail before upload or generation');

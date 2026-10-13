@@ -110,18 +110,19 @@ test('reference capacity validation rejects Krea2 selections and permits declare
 
 test('V3 tier encoding reaches real resolution and ratio bindings without inventing pixel fields', () => {
   const imported = importRunningHubImageWorkflow(IMAGE_V3_CURL);
-  imported.workflow.mapping.parameters = { resolution: { nodeId: '189', inputName: 'value' }, aspect_ratio: { nodeId: '194', inputName: 'aspect_ratio' } };
+  assert.deepEqual(imported.workflow.mapping.parameters, { resolution: { nodeId: '189', inputName: 'value' }, aspect_ratio: { nodeId: '194', inputName: 'aspect_ratio' } });
   const current = { ...config(), runningHubWorkflows: [imported.workflow], activeRunningHubWorkflowId: imported.workflow.id };
   const frozen = JSON.stringify(current);
-  for (const [tier, edge] of [['1K', '1024'], ['2K', '2048'], ['4K', '4096']] as const) {
-    const size = resolveImageResolution({ tier, logicalAspectRatio: '3:4', config: current });
+  for (const [tier, edge] of [['1K', '1024'], ['2K', '2048'], ['4K', '4096']] as const) for (const aspect of ['1:1', '3:4', '4:3', '2:3', '3:2', '9:16', '16:9']) {
+    const size = resolveImageResolution({ tier, logicalAspectRatio: aspect, config: current });
     assert.equal(size.issue, ''); assert.deepEqual(size.resolutionPlan?.encoding, { kind: 'tier', value: tier });
     assertImageResolutionPlanForConfig(size.resolutionPlan!, current);
     const request = buildRunningHubImageRequest(current, { prompt: 'V3 synthetic prompt', sizeOverride: true, ...size });
     const nodes = request.body.nodeInfoList as typeof body.nodeInfoList;
     const read = (id: string) => nodes.find(node => node.nodeId === id)!.fieldValue;
-    assert.equal(read('189'), edge); assert.equal(read('194'), '3:4');
-    assert.equal(read('195'), 'false'); assert.equal(read('191'), '1');
+    assert.equal(read('189'), edge); assert.equal(read('194'), aspect);
+    assert.equal(read('195'), 'true'); assert.equal(read('191'), '1'); assert.equal(read('186'), 'false');
+    for (const id of ['181', '182', '183']) assert.equal(read(id), 'None');
     assert.ok(nodes.every(node => !['width', 'height'].includes(node.fieldName)));
   }
   assert.equal(JSON.stringify(current), frozen);
@@ -130,6 +131,28 @@ test('V3 tier encoding reaches real resolution and ratio bindings without invent
   assert.throws(() => buildRunningHubImageRequest(current, { prompt: 'pixels', width: 1025, height: 1023, sizeOverride: true }), /width.*不能忽略/u);
   const cloudDefault = buildRunningHubImageRequest(current, { prompt: 'keep default', sizeOverride: false });
   assert.equal((cloudDefault.body.nodeInfoList as typeof body.nodeInfoList).find(node => node.nodeId === '189')!.fieldValue, '2048');
+});
+
+test('V3 enables the ratio dependency with a reference and preserves boolean type; other apps retain their switch', () => {
+  const workflow = importRunningHubImageWorkflow(IMAGE_V3_CURL).workflow;
+  const raw = JSON.parse(workflow.requestTemplate);
+  raw.nodeInfoList.find((node: { nodeId: string }) => node.nodeId === '195').fieldValue = false;
+  workflow.requestTemplate = JSON.stringify(raw);
+  const current = { ...config(), runningHubWorkflows: [workflow], activeRunningHubWorkflowId: workflow.id };
+  const before = JSON.stringify(current);
+  const size = resolveImageResolution({ tier: '1K', logicalAspectRatio: '16:9', config: current });
+  assert.equal(size.issue, '');
+  const nodeValues = (request: ReturnType<typeof buildRunningHubImageRequest>) => Object.fromEntries(
+    (request.body.nodeInfoList as typeof body.nodeInfoList).map(node => [node.nodeId, node.fieldValue]));
+  const selected = nodeValues(buildRunningHubImageRequest(current, { prompt: 'reference portrait', ...size, sizeOverride: true, uploadedImages: ['current-reference.png'] }));
+  assert.equal(selected['195'], true); assert.equal(selected['194'], '16:9');
+  assert.equal(selected['181'], 'current-reference.png'); assert.equal(selected['182'], 'None'); assert.equal(selected['183'], 'None');
+  const defaults = nodeValues(buildRunningHubImageRequest(current, { prompt: 'reference defaults', sizeOverride: false, uploadedImages: ['current-reference.png'] }));
+  assert.equal(defaults['195'], false); assert.equal(defaults['194'], '3:4'); assert.equal(defaults['189'], '2048');
+  assert.equal(JSON.stringify(current), before);
+  const other = { ...workflow, remoteId: '2079381758411587587' };
+  const unrelated = { ...current, runningHubWorkflows: [other] };
+  assert.equal(nodeValues(buildRunningHubImageRequest(unrelated, { prompt: 'other app', ...size, sizeOverride: true }))['195'], false);
 });
 
 test('blank but explicitly mapped pixel fields keep exact custom override capability', () => {

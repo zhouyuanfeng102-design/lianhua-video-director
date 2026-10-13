@@ -20,6 +20,7 @@ export interface VideoGenerationSettingsProps {
   onChange: (patch: Partial<AppSettings>) => void;
   getCurrentSettings?: () => AppSettings;
   allowPrivateNetwork?: boolean;
+  privateNetworkSaving?: boolean;
   onPrivateNetworkChange?: (allowed: boolean) => void;
 }
 const idFor = (prefix: string) => `${prefix}-${typeof crypto !== 'undefined' && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
@@ -28,7 +29,7 @@ const parseSettingsJson = (source: string): unknown => {
   catch { throw new Error('JSON 格式无法读取，请检查逗号、引号和括号；现有配置未被覆盖。'); }
 };
 
-export function VideoGenerationSettings({ settings, onChange, getCurrentSettings, allowPrivateNetwork, onPrivateNetworkChange }: VideoGenerationSettingsProps) {
+export function VideoGenerationSettings({ settings, onChange, getCurrentSettings, allowPrivateNetwork, privateNetworkSaving = false, onPrivateNetworkChange }: VideoGenerationSettingsProps) {
   const [panel, setPanel] = useState<VideoGenerationSource>(settings.videoSource || settings.videoBackend || 'api');
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
@@ -160,7 +161,7 @@ export function VideoGenerationSettings({ settings, onChange, getCurrentSettings
     } catch (cause) { setTemplateError(formatUserFacingError(cause)); }
   };
   const apiField = (key: keyof VideoTaskApiConfig, label: string, placeholder = '', secret = false) => <label className="field" key={key}><span>{label}</span><input aria-label={label} type={secret ? 'password' : 'text'} value={String(api[key] || '')} placeholder={placeholder} onChange={(event) => patchApi({ [key]: event.target.value })} /></label>;
-  const permission = onPrivateNetworkChange && <label className="check-row vgs-permission"><input type="checkbox" checked={Boolean(allowPrivateNetwork)} onChange={(event) => onPrivateNetworkChange(event.target.checked)} />允许访问本机与局域网模型端点</label>;
+  const permission = onPrivateNetworkChange && <label className="check-row vgs-permission"><input type="checkbox" checked={Boolean(allowPrivateNetwork)} disabled={privateNetworkSaving} onChange={(event) => onPrivateNetworkChange(event.target.checked)} />允许访问本机与局域网模型端点</label>;
 
   return <section className="video-generation-settings video-settings-redesign" data-video-settings-panel={panel}>
     <header className="vgs-header"><div><h2><Film size={17} />视频生成连接</h2><p>常用连接放在这里，工作流与高级协议单独管理。</p></div><label className="field vgs-default"><span>默认生成方式</span><select aria-label="默认视频生成方式" value={settings.videoSource || settings.videoBackend || 'api'} onChange={(event) => update(() => ({ videoSource: event.target.value as VideoGenerationSource, videoBackend: event.target.value === 'comfyui' ? 'comfyui' : 'api' }))}><option value="api">视频 API</option><option value="comfyui">ComfyUI</option><option value="runninghub">RunningHub 云端</option></select></label></header>

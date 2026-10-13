@@ -16,6 +16,7 @@ interface Window {
       logs: string;
       assets: string;
       snapshots: string;
+      recovery?: import('./storage').RecoveryStatus['recovery'];
       encryptionAvailable: boolean;
     }>;
     loadState: () => Promise<string | null>;

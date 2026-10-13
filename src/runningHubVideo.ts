@@ -436,6 +436,7 @@ export const importRunningHubVideoWorkflow = (input: string, name?: string): Run
   if (/^curl(?:\.exe)?\s/iu.test(text)) { const curl = readCurl(text); endpoint = readRunUrl(curl.url); warnings.push(...curl.warnings); text = curl.body; }
   let document: unknown; try { document = JSON.parse(text); } catch { throw new Error('无法读取 RunningHub 请求 JSON；请完整复制 nodeInfoList 请求体或 cURL。'); }
   let workflow = createRunningHubVideoWorkflow(name || '导入的云端工作流');
+  const backup = isRecord(document) && document.format === 'lianhua-runninghub-video-workflow';
   if (isRecord(document) && document.format === 'lianhua-runninghub-video-workflow') {
     if (document.version !== 1 || !isRecord(document.workflow)) throw new Error('不支持此 RunningHub 工作流备份版本。');
     const imported = normalizeWorkflow(document.workflow); if (!imported) throw new Error('工作流备份内容无效。');
@@ -473,7 +474,7 @@ export const importRunningHubVideoWorkflow = (input: string, name?: string): Run
   if (!workflow.remoteId.trim()) warnings.push('请求体没有提交地址 / 云端 ID，已保存为待配置草稿；请从该工作流 API 文档填写 ID。');
   if (!workflow.mapping.prompt.length) warnings.push('导入没有自动猜测提示词或参考图节点；请在映射页明确选择后再启用。');
   try { assertSafeNumbers(text); } catch (cause) { warnings.push(cause instanceof Error ? cause.message : '请求含有非安全数字，需核对后使用。'); }
-  return { workflow, warnings: [...new Set(warnings)], ...(endpoint ? { baseUrl: endpoint.baseUrl } : {}) };
+  return { workflow, warnings: [...new Set(warnings)], ...(backup ? { sourceKind: 'backup' as const } : {}), ...(endpoint ? { baseUrl: endpoint.baseUrl } : {}) };
 };
 
 export const exportRunningHubVideoWorkflow = (workflow: RunningHubVideoWorkflow): string => {
