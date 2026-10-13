@@ -1,4 +1,4 @@
-import { resolveImageOutputSize, type ResolvedImageOutputSize } from './imageOutputSize';
+import { resolveImageOutputSize, runningHubImageSizeContext, type ResolvedImageOutputSize } from './imageOutputSize';
 import type { ImageApiConfig } from './types';
 import { resolveImageResolution } from './imageResolution';
 
@@ -74,9 +74,10 @@ export const resolveStoryboardImageOutputSize = (
   api: ImageApiConfig['backend'] | ImageApiConfig,
 ): ResolvedImageOutputSize => {
   const canvas = defaultCanvas(aspectRatio);
+  const cloudContext = runningHubImageSizeContext(api);
   const aspect = parseAspectRatio(aspectRatio);
   if (preference.mode === 'default') {
-    return { ...canvas, sizeOverride: false, issue: '', layoutNote: '规格默认 · 保留原分镜画布' };
+    return { ...canvas, ...cloudContext, sizeOverride: false, issue: '', layoutNote: cloudContext.workflowSizeMode ? '工作流默认尺寸 · 像素仅作版式估算' : '规格默认 · 保留原分镜画布' };
   }
 
   if (preference.mode === 'custom') {
@@ -111,7 +112,7 @@ export const resolveStoryboardImageOutputSize = (
     return { ...resolved, sizeOverride: true, layoutNote: `旧规格 · 保留长边${longSide}px及原像素对齐；重新选择K档位后使用当前模型规格` };
   }
   const resolved = resolveImageResolution({ tier: preference.mode.toUpperCase() as '1K' | '2K' | '4K', logicalAspectRatio: aspect.label, config: api });
-  return { ...resolved, sizeOverride: true, layoutNote: `按分镜 ${aspect.label} · ${resolved.layoutNote}`,
+  return { ...resolved, ...cloudContext, sizeOverride: true, layoutNote: `${cloudContext.workflowAspect ? '比例由云端工作流决定，分镜画布仅作估算' : `按分镜 ${aspect.label}`} · ${resolved.layoutNote}`,
     issue: resolved.height < 64 || resolved.width < 64
       ? '按分镜比例计算的短边不足64像素，请提高分辨率或使用自定义尺寸；不会暗中更改画面比例。'
       : resolved.issue };

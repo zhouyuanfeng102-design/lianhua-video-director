@@ -13,6 +13,8 @@ import { STORY_CAUSALITY_RULE } from '../src/storyCausalityRules';
 import { DIALOGUE_DELIVERY_RULE, NO_DIALOGUE_PERFORMANCE_RULE } from '../src/audioPromptPolicy';
 import { SEEDANCE_CHINESE_WRITER_RULE } from '../src/seedancePromptRules';
 import {
+  VIDEO_CONTINUOUS_SCENE_RULE,
+  VIDEO_ACTING_CAMERA_PRESERVATION_RULES,
   VIDEO_NATURAL_PERFORMANCE_RULE,
   VIDEO_WORLD_SPACE_CAMERA_RULE,
   VIDEO_AI_SHOT_COVERAGE_RULE,
@@ -22,6 +24,10 @@ import {
   VIDEO_ACTING_CAMERA_REVIEW_RULE,
   VIDEO_ACTING_CAMERA_TRANSLATION_RULE,
   VIDEO_ACTING_CAMERA_RULES,
+  LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_1_0,
+  LEGACY_VIDEO_AI_SHOT_COVERAGE_RULE_V2_1_0,
+  LEGACY_VIDEO_CAMERA_SELECTION_RULE_V2_1_0,
+  LEGACY_VIDEO_ACTING_CAMERA_FIELD_RULE_V2_1_0,
   LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_0_1,
   LEGACY_VIDEO_CAMERA_SELECTION_RULE_V2_0_1,
   LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_1,
@@ -41,7 +47,7 @@ test('the module exposes text contracts and one request-only compatibility helpe
     assert.ok(typeof value === 'string' && value.length > 0, `${name} must remain a text contract`);
   }
   const rules = [
-    VIDEO_NATURAL_PERFORMANCE_RULE, VIDEO_WORLD_SPACE_CAMERA_RULE,
+    VIDEO_CONTINUOUS_SCENE_RULE, VIDEO_NATURAL_PERFORMANCE_RULE, VIDEO_WORLD_SPACE_CAMERA_RULE,
     VIDEO_AI_SHOT_COVERAGE_RULE, VIDEO_CAMERA_SELECTION_RULE,
     VIDEO_MOTIVATED_LIGHTING_RULE, VIDEO_ACTING_CAMERA_FIELD_RULE,
     VIDEO_ACTING_CAMERA_REVIEW_RULE,
@@ -54,6 +60,7 @@ test('the module exposes text contracts and one request-only compatibility helpe
 test('request compatibility preserves complete current bundles and every current single camera/spatial/frame rule', () => {
   const currentRules = [
     VIDEO_ACTING_CAMERA_RULES, VIDEO_ACTING_CAMERA_TRANSLATION_RULE,
+    VIDEO_CONTINUOUS_SCENE_RULE, VIDEO_ACTING_CAMERA_PRESERVATION_RULES,
     VIDEO_NATURAL_PERFORMANCE_RULE, VIDEO_WORLD_SPACE_CAMERA_RULE,
     VIDEO_AI_SHOT_COVERAGE_RULE, VIDEO_CAMERA_SELECTION_RULE,
     VIDEO_MOTIVATED_LIGHTING_RULE, VIDEO_ACTING_CAMERA_FIELD_RULE,
@@ -99,6 +106,39 @@ test('2.0.1 camera requests upgrade once without changing custom prose, translat
     assert.ok(currentRequest.includes(VIDEO_ACTING_CAMERA_TRANSLATION_RULE));
     assert.equal(stripLegacyVideoActingCameraRules(currentRequest), currentRequest);
     assert.equal(preset, snapshot, 'request compatibility does not migrate stored preset text');
+  }
+});
+
+test('continuous scenes and current downstream preservation keep separate photography permissions', () => {
+  for (const requirement of [
+    /按地点、连续时间、人物目标、阻碍及局势变化组织连续场面/u,
+    /事件条目、人物登场、段落标题与生成窗口都不自动成为摄影切点/u,
+    /身份资料是辨认与连续性依据，不是需要演出的事件/u,
+    /不为每个微动作编造小数秒排程/u,
+  ]) assert.match(VIDEO_CONTINUOUS_SCENE_RULE, requirement);
+  for (const requirement of [
+    /保留既定镜数、顺序、切点、景别、机位、轴线侧别、运镜、观察对象与注意交接/u,
+    /不授权主动选镜、改机位、切特写、拆合镜头或另编摄影/u,
+    /连续动作强度、对方同步回应、接触或落空及进入退出状态/u,
+    /原对白逐字保留原语言、具名说话人、声源、完整发话区间/u,
+    /不借澄清重做摄影/u,
+  ]) assert.match(VIDEO_ACTING_CAMERA_PRESERVATION_RULES, requirement);
+  assert.equal(VIDEO_ACTING_CAMERA_PRESERVATION_RULES.includes(VIDEO_AI_SHOT_COVERAGE_RULE), false);
+  assert.equal(VIDEO_ACTING_CAMERA_PRESERVATION_RULES.includes(VIDEO_CAMERA_SELECTION_RULE), false);
+});
+
+test('the retired current director bundle is recognized without changing saved presets or current transcription', () => {
+  const oldRules = [LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_1_0,
+    LEGACY_VIDEO_AI_SHOT_COVERAGE_RULE_V2_1_0, LEGACY_VIDEO_CAMERA_SELECTION_RULE_V2_1_0,
+    LEGACY_VIDEO_ACTING_CAMERA_FIELD_RULE_V2_1_0];
+  for (const old of oldRules) {
+    const saved = ['custom visual preference', old].join('\n');
+    const snapshot = saved;
+    const request = [stripLegacyVideoActingCameraRules(saved), VIDEO_ACTING_CAMERA_PRESERVATION_RULES].join('\n');
+    assert.equal(request.includes(old), false);
+    assert.equal(request.includes(VIDEO_AI_SHOT_COVERAGE_RULE), false);
+    assert.ok(request.includes(VIDEO_ACTING_CAMERA_PRESERVATION_RULES));
+    assert.equal(saved, snapshot);
   }
 });
 
@@ -180,9 +220,11 @@ test('AI selects shot coverage by information and space while confirmed conversi
     /用户exact镜数严格保持/u,
     /auto从能清楚表现全部因果的最少必要视角开始/u,
     /规划JSON沿用reason（保存后对应shotCountReason）以及purpose\/transition/u,
-    /每次新增切镜要对应具体的信息揭示、视点或空间变化/u,
+    /当前取景与自然镜内调整无法清楚表达下一项关键叙事信息时，才切向所需的新画面/u,
+    /不是硬性一镜到底/u,
+    /少而充分的镜头与简单连贯的摄影/u,
     /一个连续镜头已能看清接触、轨迹与回应时，优先在镜内调整关注/u,
-    /多人对白可以用关系构图、说话者近景或单镜关注交接/u,
+    /一个镜头可以承载相互因果的多个事件、动作与话轮/u,
     /镜头时长不等于事件持续时长/u,
     /保留既定镜数、顺序和切点/u,
     /不重切已确认稿或裁掉对白/u,
@@ -195,7 +237,9 @@ test('selected camera terms are real inputs and unselected shots still get motiv
     /明确的必选或指定镜头要求按其范围遵守/u,
     /选择了多个效果不等于每镜同时叠加所有/u,
     /不能把用户选择全部丢掉/u,
-    /未选择运镜时，仍由你按本镜信息目标自主选择/u,
+    /未选择时依据观看任务选择简洁固定、自然跟随或必要运动/u,
+    /普通多选偏好是可用手段，不是逐项展示任务/u,
+    /高速动作不等于快速剪辑/u,
     /不能回退为每镜固定同一种默认跟拍/u,
     /每镜在现有camera写出景别、必要的机位\/视角/u,
     /在purpose或camera用简短可执行语句落实选择理由/u,
@@ -207,7 +251,7 @@ test('character attention and attack targets do not automatically select camera 
   for (const requirement of [
     /分别确定人物的视线\/攻击目标与摄影的主体、取景范围和焦点/u,
     /由剧情行动决定并写在direction\/action\/performance/u,
-    /camera依据观众需要理解的关系、接触、反应或新信息选择覆盖/u,
+    /摄影的观看任务是让观众理解已经发生的关系、接触、反应或关键新信息/u,
     /观察、判断或寻找破绽先用关系构图及观察者的视线、表情、姿态表达/u,
     /目光落点本身不构成推近局部、追随视线切特写或定格的摄影要求/u,
     /局部特写在关键局部提供必要新信息、现有关系景别无法读清或用户明确指定时使用/u,
@@ -238,12 +282,11 @@ test('decisions fit existing shot fields and H3 sections without a new report or
     /现有逐镜内容/u,
     /purpose、action、performance、direction、space、camera、lighting、transition、result/u,
     /保持既有数据结构/u,
-    /H3稿将这些内容融入当前每个\[Shot N\]的现有段落/u,
+    /H3稿将这些既定内容融入当前每个\[Shot N\]的现有段落/u,
     /保持既有H3顶层section名称、顺序、参考标签和输出格式/u,
-    /时间切点保持已确认排程/u,
-    /仅本次指令明确授权taskAuthority=current-segment-staging-replan时/u,
-    /切点以同时交付的修正canonicalPrompt为准/u,
-    /用户固定段长与exact镜数仍不变/u,
+    /时间切点保持源头排程/u,
+    /转换和翻译不根据风格或资料重新设计摄影/u,
+    /仍保持用户固定段长与exact镜数/u,
     /不新增表演审查、空间地图、运镜理由等H3顶层字段或附录/u,
     /不输出内部推理链/u,
   ]) assert.match(VIDEO_ACTING_CAMERA_FIELD_RULE, requirement);

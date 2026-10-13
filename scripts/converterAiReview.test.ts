@@ -9,9 +9,9 @@ import { applyConvertedPromptToShots, parseMasterTimelinePrompt } from '../src/m
 import { AUDIO_PROMPT_RULE, NATURAL_ACTION_AUDIO_RULE } from '../src/audioPromptPolicy';
 import {
   VIDEO_CONVERSION_STORY_RULE, VIDEO_DIALOGUE_RULE, VIDEO_LOCAL_TIME_RULE,
-  VIDEO_SCENE_STYLE_RULE, VIDEO_CONVERSION_FORMAT_RULE,
+  VIDEO_CONTINUOUS_SCENE_STYLE_RULE, VIDEO_CONVERSION_FORMAT_RULE,
   VIDEO_DIALOGUE_STAGING_RULE, VIDEO_SPATIAL_CONTINUITY_RULE,
-  VIDEO_STAGING_REVIEW_RULE, VIDEO_PROMPT_FOCUS_RULE,
+  VIDEO_STAGING_TRANSCRIPTION_RULE, VIDEO_PROMPT_FOCUS_RULE,
   DEFAULT_VIDEO_CONVERSION_SYSTEM, DEFAULT_VIDEO_CONVERSION_OUTPUT,
   LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_3_0,
   LEGACY_VIDEO_DIALOGUE_RULE, stripLegacyVideoQuotaRules,
@@ -145,9 +145,9 @@ assert.equal(hasCurrentTextApiConversion({ ...result, finalPrompt: result.finalP
 assert.equal(hasCurrentTextApiConversion({ ...result, promptTrace: { ...result.promptTrace!, convertedPromptFingerprint: undefined } }), false);
 for (const rule of [
   VIDEO_CONVERSION_STORY_RULE, VIDEO_DIALOGUE_RULE, VIDEO_LOCAL_TIME_RULE,
-  VIDEO_SCENE_STYLE_RULE, VIDEO_CONVERSION_FORMAT_RULE, AUDIO_PROMPT_RULE, NATURAL_ACTION_AUDIO_RULE,
+  VIDEO_CONTINUOUS_SCENE_STYLE_RULE, VIDEO_CONVERSION_FORMAT_RULE, AUDIO_PROMPT_RULE, NATURAL_ACTION_AUDIO_RULE,
   VIDEO_DIALOGUE_STAGING_RULE, VIDEO_SPATIAL_CONTINUITY_RULE,
-  VIDEO_STAGING_REVIEW_RULE, VIDEO_PROMPT_FOCUS_RULE,
+  VIDEO_STAGING_TRANSCRIPTION_RULE, VIDEO_PROMPT_FOCUS_RULE,
 ]) assert.ok(initialSystem.includes(rule), 'generation keeps shared conversion/audio instructions');
 assert.doesNotMatch(initialSystem, /maxActionStages|禁止使用“随后”|allowedSubjects/u);
 assert.doesNotMatch(initialSystem, /requiredDialogues/u, 'live instructions cannot refer to a removed local extraction field');
@@ -303,7 +303,7 @@ for (const sample of structuralSamples) {
         assert.ok(system.includes(rule));
       }
       for (const rule of [VIDEO_DIALOGUE_STAGING_RULE, VIDEO_SPATIAL_CONTINUITY_RULE,
-        VIDEO_STAGING_REVIEW_RULE, VIDEO_PROMPT_FOCUS_RULE]) {
+        VIDEO_STAGING_TRANSCRIPTION_RULE, VIDEO_PROMPT_FOCUS_RULE]) {
         assert.equal(system.split(rule).length - 1, 1, 'the same complete staging contract survives the structural retry once');
       }
       assert.deepEqual(data.shotEvidence, jsonBlock(initialUser).shotEvidence, 'repair retains raw spatial, sound and neighboring-shot evidence');
@@ -405,7 +405,7 @@ const makeLong = (count: number): Storyboard => {
     request: async (system) => {
       calls += 1;
       for (const rule of [VIDEO_DIALOGUE_STAGING_RULE, VIDEO_SPATIAL_CONTINUITY_RULE,
-        VIDEO_STAGING_REVIEW_RULE, VIDEO_PROMPT_FOCUS_RULE]) {
+        VIDEO_STAGING_TRANSCRIPTION_RULE, VIDEO_PROMPT_FOCUS_RULE]) {
         assert.equal(system.split(rule).length - 1, 1);
       }
       assert.ok(system.includes('保留用户指定的冷色调。'));

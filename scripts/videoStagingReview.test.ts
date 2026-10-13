@@ -14,7 +14,7 @@ import { sourceContentHash } from '../src/sourceIntegrity';
 import { getH3PromptProtocolIssue, readH3PromptProtocol } from '../src/h3PromptProtocol';
 import {
   VIDEO_DIALOGUE_STAGING_RULE, VIDEO_SPATIAL_CONTINUITY_RULE,
-  VIDEO_STAGING_REVIEW_RULE, VIDEO_PROMPT_FOCUS_RULE, VIDEO_WARDROBE_SCOPE_RULE,
+  VIDEO_STAGING_TRANSCRIPTION_RULE, VIDEO_PROMPT_FOCUS_RULE, VIDEO_WARDROBE_SCOPE_RULE,
 } from '../src/videoConversionRules';
 import type { Character, ConverterPreset, ReferenceAsset, Storyboard, VideoShot } from '../src/types';
 
@@ -146,7 +146,8 @@ const result = await generateSingleSegmentPrompt({
       assert.deepEqual(data.currentReferences.map((item: any) => item.id), getSingleSegmentReferences(board, context).map((item) => item.id));
       assert.doesNotMatch(user, /UNSELECTED_IMAGE/u, 'only selected references influence staging review');
       assert.match(system, /参考图真实像素/u);
-      for (const rule of [VIDEO_DIALOGUE_STAGING_RULE, VIDEO_SPATIAL_CONTINUITY_RULE, VIDEO_STAGING_REVIEW_RULE, VIDEO_PROMPT_FOCUS_RULE]) {
+      assert.equal(data.taskAuthority, 'preserve-confirmed-schedule', 'ordinary delivery cannot recut the source plan');
+      for (const rule of [VIDEO_DIALOGUE_STAGING_RULE, VIDEO_SPATIAL_CONTINUITY_RULE, VIDEO_STAGING_TRANSCRIPTION_RULE, VIDEO_PROMPT_FOCUS_RULE]) {
         assert.ok(system.includes(rule), 'the review receives the shared staging and AI repair contract');
       }
       chineseReviewed = `${data.candidatePrompt}\nAI最终补充：师尊女声来自前方背影；林沐闭口倾听；镜头切换后师尊仍朝石门上山。`;
@@ -162,11 +163,8 @@ const result = await generateSingleSegmentPrompt({
     assert.equal(data.candidateEnglishPrompt, 'candidate with a wrong male speaker and reversed walking direction');
     assert.ok(data.stagingContext, 'English AI review receives shot and character staging context');
     assert.equal(data.stagingContext.sourceStoryContent, source);
-    assert.deepEqual(data.stagingContext.shots, reviewContext!.shots.map((shot: Record<string, unknown>, index: number) => ({
-      ...shot,
-      camera: `${index === 1 ? '中景' : '全景'}，摄影机始终在山道东侧，不越轴`,
-      sound: '环境层-[无] 动作层-[同步脚步] 情绪层-[无配乐]',
-    })), 'English receives the synchronized canonical camera/audio fields while retaining the unchanged source facts');
+    assert.deepEqual(data.stagingContext.shots, reviewContext!.shots,
+      'English receives unchanged raw source camera/audio evidence; final Chinese is its translation authority');
     assert.equal(data.stagingContext.canonicalPrompt, convertedCanonical);
     englishReviewed = `${data.sourcePrompt.replaceAll('师尊', 'the female master').replaceAll('林沐', 'the male apprentice')}\nFinal staging: The female master speaks from ahead while walking toward the stone gate; the male apprentice keeps his mouth closed. Dialogue: “灵兰喜阴，别伤了根。”`;
     return `\n${englishReviewed}\n`;
@@ -236,18 +234,25 @@ assertUntouched();
   assertUntouched();
 }
 
-// Review transport failure and empty review output stop before English. The
-// uncommitted converted candidate must not overwrite old Chinese or English.
+// Review transport failure or an empty response retains the usable compiled
+// candidate with a warning; inputs stay untouched and no content gate is added.
 for (const empty of [false, true]) {
   const failure = new Error('mock staging-review transport failure');
   const stages: SingleSegmentPromptStage[] = [];
-  await assert.rejects(generateSingleSegmentPrompt({ ...input(), request: async (_system, _user, stage) => {
+  const retained = await generateSingleSegmentPrompt({ ...input(), request: async (_system, user, stage) => {
     stages.push(stage);
     if (stage === 'convert') return convertedCanonical;
-    if (empty) return '  \n\t';
-    throw failure;
-  } }), (error) => empty ? error instanceof Error && /空|没有返回/u.test(error.message) : error === failure);
-  assert.deepEqual(stages, ['convert', 'review']);
+    if (stage === 'review') {
+      if (empty) return '  \n\t';
+      throw failure;
+    }
+    return user.includes('<review_data>') ? jsonBlock(user, 'review_data').sourcePrompt : user;
+  } });
+  assert.deepEqual(stages, ['convert', 'review', ...(empty ? ['review', 'review', 'review'] : []), 'translate', 'translate']);
+  assert.equal(retained.finalPrompt, convertedCanonical);
+  assert.ok(retained.officialPromptZh?.trim());
+  assert.ok(retained.h3DeliveryWarnings?.some((warning) => warning.includes('AI复核未完成')),
+    'a retained candidate is explicitly marked incomplete rather than silently called repaired');
   assertUntouched();
 }
 
@@ -347,43 +352,20 @@ for (const cancelAt of ['convert', 'review', 'translate'] as const) {
   assertUntouched();
 }
 
-// Regression from 0.5.150: the staging API returned canonical six-field
-// timeline text. It is data for another AI repair request, never an H3 result.
-{
-  const stages: SingleSegmentPromptStage[] = [];
-  let originalCandidate = '';
-  const recovered = await generateSingleSegmentPrompt({ ...input(), request: async (system, user, stage) => {
-    stages.push(stage);
-    if (stage === 'convert') return convertedCanonical;
-    if (stage === 'review' && !user.includes('<h3_format_repair_data>')) {
-      originalCandidate = jsonBlock(user, 'video_staging_review_data').candidatePrompt;
-      return convertedCanonical;
-    }
-    if (stage === 'review') {
-      const repair = jsonBlock(user, 'h3_format_repair_data');
-      assert.equal(repair.formatReferencePrompt, originalCandidate, 'repair receives the entire real H3 candidate');
-      assert.equal(repair.candidatePrompt, convertedCanonical, 'repair sees the observed bad response unchanged');
-      assert.equal(repair.sourceContext.sourceStoryContent, source);
-      assert.equal(repair.sourceContext.shots.length, 3);
-      assert.deepEqual(repair.requiredProtocol, readH3PromptProtocol(originalCandidate));
-      assert.match(system, /所有内容修复由你生成完整正文/u);
-      return chineseReviewed;
-    }
-    return englishReviewed;
-  } });
-  assert.deepEqual(stages, ['convert', 'review', 'review', 'translate', 'translate']);
-  assert.equal(recovered.officialPromptZh, chineseReviewed);
-  assert.equal(recovered.targetOutput?.prompt, chineseReviewed);
-  assert.equal(hasCurrentOfficialH3EnglishPrompt(recovered, context), true);
-  assertUntouched();
-}
-
-// Only reserved H3 protocol changes need format repair. Appearance/name
-// wording and duplicate references inside the prose remain model-owned.
+// The standalone protocol inspector remains available to explicit consumers.
+// Ordinary AI-authored delivery does not turn these diagnostics into another
+// model call, a semantic veto or a local rewrite.
 assert.equal(getH3PromptProtocolIssue(chineseReviewed, chineseReviewed), undefined);
 assert.equal(getH3PromptProtocolIssue(chineseReviewed.replaceAll('师尊', '远处的讲解者'), chineseReviewed), undefined);
 assert.equal(getH3PromptProtocolIssue(`${chineseReviewed}\n<Picture 1> <Picture 1>`, chineseReviewed), undefined);
-
+for (const invalid of [
+  convertedCanonical,
+  chineseReviewed.replace('summary:', '摘要：'),
+  chineseReviewed.replace('At 00:05.000', 'At 00:06.000'),
+  chineseReviewed.replace('[Shot 3] At 00:10.000', '[Shot 4] At 00:10.000'),
+  chineseReviewed.replaceAll('<Picture 1>', '<Picture 99>'),
+  chineseReviewed.replace('detailed_description:', 'integrated_multimodal_description:'),
+]) assert.ok(getH3PromptProtocolIssue(invalid, chineseReviewed));
 // Both official Shot spellings describe the same structure. The complete
 // Chinese -> English pipeline must keep the AI body verbatim without paying
 // for a repair just because the model changes marker whitespace.
@@ -421,156 +403,6 @@ assert.equal(getH3PromptProtocolIssue(`${chineseReviewed}\n<Picture 1> <Picture 
   assert.equal(hasCurrentOfficialH3Prompt(delivered, context), true);
   assert.equal(hasCurrentOfficialH3EnglishPrompt(delivered, context), true);
   assertUntouched();
-}
-
-// A real missing section is still repaired by the AI, but its request now
-// receives the particular missing field instead of a catch-all failure list.
-{
-  const stages: SingleSegmentPromptStage[] = [];
-  let requiredBody = '';
-  let repairedBody = '';
-  let translationCalls = 0;
-  const delivered = await generateSingleSegmentPrompt({ ...input(),
-    request: async (_system, user, stage) => {
-      stages.push(stage);
-      if (stage === 'convert') return convertedCanonical;
-      if (stage === 'review' && !user.includes('<h3_format_repair_data>')) {
-        requiredBody = jsonBlock(user, 'video_staging_review_data').candidatePrompt;
-        return requiredBody.replace(/^overall_soundscape:[\s\S]*?(?=^non_diegetic_music:)/mu, '');
-      }
-      if (stage === 'review') {
-        const data = jsonBlock(user, 'h3_format_repair_data');
-        assert.match(data.formatIssue, /overall_soundscape/u);
-        assert.match(data.formatIssue, /缺少/u);
-        assert.equal(data.formatReferencePrompt, requiredBody);
-        assert.equal(data.sourceContext.sourceStoryContent, source);
-        repairedBody = data.formatReferencePrompt;
-        return repairedBody;
-      }
-      translationCalls += 1;
-      if (translationCalls === 1) assert.equal(user, repairedBody);
-      else assert.equal(jsonBlock(user, 'review_data').sourcePrompt, repairedBody);
-      return repairedBody;
-    },
-  });
-  assert.deepEqual(stages, ['convert', 'review', 'review', 'translate', 'translate']);
-  assert.equal(delivered.officialPromptZh, repairedBody);
-  assert.equal(hasCurrentOfficialH3EnglishPrompt(delivered, context), true);
-  assertUntouched();
-}
-
-for (const invalid of [
-  convertedCanonical,
-  `\`\`\`\n${chineseReviewed}\n\`\`\``,
-  chineseReviewed.replace('summary:', '摘要：'),
-  chineseReviewed.replace('At 00:05.000', 'At 00:06.000'),
-  chineseReviewed.replace('[Shot 3] At 00:10.000', '[Shot 4] At 00:10.000'),
-  chineseReviewed.replaceAll('<Picture 1>', '<Picture 99>'),
-  chineseReviewed.replace('detailed_description:', 'integrated_multimodal_description:'),
-]) {
-  assert.ok(getH3PromptProtocolIssue(invalid, chineseReviewed), 'sections, shot boundaries and IDs cannot silently disappear');
-}
-
-// Exhausted repair, repair transport failure and cancellation never commit a
-// partially converted result or proceed to English; old live inputs survive.
-for (const repairOutcome of ['invalid', 'network', 'cancel'] as const) {
-  let current = true;
-  const stages: SingleSegmentPromptStage[] = [];
-  const repairFailure = new Error('mock H3 protocol repair network failure');
-  await assert.rejects(generateSingleSegmentPrompt({
-    ...input(), isCurrent: () => current, request: async (_system, user, stage) => {
-      stages.push(stage);
-      if (stage === 'convert') return convertedCanonical;
-      if (user.includes('<h3_format_repair_data>')) {
-        if (repairOutcome === 'network') throw repairFailure;
-        if (repairOutcome === 'cancel') current = false;
-      }
-      return convertedCanonical;
-    },
-  }), (error) => repairOutcome === 'network' ? error === repairFailure
-    : error instanceof Error && (repairOutcome === 'cancel' ? error.name === 'AbortError' : /AI已自动重试修复H3格式/u.test(error.message)));
-  assert.deepEqual(
-    stages,
-    repairOutcome === 'invalid'
-      ? ['convert', 'review', 'review', 'review', 'review']
-      : ['convert', 'review', 'review'],
-  );
-  assertUntouched();
-}
-
-// Saved malformed 150 artifacts must not be labelled ready simply because
-// their fingerprints and target prompt match; reading them does not rewrite.
-{
-  const oldMalformed: Storyboard = {
-    ...result, officialPromptZh: convertedCanonical,
-    targetOutput: { ...result.targetOutput!, prompt: convertedCanonical },
-    officialPromptEn: '[0s-5s] Subject: the mentor.', officialPromptEnSource: convertedCanonical,
-  };
-  const saved = JSON.stringify(oldMalformed);
-  assert.equal(hasCurrentOfficialH3Prompt(oldMalformed, context), false);
-  assert.equal(hasCurrentOfficialH3EnglishPrompt(oldMalformed, context), false);
-  assert.strictEqual(refreshOfficialH3PromptAfterSourceUpdate(oldMalformed, context, context), oldMalformed);
-  await assert.rejects(generateSingleSegmentPrompt({ ...input(), board: oldMalformed, mode: 'translate-english',
-    request: async () => { throw new Error('malformed saved Chinese cannot be used as a translation source'); },
-  }), /重新生成中文提示词/u);
-  assert.equal(JSON.stringify(oldMalformed), saved, 'legacy detection does not alter saved content');
-}
-
-// English staging review gets the same H3 repair contract. A failed repair
-// leaves only qualified Chinese available; a stale answer remains cancellation.
-for (const repairOutcome of ['valid', 'invalid', 'cancel'] as const) {
-  const stages: SingleSegmentPromptStage[] = [];
-  let current = true;
-  const request: GenerateSingleSegmentPromptInput['request'] = async (_system, user, stage) => {
-    stages.push(stage);
-    if (stage === 'convert') return convertedCanonical;
-    if (stage === 'review') return chineseReviewed;
-    if (user.includes('<h3_format_repair_data>')) {
-      const data = jsonBlock(user, 'h3_format_repair_data');
-      assert.equal(data.formatReferencePrompt, chineseReviewed);
-      assert.equal(data.candidatePrompt, '[0s-15s] Subject: the female master.');
-      assert.equal(data.sourceContext.stagingContext.sourceStoryContent, source);
-      if (repairOutcome === 'cancel') current = false;
-      return repairOutcome === 'valid' ? englishReviewed : '[0s-15s] Subject: the female master.';
-    }
-    return '[0s-15s] Subject: the female master.';
-  };
-  if (repairOutcome === 'cancel') {
-    await assert.rejects(generateSingleSegmentPrompt({ ...input(), request, isCurrent: () => current }), { name: 'AbortError' });
-  } else {
-    const reviewed = await generateSingleSegmentPrompt({ ...input(), request, isCurrent: () => current });
-    assert.equal(reviewed.officialPromptZh, chineseReviewed);
-    assert.equal(hasCurrentOfficialH3Prompt(reviewed, context), true);
-    assert.equal(hasCurrentOfficialH3EnglishPrompt(reviewed, context), repairOutcome === 'valid');
-    if (repairOutcome === 'invalid') {
-      assert.equal(reviewed.officialPromptEn, '');
-      assert.match(reviewed.officialPromptEnError || '', /AI已自动重试修复H3格式/u);
-    }
-  }
-  assert.deepEqual(
-    stages,
-    repairOutcome === 'invalid'
-      ? ['convert', 'review', 'translate', 'translate', 'translate', 'translate', 'translate']
-      : ['convert', 'review', 'translate', 'translate', 'translate'],
-  );
-  assertUntouched();
-}
-
-{
-  const savedPair = JSON.stringify(result);
-  const stages: SingleSegmentPromptStage[] = [];
-  const failedRetry = await generateSingleSegmentPrompt({ ...input(), board: result, mode: 'translate-english',
-    request: async (_system, _user, stage) => {
-      stages.push(stage);
-      return '[0s-15s] Subject: wrong timeline instead of H3.';
-    },
-  });
-  assert.deepEqual(stages, ['translate', 'translate', 'translate', 'translate', 'translate']);
-  assert.match(failedRetry.officialPromptEnError || '', /AI已自动重试修复H3格式/u);
-  assert.equal(failedRetry.officialPromptEn, result.officialPromptEn, 'failed English-only repair keeps the prior qualified English');
-  assert.equal(failedRetry.officialPromptZh, result.officialPromptZh);
-  assert.equal(failedRetry.targetOutput, result.targetOutput);
-  assert.equal(JSON.stringify(result), savedPair, 'the previous saved pair is never mutated');
 }
 
 // The final delivery fingerprint remains a source identity check, independent
@@ -663,8 +495,8 @@ for (const repairOutcome of ['valid', 'invalid', 'cancel'] as const) {
 
 // Older versions embedded the complete private dossier into an automatic
 // global lock even when the canonical/current shot never used it. Do not send
-// that derived inventory back into Chinese review, English review or either
-// H3 structure-repair request. Keep normal locks and user directions intact.
+// that derived inventory back into Chinese or English delivery. Keep normal
+// locks and user directions intact without adding protocol-repair calls.
 {
   const userDirection = '制作要求：门口保持原有灯光；穿着绿色外套走出门后不换回旧外套。';
   const publicContinuity = '承接上一段：林沐已经换上绿色外套，衣扣系好。';
@@ -687,27 +519,26 @@ for (const repairOutcome of ['valid', 'invalid', 'cancel'] as const) {
       assert.doesNotMatch(user, /LEGACY_PRIVATE_DOSSIER_SENTINEL/u, 'a legacy derived private lock never re-enters a new model request');
       if (stage === 'review') {
         reviewCalls += 1;
-        const data = jsonBlock(user, reviewCalls === 1 ? 'video_staging_review_data' : 'h3_format_repair_data');
-        const facts = reviewCalls === 1 ? data : data.sourceContext;
+        assert.equal(reviewCalls, 1);
+        const data = jsonBlock(user, 'video_staging_review_data');
+        const facts = data;
         assert.ok(facts.globalContinuityFacts.includes(publicContinuity), 'an already confirmed outfit change remains available');
         assert.ok(facts.globalContinuityFacts.includes(userDirection), 'a user direction is not stripped as private inventory');
         assert.equal(facts.characterIdentityFacts.find((person: any) => person.name === '林沐').outfit, '灰衣与竹篓', 'ordinary identity still comes from the explicit project projection, not the old dossier-filled lock');
-        if (reviewCalls === 1) {
-          h3Candidate = data.candidatePrompt;
-          return convertedCanonical;
-        }
+        h3Candidate = data.candidatePrompt;
         return h3Candidate;
       }
       translationCalls += 1;
-      if (translationCalls === 1) return 'An English draft with an incomplete H3 structure.';
-      const data = jsonBlock(user, translationCalls === 2 ? 'review_data' : 'h3_format_repair_data');
-      const facts = translationCalls === 2 ? data.stagingContext : data.sourceContext.stagingContext;
+      if (translationCalls === 1) return h3Candidate;
+      assert.equal(translationCalls, 2);
+      const data = jsonBlock(user, 'review_data');
+      const facts = data.stagingContext;
       assert.ok(facts.globalContinuityFacts.includes(publicContinuity));
       assert.ok(facts.globalContinuityFacts.includes(userDirection));
-      return translationCalls === 2 ? 'The wardrobe is unchanged, but this reply has no H3 sections.' : h3Candidate;
+      return h3Candidate;
     } });
-  assert.equal(reviewCalls, 2, 'Chinese H3 repair keeps the cleaned request context');
-  assert.equal(translationCalls, 3, 'English H3 repair keeps the same cleaned context');
+  assert.equal(reviewCalls, 1, 'Chinese delivery keeps the cleaned request context without another review');
+  assert.equal(translationCalls, 2, 'English delivery keeps the same cleaned context through its existing calls');
   assert.equal(repaired.officialPromptZh, h3Candidate);
   assert.equal(repaired.officialPromptEn, h3Candidate);
   assert.equal(JSON.stringify(oldDerivedBoard), frozen, 'legacy stored locks and prompts are not rewritten on read');

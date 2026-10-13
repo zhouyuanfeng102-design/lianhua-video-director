@@ -41,9 +41,24 @@ export const VIDEO_LOCAL_TIME_RULE = '镜头标题中的起止秒数是整段视
 
 export const VIDEO_SCENE_STYLE_RULE = '每镜描述一个清楚的主事件，可按剧情包含必要的动作与回应，不规定机械的1/2/3阶段或每秒字数额度。空间说明人物、物体的实际位置关系，光影和摄影写对当前画面有用的信息；不要求每镜凑齐前中后景、色温K数字或完整身体力学清单。固定镜数与边界已经给定时，在这些镜头内组织内容，不另行要求拆镜；未给定时才由规划阶段决定镜头。保持已选风格、人物特征及前后状态，不虚构道具、事件或声音。';
 
+/** Current request instructions; retired exports above remain fingerprint-stable. */
+export const VIDEO_CONTINUOUS_SCENE_STYLE_RULE = '每镜依据既定观看任务组织完整连续场面，一个镜头可以承载相互因果的多个动作、对白与回应；事件条目不等于镜头条目，主事件不意味着每镜只许一次动作。保持真实行动顺序、强度、接触与反馈，不规定机械的1/2/3阶段、每秒字数或动作配额。空间只表达必要的人物、物体与通路关系，光影和摄影忠实转写既定画面；不要求每镜凑齐前中后景、色温K数字或完整身体力学清单。转换、H3转写与翻译保留给定镜数、顺序、时间标题、机位、运镜与观察对象，不在这些阶段拆镜、合镜或重选摄影；摄影选择只属于明确的源头导演任务。';
+
+export const VIDEO_STAGING_TRANSCRIPTION_RULE = '在源头导演阶段，将真实说话人、听者、世界行动关系与观看任务一起落实到逐镜动作和摄影；在同一次输出内保持完整对白、原语言、具名声源、口型、朝向、空间及镜首镜尾状态。普通转换、H3转写、参考更新、翻译和已有confirmed中文只忠实传递既定排程与摄影，表达遗漏或歧义用原稿已经成立的关系澄清，不另选机位、运镜、景别或切点，不用新增转身、瞬移或新动作圆场。显式dialogue-repair只在当前任务明确授权的发话与必要排程修改内配置摄影，不借此从头重套导演风格或重新分配剧情。参考图只承担给定身份、场景或构图职责，缺少人物、背面或静态表情不更改已有演出；最终仅返回当前格式的完整正文，不追加检查器、审核调用或重试。';
+
 export const VIDEO_CONVERSION_FORMAT_RULE = '输出逐镜正文。每镜保留输入时间标题，按主体、空间、光影、镜头、台词、音效六字段组织，字段间使用中文分号。主体使用可复用名称及“正在 [可见动作]”结构；多个动作可用“→”连接，但不为凑数量补动作。其余字段用简明自然描述；有对白时把原话放在台词字段，推荐第Xs @说话人：“原话”，原文是裸对白也照常保留，不把标牌或说话语气注释当成台词。音效可用环境层-[...] 动作层-[...] 情绪层-[...]表达，无事件和无配乐如实写无。不要输出规则解释、分析、JSON或代码围栏。';
 
 export const VIDEO_CONVERSION_EXAMPLE = '仅用于说明格式与两种时间坐标的示例（不得把示例人物或台词搬入实际剧情）：\n【4.5s-9s】 主体：@林舟（专注）[朝向：门口同伴] 正在 [抬手示意同伴停步]（发出提醒）；空间：同伴站在林舟前方的门口；光影：门外自然侧光；镜头：中景固定；台词：第2s @林舟：“等我回来。”；音效：环境层-[无] 动作层-[无] 情绪层-[无配乐]';
+
+/** Two supplied schedules illustrate continuity, never a shot-count or duration quota. */
+export const VIDEO_CONTINUOUS_CONVERSION_EXAMPLE = [
+  '以下仅示意如何转写已经给定的连续排程，人物、时间和镜数不是实际剧情或配额；按当前原文与源头镜头替换，不把例子当成要求新增切点。',
+  '同镜容纳进入、互动与回应的示例：',
+  '【0s-12s】 主体：@林舟正在 [推门进入，沿原通路走到门内同伴身侧，抬手示意停步，说明去向；@同伴听完转向林舟回应，林舟点头沿通路离开]；空间：门侧通路与两人的相对位置保持可读；光影：沿用门外自然侧光；镜头：门侧双人中景固定，进入、交谈和离开均在这份取景内连续发生；台词：第3s-5s @林舟：“我去找钥匙。” 第6s-8s @同伴：“我在这里等你。”；音效：环境层-[无] 动作层-[进门落脚的自然短声] 情绪层-[无配乐]',
+  '原排程确有关键线索揭示时转写有意义切换的示例：',
+  '【0s-8s】 主体：@林舟正在 [沿桌边寻找钥匙，停在抽屉前；@同伴注意到抽屉内一角折叠纸条并指出]；空间：桌边两人与抽屉的关系保持可读；光影：沿用室内光源；镜头：桌侧双人中景，观察两人的寻找与指出；台词：第5s-7s @同伴：“这里有张纸条。”；音效：环境层-[无] 动作层-[抽屉开启的短声] 情绪层-[无配乐]',
+  '【8s-12s】 主体：@林舟正在 [接续前镜抽屉已打开的状态，取出纸条并展开，露出原文确有的地址线索]；空间：手、纸条与已打开的抽屉保持同一位置关系；光影：同一室内光源；镜头：纸条近景，原中景无法读清的关键线索成为新观看任务；台词：无；音效：环境层-[无] 动作层-[展开纸张的自然短声] 情绪层-[无配乐]',
+].join('\n');
 
 /** Exact v1.3.0 default retained only for lossless built-in migration. */
 export const LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_3_0 = [
@@ -74,11 +89,15 @@ export const LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_7_0 = [
   VIDEO_PROMPT_FOCUS_RULE,
 ].join('\n\n');
 export const DEFAULT_VIDEO_CONVERSION_SYSTEM = [
-  LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_7_0.replace(LEGACY_VIDEO_DIALOGUE_STAGING_RULE_V1_7_0, VIDEO_DIALOGUE_STAGING_RULE),
+  LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_7_0
+    .replace(LEGACY_VIDEO_DIALOGUE_STAGING_RULE_V1_7_0, VIDEO_DIALOGUE_STAGING_RULE)
+    .replace(VIDEO_SCENE_STYLE_RULE, VIDEO_CONTINUOUS_SCENE_STYLE_RULE)
+    .replace(VIDEO_STAGING_REVIEW_RULE, VIDEO_STAGING_TRANSCRIPTION_RULE),
   VIDEO_ACTION_CHOREOGRAPHY_RULE,
 ].join('\n\n');
 export const VIDEO_CAUSALITY_OUTPUT_RULE = '结合本段原文与只读理解上下文核对行动者→动作→对象→结果，保留有依据的攻击来源和具名目标；反应特写也不能让攻击因果消失，不把比喻变成新能力。中文与英文保持同一因果。';
-export const DEFAULT_VIDEO_CONVERSION_OUTPUT = [
+/** Exact former default output for historical factory fingerprints only. */
+export const LEGACY_DEFAULT_VIDEO_CONVERSION_OUTPUT_V2_1_0 = [
   VIDEO_CONVERSION_FORMAT_RULE,
   DIALOGUE_DELIVERY_RULE,
   '在主体和台词字段落实每句声源、口型与听者状态；在主体、空间和镜头字段落实本镜朝向、行进目标、机位与前后承接。每镜都保留必要约束，不新增审核报告字段。',
@@ -87,10 +106,22 @@ export const DEFAULT_VIDEO_CONVERSION_OUTPUT = [
   VIDEO_CONVERSION_EXAMPLE,
 ].join('\n\n');
 
+export const DEFAULT_VIDEO_CONVERSION_OUTPUT = [
+  VIDEO_CONVERSION_FORMAT_RULE,
+  DIALOGUE_DELIVERY_RULE,
+  '在主体和台词字段落实每句声源、口型与听者状态；在主体、空间和镜头字段落实本镜朝向、行进目标、机位与前后承接。每镜都保留必要约束，不新增审核报告字段。',
+  VIDEO_CAUSALITY_OUTPUT_RULE,
+  VIDEO_PROMPT_FOCUS_RULE,
+  VIDEO_CONTINUOUS_CONVERSION_EXAMPLE,
+].join('\n\n');
+
 /** Remove only the known contradictory legacy instructions at request time.
  * Custom presets stay stored exactly as authored; no broad text rewriting. */
 export const stripLegacyVideoQuotaRules = (value: string): string => String(value || '')
   .split(LEGACY_VIDEO_DIALOGUE_RULE).join(VIDEO_DIALOGUE_RULE)
+  .split(VIDEO_SCENE_STYLE_RULE).join(VIDEO_CONTINUOUS_SCENE_STYLE_RULE)
+  .split(VIDEO_STAGING_REVIEW_RULE).join(VIDEO_STAGING_TRANSCRIPTION_RULE)
+  .split(VIDEO_CONVERSION_EXAMPLE).join(VIDEO_CONTINUOUS_CONVERSION_EXAMPLE)
   .split(/\r?\n/u)
   .filter((line) => !/^\s*(?:对白按自然中文约4\.5字\/秒估算|目标总时长无法容纳完整长句时，只能按原句标点截取)/u.test(line))
   .join('\n');

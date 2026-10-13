@@ -480,11 +480,13 @@ for (const route of ['confirmed-slice', 'converted-gap', 'draft-gap'] as const) 
   const stages: SingleSegmentPromptStage[] = [];
   const repaired = await generateSingleSegmentPrompt({ board: sourceBoard, context, clean, converter,
     reviewWithAi: true, skipConversion: route === 'confirmed-slice',
-    request: async (_system, user, stage) => {
+    request: async (system, user, stage) => {
       stages.push(stage);
       if (stage === 'convert') return invalidTimelinePrompt;
       if (stage === 'translate') return mockEnglish(outputs[0].officialPromptZh!);
       const data = jsonBlock(user, 'video_staging_review_data');
+      assert.equal(data.taskAuthority, 'preserve-confirmed-schedule', 'format delivery preserves the source schedule');
+      assert.ok(!system.includes('VIDEO_AI_SHOT_COVERAGE_V'), 'downstream delivery never receives autonomous shot coverage rules');
       assert.equal(data.canonicalPrompt, invalidTimelinePrompt, 'the existing review receives the untouched AI canonical response');
       assert.deepEqual(data.shots.map((shot: VideoShot) => [shot.id, shot.startSec, shot.endSec, shot.prompt]),
         sourceBoard.shots.map((shot) => [shot.id, shot.startSec, shot.endSec, shot.prompt]), 'failed parsing preserves the saved shot evidence');
@@ -661,6 +663,10 @@ for (const { purpose, formatRepair } of [
       }
       const data = jsonBlock(user, 'video_staging_review_data');
       assert.equal(data.sourceStoryContent, semanticInput.generationStoryContent, 'H3 and explicit dialogue repair must see the complete primary source');
+      assert.equal(data.taskAuthority, purpose === 'dialogue-repair' ? 'current-segment-staging-replan' : 'preserve-confirmed-schedule',
+        'only the explicit dialogue repair entry can revise the source schedule');
+      if (purpose !== 'dialogue-repair') assert.ok(!system.includes('VIDEO_AI_SHOT_COVERAGE_V'),
+        'ordinary downstream delivery never receives autonomous shot coverage rules');
       assert.equal(data.shotSourceCoordinateBasis, 'segmentScope.savedSegmentSourceStoryContent');
       assert.equal(data.segmentScope.savedSegmentSourceStoryContent, semanticRawSegment.content, 'saved provenance remains the original coordinate basis');
       assert.equal(data.shots[0].sourceStart, 0);
@@ -698,6 +704,12 @@ for (const { purpose, formatRepair } of [
   if (formatRepair) assert.ok(generated.officialPromptZh?.includes('invalid_soundscape:'),
     'the AI review result is preserved instead of being rewritten or rejected by the local protocol checker');
   assert.equal(generated.officialPromptEnError, '');
+  if (purpose === 'initial') {
+    assert.equal(generated.finalPrompt, convertedCanonical, 'ordinary H3 delivery preserves the converted source schedule');
+    assert.deepEqual(generated.shots.map((shot) => [shot.id, shot.startSec, shot.endSec]),
+      sourceBoard.shots.map((shot) => [shot.id, shot.startSec, shot.endSec]));
+    assert.ok(generated.h3CharacterParticipation, 'identity and participation delivery remain available without replanning authority');
+  }
   assert.equal(JSON.stringify(sourceBoard), sourceSnapshot, 'request preparation never rewrites existing saved prompts');
 }
 

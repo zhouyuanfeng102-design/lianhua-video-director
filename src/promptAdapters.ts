@@ -761,6 +761,50 @@ function compactH3SubjectPhrase(values: readonly string[]): string {
 // labels, and a narrow allow-list would drop their gender/appearance anchors.
 const h3NonSubjectKinds = /^(?:scene|location|background|environment|place|prop|object|item|场景|地点|背景|环境|空间|道具|物品)$/iu;
 
+/** A concrete body plan supersedes its internal morphology category. Legacy
+ * records without anatomy still retain that category as identity evidence. */
+const h3MorphologyCategories = new Set([
+  'human-like', 'anthropomorphic', 'animal', 'monster', 'plant-fungal',
+  'object-energy', 'unknown', 'custom',
+]);
+
+function h3StableSubjectDetails(definition: PromptSubjectDefinitionInput, name: string): string[] {
+  const details: string[] = [];
+  const representedFacts = new Set<string>();
+  const append = (label: string, value: unknown): void => {
+    const text = clean(value);
+    if (!text) return;
+    const clauses = h3Clauses(text);
+    const uniqueClauses = clauses.filter((clause) => {
+      if (representedFacts.has(clause)) return false;
+      representedFacts.add(clause);
+      return true;
+    });
+    if (!uniqueClauses.length) return;
+    // Only remove exact repeated clauses. Do not infer which physical traits
+    // are important, filter user prose by keywords, or impose a length budget.
+    details.push(`${label}：${uniqueClauses.length === clauses.length ? text : uniqueClauses.join('；')}`);
+  };
+  const formLabel = clean(definition.formLabel);
+  if (formLabel && !name.includes(formLabel)) append('形态', formLabel);
+  append('性别', definition.gender);
+  append('物种/族裔', definition.race);
+  const morphology = clean(definition.morphology);
+  if (!clean(definition.bodyPlan) || !h3MorphologyCategories.has(morphology)) append('外貌形态', morphology);
+  append('身体结构', definition.bodyPlan);
+  append('外貌', definition.appearance);
+  append('服装', definition.outfit);
+  append('衣橱基底（不是本镜着装指令）', definition.wardrobeBaseline);
+  append('连续性锚点', definition.anchor);
+  // Legacy descriptions may contain the only visual evidence. Keep every
+  // distinct clause instead of dropping that field when structured data exists.
+  append('设定', definition.description);
+  // baseName/variantOf/transformationType link project records. The decorated
+  // name already identifies the selected form; these are not new video events.
+  // Motion habits remain dossier context, never an automatic acting instruction.
+  return details;
+}
+
 /**
  * Render project-bible identity facts into the first H3 Shot when no visual
  * reference manifest will be emitted.  The canonical timeline intentionally
@@ -794,45 +838,7 @@ function h3SubjectDefinitionAnchors(
   let merged = clean(subjectText);
   for (const definition of [...relevantDefinitions].sort((left, right) => clean(right.name).length - clean(left.name).length)) {
     const name = clean(definition.name).replace(/^@/u, '');
-    const structuredValues = [
-      clean(definition.baseName),
-      clean(definition.formLabel),
-      clean(definition.variantOf),
-      clean(definition.transformationType),
-      clean(definition.gender),
-      clean(definition.race),
-      clean(definition.morphology),
-      clean(definition.bodyPlan),
-      clean(definition.appearance),
-      clean(definition.outfit),
-      clean(definition.wardrobeBaseline),
-      clean(definition.anchor),
-      clean(definition.motion),
-    ].filter(Boolean);
-    const details = [
-      clean(definition.formLabel) ? `形态：${clean(definition.formLabel)}` : '',
-      clean(definition.baseName) ? `同源人物：${clean(definition.baseName)}` : '',
-      clean(definition.transformationType) ? `转化类型：${clean(definition.transformationType)}` : '',
-      clean(definition.gender) ? `性别：${clean(definition.gender)}` : '',
-      clean(definition.race) ? `物种/族裔：${clean(definition.race)}` : '',
-      clean(definition.morphology) ? `外貌形态：${clean(definition.morphology)}` : '',
-      clean(definition.bodyPlan) ? `身体结构：${clean(definition.bodyPlan)}` : '',
-      clean(definition.appearance) ? `外貌：${clean(definition.appearance)}` : '',
-      clean(definition.outfit) ? `服装：${clean(definition.outfit)}` : '',
-      clean(definition.wardrobeBaseline)
-        ? `衣橱基底（不是本镜着装指令）：${clean(definition.wardrobeBaseline)}；本镜衣着以已确认入口和逐镜状态为准，未涉及的衣物保持原状`
-        : '',
-      clean(definition.anchor) ? `连续性锚点：${clean(definition.anchor)}` : '',
-      clean(definition.motion) ? `动作习惯：${clean(definition.motion)}` : '',
-    ].filter(Boolean);
-    // `description` is the compatibility field used by imported projects.
-    // Preserve it alongside structured facts unless it is already represented
-    // by one of them; older callers often place the only appearance sentence
-    // in `description` while supplying gender separately.
-    const description = clean(definition.description);
-    if (description && !structuredValues.some((value) => value === description || value.includes(description))) {
-      details.push(`设定：${description}`);
-    }
+    const details = h3StableSubjectDetails(definition, name);
     const anchor = `@${name}${details.length ? `（${details.join('；')}）` : ''}`;
     if (merged.includes(`@${name}`)) merged = merged.split(`@${name}`).join(anchor);
     else if (merged.includes(name)) merged = merged.split(name).join(anchor);
@@ -1017,6 +1023,7 @@ function renderMinimaxH3Prompt(
     const parts = index === 0
       ? [
           renderedSubject && `主体：${renderedSubject}`,
+          subjectAnchor && '身份资料仅用于稳定辨认，不新增动作或展示镜；当前姿态、持物和衣着以本镜入镜状态与表演为准，未涉及的衣物保持原状',
           scene && `环境：${scene}`,
           lighting && `风格与光影：${lighting}`,
           references && `参考素材：${references}`,

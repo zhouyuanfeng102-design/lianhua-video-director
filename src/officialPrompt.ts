@@ -35,7 +35,6 @@ import {
 import {
   characterVariantDisplayName,
   characterVariantFormLabel,
-  characterVariantPromptFacts,
 } from './characterVariants';
 import {
   canUseNsfwPrivateProfileAssetForStoryboardShot,
@@ -370,8 +369,9 @@ export const buildOfficialH3SubjectDefinitions = (
       race: character.race,
       morphology: character.morphology,
       bodyPlan: character.bodyPlan,
+      // The decorated name and explicit variant fields identify the selected
+      // form. Do not copy record-link metadata into its visible appearance.
       appearance: description(
-        ...characterVariantPromptFacts(character),
         character.apparentAge,
         character.appearance,
       ),

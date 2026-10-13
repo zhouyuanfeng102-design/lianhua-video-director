@@ -7,6 +7,7 @@ import { applyOfficialH3Prompt, hasCurrentOfficialH3Prompt } from '../src/offici
 import { H3_CLIP_TIME_RULE, readH3PromptProtocol } from '../src/h3PromptProtocol';
 import { H3_IDENTITY_BINDINGS_RULE, normalizeH3IdentityBindings, readH3DeliveryEnvelope } from '../src/h3IdentityBindings';
 import { H3_STAGING_DELIVERY_RULE, synchronizeH3StagingDelivery } from '../src/h3StagingDelivery';
+import { VIDEO_ACTING_CAMERA_PRESERVATION_RULES } from '../src/videoActingCameraRules';
 import { readH3StagingShotMetadata, type H3StagingShotMetadata } from '../src/h3StagingMetadata';
 import { VIDEO_LOCAL_TIME_RULE } from '../src/videoConversionRules';
 import { translateVideoPromptToEnglish } from '../src/promptTranslation';
@@ -147,30 +148,34 @@ await test('one-to-many splitting requires separate AI choices; one-to-one keeps
   assert.deepEqual(result.shots[2].sourceBeatIds, ['beat-1']);
 });
 
-await test('initial uses same four existing API stages and saves canonical, H3 and both identity maps atomically', async () => {
+await test('initial preserves source schedule through four existing stages while saving H3 and both identity maps', async () => {
   const before = JSON.stringify(board); const stages: SingleSegmentPromptStage[] = []; let translations = 0;
+  const initialZh = applyOfficialH3Prompt(board, context).officialPromptZh!.replace('[Shot 1]', `[Shot 1] ${anchors.join(' ')}`);
+  const initialEn = enBindings.characters.reduce((text, item, index) => text.replace(anchors[index], item.referenceAnchor), initialZh);
   const result = await generateSingleSegmentPrompt({ board, context, converter, clean: (text) => text, reviewWithAi: true,
     request: async (system, user, stage) => {
       stages.push(stage);
       if (stage === 'convert') { assert.ok(!system.includes(H3_CLIP_TIME_RULE)); return original; }
       assert.ok(system.includes(H3_CLIP_TIME_RULE)); assert.ok(!system.includes(VIDEO_LOCAL_TIME_RULE));
       if (stage === 'review') {
-        assert.ok(system.includes(H3_STAGING_DELIVERY_RULE)); assert.ok(system.includes(H3_IDENTITY_BINDINGS_RULE));
-        assert.equal(json(user, 'video_staging_review_data').taskAuthority, 'current-segment-staging-replan');
-        return JSON.stringify(delivery);
+        assert.ok(!system.includes(H3_STAGING_DELIVERY_RULE)); assert.ok(system.includes(H3_IDENTITY_BINDINGS_RULE));
+        assert.ok(system.includes(VIDEO_ACTING_CAMERA_PRESERVATION_RULES));
+        assert.equal(json(user, 'video_staging_review_data').taskAuthority, 'preserve-confirmed-schedule');
+        // Extra model metadata has no authority to replan ordinary delivery.
+        return JSON.stringify({ ...delivery, h3Prompt: initialZh });
       }
-      if (++translations === 1) assert.equal(json(user, 'translation_identity_data').sourcePrompt, zh);
+      if (++translations === 1) assert.equal(json(user, 'translation_identity_data').sourcePrompt, initialZh);
       else {
         const data = json(user, 'review_data');
-        assert.equal(data.sourcePrompt, zh); assert.equal(data.stagingContext.canonicalPrompt, revised);
-        assert.equal(data.stagingContext.shots[1].startSec, 5); assert.deepEqual(data.sourceIdentityBindings, bindings);
+        assert.equal(data.sourcePrompt, initialZh); assert.equal(data.stagingContext.canonicalPrompt, original);
+        assert.equal(data.stagingContext.shots[1].startSec, 11.5); assert.deepEqual(data.sourceIdentityBindings, bindings);
       }
-      return JSON.stringify({ h3Prompt: en, identityBindings: enBindings });
+      return JSON.stringify({ h3Prompt: initialEn, identityBindings: enBindings });
     } });
   assert.deepEqual(stages, ['convert', 'review', 'translate', 'translate']);
-  assert.equal(result.finalPrompt, revised); assert.equal(result.shots[1].startSec, 5);
+  assert.equal(result.finalPrompt, original); assert.equal(result.shots[1].startSec, 11.5);
   assert.equal(hasCurrentTextApiConversion(result), true);
-  assert.equal(result.officialPromptZh, zh); assert.equal(result.officialPromptEn, en);
+  assert.equal(result.officialPromptZh, initialZh); assert.equal(result.officialPromptEn, initialEn);
   assert.deepEqual(result.h3IdentityBindings, bindings); assert.deepEqual(result.h3IdentityBindingsEn, enBindings);
   assert.equal(hasCurrentOfficialH3Prompt(result, context), true);
   assert.deepEqual(readH3PromptProtocol(result.officialPromptZh!), readH3PromptProtocol(result.officialPromptEn!));
@@ -263,39 +268,46 @@ await test('malformed staging JSON is repaired through bounded same-stage retrie
     } });
   assert.equal(reviews, 2); assert.equal(result.finalPrompt, revised);
   let failures = 0;
-  await assert.rejects(generateSingleSegmentPrompt({ board: applyOfficialH3Prompt(board, context), context, purpose: 'dialogue-repair',
-    clean: (text) => text, request: async () => { failures += 1; return '{"canonicalPrompt":'; } }), /自动重试修复交付排程3次/u);
+  const saved = applyOfficialH3Prompt(board, context);
+  const retained = await generateSingleSegmentPrompt({ board: saved, context, purpose: 'dialogue-repair',
+    clean: (text) => text, request: async (_system, user, stage) => {
+      if (stage === 'review') { failures += 1; return '{"canonicalPrompt":'; }
+      return user.includes('<review_data>') ? json(user, 'review_data').sourcePrompt : user;
+    } });
   assert.equal(failures, 4); assert.equal(board.finalPrompt, original);
+  assert.equal(retained.finalPrompt, original); assert.equal(retained.officialPromptZh, saved.officialPromptZh);
+  assert.ok(retained.h3DeliveryWarnings?.some((warning) => warning.includes('AI复核未完成')),
+    'exhausted technical delivery retains the old body with an explicit incomplete warning');
 });
 
-await test('explicit retiming cannot silently accept a legacy H3-only response with stale shot metadata', async () => {
+await test('legacy H3-only repair preserves the authored body and warns instead of guessing a new timeline', async () => {
   let reviews = 0;
   const result = await generateSingleSegmentPrompt({ board: applyOfficialH3Prompt(board, context), context, purpose: 'dialogue-repair',
-    clean: (text) => text, request: async (_system, user, stage) => {
+    clean: (text) => text, request: async (_system, _user, stage) => {
       if (stage === 'review') {
-        if (++reviews === 1) return zh;
-        assert.match(json(user, 'h3_staging_delivery_repair_data').protocolIssue, /缺少canonicalPrompt同步交付/u);
-        return JSON.stringify(delivery);
+        reviews += 1; return zh;
       }
       return JSON.stringify({ h3Prompt: en, identityBindings: enBindings });
     } });
-  assert.equal(reviews, 2); assert.equal(result.finalPrompt, revised); assert.equal(result.shots[1].startSec, 5);
+  assert.equal(reviews, 1); assert.equal(result.officialPromptZh, zh);
+  assert.equal(result.finalPrompt, original); assert.equal(result.shots[1].startSec, 11.5);
+  assert.ok(result.h3DeliveryWarnings?.some((warning) => warning.includes('时间轴待同步')));
 });
 
-await test('initial generation also requires two synchronized bodies even when H3-only retains every cut', async () => {
+await test('initial H3-only delivery preserves source cuts without requesting a second canonical body', async () => {
   let reviews = 0;
   const unchangedCuts = applyOfficialH3Prompt(board, context).officialPromptZh!;
   const result = await generateSingleSegmentPrompt({ board, context, converter, reviewWithAi: true, clean: (text) => text,
     request: async (_system, user, stage) => {
       if (stage === 'convert') return original;
       if (stage === 'review') {
-        if (++reviews === 1) return unchangedCuts;
-        assert.match(json(user, 'h3_staging_delivery_repair_data').protocolIssue, /缺少canonicalPrompt同步交付/u);
-        return JSON.stringify(delivery);
+        reviews += 1; return unchangedCuts;
       }
-      return JSON.stringify({ h3Prompt: en, identityBindings: enBindings });
+      return user.includes('<review_data>') ? json(user, 'review_data').sourcePrompt : user;
     } });
-  assert.equal(reviews, 2); assert.equal(result.finalPrompt, revised); assert.equal(result.shots[1].startSec, 5);
+  assert.equal(reviews, 1); assert.equal(result.finalPrompt, original); assert.equal(result.shots[1].startSec, 11.5);
+  assert.equal(result.officialPromptZh, unchangedCuts);
+  assert.equal(result.officialPromptEnSource, unchangedCuts);
 });
 
 await test('English metadata is translated in the existing call even when separate review is disabled', async () => {
@@ -315,7 +327,7 @@ await test('cancellation between response and parsing leaves the original saved 
 });
 
 const outputError = (code: string) => Object.assign(new Error(`synthetic ${code}`), { name: 'TextModelResponseError', code });
-await test('capacity, JSON and H3 repairs share three retries and repeat only technical request content', async () => {
+await test('capacity and JSON recovery share the existing budget and repeat only technical request content', async () => {
   const requests: Array<{ user: string; maxTokens?: number }> = []; const originalConfig = { maxTokens: 6000 };
   const result = await generateSingleSegmentPrompt({ board: applyOfficialH3Prompt(board, context), context, purpose: 'dialogue-repair',
     maxOutputTokens: originalConfig.maxTokens, clean: (text) => text,
@@ -325,36 +337,45 @@ await test('capacity, JSON and H3 repairs share three retries and repeat only te
         requests.push({ user, maxTokens: transport?.maxTokens });
         if (requests.length === 1) throw outputError('length');
         if (requests.length === 2) return '{"canonicalPrompt":';
-        if (requests.length === 3) return JSON.stringify({ ...delivery, h3Prompt: zh.replace('non_diegetic_music:', 'wrong_music_field:') });
-        assert.equal(requests.length, 4, 'initial plus exactly three technical recovery requests');
-        assert.ok(user.includes('h3_format_repair_data')); return JSON.stringify({ h3Prompt: zh, identityBindings: bindings });
+        assert.equal(requests.length, 3, 'initial plus one capacity and one JSON recovery request');
+        return JSON.stringify(delivery);
       }
       assert.equal(transport?.maxTokens, 6000, 'English remains a single-body request');
       return JSON.stringify({ h3Prompt: en, identityBindings: enBindings });
     } });
-  assert.deepEqual(requests.map((item) => item.maxTokens), [12000, 24000, 24000, 24000]);
+  assert.deepEqual(requests.map((item) => item.maxTokens), [12000, 24000, 24000]);
   assert.equal(requests[0].user, requests[1].user, 'length recovery repeats original request, not an invented story repair');
   assert.equal(result.officialPromptZh, zh); assert.equal(originalConfig.maxTokens, 6000);
 });
 
-await test('capacity failures cannot reset a partly consumed JSON retry budget', async () => {
+await test('capacity failures cannot reset a consumed JSON budget or silently label the old body as repaired', async () => {
   let reviews = 0;
-  await assert.rejects(generateSingleSegmentPrompt({ board: applyOfficialH3Prompt(board, context), context, purpose: 'dialogue-repair',
+  const saved = applyOfficialH3Prompt(board, context);
+  const result = await generateSingleSegmentPrompt({ board: saved, context, purpose: 'dialogue-repair',
     maxOutputTokens: 6000, clean: (text) => text,
-    request: async (_system, _user, stage) => {
-      assert.equal(stage, 'review'); reviews += 1;
+    request: async (_system, user, stage) => {
+      if (stage !== 'review') return user.includes('<review_data>') ? json(user, 'review_data').sourcePrompt : user;
+      reviews += 1;
       if (reviews === 1) return '{"canonicalPrompt":';
       throw outputError('length');
-    } }), /中文H3交付已自动重试3次/u);
+    } });
   assert.equal(reviews, 4);
+  assert.equal(result.officialPromptZh, saved.officialPromptZh); assert.equal(result.finalPrompt, original);
+  assert.ok(result.h3DeliveryWarnings?.some((warning) => warning.includes('AI复核未完成')));
 });
 
 await test('provider refusal never becomes a JSON/story repair or consumes extra calls', async () => {
   let requests = 0; const refusal = outputError('refusal');
-  await assert.rejects(generateSingleSegmentPrompt({ board: applyOfficialH3Prompt(board, context), context, purpose: 'dialogue-repair',
+  const saved = applyOfficialH3Prompt(board, context);
+  const result = await generateSingleSegmentPrompt({ board: saved, context, purpose: 'dialogue-repair',
     maxOutputTokens: 6000, clean: (text) => text,
-    request: async () => { requests += 1; throw refusal; } }), (error) => error === refusal);
+    request: async (_system, user, stage) => {
+      if (stage === 'review') { requests += 1; throw refusal; }
+      return user.includes('<review_data>') ? json(user, 'review_data').sourcePrompt : user;
+    } });
   assert.equal(requests, 1);
+  assert.equal(result.officialPromptZh, saved.officialPromptZh);
+  assert.ok(result.h3DeliveryWarnings?.some((warning) => warning.includes('AI复核未完成')));
 });
 
 await test('English initial/review/format phases share one three-retry transport and serialization budget', async () => {
@@ -372,10 +393,10 @@ await test('English initial/review/format phases share one three-retry transport
       if (translations === 3) return JSON.stringify({ h3Prompt: en, identityBindings: enBindings });
       if (translations === 4) return '{"h3Prompt":';
       assert.equal(translations, 5); // Two scheduled calls plus three total retries.
-      return JSON.stringify({ h3Prompt: en.replace('non_diegetic_music:', 'wrong_music_field:'), identityBindings: enBindings });
+      return JSON.stringify({ h3Prompt: en, identityBindings: enBindings });
     } });
   assert.equal(translations, 5, 'no sixth H3 format request after the shared retry budget is exhausted');
-  assert.match(result.officialPromptEnError || '', /自动重试3次/u);
+  assert.equal(result.officialPromptEnError || '', ''); assert.equal(result.officialPromptEn, en);
   assert.equal(result.officialPromptZh, zh, 'qualified Chinese survives exhausted English retries');
 });
 
@@ -390,76 +411,42 @@ await test('optional null and empty tokens complete the existing pipeline withou
   assert.equal(reviews, 1); assert.deepEqual(result.h3IdentityBindings, bindings); assert.equal(result.officialPromptZh, zh);
 });
 
-await test('metadata repairs preserve both bodies and reuse exact field diagnostics with immutable input', async () => {
-  let reviews = 0; const before = JSON.stringify(board);
-  const fixedMetadata = [{ ...emptyMetadata, sourceExcerpt: 'synthetic evidence' }, null];
-  const broken = { ...delivery, shotMetadata: [{ ...fixedMetadata[0], sourceBeatIds: 'wrong type' }, null] };
-  const result = await generateSingleSegmentPrompt({ board: applyOfficialH3Prompt(board, context), context, purpose: 'dialogue-repair', clean: (text) => text,
-    request: async (system, user, stage) => {
-      if (stage !== 'review') return JSON.stringify({ h3Prompt: en, identityBindings: enBindings });
-      if (++reviews === 1) return JSON.stringify(broken);
-      const repair = json(user, 'h3_metadata_repair_data');
-      assert.deepEqual(repair.repairFields, ['shotMetadata']);
-      assert.equal(repair.issues[0].path, 'shotMetadata[0].sourceBeatIds');
-      assert.equal(repair.lockedDelivery.h3Prompt, zh); assert.equal(repair.lockedDelivery.canonicalPrompt, revised);
-      assert.match(system, /metadataPatch/u);
-      assert.ok(!system.includes('本次明确授权当前段未确认草稿/对白排程修复'), 'metadata repair receives no authority to rewrite the schedule');
-      return JSON.stringify({ metadataPatch: { shotMetadata: fixedMetadata } });
-    } });
-  assert.equal(reviews, 2); assert.equal(result.finalPrompt, revised); assert.equal(result.officialPromptZh, zh);
-  assert.equal(result.shots[0].sourceExcerpt, 'synthetic evidence'); assert.deepEqual(result.h3IdentityBindings, bindings);
-  assert.equal(JSON.stringify(board), before);
+await test('unreadable optional metadata warns without another call, changing the body or guessing provenance', async () => {
+  for (const invalidMetadata of [
+    { shotMetadata: 'invalid' },
+    { shotSourceIds: ['wrong shape', ['shot-1']] },
+    { shotSourceIds: [['unknown'], ['shot-1']] },
+  ]) {
+    let reviews = 0; const saved = applyOfficialH3Prompt(board, context); const before = JSON.stringify(saved);
+    const result = await generateSingleSegmentPrompt({ board: saved, context, purpose: 'dialogue-repair', clean: (text) => text,
+      request: async (_system, user, stage) => {
+        assert.ok(!user.includes('h3_metadata_repair_data'), 'optional metadata cannot trigger an added model loop');
+        if (stage === 'review') { reviews += 1; return JSON.stringify({ ...delivery, ...invalidMetadata }); }
+        return JSON.stringify({ h3Prompt: en, identityBindings: enBindings });
+      } });
+    assert.equal(reviews, 1); assert.equal(result.officialPromptZh, zh); assert.equal(result.officialPromptEn, en);
+    assert.deepEqual(result.h3IdentityBindings, bindings);
+    assert.ok(result.h3DeliveryWarnings?.length, 'unreadable records remain visibly pending rather than falsely completed');
+    if ('shotSourceIds' in invalidMetadata) {
+      assert.equal(result.finalPrompt, original);
+      assert.deepEqual(result.shots, saved.shots, 'unknown provenance cannot be inferred, merged or cleared');
+    } else {
+      assert.equal(result.finalPrompt, revised, 'readable explicit one-to-one mapping still supports the authorized repair');
+      assert.equal(result.shots[0].sourceExcerpt, saved.shots[0].sourceExcerpt);
+    }
+    assert.equal(JSON.stringify(saved), before);
+  }
 });
 
-await test('changed bodies in a metadata repair are rejected and a later valid patch keeps the original candidate', async () => {
-  let reviews = 0;
-  const broken = { ...delivery, shotSourceIds: ['wrong shape', ['shot-1']] };
-  const result = await generateSingleSegmentPrompt({ board: applyOfficialH3Prompt(board, context), context, purpose: 'dialogue-repair', clean: (text) => text,
-    request: async (_system, user, stage) => {
-      if (stage !== 'review') return JSON.stringify({ h3Prompt: en, identityBindings: enBindings });
-      if (++reviews === 1) return JSON.stringify(broken);
-      const repair = json(user, 'h3_metadata_repair_data');
-      assert.equal(repair.lockedDelivery.h3Prompt, zh);
-      if (reviews === 2) return JSON.stringify({ ...delivery, h3Prompt: `${zh} unwanted prose change` });
-      assert.match(repair.protocolIssue, /正文、排程和其他字段逐字保持/u);
-      return JSON.stringify({ metadataPatch: { shotSourceIds: delivery.shotSourceIds } });
-    } });
-  assert.equal(reviews, 3); assert.equal(result.officialPromptZh, zh); assert.equal(result.finalPrompt, revised);
-});
-
-await test('provenance repair of an unknown source ID changes only its mapping, not the body or saved project', async () => {
-  let reviews = 0;
-  const result = await generateSingleSegmentPrompt({ board: applyOfficialH3Prompt(board, context), context, purpose: 'dialogue-repair', clean: (text) => text,
-    request: async (_system, user, stage) => {
-      if (stage !== 'review') return JSON.stringify({ h3Prompt: en, identityBindings: enBindings });
-      if (++reviews === 1) return JSON.stringify({ ...delivery, shotSourceIds: [['unknown'], ['shot-1']] });
-      const repair = json(user, 'h3_metadata_repair_data');
-      assert.equal(repair.issues[0].path, 'shotSourceIds[0][0]');
-      return JSON.stringify({ metadataPatch: { shotSourceIds: delivery.shotSourceIds } });
-    } });
-  assert.equal(reviews, 2); assert.equal(result.officialPromptZh, zh);
-});
-
-await test('bad metadata patches stop within the shared retry budget and retain the saved result', async () => {
-  let reviews = 0; const saved = applyOfficialH3Prompt(board, context); const before = JSON.stringify(saved);
-  await assert.rejects(generateSingleSegmentPrompt({ board: saved, context, purpose: 'dialogue-repair', clean: (text) => text,
-    request: async (_system, _user, stage) => {
-      assert.equal(stage, 'review');
-      if (++reviews === 1) return JSON.stringify({ ...delivery, shotMetadata: 'invalid' });
-      return JSON.stringify({ metadataPatch: {} });
-    } }), /自动重试修复交付排程3次.*metadataPatch\.shotMetadata/u);
-  assert.equal(reviews, 4); assert.equal(JSON.stringify(saved), before);
-});
-
-await test('switching project during a metadata repair cancels the response before commit or translation', async () => {
+await test('switching project before an unreadable-metadata response cancels before commit or translation', async () => {
   let current = true; let requests = 0; const saved = applyOfficialH3Prompt(board, context); const before = JSON.stringify(saved);
   await assert.rejects(generateSingleSegmentPrompt({ board: saved, context, purpose: 'dialogue-repair', clean: (text) => text, isCurrent: () => current,
     request: async () => {
-      if (++requests === 1) return JSON.stringify({ ...delivery, shotMetadata: 'invalid' });
+      requests += 1;
       current = false;
-      return JSON.stringify({ metadataPatch: { shotMetadata: [null, null] } });
+      return JSON.stringify({ ...delivery, shotMetadata: 'invalid' });
     } }), (error) => error instanceof Error && error.name === 'AbortError');
-  assert.equal(requests, 2); assert.equal(JSON.stringify(saved), before);
+  assert.equal(requests, 1); assert.equal(JSON.stringify(saved), before);
 });
 
 console.log(`H3 staging delivery: ${count} synthetic offline cases passed; no project data or live API used`);

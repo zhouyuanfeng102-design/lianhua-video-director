@@ -25,9 +25,13 @@ export function RunningHubImageSettings({ config, onChange }: Props) {
     const saved = normalizeRunningHubImageConfig(value);
     return { enabled: value.enabled, baseUrl: value.baseUrl, apiKey: value.apiKey, workflows: saved.runningHubWorkflows, activeWorkflowId: saved.activeRunningHubWorkflowId };
   };
-  const applyManager = (next: RunningHubVideoConfig) => latest.current.onChange({
-    runningHubWorkflows: next.workflows, activeRunningHubWorkflowId: next.activeWorkflowId, enabled: next.enabled,
-  });
+  const applyManager = (next: RunningHubVideoConfig): RunningHubVideoConfig => {
+    const patch = { ...normalizeRunningHubImageConfig({ runningHubWorkflows: next.workflows,
+      activeRunningHubWorkflowId: next.activeWorkflowId }), enabled: next.enabled };
+    latest.current.onChange(patch);
+    latest.current.config = { ...latest.current.config, ...patch };
+    return managerConfig();
+  };
   const importRequest = (source: string, name?: string) => {
     setError(''); setMessage('');
     try {

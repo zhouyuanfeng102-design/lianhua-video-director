@@ -9,8 +9,9 @@ import { VIDEO_ACTION_EVENT_REVIEW_RULE } from '../src/videoActionChoreographyRu
 import type { Character, ConverterPreset, H3IdentityBindings, PromptCharacterParticipation, Storyboard } from '../src/types';
 
 // Offline integration regression: only the model responses are synthetic. The
-// production converter, H3 review, staging synchronization and translation run
-// together. This verifies data flow, not a real model's choreography quality.
+// explicit dialogue-repair entry, H3 staging synchronization and translation
+// run together. Ordinary delivery cannot replan this source schedule.
+// This verifies data flow, not a real model's choreography quality.
 const characters: Character[] = [
   { id: 'zesshi', name: '绝死绝命', outfit: '黑白铠甲', appearance: '黑白长发' },
   { id: 'mare', name: '马雷', outfit: '白色斗篷', appearance: '金色短发' },
@@ -93,39 +94,35 @@ const runScenario = async (scenario: Scenario): Promise<Storyboard> => {
   let checkpoint: Storyboard | undefined;
   let checkpointCalls = 0;
   let englishReviewCalls = 0;
-  const result = await generateSingleSegmentPrompt({ board, context, converter, reviewWithAi: true, now: () => 100,
+  const result = await generateSingleSegmentPrompt({ board, context, converter, purpose: 'dialogue-repair', reviewWithAi: true, now: () => 100,
     clean: (text) => text,
     onQualifiedChinese: (value) => { checkpoint = value; checkpointCalls++; },
     onAiTranslationReview: () => { englishReviewCalls++; },
     request: async (system, user, stage) => {
       requests.push({ system, user, stage });
-      if (stage === 'convert') return original;
+      assert.notEqual(stage, 'convert', 'an explicit repair reuses the saved canonical without another conversion');
       if (stage === 'review') return JSON.stringify({ canonicalPrompt: corrected, h3Prompt: scenario.zh,
         identityBindings: zhBindings, characterParticipation: participation, shotSourceIds, shotMetadata });
       return JSON.stringify({ h3Prompt: scenario.en, identityBindings: enBindings });
     },
   });
 
-  assert.deepEqual(requests.map((request) => request.stage), ['convert', 'review', 'translate', 'translate'],
-    'event review reuses the existing calls, with no extra model stage or semantic retry');
-  const stagingReview = readData(requests[1].user, 'video_staging_review_data');
-  const conversionData = readData(requests[0].user, 'video_conversion_data');
-  assert.equal(conversionData.voiceFactScope, 'source-grounded-new-draft');
+  assert.deepEqual(requests.map((request) => request.stage), ['review', 'translate', 'translate'],
+    'explicit repair reuses the existing calls, with no extra model stage or semantic retry');
+  const stagingReview = readData(requests[0].user, 'video_staging_review_data');
   assert.equal(stagingReview.voiceFactScope, 'source-grounded-new-draft');
-  for (const data of [conversionData, stagingReview]) {
-    assert.equal(data.characterIdentityFacts.find((person: { id: string }) => person.id === 'mare').gender, '女',
-      'the model receives project identity even when the candidate carries a conflicting voice');
-  }
+  assert.equal(stagingReview.characterIdentityFacts.find((person: { id: string }) => person.id === 'mare').gender, '女',
+    'the model receives project identity even when the candidate carries a conflicting voice');
   assert.equal(stagingReview.taskAuthority, 'current-segment-staging-replan');
   assert.equal(stagingReview.canonicalPrompt, original, 'the bad four-shot candidate is supplied as review evidence');
   assert.deepEqual(stagingReview.shots.map((shot: { startSec: number; endSec: number }) => [shot.startSec, shot.endSec]),
     scenario.original.map((shot) => [shot.start, shot.end]));
-  assert.ok(requests[1].system.includes(VIDEO_ACTION_EVENT_REVIEW_RULE), 'existing Chinese review receives event evidence checks');
+  assert.ok(requests[0].system.includes(VIDEO_ACTION_EVENT_REVIEW_RULE), 'explicit dialogue repair retains its authorized event evidence procedure');
 
-  const translation = readData(requests[2].user, 'translation_identity_data');
+  const translation = readData(requests[1].user, 'translation_identity_data');
   assert.equal(translation.sourcePrompt, scenario.zh, 'English translates the corrected Chinese H3, not the old candidate');
   assert.deepEqual(translation.sourceIdentityBindings, zhBindings);
-  const englishReview = readData(requests[3].user, 'review_data');
+  const englishReview = readData(requests[2].user, 'review_data');
   assert.equal(englishReview.sourcePrompt, scenario.zh);
   assert.equal(englishReview.candidateEnglishPrompt, scenario.en);
   assert.equal(englishReview.stagingContext.canonicalPrompt, corrected);
@@ -133,7 +130,7 @@ const runScenario = async (scenario: Scenario): Promise<Storyboard> => {
     scenario.corrected.map((shot) => [shot.start, shot.end]), 'English review receives the merged timeline');
   assert.deepEqual(englishReview.stagingContext.shots.map((shot: { prompt: string }) => shot.prompt), corrected.split('\n'));
   assert.deepEqual(englishReview.sourceIdentityBindings, zhBindings);
-  assert.ok(requests.slice(2).every((request) => !request.system.includes(VIDEO_ACTION_EVENT_REVIEW_RULE)),
+  assert.ok(requests.slice(1).every((request) => !request.system.includes(VIDEO_ACTION_EVENT_REVIEW_RULE)),
     'English preserves the corrected schedule instead of acquiring Chinese replanning authority');
 
   assert.equal(checkpointCalls, 1);

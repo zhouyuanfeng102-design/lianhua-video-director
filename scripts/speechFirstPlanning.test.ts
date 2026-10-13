@@ -83,7 +83,8 @@ try {
     assert.equal(calls.length, 2, 'same original planning/review stages');
     for (const index of [0, 1]) {
       assert.ok(system(index).includes(STORYBOARD_SPEECH_FIRST_PLANNING_RULE));
-      assert.match(system(index), /15秒视频段不等于1个15秒镜头/u);
+      assert.match(system(index), /durationSec\/requiredSegmentDurationSec规定交付时间，不规定摄影镜数/u);
+      assert.match(system(index), /按连续场面与观看任务安排摄影，不以生成窗口、事件条目或话轮数量预填切点/u);
       assert.match(system(index), /本镜相对起止区间/u);
     }
     assert.equal(data('storyboard_planning_data').requiredShotCount, undefined);

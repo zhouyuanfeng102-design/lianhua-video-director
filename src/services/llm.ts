@@ -4003,7 +4003,7 @@ export const requestShotRecommendation = async (
   let candidateResult = await requestTextModel(
     config,
     [
-      '你是视频分镜规划器。你必须亲自决定镜头数量、每镜时间边界、原文归属、主体、动作和摄影设计，不得要求或依赖任何本地推荐镜头数。',
+      '你是视频分镜规划器，以连续场面组织剧情。本阶段负责摄影排程：先理解本段人物目标、互动关系、行动因果、完整对白与信息揭示顺序，再组织观看重点，最后决定镜数、镜界和机位。完整表达效果相当时选择镜头更少、摄影更简单的方案；不把人物名单、道具、句子或动作阶段当作镜头清单，也不强制一镜到底。你必须亲自决定原文归属、主体、动作和摄影设计，不得要求或依赖任何本地推荐镜头数；后续转换与翻译负责忠实表达这份排程。',
       '只返回一个严格 JSON 对象，不要 Markdown、解释、代码围栏或额外对象。',
       STORYBOARD_SOURCE_PLANNING_AUTHORITY_RULE,
       STORYBOARD_SPEECH_FIRST_PLANNING_RULE,
@@ -4042,12 +4042,14 @@ export const requestShotRecommendation = async (
       VIDEO_LOCAL_TIME_RULE,
       storyboardShotTimeRule(initialParams),
       DIALOGUE_LANGUAGE_RULE,
-      'planningCreativeDirection 是用户在导演台选定的创作方向：镜头设计、构图、光影、材质和声音必须具体体现其中的导演风格、视觉风格、风格预设及镜头/光影偏好，但不得因此改写剧情事实、对白、因果或结局。',
+      'planningCreativeDirection 是用户在导演台选定的创作方向：按其实际适用范围体现导演、视觉、光影、材质和声音要求。用户明确指定镜数或具体摄影指令按其范围执行；普通风格中的快节奏、特写交替、快速衔接和多选运镜只是可用表达偏好，不构成逐项拍摄或新增切点的清单。先保持剧情与揭示顺序、行动和情绪可理解性，再选择少而有效的镜头与简单摄影；不为展示人物或武器另排介绍镜。',
       ...(params.sequenceSegmentContext ? ['sequenceSegmentContext是已完成的本段语义分配，不是全片总稿。对照本段sourceEvidence、events及dialogues生成本段完整镜头；事件ID可跨段但只演当前phase，不重新演前段已完成事件，不移入后段剧情或对白。保留本段入口、出口及转场；previousPromptHandoff若存在，以上段最终提示词末端状态为衔接依据，约0.5秒短动作承接计入本段时长，最晚0.8秒推进本段新剧情，不重播整镜或已说完台词。明确换场/跳时按原文转场。镜数、镜头切换与运镜由你结合本段剧情及已选导演要求安排，不因为没有总稿而套固定跟拍。'] : []),
       ...(params.sequenceSegmentContext ? ['若sequenceSegmentContext.contentOverridden=true，segment.content已由用户明确编辑；以其中当前剧情和明确对白为准，旧semanticSource仅保留历史来源，不用于撤销用户改动或恢复被删除的台词。'] : []),
       '每个 shots 项包含 startSec、endSec、sourceExcerpt、purpose、subject、action、camera、transition、lighting、sound、result。',
       '若数据中提供 requiredShotCount，shots 数量必须与其完全一致；未提供时由你独立决定最合适的镜头数量。',
-      'JSON 格式：{"reason":"分镜依据","breakdown":["依据1"],"aiReview":{"status":"passed","summary":"对照全文自检的结论","issues":[]},"shots":[{"startSec":0,"endSec":3,"durationSec":3,"localTimeRangeSec":[0,3],"sourceExcerpt":"对应原文依据","purpose":"叙事目的","subject":"稳定主体名","action":"可见动作链及口部动作先后","camera":"景别、机位、运镜与当前说话焦点","transition":"切换依据","lighting":"光影","sound":"声音","result":"镜头末状态","space":"空间关系","performance":"可见表演","direction":"朝向","dialogue":"无，或本镜相对起点–终点秒 @原说话人（已知身份、确认声线仅有依据时、在画/画外、听者）：完整原台词","visiblePrivatePartsByCharacter":{}}]}。其中数字区间、人物和台词均只示意字段含义，不是固定时长/语速配额或待复制剧情；按实际原话和动作安排完整发话，再把“相对起点–终点”替换成该镜实际数字区间。“稳定主体名”等必须替换成剧情实际内容。visiblePrivatePartsByCharacter 可省略；没有本镜明确可见需求就保持空对象。',
+      `JSON 字段格式示意：${JSON.stringify({ reason: '连续场面的叙事职责与必要观察安排', breakdown: ['本次具体依据'], aiReview: { status: 'passed', summary: '本次对照全文的结论', issues: [] }, shots: [{ startSec: 0, endSec: params.durationSec, durationSec: params.durationSec, localTimeRangeSec: [0, params.durationSec], sourceExcerpt: '对应原文依据', purpose: '本镜承担的完整叙事职责', subject: '剧情中的稳定主体名', action: '本镜内多个真实动作、对白及回应的连续过程', camera: '能表达观看重点的景别、机位与简单连续摄影', transition: '开场或实际换镜的叙事触发与状态承接', lighting: '场面光影', sound: '实际声音', result: '本镜结束时供后续继承的状态', space: '人物和物体的空间关系', performance: '剧情触发的可见表演', direction: '具名人物的朝向与作用目标', dialogue: '无，或本镜相对起点–终点秒 @原说话人（有依据的声音身份、在画/画外、听者）：完整原台词', visiblePrivatePartsByCharacter: {} }] })}。这里只示意字段，不设定本次镜数、镜长或语速，也不要求一镜到底；实际分镜覆盖本次获准总时长。主体名、原文、动作、时间和对白均替换为当前剧情。visiblePrivatePartsByCharacter 可省略，没有本镜明确可见需求时保持空对象。`,
+      '摄影选择对照例仅说明场面组织，不是本次剧情或镜数配额：若原文是“门开，来者进入半步停住，室内人物持武器站立”，先以门口与室内的空间关系连续表达入场和相遇，不默认分别拍每人、武器和脸的介绍镜；若原文在连续交谈或攻防后揭示一项当前机位看不清的关键线索，可在揭示时换观察位置，新镜接续同一行动与原话，不重新起手。不要把例子的人物、武器或线索补进当前剧情。',
+      '普通转头、迈步、持物和表情变化使用自然先后与连续速度表达；数字时间主要服务真正切点、完整发话区间及确需同步的关键事件，不逐个小动作安排毫秒刻度。每个shots项内部保持真实连续摄影，不在其camera或action里暗藏未列出的反打、插入镜头或“切到特写”。',
       '镜头总数必须在 1—900 之间。'
     ].join('\n'),
     [
@@ -6841,7 +6843,7 @@ const requestImageModelOnce = async (config: ImageApiConfig, input: string | Ima
     const desktop = typeof window !== 'undefined'
       ? (window as Window & { lianhuaDesktop?: { downloadImage?: (url: string) => Promise<string> } }).lianhuaDesktop : undefined;
     const referenceImages = normalizedReferenceImages(options);
-    return requestRunningHubImage(config, { prompt, width, height, sizeOverride: options.sizeOverride,
+    return requestRunningHubImage(config, { prompt, width, height, sizeOverride: options.sizeOverride, resolutionPlan: plan,
       referenceCount: referenceImages.length, referenceImages, signal: options.signal }, {
       request: requestHttp,
       ...(desktop?.downloadImage ? { downloadImage: (url: string) => desktop.downloadImage!(url) } : {}),

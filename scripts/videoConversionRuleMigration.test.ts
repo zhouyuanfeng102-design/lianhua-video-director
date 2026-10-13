@@ -8,11 +8,11 @@ import {
 import {
   DEFAULT_VIDEO_CONVERSION_OUTPUT, DEFAULT_VIDEO_CONVERSION_SYSTEM, VIDEO_DIALOGUE_RULE,
   VIDEO_CONVERSION_EXAMPLE, VIDEO_LOCAL_TIME_RULE,
-  LEGACY_DEFAULT_VIDEO_CONVERSION_OUTPUT_V1_4_0, LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_3_0,
+  LEGACY_DEFAULT_VIDEO_CONVERSION_OUTPUT_V1_4_0, LEGACY_DEFAULT_VIDEO_CONVERSION_OUTPUT_V2_1_0, LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_3_0,
   LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_4_0, VIDEO_DIALOGUE_STAGING_RULE,
   LEGACY_VIDEO_DIALOGUE_STAGING_RULE_V1_7_0,
   LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_7_0,
-  VIDEO_SPATIAL_CONTINUITY_RULE, VIDEO_STAGING_REVIEW_RULE, VIDEO_PROMPT_FOCUS_RULE,
+  VIDEO_SPATIAL_CONTINUITY_RULE, VIDEO_STAGING_REVIEW_RULE, VIDEO_STAGING_TRANSCRIPTION_RULE, VIDEO_PROMPT_FOCUS_RULE,
   VIDEO_CAUSALITY_OUTPUT_RULE,
 } from '../src/videoConversionRules';
 import { AUDIO_PROMPT_RULE, DIALOGUE_DELIVERY_RULE } from '../src/audioPromptPolicy';
@@ -41,11 +41,14 @@ assert.ok(timeline.baseRules.includes(VIDEO_CONVERSION_EXAMPLE));
 assert.ok(timeline.baseRules.includes(VIDEO_LOCAL_TIME_RULE));
 assert.ok(timeline.outputRules.includes(VIDEO_DIALOGUE_RULE));
 assert.ok(timeline.outputRules.includes(AUDIO_PROMPT_RULE));
-for (const rule of [VIDEO_DIALOGUE_STAGING_RULE, VIDEO_SPATIAL_CONTINUITY_RULE, VIDEO_STAGING_REVIEW_RULE, VIDEO_PROMPT_FOCUS_RULE]) {
+for (const rule of [VIDEO_DIALOGUE_STAGING_RULE, VIDEO_SPATIAL_CONTINUITY_RULE, VIDEO_PROMPT_FOCUS_RULE]) {
   assert.ok(converter.systemPrompt.includes(rule), 'the live converter receives shared AI staging and self-repair instructions');
   assert.ok([timeline.baseRules, timeline.continuityRules, timeline.outputRules].join('\n').includes(rule),
     'the rule library exposes the same staging and self-repair contract');
 }
+assert.ok(converter.systemPrompt.includes(VIDEO_STAGING_TRANSCRIPTION_RULE), 'current converter uses the source-preserving transcription contract');
+assert.ok([timeline.baseRules, timeline.continuityRules, timeline.outputRules].join('\n').includes(VIDEO_STAGING_REVIEW_RULE),
+  'historical timeline factory text keeps its original staging fingerprint; current requests replace it without migration');
 const activeRules = [timeline.baseRules, timeline.continuityRules, timeline.outputRules, converter.systemPrompt, converter.outputRules].join('\n');
 assert.doesNotMatch(activeRules, /4\.5字\/秒|0\.18秒|0\.28秒|按原句标点截取|连两个字都无法容纳|不足1\.2秒|1–3|色温K值/u,
   'retired time-capacity, dialogue-cropping and mechanical formatting requirements cannot reach new default requests');
@@ -79,7 +82,7 @@ const legacyConverterV160 = {
     .replace(AUDIO_PROMPT_RULE, legacyQuietMusicAudioRule)
     .replace(`\n\n${STORY_CAUSALITY_RULE}`, '')
     .replace(`\n\n${DIALOGUE_DELIVERY_RULE}`, ''),
-  outputRules: converter.outputRules
+  outputRules: LEGACY_DEFAULT_VIDEO_CONVERSION_OUTPUT_V2_1_0
     .replace(`\n\n${VIDEO_CAUSALITY_OUTPUT_RULE}`, '')
     .replace(`\n\n${DIALOGUE_DELIVERY_RULE}`, ''),
   version: '1.6.0',
@@ -114,7 +117,7 @@ assert.equal(
     .replace(`\n\n${DIALOGUE_DELIVERY_RULE}`, ''),
   'the V0.6.3 converter fixture is frozen independently of live audio, dialogue and causality rules',
 );
-assert.equal(legacyConverterV150.outputRules, DEFAULT_VIDEO_CONVERSION_OUTPUT
+assert.equal(legacyConverterV150.outputRules, LEGACY_DEFAULT_VIDEO_CONVERSION_OUTPUT_V2_1_0
   .replace(`\n\n${VIDEO_CAUSALITY_OUTPUT_RULE}`, '')
   .replace(`\n\n${DIALOGUE_DELIVERY_RULE}`, ''));
 assert.ok(!legacyConverterV150.systemPrompt.includes(STORY_CAUSALITY_RULE));

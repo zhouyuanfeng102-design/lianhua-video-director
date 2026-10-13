@@ -27,7 +27,7 @@ export interface RunningHubWorkflowManagerProps {
   validateWorkflow?: typeof validateRunningHubVideoWorkflow;
   config: RunningHubVideoConfig;
   getCurrentConfig?: () => RunningHubVideoConfig;
-  onChange: (next: RunningHubVideoConfig) => void;
+  onChange: (next: RunningHubVideoConfig) => RunningHubVideoConfig | void;
   onClose: () => void;
 }
 type EditorTab = 'basic' | 'mapping' | 'output' | 'parameters' | 'runtime' | 'json';
@@ -218,7 +218,13 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
   }, [draft?.id, draft?.remoteId, draft?.runKind, config.baseUrl, config.apiKey]);
 
   function clearNotice() { setError(''); setMessage(''); }
-  function apply(next: RunningHubVideoConfig) { latest.current.config = next; latest.current.onChange(next); }
+  function apply(next: RunningHubVideoConfig) {
+    // Image settings normalize persisted workflows. Use their accepted value,
+    // rather than the editor's pre-normalization object, for the stored baseline.
+    const saved = latest.current.onChange(next) || next;
+    latest.current.config = saved;
+    return saved;
+  }
   function loadDraft(workflow: RunningHubVideoWorkflow | undefined, saved = true) {
     cancelDiscovery(); nodeEpoch.current += 1; setNodeDialog(null); setNodeFileBusy(false); setNodeSearch(''); setNodeSource(''); setManualNode({ nodeId: '', fieldName: '', value: '', type: 'string' });
     setMappingRange('common'); setMappingSearch(''); setParameterRange('common');
@@ -323,7 +329,7 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
       const persisted = current.workflows.find((entry) => entry.id === workflow.id);
       if (baseStoredRef.current && (!persisted || jsonKey(persisted) !== baseStoredRef.current)) throw new Error('这份工作流已在其他位置变化，请重新打开，避免覆盖新的设置。');
       const next = saveRunningHubVideoWorkflow(current, workflow);
-      apply(next); loadDraft(next.workflows.find((entry) => entry.id === workflow.id));
+      const saved = apply(next); loadDraft(saved.workflows.find((entry) => entry.id === workflow.id));
       setMessage(isReady(workflow) ? '已保存云端工作流；未提交云端任务，也未修改历史任务快照。' : '已保存为待配置草稿；补齐 ID、请求 JSON 与输入映射后才能设为当前。');
     } catch (cause) { setError(errorText(cause)); }
   }
@@ -353,8 +359,8 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
     setConfirmation({ title: `删除“${savedDraft.name}”？`, body: `${note}仅删除这份本地配置，不删除 RunningHub 云端工作流、项目素材或历史任务。${dirty ? '尚未保存的编辑也会放弃。' : ''}`, actionLabel: '确认删除云端工作流', danger: true, action: () => {
       const current = currentConfig(); const entry = current.workflows.find((item) => item.id === id);
       if (!entry || jsonKey(entry) !== jsonKey(beforeEntry) || current.activeWorkflowId !== before.activeWorkflowId || deletedConfig(current).activeWorkflowId !== preview.activeWorkflowId) { setError('工作流或当前选择已变化，请重新确认；没有删除设置。'); return; }
-      const next = deletedConfig(current); apply(next);
-      loadDraft(next.workflows.find((item) => item.id === next.activeWorkflowId) || next.workflows[0]); setMessage('已删除所选本地配置，云端工作流与历史素材未改动。');
+      const saved = apply(deletedConfig(current));
+      loadDraft(saved.workflows.find((item) => item.id === saved.activeWorkflowId) || saved.workflows[0]); setMessage('已删除所选本地配置，云端工作流与历史素材未改动。');
     } });
   }
   function acceptImport(source: string, name: string) {
@@ -367,7 +373,7 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
           // Import always receives a fresh ID from the library and appends against authoritative state.
           const workflow = { ...imported.workflow, name: uniqueName(imported.workflow.name) };
           const next = saveRunningHubVideoWorkflow(current, workflow);
-          apply(next); loadDraft(next.workflows.find((entry) => entry.id === workflow.id));
+          const saved = apply(next); loadDraft(saved.workflows.find((entry) => entry.id === workflow.id));
           setImportOpen(false); setImportText(''); setImportName(''); setSearch(''); setLibraryPage(Math.floor(current.workflows.length / 4)); setTab('mapping');
           setMessage(['已新增导入工作流，未覆盖旧配置。请核对 ID、提示词与图片映射，再设为当前。', imported.baseUrl ? '导入来源地址未自动替换连接设置。' : '', ...imported.warnings].filter(Boolean).join(' '));
         } catch (cause) { setError(errorText(cause)); }
@@ -576,7 +582,7 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
         const custom = event.target.value === '__custom__'; setCustomOutputDefaults({ ...customOutputDefaults, [id]: custom }); if (!custom) setDefault(event.target.value);
       }}>{!options.includes(value) && <option value={value} disabled={strictOptions}>当前值：{value || '空'}</option>}{options.map((option) => <option key={option} value={option}>{option}{control.unit === 'MP' ? ' MP' : ''}{control.optionLabels?.[option] ? `（${control.optionLabels[option]}）` : ''}</option>)}{!strictOptions && <option value="__custom__">自定义值…</option>}</select> : <input aria-label={`${label}默认值`} type={numeric ? 'number' : 'text'} inputMode={numeric ? 'decimal' : 'text'} min={numeric ? numberProp('min') : undefined} max={numeric ? numberProp('max') : undefined} step={numeric ? numberProp('step') ?? 'any' : undefined} disabled={!supported} value={value} placeholder="先选择实际节点字段" onChange={(event) => setDefault(event.target.value)} />}</label>
       {edit.kind === 'select' && !strictOptions && customOutputDefaults[id] && <label className="field"><span>自定义默认值</span><input aria-label={`${label}自定义默认值`} value={value} onChange={(event) => setDefault(event.target.value)} /></label>}
-      <p className="vwm-help">{control.unit === 'MP' ? `MP 为百万像素，按节点数值提交。${control.optionLabels ? `括号为 ${control.optionLabelAspectRatio || '当前比例'} 节点尺寸，二采后以成片为准。` : ''}` : definition.hint}</p>
+      <p className="vwm-help">{control.unit === 'MP' ? `MP 为百万像素，按节点数值提交。${control.optionLabels ? `括号为 ${control.optionLabelAspectRatio || '当前比例'} 节点尺寸，二采后以成片为准。` : ''}` : isImage && (key === 'width' || key === 'height') ? '可选映射。自定义精确像素需要同时绑定宽高；使用分辨率档位或工作流默认尺寸时，无需强行绑定宽高。' : isImage && key === 'aspect_ratio' ? '可选映射。按节点完整选项值提交；未绑定时保留工作流比例。条件开关须由工作流明确配置，不会自动开启。' : definition.hint}</p>
       {(key === 'resolution' || key === 'aspect_ratio' || key === 'steps') && binding && supported && <button type="button" className="vwm-text-button rhv-control-settings-button" aria-label={`${label}输入选项设置`} onClick={() => setOutputControlKey(key)}>输入选项设置</button>}
     </div>;
   }
@@ -631,9 +637,9 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
             {tab === 'output' && outputSection !== 'common' && <RunningHubGenerationExtras key={`${draft.id}-${outputSection}`} section={outputSection} workflow={draft} nodeEdits={nodeEdits} onDefaultChange={(binding, text) => { setNodeEdits((current) => ({ ...current, [bindingKey(binding)]: text })); clearNotice(); }} onWorkflowChange={(next) => { setDraft(prepareWorkflowDraft(next)); clearNotice(); }} onReadNodes={() => { void readCloudNodes(); }} onImportNodes={() => openNodeDialog('json')} onManualNode={() => openNodeDialog('manual')} discovering={discovering} onDialogOpenChange={(open, close) => { extrasDialogClose.current = open ? close : null; }} />}
             {tab === 'output' && outputSection === 'common' && <>
               <div className="rhv-field-filters"><label className="field"><span>显示范围</span><select aria-label="生成参数字段范围" value={outputRange} onChange={(event) => setOutputRange(event.target.value === 'all' ? 'all' : 'common')}><option value="common">常用候选及已绑定</option><option value="all">全部字段（高级）</option></select></label><label className="field"><span>搜索节点（已绑定项保留）</span><input aria-label="搜索生成参数字段" value={outputSearch} onChange={(event) => setOutputSearch(event.target.value)} placeholder="节点 ID / 字段名 / 标题" /></label></div>
-              <div className="rhv-output-fields">{isImage ? <>{outputField('width')}{outputField('height')}{outputField('resolution')}{outputField('steps')}</> : <>{outputField('duration')}{outputField('aspect_ratio')}{outputField('resolution')}{outputField('steps')}</>}</div>
+              <div className="rhv-output-fields">{isImage ? <>{outputField('width')}{outputField('height')}{outputField('resolution')}{outputField('aspect_ratio')}{outputField('steps')}</> : <>{outputField('duration')}{outputField('aspect_ratio')}{outputField('resolution')}{outputField('steps')}</>}</div>
               {outputDraftIssue && <p className="vd-error">{outputDraftIssue}</p>}
-              <p className="vwm-help">比例按云端字段提供的完整选项值提交；MP 使用单个像素选项；采样步数绑定真实字段。生成时留空使用原值；解除绑定保留请求字段。</p>
+              <p className="vwm-help">{isImage ? '尺寸映射按工作流能力配置：宽高用于精确像素，分辨率用于支持的档位，比例可选。仅覆盖明确绑定的字段，不自动开启条件开关；工作流默认尺寸保留所有原值。' : '比例按云端字段提供的完整选项值提交；MP 使用单个像素选项；采样步数绑定真实字段。生成时留空使用原值；解除绑定保留请求字段。'}</p>
             </>}
             {tab === 'basic' && <><label className="field"><span>工作流名称（可直接重命名后保存）</span><input aria-label="RunningHub 工作流名称" value={draft.name} onChange={(event) => patchDraft({ name: event.target.value })} /></label><div className="rhv-two-fields"><label className="field"><span>云端调用类型</span><select aria-label="RunningHub 云端调用类型" value={draft.runKind} onChange={(event) => patchDraft({ runKind: event.target.value as RunningHubVideoWorkflow['runKind'] })}><option value="ai-app">AI 应用 · run/ai-app</option><option value="workflow">ComfyUI 工作流 · run/workflow</option></select></label><label className="field"><span>{draft.runKind === 'ai-app' ? 'AI 应用 ID' : '云端工作流 ID'}</span><input aria-label="RunningHub 云端 ID" value={draft.remoteId} inputMode="numeric" placeholder="从 RunningHub 调用地址中复制 ID" onChange={(event) => patchDraft({ remoteId: event.target.value })} /></label></div><label className="field"><span>最终{isImage ? "图片" : "视频"}输出节点 ID（可选）</span><input aria-label={isImage ? "RunningHub 图片输出节点 ID" : "RunningHub 视频输出节点 ID"} value={draft.outputNodeId || ''} placeholder={isImage ? "留空：自动收集图片结果" : "留空：自动收集视频结果；多输出时可指定最终成片节点"} onChange={(event) => patchDraft({ outputNodeId: event.target.value || undefined })} /></label><div className="vwm-info"><strong>只注入你明确绑定的输入</strong><p>{isImage ? "当前生图提示词映射到明确的文本字段；宽高通过生成参数页绑定实际像素字段。参考图片按明确的图片槽上传；没有图片槽时仅支持文生图，不会忽略已选图片。图像入口不提交音频，工作流其它常量、模型与采样参数保持原值。" : "当前视频提示词 → 提示词映射；选择的参考图 → 按顺序上传并填入图片槽。选择的参考音频 → 填入明确的音频槽，未选音频保留原值。工作流其余常量、LoRA 与自定义字段保持原值。"}</p><p>云端 ID 按文字保存，不会将 19 位 ID 转成浮点数。工作流须在 RunningHub 云端已存在，本软件不创建或上传本地 ComfyUI 画布。</p></div>{parsed.issues.length > 0 && <div className="rhv-issues"><strong>待配置项</strong><p>{parsed.issues.slice(0, 3).join('；')}</p></div>}</>}
             {tab === 'mapping' && <>

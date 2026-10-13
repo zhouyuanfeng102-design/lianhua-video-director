@@ -175,4 +175,7 @@ test('global lock and H3 subject definitions do not leak the original form into 
   assert.deepEqual(definitions.map((definition) => definition.name), ['泰罗·女性形态']);
   assert.deepEqual(definitions[0].referenceAssetIds, [femaleAsset.id]);
   assert.equal(definitions[0].formLabel, '女性形态');
+  assert.ok(definitions[0].appearance?.includes(female.appearance), 'the selected form keeps all authored visible appearance facts');
+  assert.doesNotMatch(definitions[0].appearance || '', /形态设定：|同源人物：|转化类型：/u,
+    'record-link metadata must not be copied a second time into visible appearance');
 });

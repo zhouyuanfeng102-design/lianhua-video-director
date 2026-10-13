@@ -1,4 +1,6 @@
 import type { ImageApiConfig } from './types';
+import type { ImageResolutionPlan } from './imageResolution';
+import { runningHubImageTierParameters } from './runningHubImageSize';
 import type { RunningHubVideoImportResult, RunningHubVideoWorkflow } from './runningHubVideoTypes';
 import { bindRunningHubVideoRequest, compileRunningHubVideoApi, importRunningHubVideoWorkflow,
   normalizeRunningHubVideoConfig, readRunningHubVideoRequest, validateRunningHubVideoWorkflow } from './runningHubVideo';
@@ -75,7 +77,7 @@ export const validateRunningHubImageConfig = (config: ImageApiConfig, referenceC
   return undefined;
 };
 
-export interface RunningHubImageInput { prompt: string; width?: number; height?: number; sizeOverride?: boolean; referenceCount?: number; uploadedImages?: string[] }
+export interface RunningHubImageInput { prompt: string; width?: number; height?: number; sizeOverride?: boolean; resolutionPlan?: ImageResolutionPlan; referenceCount?: number; uploadedImages?: string[] }
 export const buildRunningHubImageRequest = (config: ImageApiConfig, input: RunningHubImageInput): {
   endpoint: string; queryEndpoint: string; uploadEndpoint: string; headers: Record<string, string>; body: Record<string, unknown>; outputNodeId?: string;
 } => {
@@ -87,10 +89,14 @@ export const buildRunningHubImageRequest = (config: ImageApiConfig, input: Runni
   const workflow = fields.runningHubWorkflows.find(item => item.id === fields.activeRunningHubWorkflowId)!;
   if ((input.uploadedImages?.length ?? 0) !== referenceCount) throw new Error('参考图上传结果数量与所选图片不一致，尚未提交图像任务。');
   const parameters: Record<string, unknown> = {};
-  if (input.sizeOverride) for (const dimension of ['width', 'height'] as const) {
-    if (!workflow.mapping.parameters?.[dimension]) throw new Error(`RunningHub ${dimension} 尚未绑定云端尺寸字段，不能忽略所选像素。`);
-    if (!Number.isSafeInteger(input[dimension]) || (input[dimension] ?? 0) < 64) throw new Error('图片宽和高必须是至少 64 的整数。');
-    parameters[dimension] = input[dimension];
+  if (input.sizeOverride) {
+    if (input.resolutionPlan?.encoding.kind === 'tier') {
+      Object.assign(parameters, runningHubImageTierParameters(workflow, input.resolutionPlan.encoding.value, input.resolutionPlan.logicalAspectRatio));
+    } else for (const dimension of ['width', 'height'] as const) {
+      if (!workflow.mapping.parameters?.[dimension]) throw new Error(`RunningHub ${dimension} 尚未绑定云端尺寸字段，不能忽略所选像素。`);
+      if (!Number.isSafeInteger(input[dimension]) || (input[dimension] ?? 0) < 64) throw new Error('图片宽和高必须是至少 64 的整数。');
+      parameters[dimension] = input[dimension];
+    }
   }
   const compiled = compileRunningHubVideoApi({ enabled: config.enabled, baseUrl: config.baseUrl, apiKey: config.apiKey,
     workflows: fields.runningHubWorkflows, activeWorkflowId: fields.activeRunningHubWorkflowId }, workflow.id, parameters);

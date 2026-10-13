@@ -248,9 +248,9 @@ try {
         }
         assertH3DescriptionLanguage(system, stage === 'review' ? '中文' : '英文');
         if (stage === 'review') {
-          assert.ok(system.includes(VIDEO_ACTION_EVENT_REVIEW_RULE), 'Chinese staging review receives the same event evidence procedure');
+          assert.ok(!system.includes(VIDEO_ACTION_EVENT_REVIEW_RULE), 'ordinary Chinese delivery preserves source choreography without acquiring event replanning');
           const data = block(user, 'video_staging_review_data');
-          assert.equal(data.sourceStoryContent, story); assert.equal(data.taskAuthority, 'current-segment-staging-replan');
+          assert.equal(data.sourceStoryContent, story); assert.equal(data.taskAuthority, 'preserve-confirmed-schedule');
           assert.equal(data.shotMode, board.shotMode);
           return envelope(zh, board);
         }
@@ -375,7 +375,7 @@ try {
           assert.ok(system.includes(converter.systemPrompt)); return confirmedCanonical;
         }
         assert.equal(data.durationSec, 35);
-        assert.equal(data.taskAuthority, 'current-segment-staging-replan'); assert.equal(data.shotMode, 'exact'); assert.equal(data.shotCount, 6);
+        assert.equal(data.taskAuthority, 'preserve-confirmed-schedule'); assert.equal(data.shotMode, 'exact'); assert.equal(data.shotCount, 6);
         return envelope(zh, { ...board, finalPrompt: confirmedCanonical });
       } });
     assert.deepEqual(eventStages, ['convert', 'review', 'translate', 'translate'], 'action direction adds no model call');

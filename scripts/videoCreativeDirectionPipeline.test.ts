@@ -9,8 +9,8 @@ import {
   buildVideoCreativeDirection, videoCreativeDirectionForBoard, VIDEO_CREATIVE_DIRECTION_DATA_RULE,
   VIDEO_CREATIVE_DIRECTION_TRANSLATION_DATA_RULE, type VideoCreativeDirection,
 } from '../src/videoCreativeDirection';
-import { VIDEO_ACTING_CAMERA_RULES, VIDEO_ACTING_CAMERA_TRANSLATION_RULE } from '../src/videoActingCameraRules';
-import { SPATIAL_COORDINATE_RULE, SPATIAL_CONTINUITY_REVIEW_RULE, SPATIAL_TRANSLATION_RULE } from '../src/spatialContinuityRules';
+import { VIDEO_ACTING_CAMERA_RULES, VIDEO_ACTING_CAMERA_PRESERVATION_RULES, VIDEO_ACTING_CAMERA_TRANSLATION_RULE } from '../src/videoActingCameraRules';
+import { SPATIAL_TRANSLATION_RULE } from '../src/spatialContinuityRules';
 import type { AiStoryboardShotPlan, Character, ConverterPreset, ReferenceAsset, Storyboard, TextApiConfig, VideoShot } from '../src/types';
 
 // Entirely synthetic fixtures and in-memory request callbacks. A throwing
@@ -150,13 +150,14 @@ const assertCreativeRuleOnce = (system: string, english = false): void => {
   assert.equal(system.split(expected).length - 1, 1, 'each creative-context request carries its phase-specific scope rule once');
   assert.equal(system.includes(forbidden), false, 'translation-only context and creative planning rules must not cross phases');
 };
-const assertActingRuleOnce = (system: string, english = false): void => {
+const assertActingRuleOnce = (system: string, english = false, sourcePlanning = false): void => {
   assert.equal(system.split(VIDEO_ACTING_CAMERA_TRANSLATION_RULE).length - 1, english ? 1 : 0);
-  assert.equal(system.split(VIDEO_ACTING_CAMERA_RULES).length - 1, english ? 0 : 1);
+  assert.equal(system.split(VIDEO_ACTING_CAMERA_RULES).length - 1, sourcePlanning ? 1 : 0);
+  assert.equal(system.split(VIDEO_ACTING_CAMERA_PRESERVATION_RULES).length - 1, !english && !sourcePlanning ? 1 : 0);
   for (const rule of VIDEO_ACTING_CAMERA_RULES.split('\n\n')) {
-    assert.equal(system.split(rule).length - 1, english ? 0 : 1,
-      english ? 'English requests cannot independently choose acting, cameras, shot coverage or lighting'
-        : 'planning, Chinese review and repairs receive every acting/camera rule exactly once');
+    assert.equal(system.split(rule).length - 1, sourcePlanning ? 1 : 0,
+      sourcePlanning ? 'the source planning request receives every acting/camera rule exactly once'
+        : 'conversion, H3 and English delivery cannot independently choose acting, cameras or shot coverage');
   }
   if (english) assert.equal(system.includes(VIDEO_CREATIVE_DIRECTION_DATA_RULE), false,
     'even the bare first translation cannot receive an autonomous creative-selection rule');
@@ -242,7 +243,7 @@ test('planning, independent AI review and missing-camera repair retain one compl
     const data = jsonBlock(user, tag);
     assertDirection(data.planningCreativeDirection, direction);
     assertDirectionOnce(user, 'planningCreativeDirection'); assertCreativeRuleOnce(promptOf(payload, 'system'));
-    assertActingRuleOnce(promptOf(payload, 'system'));
+    assertActingRuleOnce(promptOf(payload, 'system'), false, true);
     assert.equal(data.sourceStory, source);
     assert.equal(Object.hasOwn(data.pacing, 'extraRequirement'), false, 'pacing does not duplicate or compete with the creative requirement');
     assert.equal(user.split('"extraRequirement"').length - 1, 1);
@@ -272,7 +273,7 @@ test('legacy pacing-only requirements and empty preferences reach planning witho
       assert.ok(calls <= 2);
       const user = promptOf(payload, 'user');
       const data = jsonBlock(user, calls === 1 ? 'storyboard_planning_data' : 'storyboard_ai_review_data');
-      assertCreativeRuleOnce(promptOf(payload, 'system')); assertActingRuleOnce(promptOf(payload, 'system'));
+      assertCreativeRuleOnce(promptOf(payload, 'system')); assertActingRuleOnce(promptOf(payload, 'system'), false, true);
       assertDirection(data.planningCreativeDirection, expected);
       assert.deepEqual(data.planningCreativeDirection.cameraTerms, []);
       assert.deepEqual(data.planningCreativeDirection.lightingTerms, []);
@@ -288,11 +289,10 @@ test('legacy pacing-only requirements and empty preferences reach planning witho
   }
 });
 
-test('conversion, structural repair and both H3 review repairs retain full direction and authored staging facts', async () => {
+test('ordinary conversion, H3 and English delivery retain full direction and source staging without extra requests', async () => {
   const board = makeBoard(4);
   const before = JSON.stringify({ board, context });
   const stages: SingleSegmentPromptStage[] = [];
-  const malformedCanonical = board.finalPrompt.replace(' 正在 [', ' 动作槽 [');
   let conversionCalls = 0; let chineseCalls = 0; let englishCalls = 0;
   let finalChinese = ''; let finalEnglish = '';
   const result = await generateSingleSegmentPrompt({
@@ -302,47 +302,41 @@ test('conversion, structural repair and both H3 review repairs retain full direc
       assertActingRuleOnce(system, stage === 'translate');
       if (stage === 'convert') {
         conversionCalls += 1;
-        const data = jsonBlock(user, conversionCalls === 1 ? 'video_conversion_data' : 'video_conversion_structural_repair_data');
+        assert.equal(conversionCalls, 1, 'valid source conversion does not add a structural repair');
+        const data = jsonBlock(user, 'video_conversion_data');
         assertDirection(data.creativeDirection, direction); assertDirectionOnce(user); assertCreativeRuleOnce(system);
         assertShotFacts(data, board, true); assert.equal(data.sourceStoryContent, source);
-        if (conversionCalls === 2) assert.equal(data.invalidCandidate, malformedCanonical);
-        return conversionCalls === 1 ? malformedCanonical : board.finalPrompt;
+        return board.finalPrompt;
       }
       if (stage === 'review') {
         chineseCalls += 1;
-        const data = jsonBlock(user, chineseCalls === 1 ? 'video_staging_review_data' : 'h3_format_repair_data');
-        const facts = chineseCalls === 1 ? data : data.sourceContext;
+        assert.equal(chineseCalls, 1, 'normal H3 delivery does not add another review or protocol repair');
+        const data = jsonBlock(user, 'video_staging_review_data');
+        const facts = data;
+        assert.equal(facts.taskAuthority, 'preserve-confirmed-schedule', 'ordinary H3 delivery cannot replan even a fresh draft');
         assertDirection(facts.creativeDirection, direction); assertDirectionOnce(user); assertCreativeRuleOnce(system);
         assertShotFacts(facts, board); assert.equal(facts.sourceStoryContent, source);
-        if (chineseCalls === 1) {
-          finalChinese = data.candidatePrompt;
-          assert.equal(readH3PromptProtocol(finalChinese)?.shots.length, 4);
-          return board.finalPrompt;
-        }
-        assert.equal(data.candidatePrompt, board.finalPrompt);
-        assert.deepEqual(data.requiredProtocol, readH3PromptProtocol(finalChinese));
+        finalChinese = data.candidatePrompt;
+        assert.equal(readH3PromptProtocol(finalChinese)?.shots.length, 4);
         return finalChinese;
       }
       englishCalls += 1;
       if (englishCalls === 1) {
         assert.equal(user, finalChinese, 'first English request translates only the exact final Chinese');
-        return 'Mock English candidate without H3 sections.';
+        finalEnglish = finalChinese.replaceAll('林舟', 'Lin Zhou');
+        return finalEnglish;
       }
-      const data = jsonBlock(user, englishCalls === 2 ? 'review_data' : 'h3_format_repair_data');
-      const review = englishCalls === 2 ? data : data.sourceContext;
+      assert.equal(englishCalls, 2, 'normal translation uses its existing review without another protocol repair');
+      const data = jsonBlock(user, 'review_data');
+      const review = data;
       assertDirection(review.stagingContext.creativeDirection, direction); assertDirectionOnce(user); assertCreativeRuleOnce(system, true);
       assertShotFacts(review.stagingContext, board); assert.equal(review.sourcePrompt, finalChinese);
-      if (englishCalls === 2) {
-        assert.equal(data.candidateEnglishPrompt, 'Mock English candidate without H3 sections.');
-        assert.match(system, /不(?:授权|以|得).*?(?:重|新增|改剧情)/u, 'context cannot authorize English replanning');
-        return 'Mock reviewed English still missing its H3 sections.';
-      }
-      assert.deepEqual(data.requiredProtocol, readH3PromptProtocol(finalChinese));
-      finalEnglish = finalChinese.replaceAll('林舟', 'Lin Zhou');
+      assert.equal(data.candidateEnglishPrompt, finalEnglish);
+      assert.match(system, /不(?:授权|以|得).*?(?:重|新增|改剧情)/u, 'context cannot authorize English replanning');
       return finalEnglish;
     },
   });
-  assert.deepEqual(stages, ['convert', 'convert', 'review', 'review', 'translate', 'translate', 'translate']);
+  assert.deepEqual(stages, ['convert', 'review', 'translate', 'translate']);
   assert.equal(result.officialPromptZh, finalChinese); assert.equal(result.targetOutput?.prompt, finalChinese);
   assert.equal(result.officialPromptEn, finalEnglish); assert.equal(result.officialPromptEnSource, finalChinese);
   assert.deepEqual(readH3PromptProtocol(finalEnglish), readH3PromptProtocol(finalChinese));
@@ -428,7 +422,7 @@ test('empty saved preferences remain arrays through confirmed Chinese and Englis
   assert.equal(result.shots[1].subject, '铜铃', 'an AI-authored unoccupied prop shot is not replaced by a character close-up');
 });
 
-test('anonymous conflicting camera facts are repaired by the same Chinese AI review with no local semantic veto or extra requests', async () => {
+test('anonymous source camera facts remain the photography authority through Chinese and English delivery', async () => {
   // These three uneven shots in 15 seconds are synthetic input, not a
   // recommendation or a default for any segment. No user story is used.
   const anonymousSource = '匿名甲走到矮台前停步，注视矮台上的方形道具，然后将其放入空盒。';
@@ -491,11 +485,10 @@ test('anonymous conflicting camera facts are repaired by the same Chinese AI rev
         assert.deepEqual(protocol.shots, [
           { marker: '[Shot 1]', cut: null }, { marker: '[Shot 2]', cut: 'At 00:04.000' }, { marker: '[Shot 3]', cut: 'At 00:10.000' },
         ]);
-        // This replacement is the mocked model response, never production
-        // repair logic. Only the request callback authors the consistent text.
-        reviewedChinese = initialCandidate.replaceAll(conflictingCamera, consistentCamera);
-        assert.notEqual(reviewedChinese, initialCandidate);
-        assert.deepEqual(readH3PromptProtocol(reviewedChinese), protocol, 'AI fixes prose without new sections, shots, tags or cuts');
+        assert.equal(data.taskAuthority, 'preserve-confirmed-schedule');
+        assert.ok(system.includes(VIDEO_ACTING_CAMERA_PRESERVATION_RULES), 'the existing delivery can clarify prose but cannot choose another camera');
+        reviewedChinese = initialCandidate;
+        assert.deepEqual(readH3PromptProtocol(reviewedChinese), protocol, 'H3 keeps the source shots, tags and cuts');
         return `\n${reviewedChinese}\n`;
       }
       englishCalls += 1;
@@ -588,8 +581,8 @@ test('three seated actors keep body-side ownership and screen placement through 
       assertActingRuleOnce(system, stage === 'translate');
       if (stage === 'review') {
         assert.equal(stages.length, 1, 'spatial ambiguity reaches the existing review, not a local side gate');
-        assert.equal(system.split(SPATIAL_COORDINATE_RULE).length - 1, 1);
-        assert.equal(system.split(SPATIAL_CONTINUITY_REVIEW_RULE).length - 1, 1);
+        assert.equal(system.split(VIDEO_ACTING_CAMERA_PRESERVATION_RULES).length - 1, 1,
+          'existing spatial wording is clarified under source-preserving photography authority');
         const data = jsonBlock(user, 'video_staging_review_data');
         assert.equal(data.sourceStoryContent, spatialSource);
         assert.equal(data.shots[1].space, shots[1].space);

@@ -715,6 +715,64 @@ assert.match(
   'no-reference H3 must preserve custom gender and appearance facts for every named character',
 );
 
+const h3StableIdentityInput: PromptAdapterInput = {
+  ...common,
+  targetId: 'minimax-h3',
+  durationSec: 6,
+  references: [],
+  canonicalPrompt: [
+    '【0s-4s】 主体：@来客·兽化形态（侧身停在门口；左手持法杖；白披风已留在椅背）[朝向：室内] 正在 [推门进入并停步]（入场）；空间：石厅；镜头：同侧中景跟拍；台词：无；音效：无。',
+    '【4s-6s】 主体：@来客·兽化形态（左手仍持法杖；白披风仍在椅背）正在 [望向室内]（观察）；空间：石厅；镜头：缓慢推近；台词：无；音效：无。',
+  ].join('\n'),
+  subjectDefinitions: [{
+    name: '来客·兽化形态', kind: 'character',
+    baseName: '来客', formLabel: '兽化形态', variantOf: '来客', transformationType: 'appearance',
+    gender: '女', race: '兽人', morphology: 'anthropomorphic',
+    bodyPlan: '宽肩；身高约195cm；双臂双腿；一条长尾',
+    appearance: '短金发；琥珀虹膜；宽肩',
+    wardrobeBaseline: '白披风与黑色护胸',
+    anchor: '左眉浅疤；右耳银环',
+    description: '短金发；左眉浅疤；尾端保留黑色毛簇',
+    motion: '习惯转动法杖并做威慑亮相',
+  }],
+};
+const h3StableIdentitySnapshot = structuredClone(h3StableIdentityInput);
+for (const references of [[], [{ id: 'identity-first-frame', name: '首帧', mediaType: 'image', role: 'first-frame' }]]) {
+  const compactIdentity = compileTargetPrompt({ ...h3StableIdentityInput, references });
+  assert.deepEqual(readH3PromptProtocol(compactIdentity.prompt)?.shots, [
+    { marker: '[Shot 1]', cut: null }, { marker: '[Shot 2]', cut: 'At 00:04.000' },
+  ], 'identity presentation must not create a display shot or alter the authored cut');
+  assert.doesNotMatch(compactIdentity.prompt, /同源人物：|转化类型：|形态：兽化形态|外貌形态：anthropomorphic|动作习惯：|习惯转动法杖并做威慑亮相/u);
+  for (const fact of ['宽肩', '身高约195cm', '双臂双腿', '一条长尾', '短金发', '琥珀虹膜', '左眉浅疤', '右耳银环', '尾端保留黑色毛簇']) {
+    assert.equal(compactIdentity.prompt.split(fact).length - 1, 1,
+      `every distinct physical identity fact survives once: ${fact}`);
+  }
+  assert.match(compactIdentity.prompt, /衣橱基底（不是本镜着装指令）：白披风与黑色护胸/u);
+  assert.match(compactIdentity.prompt, /身份资料仅用于稳定辨认，不新增动作或展示镜；当前姿态、持物和衣着以本镜入镜状态与表演为准/u);
+  for (const state of ['侧身停在门口', '左手持法杖', '白披风已留在椅背', '左手仍持法杖', '白披风仍在椅背']) {
+    assert.ok(compactIdentity.prompt.includes(state), 'source shot state must retain authority over the identity inventory');
+  }
+  assert.match(compactIdentity.prompt, /推门进入并停步/u);
+  assert.match(compactIdentity.prompt, /望向室内/u);
+}
+assert.deepEqual(h3StableIdentityInput, h3StableIdentitySnapshot, 'identity deduplication must leave the complete source dossier untouched');
+
+const h3LegacyCustomIdentity = compileTargetPrompt({
+  ...common, targetId: 'minimax-h3', durationSec: 5, references: [],
+  canonicalPrompt: '【0s-5s】 主体：@星兽；动作：星兽停在石阶边；镜头：固定全景；台词：无。',
+  subjectDefinitions: [{ name: '星兽', kind: 'creature', formLabel: '六足晶壳形态',
+    morphology: '透明晶壳与六足', description: '背部有三道金色裂纹，体长约八米' }],
+});
+assert.match(h3LegacyCustomIdentity.prompt, /形态：六足晶壳形态/u, 'a form label absent from the name still supplies visible identity evidence');
+assert.match(h3LegacyCustomIdentity.prompt, /外貌形态：透明晶壳与六足/u, 'custom visible morphology must not be mistaken for an internal category');
+assert.match(h3LegacyCustomIdentity.prompt, /设定：背部有三道金色裂纹，体长约八米/u, 'legacy description-only physical facts remain complete');
+const h3LegacyCategoryIdentity = compileTargetPrompt({
+  ...common, targetId: 'minimax-h3', durationSec: 5, references: [],
+  canonicalPrompt: '【0s-5s】 主体：@星兽；动作：星兽停在石阶边；镜头：固定全景；台词：无。',
+  subjectDefinitions: [{ name: '星兽', kind: 'creature', morphology: 'animal' }],
+});
+assert.match(h3LegacyCategoryIdentity.prompt, /外貌形态：animal/u, 'a legacy morphology category remains when it is the only available body-shape evidence');
+
 // Dynamic body/clothing state lives inside the canonical subject parenthesis.
 // It is shot state, not a stable identity suffix, and must survive the H3
 // structured-subject parser on every cut.

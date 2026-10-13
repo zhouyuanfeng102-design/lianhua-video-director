@@ -162,7 +162,7 @@ export const LEGACY_VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE_V1_8_9 = [
 
 /** One event-first writing procedure, replacing the accumulated historical
  * paragraphs above. It uses existing fields and adds no local semantic gate. */
-const VIDEO_ACTION_EVENT_UNDERSTANDING = [
+const LEGACY_VIDEO_ACTION_EVENT_UNDERSTANDING_V2_1_1 = [
   '先按实际发生次数编排事件，再选择摄影覆盖。完整理解本段原剧情、当前用户正文和只读上下文，锁定具名行动者、对手或直接受力物、武器与能力、意图、已有招式与次数、先后、命中/落空、伤情和结果；用户已改正文时不恢复被删改的旧剧情。为每次实际发生的事件明确进入状态、施力或启动、接触/经过、结束状态，以及它与下一事件的承接或并行关系。同一事件只发生一次，其他镜头观察它当前的阶段，人物介绍、performance和result不能再发出一次执行命令。原文概述的同一次交战可补足必要的可见轨迹与身体行为，不能增加攻击次数、人物、武器、能力、伤情、胜负或另一事件；静止、蓄势、观察、普通交谈仍按剧情保留。',
   '先建立世界中的行动轴线，再写每个相关动作的朝向。用稳定姓名明确谁面向谁、直接受力物在谁的哪一侧、目标相对地标的位置；在关键发力处写出头部/视线目标、胸部和髋部相对对手的朝向、支撑与发力肢体、接触部位及结束姿态。踢物写清“具名施力者 → 发力脚接触的实体物及部位 → 飞行路径 → 袭向的具名目标 → 对方回应及终点”；支撑脚踩地与另一脚踢中物体分开表达，接触前物体不自行启动。原文只写向对手踢物而未规定背身招式时，在新稿让目标位于施力者身前或侧前、视线保持目标，按物体位置选定可执行的前踢或侧踢，不能靠转髋或为露正脸变成背对目标后踢；原定背踢、回旋与非人结构照实保留。身体侧别、转身与视线变化由事件决定，镜头换位不把目标改成摄影机、观众、前方或门墙。',
   '区分镜头覆盖时间与事件实际持续时间。先按原意确定短促接触、起跳/倒飞、飞行、避让/格挡、落地或下一状态的起止，再围绕事件安排镜界；切镜不是重新启动，也不是自动延长。必要时在现有action正文写明事件的起止时间或明确结束点，跨镜事件沿用同一连续时间轴，本镜相对时刻加startSec才是段内时刻。普通速度的短距离倒飞/抛物在一个短促时间窗内完成位移并进入剧情已有的后续状态，不能把“仍悬空”续写到每个镜尾凑满D；原文明确空中交锋则让追击与招架在同一次短促腾空过程中连续发生，保留已有幻想飞行、悬浮和明确慢动作，不擅自改成落地交战或固定现实物理秒数。段尾本来未完成的动作保留未完状态。',
@@ -172,11 +172,21 @@ const VIDEO_ACTION_EVENT_UNDERSTANDING = [
   '完整原对白按自然发话区间、原语言和具名声源保留；追击、位移及不妨碍发音的动作可与对白并行，不把腾空维持到说完才结束，口部互斥动作仍错开。固定durationSec与exact镜数保持；只有源头规划或获准未确认新稿可重排镜界，auto不预设三镜或其他配额。只在本段事件范围安排，原有幻想逻辑和合理留白保留。参考图按实际身份、服装、场景或构图职责使用，不继承身份图面向观众的静态展示姿势，不虚构实际未接收的Picture/Video/Audio素材。',
 ].join('\n\n');
 
+const VIDEO_ACTION_EVENT_UNDERSTANDING = LEGACY_VIDEO_ACTION_EVENT_UNDERSTANDING_V2_1_1
+  .split('\n\n').map((rule, index) => index === 5
+    ? '事件与对白时序确定后，按完整连续场面选择简单、清楚的摄影：同等剧情和情绪表达下优先较少镜头，当前构图有效时持续观察，简单跟随或重构图即可表达新重点时在镜内完成。只有新观察位置具有具体的关键信息、情绪、视点或空间表达收益，或简单切换比复杂运镜更清楚时才切镜；每一招、接触、受击和反应不自动产生At切点，一个镜头可包含多次真实攻防。不强制一镜到底，不用反复绕行、移焦和遮挡换取少一个镜头。关键身体、物体路径与交点保持可读，切镜可接续同一动作当前阶段、方向和速度；正常速度完成短动作后继续剧情已有回应，不能重演或拖延事件填满镜长。普通微动作以自然先后表达，不逐个编写毫秒刻度。'
+    : index === 6 ? rule.replace('只有源头规划或获准未确认新稿可重排镜界，auto不预设三镜或其他配额。',
+      '只有源头规划或用户明确请求的摄影/对白排程修改可重排镜界，普通转换与H3编写保留源头排程；auto不预设三镜或其他配额。')
+      : rule).join('\n\n');
+
 export const VIDEO_ACTION_CHOREOGRAPHY_RULE = [
   'VIDEO_ACTION_CHOREOGRAPHY_V1：本次源头规划或获准中文新稿先完成事件时间与世界关系，再安排镜头；把结果落实在正文，不让视频模型自行猜测动作关系。',
   VIDEO_ACTION_EVENT_UNDERSTANDING,
   '规划沿用action、space、direction、performance、camera、transition、result：action写发生一次的事件与实际起止，result交代供下一镜继承的双方位置、姿态、运动阶段和武器状态，camera覆盖该事件。普通稿保留六字段，H3把对应内容写入各[Shot N]的现有正文，同步canonicalPrompt、H3及受影响时间字段。保持现有section、Subject/Picture/Video/Audio标签、S声源、<d>、完整对白和合法切点，不新增动作schema、combat_plan、action_sequence、negative_prompt、规则或审核附录，不增加独立调用、本地语义门禁、重试或收费视频测试，不自动改历史稿。',
 ].join('\n\n');
+
+const LEGACY_VIDEO_ACTION_CHOREOGRAPHY_RULE_V2_1_1 = VIDEO_ACTION_CHOREOGRAPHY_RULE
+  .split(VIDEO_ACTION_EVENT_UNDERSTANDING).join(LEGACY_VIDEO_ACTION_EVENT_UNDERSTANDING_V2_1_1);
 
 /** Supplied to the existing review request only. This requests observable
  * evidence from the candidate, never an internal reasoning transcript. */
@@ -203,6 +213,9 @@ export const VIDEO_ACTION_CAUSALITY_RULE = [
   '将上述结果融入目标格式的现有正文和时间轴，保持固定段长、exact镜数、当前授权边界、完整原对白及真实参考标签；不新增动作schema或审核附录，不增加独立调用、本地语义门禁、重试或历史改写。',
 ].join('\n\n');
 
+const LEGACY_VIDEO_ACTION_CAUSALITY_RULE_V2_1_1 = VIDEO_ACTION_CAUSALITY_RULE
+  .split(VIDEO_ACTION_EVENT_UNDERSTANDING).join(LEGACY_VIDEO_ACTION_EVENT_UNDERSTANDING_V2_1_1);
+
 export const VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE = [
   ...VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE.split('\n\n').slice(0, 3),
   LEGACY_VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE_V1_8_9.split('\n\n')[2],
@@ -223,6 +236,7 @@ export const withVideoActionChoreographyScope = (systemPrompt: string, scope: Vi
   // prefix, which must never be stripped independently from a user addition.
   const firstPartyBlocks = [VIDEO_ACTION_CHOREOGRAPHY_RULE, VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE,
     VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE, VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE, VIDEO_ACTION_CAUSALITY_RULE,
+    LEGACY_VIDEO_ACTION_CHOREOGRAPHY_RULE_V2_1_1, LEGACY_VIDEO_ACTION_CAUSALITY_RULE_V2_1_1,
     LEGACY_VIDEO_ACTION_CHOREOGRAPHY_RULE_V1_8_9, LEGACY_VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE_V1_8_9,
     LEGACY_VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE_V1_8_9, LEGACY_VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE_V1_8_9,
     LEGACY_VIDEO_ACTION_CAUSALITY_RULE_V1_8_9,

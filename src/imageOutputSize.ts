@@ -2,6 +2,7 @@ import type { ImageApiConfig, ImageVariant } from './types';
 import { IMAGE_RESOLUTION_TECHNICAL_MAX_SIDE, imageResolutionAspectRatio, resolveImageResolution, resolveImageResolutionCapabilities, runningHubImageDimensionOverrideIssue, type ImageResolutionPlan } from './imageResolution';
 import { selectedRunningHubImageWorkflow } from './runningHubImage';
 import { readRunningHubVideoRequest } from './runningHubVideo';
+import { runningHubImageSizeMode } from './runningHubImageSize';
 
 export type ImageOutputSizeMode = 'default' | '1x' | '2x' | '1k' | '2k' | '4k' | 'custom';
 export type ImageOutputAspect = 'variant' | '1:1' | '3:4' | '4:3' | '9:16' | '16:9' | '3:2' | '2:3';
@@ -75,7 +76,16 @@ export interface ResolvedImageOutputSize {
   warning?: string;
   layoutNote: string;
   resolutionPlan?: ImageResolutionPlan;
+  workflowSizeMode?: 'pixels' | 'tier' | 'default';
+  workflowAspect?: boolean;
 }
+
+export const runningHubImageSizeContext = (api: ImageApiConfig['backend'] | ImageApiConfig): Pick<ResolvedImageOutputSize, 'workflowSizeMode' | 'workflowAspect'> => {
+  if ((typeof api === 'string' ? api : api.backend) !== 'runninghub') return {};
+  const workflow = typeof api === 'string' ? undefined : selectedRunningHubImageWorkflow(api);
+  const workflowSizeMode = runningHubImageSizeMode(workflow);
+  return { workflowSizeMode, workflowAspect: workflowSizeMode !== 'pixels' && !workflow?.mapping.parameters?.aspect_ratio };
+};
 
 const runningHubDefaultImageSize = (api: ImageApiConfig['backend'] | ImageApiConfig): { width: number; height: number } | undefined => {
   if (typeof api === 'string' || api.backend !== 'runninghub') return undefined;
@@ -105,6 +115,7 @@ export const resolveImageOutputSize = (
 ): ResolvedImageOutputSize => {
   const locked = imageOutputAspectLocked(variant);
   const backend = typeof api === 'string' ? api : api.backend;
+  const cloudContext = runningHubImageSizeContext(api);
   const sizeOverride = preference.mode !== 'default';
   const useRunningHubDefaults = backend === 'runninghub' && !sizeOverride;
   const cloudDefaultSize = useRunningHubDefaults ? runningHubDefaultImageSize(api) : undefined;
@@ -123,7 +134,9 @@ export const resolveImageOutputSize = (
     const recommendedAspect = imageResolutionAspectRatio(canvas.width, canvas.height);
     const differs = locked && actualAspect !== recommendedAspect;
     const warning = [resolved.warning, differs ? `${layout}；本次按${actualAspect}及实际像素提交，请按实际画布组织布局。` : ''].filter(Boolean).join(' ');
-    return { ...resolved, ...(warning ? { warning } : {}), ...(resolved.resolutionPlan && warning ? { resolutionPlan: { ...resolved.resolutionPlan, verified: false } } : {}),
+    const ratioIssue = !custom && cloudContext.workflowAspect && preference.aspect !== 'variant'
+      ? '当前工作流未绑定画面比例字段，请选择“工作流比例”或在生成参数中绑定实际比例节点。' : '';
+    return { ...resolved, ...cloudContext, issue: resolved.issue || ratioIssue, ...(warning ? { warning } : {}), ...(resolved.resolutionPlan && warning ? { resolutionPlan: { ...resolved.resolutionPlan, verified: false } } : {}),
       sizeOverride: true, layoutNote: [layout, resolved.layoutNote].filter(Boolean).join(' · ') };
   }
   const scale = preference.mode === '2x' ? 2 : 1;
@@ -154,7 +167,7 @@ export const resolveImageOutputSize = (
   const layoutNote = locked
     ? variant === 'grid' ? '九宫格推荐1:1' : variant === 'private-full-body' ? '私密全身推荐2:3竖图' : '多视图推荐3:2'
     : '';
-  return { width, height, sizeOverride, issue, ...(warnings.length ? { warning: warnings.join(' ') } : {}),
+  return { width, height, sizeOverride, issue, ...cloudContext, ...(warnings.length ? { warning: warnings.join(' ') } : {}),
     layoutNote: [layoutNote, useRunningHubDefaults ? '使用云端工作流默认尺寸，不覆盖云端参数' : ''].filter(Boolean).join(' · ') };
 };
 
@@ -162,6 +175,7 @@ export const imageReturnedSizeWarning = (requested: { width: number; height: num
   if (!actual || requested.width === actual.width && requested.height === actual.height) return '';
   const plan = requested.resolutionPlan;
   if (plan?.encoding.kind === 'tier') {
+    if (plan.profile === 'pixel-long-edge') return `本次按${plan.encoding.value}云端档位提交；${requested.width}×${requested.height}为版式估算，实际尺寸由工作流决定。返回${actual.width}×${actual.height}，原图已保留。`;
     if (plan.profile === 'grok-k') {
       return `本次按${plan.encoding.value}原生档位和${plan.logicalAspectRatio}画幅提交，此前${requested.width}×${requested.height}为档位估算；后端实际返回${actual.width}×${actual.height}，实际像素以返回图片为准，原图已保留。`;
     }

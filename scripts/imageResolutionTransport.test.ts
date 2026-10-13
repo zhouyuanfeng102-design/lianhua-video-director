@@ -3,6 +3,8 @@ import { buildComfyUIWorkflow, getComfyImageSizeOverrideSupport, importComfyUIAp
 import { resolveImageResolution } from '../src/imageResolution';
 import { requestImageModel } from '../src/services/llm';
 import type { ImageApiConfig } from '../src/types';
+import { importRunningHubImageWorkflow } from '../src/runningHubImage';
+import { IMAGE_V3_CURL } from './fixtures/runningHubImageV3';
 
 type Request = {
   url: string; body?: string; headers: Record<string, string>;
@@ -15,6 +17,7 @@ const originalWindow = globalThis.window;
 Object.defineProperty(globalThis, 'window', { configurable: true, writable: true, value: { lianhuaDesktop: {
   request: async (request: Request) => {
     requests.push(request);
+    if (request.url.includes('/openapi/v2/run/ai-app/')) return { status: 200, body: JSON.stringify({ taskId: 'mock-runninghub-image', status: 'SUCCESS', results: [{ url: 'https://image.example.test/native-runninghub.png', outputType: 'png' }] }) };
     if (request.url.includes(':generateContent')) return { status: 200, body: JSON.stringify({ candidates: [{ content: { parts: [
       { text: 'A generated image.' }, { inlineData: { mimeType: 'image/png', data: png } },
     ] } }] }) };
@@ -38,6 +41,25 @@ const planned = (api: ImageApiConfig, tier: '1K' | '2K' | '4K', aspect = '3:2') 
 const json = (request = requests.at(-1)!) => JSON.parse(request.body || '{}');
 
 try {
+  const cloudImported = importRunningHubImageWorkflow(IMAGE_V3_CURL);
+  cloudImported.workflow.mapping.parameters = { resolution: { nodeId: '189', inputName: 'value' }, aspect_ratio: { nodeId: '194', inputName: 'aspect_ratio' } };
+  cloudImported.workflow.mapping.images = ['181', '182', '183'].map(nodeId => ({ nodeId, inputName: 'image' }));
+  const runningHub = { ...config('runninghub'), runningHubWorkflows: [cloudImported.workflow], activeRunningHubWorkflowId: cloudImported.workflow.id };
+  const cloudPlan = planned(runningHub, '2K', '3:4');
+  assert.deepEqual(cloudPlan.resolutionPlan.encoding, { kind: 'tier', value: '2K' });
+  const beforeCloud = requests.length; let cloudStarted = 0;
+  const generatedCloud = await requestImageModel(runningHub, cloudPlan, () => { cloudStarted += 1; });
+  assert.equal(requests.length, beforeCloud + 1, 'one mocked cloud generation call; no unnecessary upload or query');
+  assert.equal(cloudStarted, 1); assert.equal(generatedCloud.dataUrl, reference);
+  const cloudNodes = json().nodeInfoList as Array<{ nodeId: string; fieldName: string; fieldValue: unknown }>;
+  const cloudValue = (id: string) => cloudNodes.find(node => node.nodeId === id)!.fieldValue;
+  assert.equal(cloudValue('189'), '2048'); assert.equal(cloudValue('194'), '3:4');
+  assert.equal(cloudValue('195'), 'false'); assert.equal(cloudValue('191'), '1');
+  assert.ok(cloudNodes.every(node => !['width', 'height'].includes(node.fieldName)));
+  const beforeInvalidCloud = requests.length;
+  await assert.rejects(() => requestImageModel(runningHub, { prompt: 'exact custom request', width: 1025, height: 1023, sizeOverride: true, referenceImages: [reference] }), /width.*不能忽略/u);
+  assert.equal(requests.length, beforeInvalidCloud, 'unsupported custom pixels fail before upload or generation');
+
   const compatible = config('openai');
   await requestImageModel(compatible, { prompt: 'legacy request', width: 3072, height: 2048, sizeOverride: true });
   assert.equal(json().size, '3072x2048', 'requests without a plan retain saved historical pixel semantics');
@@ -53,7 +75,7 @@ try {
   assert.equal(requests.at(-1)!.multipart!.fields.find((field) => field.name === 'size')!.value, '3840x2160');
   assert.equal(requests.at(-1)!.multipart!.files.length, 2, 'explicit equal-pixel reference slots remain ordered');
 
-  const alias = { ...config('openai', 'gemini-3-pro-image'), imageProtocol: 'openai-compatible' as const };
+  const alias = { ...config('openai', 'gemini-3-pro-image'), imageProtocol: 'openai-compatible-manual' as const };
   await requestImageModel(alias, planned(alias, '2K'));
   assert.equal(json().size, '2528x1696', 'a model alias never switches the explicit wire protocol');
   assert.ok(requests.at(-1)!.url.endsWith('/images/generations'));
@@ -187,4 +209,4 @@ try {
 } finally {
   Object.defineProperty(globalThis, 'window', { configurable: true, writable: true, value: originalWindow });
 }
-console.log('Native resolution transport checks passed: frozen plans, GPT/Gemini/xAI JSON/multipart, SD/NAI/ComfyUI and conservative workflow bindings; all requests mocked.');
+console.log('Native resolution transport checks passed: frozen plans, RunningHub tier forwarding, GPT/Gemini/xAI JSON/multipart, SD/NAI/ComfyUI and conservative workflow bindings; all requests mocked.');

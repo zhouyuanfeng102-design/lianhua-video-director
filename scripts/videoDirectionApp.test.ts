@@ -16,6 +16,13 @@ import * as styles from '../src/directorStyles';
 import * as visual from '../src/visualStyles';
 import * as identities from '../src/storyboardRequestIdentity';
 import * as handoff from '../src/sequencePromptHandoff';
+import * as chapters from '../src/chapters';
+import * as storyReferences from '../src/storyReferences';
+import * as comicSources from '../src/comicSources';
+import * as sceneContext from '../src/videoSceneContext';
+import * as participation from '../src/characterParticipation';
+import * as storyDraft from '../src/storyDraft';
+import * as semanticIdentities from '../src/semanticSegmentIdentityReferences';
 import { normalizeGridDirectorInputMode } from '../src/gridDirectorWorkflow';
 import { GRID_CREATION_RETIRED_MESSAGE } from '../src/gridRetirement';
 import { availableVideoPrivateParts } from '../src/videoPrivateScope';
@@ -130,6 +137,8 @@ const harness = (options: { count?: number; extra?: string; state?: AppState; pl
   const deps: Record<string, any> = {
     ...effects, ...direction, ...engine, ...official, ...storage, ...sequence, ...semantic,
     ...segmentation, ...timeline, ...styles, ...visual, ...identities, ...handoff,
+    ...chapters, ...storyReferences, ...comicSources, ...sceneContext, ...participation,
+    ...storyDraft, ...semanticIdentities,
     normalizeGridDirectorInputMode, GRID_CREATION_RETIRED_MESSAGE, availableVideoPrivateParts,
     sourceContentHash, getSingleSegmentReferences,
     buildPromptPlan: (input: Parameters<typeof engine.buildPromptPlan>[0]) => {
@@ -239,10 +248,13 @@ for (const fullTimeline of [false, true]) {
     assertCompleteDirection(conversionData.creativeDirection, qa.deps.activeStyle, fullExtra);
     assertCompleteDirection(jsonData(review.user, 'video_staging_review_data').creativeDirection, qa.deps.activeStyle, fullExtra);
     assertCompleteDirection(jsonData(englishReview.user, 'review_data').stagingContext.creativeDirection, qa.deps.activeStyle, fullExtra);
-    assert.ok(conversion.system.includes(actingCamera.VIDEO_AI_SHOT_COVERAGE_RULE));
-    assert.ok(review.system.includes(actingCamera.VIDEO_ACTING_CAMERA_FIELD_RULE));
+    assert.ok(conversion.system.includes(actingCamera.VIDEO_ACTING_CAMERA_PRESERVATION_RULES));
+    assert.ok(review.system.includes(actingCamera.VIDEO_ACTING_CAMERA_PRESERVATION_RULES));
+    assert.ok(!conversion.system.includes(actingCamera.VIDEO_AI_SHOT_COVERAGE_RULE));
+    assert.ok(!review.system.includes(actingCamera.VIDEO_ACTING_CAMERA_FIELD_RULE));
+    assert.equal(jsonData(review.user, 'video_staging_review_data').taskAuthority, 'preserve-confirmed-schedule');
     assert.ok(englishReview.system.includes(actingCamera.VIDEO_ACTING_CAMERA_TRANSLATION_RULE));
-    assert.match(conversion.system, /空的cameraTerms\/lightingTerms[\s\S]*仍由AI结合剧情选择/u);
+    assert.match(conversion.system, /不因导演风格或运镜选择为空另选摄影/u);
     assert.equal(getH3PromptProtocolIssue(board.officialPromptZh!), undefined);
     assert.equal(getH3PromptProtocolIssue(board.officialPromptEn!, board.officialPromptZh), undefined);
     const protocol = readH3PromptProtocol(board.officialPromptZh!)!;
@@ -468,7 +480,7 @@ test('actual App semantic segment freezes public characters and carries only its
   assert.equal(board.sourceSceneSnapshots?.length, 1); assert.equal(board.sourceSceneSnapshots?.[0].content, generationStory);
   assert.deepEqual(board.sourceSceneSnapshots?.[0].characterIds, savedCharacters.map((character) => character.id));
   assert.deepEqual(board.sourceSceneSnapshots?.[0].locationIds, []); assert.deepEqual(board.sourceSceneSnapshots?.[0].propIds, []);
-  assert.deepEqual(board.promptTrace?.sourceDocumentIds, []);
+  assert.deepEqual(board.promptTrace?.sourceDocumentIds, ['direction-source'], 'semantic generation retains the real active chapter provenance');
   const conversion = qa.calls.model.find((call) => call.stage === 'convert')!;
   const review = qa.calls.model.find((call) => call.stage === 'review')!;
   for (const call of [conversion, review]) {
@@ -481,10 +493,22 @@ test('actual App semantic segment freezes public characters and carries only its
   assert.deepEqual(reviewData.characterIdentityFacts.map(({ name, appearance, outfit }: Record<string, unknown>) => ({ name, appearance, outfit })),
     savedCharacters.map(({ name, appearance, outfit }) => ({ name, appearance, outfit })));
   for (const call of qa.calls.model) {
-    assert.doesNotMatch(call.user, /FUTURE_(?:SEGMENT|DIALOGUE|PHASE)_ONLY|LIVE_ONLY_|UNRELATED_(?:SCENE|PERSON|OUTFIT)_ONLY/u,
-      `${call.stage} cannot import future story or live public-character/UI drift`);
-    if (call.stage === 'translate') assert.doesNotMatch(call.user, /<semantic_segment_source_data>/u,
-      'English translates the qualified Chinese rather than replanning semantic evidence');
+    if (call.stage === 'translate') {
+      assert.doesNotMatch(call.user, /FUTURE_(?:SEGMENT|DIALOGUE|PHASE)_ONLY|LIVE_ONLY_|UNRELATED_(?:SCENE|PERSON|OUTFIT)_ONLY/u,
+        'English preserves only the current qualified performance');
+      assert.doesNotMatch(call.user, /<semantic_segment_source_data>/u,
+        'English translates the qualified Chinese rather than replanning semantic evidence');
+      continue;
+    }
+    const performanceData = jsonData(call.user, call.stage === 'convert' ? 'video_conversion_data' : 'video_staging_review_data');
+    assert.doesNotMatch(JSON.stringify({
+      sourceStoryContent: performanceData.sourceStoryContent,
+      shotEvidence: performanceData.shotEvidence,
+      shots: performanceData.shots,
+      characterIdentityFacts: performanceData.characterIdentityFacts,
+      creativeDirection: performanceData.creativeDirection,
+    }), /FUTURE_(?:SEGMENT|DIALOGUE|PHASE)_ONLY|LIVE_ONLY_|UNRELATED_(?:SCENE|PERSON|OUTFIT)_ONLY/u,
+      `${call.stage} performance scope cannot import future story or live character/UI drift; full-story understanding context remains available`);
   }
   assert.equal(getH3PromptProtocolIssue(board.officialPromptZh!), undefined);
   assert.equal(getH3PromptProtocolIssue(board.officialPromptEn!, board.officialPromptZh), undefined);
