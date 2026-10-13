@@ -4,13 +4,13 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的 Windows 桌面工作台。
 
-当前版本：**2.0.5** · 2026-10-13 · Windows 64 位 · 便携运行
+当前版本：**2.0.7** · 2026-10-13 · Windows 64 位 · 便携运行
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows 便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-2.0.5.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-2.0.7.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
 1. 下载上面的 EXE，放在可写入的文件夹里，双击运行，无需安装 Node.js。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
@@ -85,6 +85,10 @@
 1.8.8 的图片 ComfyUI 设置支持直接导入画布 JSON，自动转换有效连线、节点参数与关闭／旁路状态，并修复 Lazy 合并工作台参考图和提示词入口的识别。API JSON 继续支持；无法可靠映射的特殊节点会指出具体节点并提示导出 API 格式。详见[本版更新说明](docs/releases/发布说明-1.8.8.md)。
 
 1.8.9 细化视频提示词中的身体朝向、踢法、实体飞行、腾空落地与连续招架，保持动作速度和时序一致；逐句维护已确认声线，英文保留人物身份与具体动作。沿用现有生成流程，没有新增本地校验、重试或审核调用。旧稿和已生成视频继续保留，需主动重新生成提示词才能采用新规则。详见[本版更新说明](docs/releases/发布说明-1.8.9.md)。
+
+2.0.6 收紧视频导演台“长剧情批量”的设置布局，将批量提示词格式改为行内选择，并缩小字体、控件和间距。取消批量设置内部滚动，格式、计划、连接、选段和生成参数可一起查看；修正普通稿误报 H3 图片绑定与“待关联”的提示。新建或未选格式的单段、批量及从提示词导演台重新选择的入口默认使用 H3，没有可用 H3 稿时明确提示；已有显式选择与失败任务快照保留。详见[本版更新说明](docs/releases/发布说明-2.0.6.md)。
+
+2.0.7 收紧视频导演台“长剧情批量”的分段卡片，收起及展开分段设置时的常规高度约缩至原来一半；重新排列格式、语言、参考图衔接及音频入口，字体随可用空间缩小，让同屏显示更多片段。详见[本版更新说明](docs/releases/发布说明-2.0.7.md)。
 
 ## 从源码运行
 

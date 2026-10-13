@@ -114,10 +114,20 @@ export interface VideoPromptChoice {
 
 export const videoPromptFormatLabel = (format?: VideoPromptFormat): string => format === 'seedance' ? 'Seedance' : format === 'h3' ? 'H3' : format === 'ordinary' ? '普通稿' : '历史稿';
 
-export const defaultVideoPromptFormat = (project: Project, storyboardId?: string): VideoPromptFormat => {
-  const board = project.storyboards.find((item) => item.id === storyboardId) || project.storyboards.find((item) => !item.sourceStale);
-  return isOfficialH3TargetId(board?.targetModelId) ? 'h3' : board?.targetModelId?.startsWith('seedance') ? 'seedance' : 'ordinary';
-};
+/** New selections use H3 regardless of the model recorded on older boards. */
+export const defaultVideoPromptFormat = (_project: Project, _storyboardId?: string): VideoPromptFormat => 'h3';
+
+export const hasPreparedVideoBatchDraft = (draft?: VideoDirectorBatchDraft): boolean => Boolean(draft && (
+  draft.selectedKeys.length || draft.parameterText.trim() && draft.parameterText.trim() !== '{}'
+  || [draft.languages, draft.promptFormats, draft.referenceOverrides, draft.referenceRoleOverrides,
+    draft.audioOverrides, draft.automaticTails, draft.tailCharacterModes].some((entries) => entries && Object.keys(entries).length)
+));
+
+/** Preserve prepared selections and retry provenance; empty saved defaults can
+ * adopt H3 without replacing a chosen prompt, pictures, or tail dependencies. */
+export const initialVideoBatchPromptFormat = (draft?: VideoDirectorBatchDraft, retryFormat?: VideoPromptFormat): VideoPromptFormat => (
+  retryFormat || (hasPreparedVideoBatchDraft(draft) ? draft?.promptFormat : undefined) || 'h3'
+);
 
 const isVideoDirectorVisualAsset = (asset: ReferenceAsset): boolean => (
   asset.mediaType !== 'video' && asset.mediaType !== 'audio'

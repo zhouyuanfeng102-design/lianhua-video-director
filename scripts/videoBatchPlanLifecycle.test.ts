@@ -101,6 +101,7 @@ function harness(initial: Props) {
     required, nodes: () => nodesOf(tree), text: () => textOf(tree), draft: () => drafts.at(-1)!, submissions: () => submissions,
     rows: () => nodesOf(tree).filter((node) => String(node.props.className || '').split(' ').includes('vd-batch-row')),
     click: (label: string) => { const node = required(label, 'button'); assert.ok(!node.props.disabled, `${label} enabled`); node.props.onClick(); render(); },
+    chooseFormat: (format: 'h3' | 'ordinary') => { required('批量提示词格式', 'select').props.onChange({ target: { value: format } }); render(); },
     update: (patch: Props) => { props = { ...props, ...patch }; render(); }, render,
     dispose: () => slots.forEach((slot) => slot.cleanup?.()),
   };
@@ -113,6 +114,8 @@ try {
   const h = harness({ ...initial, project: { ...initial.project, sequencePlans: [], storyboards: [] } });
   assert.equal(h.required('批量全片计划', 'select').props.value, '');
   assert.match(h.text(), /当前章节尚无已分段计划/u);
+  assert.equal(h.required('批量提示词格式', 'select').props.value, 'h3', 'new batch does not inherit an ordinary single-segment draft');
+  h.chooseFormat('ordinary');
   h.update({ project: initial.project });
   assert.equal(h.required('批量全片计划', 'select').props.value, initial.plan.id);
   assert.equal(h.rows().length, 2);

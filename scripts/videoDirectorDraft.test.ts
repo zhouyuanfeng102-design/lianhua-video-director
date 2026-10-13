@@ -4,7 +4,7 @@ import { buildOfficialH3SourceFingerprint, hasCurrentOfficialH3Prompt, officialH
 import { buildVideoBatchRows } from '../src/videoBatch';
 import type { ImageGenerationTask, ReferenceAsset, Storyboard, VideoGenerationTask } from '../src/types';
 import { bindStoryboardImageAsset, buildCustomStoryboardImageRequests } from '../src/storyboardImages';
-import { addVideoDraftAssets, applyVideoPromptChoice, draftFromVideoTask, emptyVideoDraft, formatVideoElapsed, isVideoDirectorImage, reorderVideoReference, videoExecutionElapsedMs, videoPromptChoices, videoPromptReferencePreviews } from '../src/videoDirectorDraft';
+import { addVideoDraftAssets, applyVideoPromptChoice, defaultVideoPromptFormat, draftFromVideoTask, emptyVideoDraft, formatVideoElapsed, hasPreparedVideoBatchDraft, initialVideoBatchPromptFormat, isVideoDirectorImage, reorderVideoReference, videoExecutionElapsedMs, videoPromptChoices, videoPromptReferencePreviews, type VideoDirectorBatchDraft } from '../src/videoDirectorDraft';
 
 const state = createInitialState();
 const project = state.project;
@@ -357,4 +357,28 @@ assert.equal(videoPromptReferencePreviews({ ...missingReferenceProject, storyboa
   'mismatched English is not exposed as a recoverable current translation');
 assert.equal(officialH3MissingReferenceNotice(currentH3, h3Context), undefined, 'valid output remains normal');
 assert.equal(videoPromptReferencePreviews({ ...project, storyboards: [staleH3] }).length, 0, 'legacy invalid artifacts do not bypass validation');
-console.log('videoDirectorDraft: prompt selection, missing-reference original previews, explicit references and snapshot tests passed');
+for (const targetModelId of [undefined, 'custom', 'seedance-2.5', 'minimax-hailuo-3']) {
+  assert.equal(defaultVideoPromptFormat({ ...project, storyboards: [{ ...board, targetModelId }] }, board.id), 'h3', 'new selection defaults to H3 independently of the old board model');
+}
+assert.equal(defaultVideoPromptFormat({ ...project, storyboards: [] }), 'h3');
+const blankBatch: VideoDirectorBatchDraft = {
+  planId: 'sequence', backend: 'api', workflowId: '', apiProfileId: '', parameterText: '{}', parameterDrafts: [],
+  selectedKeys: [], languages: {}, promptFormat: 'ordinary', promptFormats: {}, referenceOverrides: {},
+  referenceRoleOverrides: {}, automaticTails: {}, tailCharacterModes: {}, previewSegmentId: '', previewPane: 'prompt', settingsCollapsed: false, query: '',
+};
+const blankBefore = structuredClone(blankBatch);
+assert.equal(initialVideoBatchPromptFormat(), 'h3');
+assert.equal(hasPreparedVideoBatchDraft(blankBatch), false);
+assert.equal(initialVideoBatchPromptFormat(blankBatch), 'h3', 'old empty ordinary defaults adopt H3');
+assert.deepEqual(blankBatch, blankBefore);
+const preparedBatch = { ...blankBatch, selectedKeys: ['board-1:ordinary:zh'], referenceOverrides: { 'segment-2': [{ assetId: 'character', role: 'character' as const, slotIndex: 2 }] } };
+const preparedBefore = structuredClone(preparedBatch);
+assert.equal(initialVideoBatchPromptFormat(preparedBatch), 'ordinary', 'prepared ordinary selections keep their actual format');
+assert.deepEqual(preparedBatch, preparedBefore, 'format initialization never rewrites selected prompts or picture slots');
+assert.equal(initialVideoBatchPromptFormat({ ...blankBatch, parameterText: '{"duration":8}' }), 'ordinary', 'prepared parameters are preserved');
+assert.equal(initialVideoBatchPromptFormat(blankBatch, 'ordinary'), 'ordinary', 'an ordinary retry overrides the new default');
+assert.equal(initialVideoBatchPromptFormat(preparedBatch, 'seedance'), 'seedance', 'a Seedance retry retains its format');
+const onlyOrdinary = { ...project, storyboards: [{ ...board, targetModelId: 'custom', officialPromptZh: undefined, officialPromptEn: undefined }] };
+assert.equal(videoPromptChoices(onlyOrdinary, undefined, 'h3').length, 0, 'missing H3 never falls back to an ordinary prompt');
+assert.equal(videoPromptChoices(onlyOrdinary, undefined, 'ordinary')[0]?.prompt, board.finalPrompt, 'ordinary remains available only when explicitly requested');
+console.log('videoDirectorDraft: H3 defaults, preserved prepared selections, prompt selection, missing-reference original previews, explicit references and snapshot tests passed');

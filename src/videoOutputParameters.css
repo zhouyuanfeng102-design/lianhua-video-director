@@ -32,6 +32,20 @@
 .vop-batch-notes > .vop-help, .vop-batch-notes > .vop-unavailable { margin: 0; }
 .vop-batch-notes > .vop-help-details[open] { flex-basis: 100%; }
 .vop-batch > .vop-error { flex-basis: 100%; margin: 0; }
+/* Batch settings stay fully exposed; cap their sizing to the available window. */
+.vd-batch-controls .vop-batch { gap: 3px 8px; padding: 4px 6px; }
+.vd-batch-controls .vop-batch .vop-heading { flex: 0 0 115px; display: grid; gap: 1px; font-size: inherit; line-height: 1.3; }
+.vd-batch-controls .vop-batch .vop-fields { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 4px 6px; }
+.vd-batch-controls .vop-batch .vop-field-label { font-size: inherit; line-height: 1.2; }
+.vd-batch-controls .vop-batch .vop-field :is(input, select) { height: 26px; min-height: 26px; padding: 2px 5px; font-size: inherit; line-height: 1.2; }
+.vd-batch-controls .vop-batch :is(.vop-heading > span, .vop-control-hint, .vop-help, .vop-unavailable, .vop-stale, .vop-clear) { font-size: max(9px, calc(var(--vd-settings-font) - 2px)); line-height: 1.3; }
+.vd-batch-controls .vop-batch .vop-dimensions { margin-top: 0; font-size: inherit; }
+.vd-batch-controls .vop-batch .vop-dimensions > summary { margin-bottom: 2px; }
+@media (min-width: 1000px) {
+  .vd-batch-controls:has(> .vd-batch-advanced[open]) > .vop-batch { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .vd-batch-controls:has(> .vd-batch-advanced[open]) .vop-heading { display: flex; }
+  .vd-batch-controls:has(> .vd-batch-advanced[open]) .vop-batch > .vop-fields { grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+}
 .vd-tracking-note { margin: 6px 0; color: var(--muted); font-size: calc(10px * var(--ui-font-scale, 1)); line-height: 1.4; }
 .vd-tracking-note > summary { cursor: pointer; }
 .vd-tracking-note > p { margin: 4px 0; }
@@ -59,7 +73,7 @@
   .video-director-view .vop-fields[data-count="3"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .video-director-view .vop-batch { margin: 0; }
   .video-director-view .vop-batch .vop-heading { margin: 0; }
-  .video-director-view .vop-batch .vop-fields[data-count="3"] { grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); }
+  .video-director-view .vop-batch .vop-fields[data-count="3"] { grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
   .video-director-view .vd-batch-controls { gap: 4px; }
   .video-director-view .vd-batch-configuration { gap: 6px; }
   .video-director-view .vd-batch-toolbar { gap: 4px; }

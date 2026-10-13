@@ -529,4 +529,23 @@ await test('后镜补关联保留At紧随镜号，三字段与六字段稿都不
   }
 });
 
+await test('显式普通稿即使保留H3章节也不进入H3人物绑定，图片槽和正文保持原样', () => {
+  for (const language of ['zh', 'en'] as const) {
+    const { project, draft } = fixture();
+    draft.h3ReferenceBinding = undefined;
+    draft.source = { promptFormat: 'ordinary', language };
+    draft.references = [{ assetId: 'a-image', role: 'character', slotIndex: 2 }, { assetId: 'b-image', role: 'character', slotIndex: 3 }];
+    const before = structuredClone(draft);
+    const result = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api: cloud() });
+    assert.equal(result.draft.prompt, draft.prompt);
+    assert.deepEqual(result.draft.references, draft.references);
+    assert.deepEqual(result.warnings, []);
+    assert.equal(result.draft.h3ReferenceBinding, undefined);
+    assert.deepEqual(result.characterStates.map((entry) => entry.slots), [[3], [4]]);
+    assert.deepEqual(draft, before);
+    const h3 = prepareVideoH3ReferenceDraft(project, { ...draft, source: { ...draft.source, promptFormat: 'h3' } }, { backend: 'api', api: cloud() });
+    assert.ok(h3.warnings.some((warning) => warning.includes('没有可信的可定位人物绑定')));
+  }
+});
+
 console.log(`${groups} H3 reference-binding regression groups passed (synthetic inputs, no real API)`);

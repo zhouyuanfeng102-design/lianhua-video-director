@@ -417,7 +417,9 @@ export const prepareVideoH3ReferenceDraft = (
     const warnings = unique([...referenceWarnings, ...issues]);
     return { draft: { ...draft, h3ReferenceWarnings: warnings }, warnings, characterStates };
   };
-  if (!isH3(draft.prompt)) return unchanged([]);
+  // The selected format takes precedence over headings retained in ordinary
+  // drafts; their pictures do not require H3 identity-anchor serialization.
+  if (draft.source?.promptFormat === 'ordinary' || !isH3(draft.prompt)) return unchanged([]);
   // A true retry retains its frozen, already-displayed submission. Selecting
   // current images explicitly removes reuseTaskId in the picker.
   if (draft.reuseTaskId) {
