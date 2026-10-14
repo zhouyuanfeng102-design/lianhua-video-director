@@ -6,8 +6,8 @@ import {
   type MouseEvent,
 } from 'react';
 
-import { assetPreviewUrl } from '../media';
 import { ReferenceImageName } from './ReferenceImageName';
+import { ReferenceImageThumbnail } from './ReferenceImageThumbnail';
 import type {
   AssetRole,
   AssetType,
@@ -191,7 +191,6 @@ export function ReferenceImagePickerModal({
 
         <div className="reference-image-picker-list">
           {visibleAssets.length > 0 ? visibleAssets.map((asset) => {
-            const previewUrl = assetPreviewUrl(asset);
             const selected = asset.id === draftAssetId;
             return (
               <button
@@ -202,13 +201,7 @@ export function ReferenceImagePickerModal({
                 disabled={busy}
                 onClick={() => setDraftAssetId(asset.id)}
               >
-                <span className="reference-image-picker-thumb">
-                  {previewUrl ? (
-                    <img src={previewUrl} alt="" loading="lazy" draggable={false} />
-                  ) : (
-                    <span className="reference-image-picker-no-preview">无预览</span>
-                  )}
-                </span>
+                <ReferenceImageThumbnail asset={asset} />
                 <span className="reference-image-picker-info">
                   <ReferenceImageName name={asset.name} />
                   <span>{assetTypeLabel(asset)} · {assetRoleLabel(asset)}</span>

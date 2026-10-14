@@ -17596,13 +17596,14 @@ function ImageWorkbenchView(ctx: AppContext) {
       || imageVariant === "private-four-in-one"
       || imageVariant === "private-close-up"
     );
-  const selectableReferenceAssets = privateVariantSelected
+  const selectableReferenceAssets = useMemo(() => privateVariantSelected
     ? state.project.assets.filter((asset) => isMatchingNsfwPrivateWorkbenchReference(
         asset,
         selectedEntityId,
         nsfwPrivatePart,
       ))
-    : filterStoryboardReferenceAssets(state.project.assets);
+    : filterStoryboardReferenceAssets(state.project.assets),
+    [state.project.assets, privateVariantSelected, selectedEntityId, nsfwPrivatePart]);
   const selectedReferenceAsset = state.project.assets.find(
     (asset: ReferenceAsset) => asset.id === selectedReferenceAssetId,
   );

@@ -46,6 +46,16 @@ interface Window {
       dataUrl: string; mimeType: 'audio/mpeg' | 'audio/wav' | 'audio/flac'; sizeBytes: number; checksum: string;
     }>;
     assetStatus: (relativePath: string) => Promise<Partial<import('./storage').ManagedMediaResult> & { exists: boolean }>;
+    getImageThumbnail?: (payload: {
+      relativePath: string;
+      expectedChecksum?: string;
+    }) => Promise<{
+      dataUrl: string;
+      mimeType: 'image/png';
+      width: number;
+      height: number;
+      sizeBytes: number;
+    }>;
     getVideoThumbnail: (payload: {
       projectId: string;
       assetId: string;

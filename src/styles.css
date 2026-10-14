@@ -1124,8 +1124,9 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
   color: var(--faint);
   background: #eceef2;
 }
-.reference-image-picker-thumb img { width: 100%; height: 100%; display: block; object-fit: cover; }
+.reference-image-picker-thumb img { grid-area: 1 / 1; width: 100%; height: 100%; display: block; object-fit: cover; }
 .reference-image-picker-no-preview { padding: 4px; font-size: calc(9px * var(--ui-font-scale, 1)); text-align: center; }
+.reference-image-picker-thumbnail-status { grid-area: 1 / 1; }
 .reference-image-picker-info { min-width: 0; display: grid; align-content: start; gap: 2px; }
 .reference-image-picker-info > span:not(.reference-image-name) {
   min-width: 0;

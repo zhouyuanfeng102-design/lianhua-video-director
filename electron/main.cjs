@@ -23,6 +23,7 @@ const { collectImageReferenceSnapshotsForExport } = require(path.join(__dirname,
 const { isCompleteWebP } = require(path.join(__dirname, 'webpValidation.cjs'));
 const { createVideoWorkbench } = require(path.join(__dirname, 'videoWorkbench.cjs'));
 const { createVideoThumbnailService } = require(path.join(__dirname, 'videoThumbnail.cjs'));
+const { createImageThumbnailService } = require(path.join(__dirname, 'imageThumbnail.cjs'));
 const stateSerialization = require(path.join(__dirname, 'stateSerialization.cjs'));
 const { readProjectLibraryImport } = require(path.join(__dirname, 'projectLibraryImport.cjs'));
 const { createStatePersistence } = require(path.join(__dirname, 'statePersistence.cjs'));
@@ -1776,6 +1777,19 @@ function createWindow() {
 
 let videoWorkbench;
 let videoThumbnails;
+let imageThumbnails;
+const imageThumbnailOwners = new WeakSet();
+const getImageThumbnails = (event) => {
+  if (!imageThumbnails) imageThumbnails = createImageThumbnailService({ assetRoot, cacheRoot, projectRoot, resourcesPath: process.resourcesPath });
+  const sender = event.sender;
+  if (!imageThumbnailOwners.has(sender)) {
+    imageThumbnailOwners.add(sender);
+    const ownerId = sender.id;
+    sender.once('destroyed', () => imageThumbnails?.cancelOwner(ownerId));
+    sender.on('render-process-gone', () => imageThumbnails?.cancelOwner(ownerId));
+  }
+  return imageThumbnails;
+};
 const thumbnailOwners = new WeakSet();
 const getVideoThumbnails = (event) => {
   if (!videoThumbnails || videoThumbnails.canRestart()) videoThumbnails = createVideoThumbnailService({ assetRoot, cacheRoot, projectRoot, resourcesPath: process.resourcesPath });
@@ -1805,6 +1819,7 @@ const workbenchProgressTarget = (event) => {
 };
 
 app.whenReady().then(() => {
+  handleTrustedIpc('lianhua:get-image-thumbnail', (event, payload) => getImageThumbnails(event).get(payload, event.sender.id));
   handleTrustedIpc('lianhua:get-video-thumbnail', (event, payload) => getVideoThumbnails(event).get(payload, event.sender.id));
   handleTrustedIpc('lianhua:cancel-video-thumbnails', (event, payload) => videoThumbnails?.cancelProject(payload?.projectId, event.sender.id) || 0);
   handleTrustedIpc('lianhua:video-workbench-status', () => getVideoWorkbench().status());
@@ -2196,6 +2211,8 @@ app.on('window-all-closed', () => {
   videoTransport?.close();
   videoWorkbench?.close();
   videoThumbnails?.close();
+  imageThumbnails?.close();
+  imageThumbnails = undefined;
   if (videoThumbnails?.canRestart()) videoThumbnails = undefined;
   if (process.platform !== 'darwin') app.quit();
 });

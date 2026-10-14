@@ -11,6 +11,16 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "2.1.7",
+    releasedAt: "2026-10-14",
+    title: "资产库选图加载优化",
+    highlights: [
+      "从资产库选择参考图时使用小尺寸预览，减少多张 4K 图片集中加载造成的卡顿。",
+      "滚动到图片所在位置才加载预览，已生成的预览会缓存，重复打开选图窗口更快。",
+      "搜索、选择和确认继续使用原资产，生成时仍读取原图。",
+    ],
+  },
+  {
     version: "2.1.6",
     releasedAt: "2026-10-14",
     title: "NSFW 动作视频声音规则细化",

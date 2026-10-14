@@ -104,6 +104,10 @@ async function run() {
     window.lianhuaDesktop = {
       storagePaths: async () => ({ dataRoot: 'QA-only', sessionData: 'QA-only/session', cache: 'QA-only/cache', temp: 'QA-only/temp', logs: 'QA-only/logs', recovery }),
       recoveryStatus: async () => new Promise(() => {}),
+      getImageThumbnail: async payload => {
+        if (payload.relativePath !== qa.media.relativePath || payload.expectedChecksum !== qa.media.expectedChecksum) throw new Error('Unexpected synthetic thumbnail');
+        return { dataUrl: qa.media.dataUrl, mimeType: 'image/png', width: 80, height: 64, sizeBytes: 256 };
+      },
       readManagedImageDataUrl: async payload => {
         qa.reads.push({ ...payload });
         if (payload.relativePath !== qa.media.relativePath || payload.expectedChecksum !== qa.media.expectedChecksum) throw new Error('Unexpected synthetic managed image');
