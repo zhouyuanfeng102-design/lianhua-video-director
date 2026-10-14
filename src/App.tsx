@@ -1593,11 +1593,10 @@ const isMatchingNsfwPrivateWorkbenchReference = (
   characterId: string,
   privatePart: NsfwPrivatePart,
 ): asset is ReferenceAsset => Boolean(
-  characterId
-  && hasUsableStoryboardReferencePixels(asset)
-  && isNsfwPrivateProfileAsset(asset)
-  && asset.sourceEntityId === characterId
-  && (asset.imageVariant === "private-four-in-one" || nsfwPrivatePartForAsset(asset) === privatePart)
+  hasUsableStoryboardReferencePixels(asset)
+  && (!isNsfwPrivateProfileAsset(asset) || (characterId
+    && asset.sourceEntityId === characterId
+    && (asset.imageVariant === "private-four-in-one" || nsfwPrivatePartForAsset(asset) === privatePart)))
 );
 
 const durationValue = (preset: DurationPreset, custom: number): number => {
@@ -18708,7 +18707,7 @@ function ImageWorkbenchView(ctx: AppContext) {
   };
   const selectReferenceFromLibrary = async (asset: ReferenceAsset) => {
     if (!selectableReferenceAssets.some((candidate) => candidate.id === asset.id)) {
-      notify("当前图片与所选人物、部位或普通参考图范围不匹配。", "error");
+      notify("当前图片不可用，或私密资料图与所选人物、部位不匹配。", "error");
       setReferencePickerOpen(false);
       return;
     }
@@ -20426,12 +20425,12 @@ function ImageWorkbenchView(ctx: AppContext) {
               <Field
                 className="image-upload-field"
                 label={imageGenerationMode === "private"
-                  ? "同人物同部位参考图"
+                  ? "私密生图参考图"
                   : assetKind === "grid"
                     ? "已有九宫格母版"
                     : "普通参考图"}
                 hint={imageGenerationMode === "private"
-                  ? "上传图片会绑定当前人物与当前部位；资产库只显示匹配当前人物和部位的私密图。"
+                  ? "可选择普通图片作为本次参考；已有私密资料图按当前人物与部位匹配。上传图片会绑定当前人物与当前部位。"
                   : assetKind === "grid"
                     ? "上传现成的 3×3 图片会直接保存并绑定；也可作为参考重新生成。"
                     : "可以上传新图片，或选择当前项目资产库中的普通图片。"}
@@ -20495,7 +20494,7 @@ function ImageWorkbenchView(ctx: AppContext) {
                   }}
                 />
                 {imageGenerationMode === "private"
-                  ? "将当前同人物同部位图片作为本次私密生图参考"
+                  ? "将当前图片作为本次私密生图参考"
                   : assetKind === "grid"
                     ? "以当前九宫格为参考重新生成另一版母版"
                     : "将当前普通图片作为本次图生图参考"}

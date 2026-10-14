@@ -64,6 +64,42 @@ export const MOSE_JIANGHU_NSFW_ANATOMICAL_DETAIL_RULES = `涉及 NSFW 部位、�
 - 多人或多部位分别保持各自特征，保留人物身份、性格、说话方式、情绪与关系阶段；不得用规则名、后台分类或设定标签代替正文中的具体感官细节。
 - SFW 场景完全忽略本规则。`;
 
+/**
+ * Video-specific NSFW choreography.  The generic prose/detail rules above are
+ * good at permitting explicit content, but video prompts also need time-bound
+ * contact, movement and field placement so later H3/Seedance writers do not
+ * collapse the scene into vague "intimacy" wording.
+ */
+export const MOSE_JIANGHU_NSFW_VIDEO_SOUND_RULE = `NSFW 视频声音细化规则：当本段或本镜明确进入 NSFW 动作，且当前任务允许写声音或已有音效字段需要交付时，声音必须从当前动作阶段、人物反应、身体/衣料/环境材质中选择，不硬加无依据声音，也不把私密动作声源泛化成打斗、撞墙或重物碰撞。
+- 按阶段匹配声音：接近与姿势建立写贴近呼吸、衣料轻动、床褥或坐垫轻微承重；首次接触写短促吸气、皮肤轻触、衣料贴肤或细微湿润声；连续摩擦、抽送或身体律动写与节奏同步的压低喘息、断续呻吟、湿滑摩擦、床单摩擦、被褥挤压或轻微黏连声；强弱变化写气息中断、低哼、支撑面轻压或材质细响；暂停、分离或余韵写呼吸回落、衣料重新贴合、残留湿声或安静。
+- 按人物性格和关系阶段调整声量与反应：克制、冷静、羞怯的人物以压低、短促、断续、忍耐的气息和低声反应为主；主动、挑逗或情绪外放的人物可以更有节奏、更清晰，但仍与动作同步，不写成无关喊叫或夸张拟声。
+- 声源必须落在画面和剧情支持的物体上：身体接触、口鼻呼吸、人声反应、薄衣或贴身衣料、床单被褥、软垫、水汽、湿润皮肤和体液反馈。墙面、桌面、地板、门板、武器或硬物只在原剧情明确支撑、倚靠、碰到或发生对应事件时才作为轻微声源。
+- 除非原剧情明确发生碰撞、摔倒、破坏、打斗、拍打墙体或家具大幅震动，身体律动的声音来源保持为上述私密动作声源，不写成重击、格挡、拳脚冲撞、墙体震动、破裂声或战斗类拟声。
+- 原文没有可听声音、当前镜头为无声/静音交付、或声音依据不足时，音效写无或只保留已确认的可见口型/呼吸事实；不要为了突出 NSFW 氛围而凭空新增人声、呻吟、体液声或环境声。`;
+
+export const MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE = `NSFW 视频动作细化规则：当本段或本镜明确涉及裸露、私密部位、性行为、体液或生理反应时，把已经发生或正在发生的内容写成可拍摄的连续动作，不用“亲密互动、缠绵、激烈动作、暧昧接触、身体交缠、sexual activity、close contact”等泛词替代具体过程。
+- 先锁定原剧情实际阶段：接近与姿势建立、首次接触或进入、连续摩擦或抽送、关键生理反应、分离与残留，只写原文已经给出或当前镜头合理承接的阶段；原文没有进入、高潮、射精、分离或残留时不补造。
+- 主体/action/连续时间轴要写清谁主动、谁回应、身体姿势、肢体支撑、朝向、接触或进入的先后、部位与部位的对应关系、方向、幅度、速度、深度、强弱变化和本镜结束状态；不要只写“继续亲密”或“动作加深”。
+- 空间/scene/description 要写清两人的相对位置、可见范围、遮挡、衣物或裸露状态、接触点所在的身体方位，以及当前画面能看见哪些动作证据；私密档案只用于当前镜已选中的可见事实，不搬运整份资料。
+- 多人场景每个动作都绑定具体人物和具体部位：角色A的哪一部位接触角色B的哪一部位、A如何移动、B如何承受或回应、结束时两人分别处于什么姿势。不能把一个人的部位、体液、姿势或动作结果写到另一个人身上。
+- 普通六字段把细化动作放入主体、空间和音效；H3写入对应 Shot 的 integrated_multimodal_description 或 detailed_description；Seedance写入连续时间轴。不要新增 action_plan、规则解释、审核附录或反向提示词。
+- SFW 场景完全忽略本规则。
+
+${MOSE_JIANGHU_NSFW_VIDEO_SOUND_RULE}`;
+
+export const MOSE_JIANGHU_NSFW_VIDEO_ACTION_PRESERVATION_RULE = `NSFW 视频动作保真规则：本次处理已有中文稿、H3稿、参考更新、衔接修复、格式修复或只读复核时，保留当前正文已经成立的 NSFW 动作阶段、人物绑定、姿势、部位对应、接触/进入/摩擦、体液或残留、呼吸与身体反应，不把它们压缩为“亲密互动、缠绵、激烈动作、暧昧接触、sexual activity、close contact”等概括词。
+- 只修复本次任务授权范围内的遗漏、结构或表达歧义；已有具体动作保持具体，已有镜数、切点、参考标签、对白和声音范围保持。
+- 原稿或来源没有写出的进入、高潮、射精、分离、残留、衣物变化或新姿势不得在保真阶段补造。
+- 多人物动作继续按人物和部位分别归属，不能在保真、参考更新或格式修复中交换身体部位、动作结果或体液归属。
+- 保留已确认的具体 NSFW 声音来源、人物反应、动作阶段和材质，不压成泛泛动作声；不把已确认的私密动作声音改成碰撞、墙体、打斗或重击类声源，除非 sourcePrompt 已经明确这样写。
+
+${MOSE_JIANGHU_NSFW_VIDEO_SOUND_RULE}`;
+
+export const MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE = `NSFW 视频动作翻译保真规则：英文翻译、Seedance 英文稿和 H3 英文修复必须忠实保留中文 sourcePrompt 已确认的 NSFW 动作细节，不把具体部位、姿势、接触、进入、摩擦、节奏、体液/残留、喘息和身体反应翻译成 vague intimacy / sexual activity / close contact / passionate movement 等泛词。
+- 保持逐镜人物绑定、身体部位归属、可见范围、衣物或裸露状态、动作先后、速度/幅度/深度、具体声音来源、人物反应、动作阶段、材质声和本镜结束状态；只修翻译遗漏或歧义，不重新导演、不新增中文没有的动作阶段。
+- 已确认的私密动作声音按源稿保留为呼吸、喘息、人声反应、衣料、床褥、湿滑摩擦或体液反馈等对应 sound source，不译成 generic impact / collision / thud / striking / wall vibration / combat sound；源稿没有声音时不新增声音。
+- 原语言对白、H3 section、At 切点、Seedance 章节和真实参考标记保持原结构。`;
+
 /** Complete shared rule injected into every model-facing NSFW generation stage. */
 export const MOSE_JIANGHU_NSFW_DETAIL_RULES = [
   MOSE_JIANGHU_NSFW_PROMPT_RULE,

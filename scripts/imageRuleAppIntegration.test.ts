@@ -233,14 +233,14 @@ const privateReferenceMatcher = source.slice(
 );
 for (const requiredCheck of [
   /hasUsableStoryboardReferencePixels\(asset\)/u,
-  /isNsfwPrivateProfileAsset\(asset\)/u,
+  /!isNsfwPrivateProfileAsset\(asset\) \|\| \(characterId/u,
   /asset\.sourceEntityId === characterId/u,
   /asset\.imageVariant === "private-four-in-one" \|\| nsfwPrivatePartForAsset\(asset\) === privatePart/u,
 ]) {
   assert.match(
     privateReferenceMatcher,
     requiredCheck,
-    'a private reference must have pixels and match both the selected character and private part',
+    'ordinary pixels are selectable; marked private profiles still match the selected character and part',
   );
 }
 assert.match(
@@ -390,7 +390,7 @@ assert.match(imagePanelRules, /value=\{activeImagePromptPresetId\}[\s\S]*?select
 assert.match(imagePanelHeading, /className="image-rule-manager-button"[\s\S]*?onClick=\{\(\) => setView\("rules"\)\}/u, 'the manager button in the compact panel heading must retain rule-center navigation');
 assert.match(imagePanelReferences, /type="file"[\s\S]*?onChange=\{uploadReference\}[\s\S]*?onClick=\{\(\) => setReferencePickerOpen\(true\)\}/u, 'regrouped references must retain upload and library selection actions');
 assert.match(imagePanelReferences, /imageGenerationMode === "ordinary" && \([\s\S]*?onClick=\{analyzeUploadedReference\}/u, 'AI reference analysis must remain an ordinary-only action');
-assert.match(imagePanelReferences, /checked=\{useReferenceImage\}[\s\S]*?disabled=\{!uploadedPreview \|\| !supportsReferenceImageInput \|\| busy \|\| autofillBusy\}[\s\S]*?setUseReferenceImage\(event\.target\.checked\);[\s\S]*?clearImageGenerationOutputs\(imageGenerationMode\)/u, 'real reference transmission must remain explicit, capability checked, and lane scoped');
+assert.match(imagePanelReferences, /checked=\{useReferenceImage\}[\s\S]*?disabled=\{!uploadedPreview \|\| \(!supportsReferenceImageInput && !useReferenceImage\) \|\| busy \|\| autofillBusy\}[\s\S]*?setUseReferenceImage\(event\.target\.checked\);[\s\S]*?clearImageGenerationOutputs\(imageGenerationMode\)/u, 'real reference transmission must remain explicit, capability checked, and lane scoped');
 assert.match(imagePanelSpecification, /value=\{imageGenerationCount\}[\s\S]*?patchActiveImageGenerationLane\(\{ generationCount: normalizeImageBatchCount\(event\.target\.value\) \}\)[\s\S]*?Array\.from\(\{ length: 8 \}/u, 'quantity must retain its working 1–8 per-lane generation setting');
 assert.match(imagePanelSpecification, /<ImageOutputSizeControls[\s\S]*?lane=\{imageGenerationMode\}[\s\S]*?onChange=\{changeImageOutputSize\}/u, 'regrouped pixels must still update the active ordinary/private preference');
 assert.match(imagePanelReferences, /<details className="image-panel-capability"><summary aria-label="生图更多设置">[\s\S]*?<div className="image-panel-extra-popover">[\s\S]*?imageGenerationMode === "ordinary" && \(\s*<Field\s+className="image-negative-field"/u, 'more settings must retain ordinary-only negative input behind an explicit expandable control');

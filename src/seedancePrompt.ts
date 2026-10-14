@@ -12,6 +12,8 @@ import { SEEDANCE_CHINESE_WRITER_RULE, SEEDANCE_PROMPT_STRATEGY_VERSION } from '
 import type { Seedance25Output } from './types';
 import { maskVideoPictureReferenceLiterals } from './videoPictureReferences';
 import { VIDEO_SCENE_CONTEXT_RULE, type VideoSceneContext } from './videoSceneContext';
+import { MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE } from './nsfwPromptRules';
+import { hasNsfwDetailSignal } from './promptConstraints';
 
 export interface OfficialSeedancePromptInput extends PromptAdapterInput {
   /** Complete read-only story/shot evidence used by this exact generation. */
@@ -360,7 +362,13 @@ export const generateOfficialSeedancePrompt = async ({ input, request, isCurrent
     shotPrivateDetails: input.shotPrivateDetails || [],
     constraints: visibleSeedanceConstraints(input.constraints),
   };
-  const response = await request(`${SEEDANCE_CHINESE_WRITER_RULE}\n\n${VIDEO_SCENE_CONTEXT_RULE}`,
+  const nsfwVideoActionRule = hasNsfwDetailSignal(
+    input.nsfwDetail ? 'NSFW' : '',
+    input.canonicalPrompt,
+    JSON.stringify(input.sourceEvidence || ''),
+    ...(input.constraints || []),
+  ) ? MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE : '';
+  const response = await request([SEEDANCE_CHINESE_WRITER_RULE, VIDEO_SCENE_CONTEXT_RULE, nsfwVideoActionRule].filter(Boolean).join('\n\n'),
     `<seedance_source_data>\n${JSON.stringify(evidence, null, 2).replace(/</gu, '\\u003c').replace(/>/gu, '\\u003e')}\n</seedance_source_data>\n依据以上当前证据返回完整 Seedance 中文成稿。`);
   assertSeedanceRequestCurrent(isCurrent);
   const promptZh = cleanSeedancePrompt(response);

@@ -37,6 +37,12 @@ import {
 import { VIDEO_ACTING_CAMERA_RULES, VIDEO_ACTING_CAMERA_PRESERVATION_RULES, VIDEO_ACTING_CAMERA_TRANSLATION_RULE, stripLegacyVideoActingCameraRules } from './videoActingCameraRules';
 import { buildVideoSceneContext, VIDEO_SCENE_CONTEXT_RULE, type VideoSceneContext } from './videoSceneContext';
 import { VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE, VIDEO_ACTION_EVENT_REVIEW_RULE, withVideoActionChoreographyScope } from './videoActionChoreographyRules';
+import {
+  MOSE_JIANGHU_NSFW_VIDEO_ACTION_PRESERVATION_RULE,
+  MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE,
+  MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE,
+} from './nsfwPromptRules';
+import { hasNsfwDetailSignal } from './promptConstraints';
 import { STORY_CAUSALITY_RULE, STORY_CAUSALITY_TRANSLATION_RULE, STORY_UNDERSTANDING_CONTEXT_RULE } from './storyCausalityRules';
 import { CHARACTER_PARTICIPATION_RULE, characterParticipationAliases, resolvePromptCharacterParticipation, stampCharacterParticipation } from './characterParticipation';
 import type { ConverterPreset, H3IdentityBindings, RuleSet, Storyboard } from './types';
@@ -180,6 +186,35 @@ export async function generateSingleSegmentPrompt(
     ? input.sequenceSegmentContext.generationStoryContent ?? semanticSegmentStoryContent({
       ...input.sequenceSegmentContext.segment, contentOverridden: input.sequenceSegmentContext.contentOverridden,
     }) : undefined;
+  const hasNsfwVideoActionSignal = hasNsfwDetailSignal(
+    semanticStoryContent,
+    input.sourceStoryContent,
+    input.conversionDraft?.sourceStoryContent,
+    input.board.sourceStoryContent,
+    input.board.extraRequirement,
+    input.board.finalPrompt,
+    input.board.officialPromptZh,
+    input.board.officialPromptEn,
+    ...input.board.shots.flatMap((shot) => [
+      shot.action,
+      shot.prompt,
+      shot.nsfwContinuity?.contact,
+      shot.nsfwContinuity?.actionStage,
+      shot.nsfwContinuity?.residue,
+    ]),
+  );
+  const nsfwVideoActionRuleForRequest = (
+    stage: SingleSegmentPromptStage,
+    formatOnly: boolean,
+    serializationRepair: boolean,
+  ): string => {
+    if (!hasNsfwVideoActionSignal) return '';
+    if (stage === 'translate') return MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE;
+    if (stage === 'convert' || canReplanStaging && !formatOnly && !serializationRepair) {
+      return MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE;
+    }
+    return MOSE_JIANGHU_NSFW_VIDEO_ACTION_PRESERVATION_RULE;
+  };
   const assertCurrent = (): void => {
     if (input.isCurrent && !input.isCurrent()) {
       const error = new Error('当前分段、参考图或项目已变化，提示词生成已取消，原结果保持不变。');
@@ -237,6 +272,10 @@ export async function generateSingleSegmentPrompt(
         if (!scopedSystem.includes(rule)) scopedSystem += `\n\n${rule}`;
       }
       if (!scopedSystem.includes(DIALOGUE_DELIVERY_RULE)) scopedSystem += `\n\n${DIALOGUE_DELIVERY_RULE}`;
+      const nsfwVideoActionRule = nsfwVideoActionRuleForRequest(stage, formatOnly, serializationRepair);
+      if (nsfwVideoActionRule && !scopedSystem.includes(nsfwVideoActionRule)) {
+        scopedSystem += `\n\n${nsfwVideoActionRule}`;
+      }
       if (stage !== 'convert' && !scopedSystem.includes(H3_DIALOGUE_FORMAT_RULE)) scopedSystem += `\n\n${H3_DIALOGUE_FORMAT_RULE}`;
       if (stage !== 'convert' && !scopedSystem.includes(H3_CLIP_TIME_RULE)) scopedSystem += `\n\n${H3_CLIP_TIME_RULE}`;
       let scopedUser = user;

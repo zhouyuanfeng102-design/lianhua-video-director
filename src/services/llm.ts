@@ -74,6 +74,7 @@ import {
   MOSE_JIANGHU_NSFW_IMAGE_CONVERTER_RULE,
   MOSE_JIANGHU_NSFW_IMAGE_PROMPT_RULE,
   MOSE_JIANGHU_NSFW_PROMPT_RULE,
+  MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE,
   MOSE_JIANGHU_NSFW_WRITING_RULES,
 } from '../nsfwPromptRules';
 import { hasNsfwDetailSignal } from '../promptConstraints';
@@ -3997,9 +3998,9 @@ export const requestShotRecommendation = async (
       `精确镜头数 ${params.requiredShotCount} 少于固定分段网格所需的至少 ${internalHardBoundariesSec.length + 1} 镜。`,
     );
   }
-  const nsfwDetailRule = hasNsfwDetailSignal(initialParams.story)
-    ? MOSE_JIANGHU_NSFW_DETAIL_RULES
-    : '';
+  const hasStoryboardNsfwSignal = hasNsfwDetailSignal(initialParams.story);
+  const nsfwDetailRule = hasStoryboardNsfwSignal ? MOSE_JIANGHU_NSFW_DETAIL_RULES : '';
+  const nsfwVideoActionRule = hasStoryboardNsfwSignal ? MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE : '';
   let candidateResult = await requestTextModel(
     config,
     [
@@ -4036,6 +4037,7 @@ export const requestShotRecommendation = async (
       'characterContinuity 只包含项目人物的普通身份与衣着基准。人物出镜时必须保持对应 name、baseName、formLabel、variantOf、transformationType、gender、race、appearance 和身份 anchor。没有剧情明确形态转换时不得改变性别、物种或身体结构；如果全文明确发生转换，必须在对应镜头使用具体“谁·什么形态”的 name，并只使用该形态的资料，不把原始形态与转化形态合并。outfit 是没有剧情变化时继承的穿着基准；当前原文明示换装或已确认进入状态不同时，由你按真实时间顺序保持该变化，不强行恢复资料中的旧衣着。不要求把字段名写进 JSON，也不要把整份身份资料复写为每镜画面。',
       'action 写本镜实际可见的连续事件与双方回应，把心理说明转成可见证据。小说只写连续交战、连击或复杂动作时，在同一次交战和原结果内补足必要步法、攻击落点、接挡方式、受力与下一招承接；不是每镜只允许一次挥舞，也不凭空新增能力、伤情、胜负或对白。先安排剧情与完整发话再决定容纳它们的镜长，不反过来按AI自定镜长压缩原话，也不按固定动作阶段数、字数或每秒额度裁剪完整剧情与对白。已有准确可拍的动作描述可以沿用，不必为了词面变化改写。',
       nsfwDetailRule,
+      nsfwVideoActionRule,
       '涉及走跑、起跳、转身、攻击、格挡、推拉或负重时，按剧情实际写出时长容得下的支撑脚与地面反力、重心转移、髋和躯干带动肩臂或腿、接触阻力与即时反馈、随动卸力和恢复平衡，避免滑步、漂浮、瞬间换姿势和僵硬肢体。',
       AUDIO_PROMPT_RULE,
       DIALOGUE_DELIVERY_RULE,
@@ -4127,6 +4129,7 @@ export const requestShotRecommendation = async (
           'characterContinuity 和 planningCreativeDirection 继续约束身份、外貌、导演风格与摄影光影，不得在修复中遗失。',
           ...(activeParams.sequenceSegmentContext ? ['sequenceSegmentContext只分配当前段的事件阶段、对白与衔接；不得借审核重演前段或引入后段。当contentOverridden=true时，当前segment.content是用户修改后的正文，以明确修改为准，不用旧semanticSource恢复已删改的台词或动作。'] : []),
           nsfwDetailRule,
+          nsfwVideoActionRule,
           AUDIO_PROMPT_RULE,
           DIALOGUE_DELIVERY_RULE,
           VIDEO_LOCAL_TIME_RULE,
@@ -4252,6 +4255,7 @@ export const requestShotRecommendation = async (
           '修复时继续遵守 characterContinuity 中的性别、物种与外观事实，不得省略后产生相反性别或雌雄设定。',
           '保留原文已成立的可见动作与表演，已完成状态只继承、不重新执行；按完整剧情自然安排节奏和必要修复，不为满足固定动作阶段数或字数额度删剧情、删对白，人体动作保持支撑、重心与接触反馈合理。',
           nsfwDetailRule,
+          nsfwVideoActionRule,
           AUDIO_PROMPT_RULE,
           DIALOGUE_DELIVERY_RULE,
           VIDEO_LOCAL_TIME_RULE,

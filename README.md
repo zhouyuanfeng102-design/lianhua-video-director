@@ -4,13 +4,13 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的 Windows 桌面工作台。
 
-当前版本：**2.1.4** · 2026-10-13 · Windows 64 位 · 便携运行
+当前版本：**2.1.6** · 2026-10-14 · Windows 64 位 · 便携运行
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows 便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-2.1.4.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-2.1.6.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
 1. 下载上面的 EXE，放在可写入的文件夹里，双击运行，无需安装 Node.js。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
@@ -103,6 +103,10 @@
 2.1.3 修复 RunningHub V3 应用 `2079381758411587586` 的参考图与画面比例：新导入绑定真实图片槽及尺寸字段，兼容已保存配置漏图槽；未选槽按官方 `None` 提交，避免示例图参与。指定比例及零引用文生图同步打开真实比例开关，有引用且使用工作流默认尺寸时保留原开关。其他应用沿用已有协议。本次针对性模拟请求检查、打包类型检查与生产构建已通过，便携包已生成，交付附 SHA-256 清单；未发送真实付费生成，详见[本版更新说明](docs/releases/发布说明-2.1.3.md)。
 
 2.1.4 修复 ComfyUI 本机与局域网访问许可：开关与提示按实际保存值同步，启动时缺少或迟到的状态读取不再覆盖刚保存的许可；图片与视频设置共用同一许可状态。本次 7 组专项界面验证、打包类型检查与生产构建已通过，便携包已生成，交付附 SHA-256 清单；未发送实际模型请求，详见[本版更新说明](docs/releases/发布说明-2.1.4.md)。
+
+2.1.5 修复私密生图从资产库手工选参考图：普通可用图片无需预先绑定人物即可显示和选择，已有私密图继续按当前人物与部位匹配；选中的普通图保留在当前通道，源图标签与人物关联保持原值，并更新界面中的参考范围说明。本次专项界面检查、源码集成检查及打包检查已通过，便携包已生成，交付附 SHA-256 清单；未发送实际模型请求，详见[本版更新说明](docs/releases/发布说明-2.1.5.md)。
+
+2.1.6 细化 NSFW 动作视频的声音提示词：按动作阶段、人物反应和身体/衣料/床褥等材质选择自然声源，避免把私密动作误写成打斗、撞墙或重击声；声音无依据时不强行添加。中文转换、保真修复、英文翻译、H3 和 Seedance 链路共用同一规则，并通过专项测试，详见[本版更新说明](docs/releases/发布说明-2.1.6.md)。
 
 ## 从源码运行
 

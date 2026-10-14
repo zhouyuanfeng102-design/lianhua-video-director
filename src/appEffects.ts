@@ -34,6 +34,9 @@ import {
   MOSE_JIANGHU_NSFW_ANATOMICAL_DETAIL_RULES,
   MOSE_JIANGHU_NSFW_DETAIL_RULES,
   MOSE_JIANGHU_NSFW_PROMPT_RULE,
+  MOSE_JIANGHU_NSFW_VIDEO_ACTION_PRESERVATION_RULE,
+  MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE,
+  MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE,
   MOSE_JIANGHU_NSFW_WRITING_RULES,
 } from './nsfwPromptRules';
 import { hasNsfwDetailSignal } from './promptConstraints';
@@ -381,12 +384,18 @@ export const convertStoryboardDraftToFinal = async (
     || input.draft.sourceStoryContent
     || ''
   );
-  const nsfwDetailRule = hasNsfwDetailSignal(
+  const hasNsfwVideoActionSignal = hasNsfwDetailSignal(
     sourceStoryContent,
     input.draft.extraRequirement,
     draftPrompt,
     ...input.draft.shots.map((shot) => shot.action),
-  ) ? MOSE_JIANGHU_NSFW_DETAIL_RULES : '';
+  );
+  const nsfwDetailRule = hasNsfwVideoActionSignal ? MOSE_JIANGHU_NSFW_DETAIL_RULES : '';
+  const nsfwVideoActionRule = hasNsfwVideoActionSignal
+    ? refreshConfirmedPrompt
+      ? MOSE_JIANGHU_NSFW_VIDEO_ACTION_PRESERVATION_RULE
+      : MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE
+    : '';
   // Preserve authored source and plan data. Alias resolution, speaker
   // attribution and identity continuity belong to the model reading the full
   // story, not to a local whitelist or quotation/beat extraction heuristic.
@@ -531,7 +540,9 @@ export const convertStoryboardDraftToFinal = async (
     ...(input.sequenceHandoff ? [VIDEO_SEQUENCE_TEXT_HANDOFF_RULE] : []),
     VIDEO_CONVERSION_FORMAT_RULE, VIDEO_CONVERSION_EXAMPLE, VIDEO_CONTINUOUS_CONVERSION_EXAMPLE, AUDIO_PROMPT_RULE, DIALOGUE_DELIVERY_RULE, DIALOGUE_LANGUAGE_RULE,
     MOSE_JIANGHU_NSFW_DETAIL_RULES, MOSE_JIANGHU_NSFW_PROMPT_RULE,
-    MOSE_JIANGHU_NSFW_WRITING_RULES, MOSE_JIANGHU_NSFW_ANATOMICAL_DETAIL_RULES];
+    MOSE_JIANGHU_NSFW_WRITING_RULES, MOSE_JIANGHU_NSFW_ANATOMICAL_DETAIL_RULES,
+    MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, MOSE_JIANGHU_NSFW_VIDEO_ACTION_PRESERVATION_RULE,
+    MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE];
   const converterRules = [...new Set([
     input.ruleSet?.baseRules, input.ruleSet?.continuityRules, input.ruleSet?.outputRules,
     input.converter.systemPrompt, input.converter.outputRules,
@@ -547,6 +558,7 @@ export const convertStoryboardDraftToFinal = async (
     audioContractRule, VIDEO_LOCAL_TIME_RULE, VIDEO_CONVERSION_FORMAT_RULE,
     VIDEO_DIALOGUE_STAGING_RULE, VIDEO_SPATIAL_CONTINUITY_RULE,
     VIDEO_STAGING_TRANSCRIPTION_RULE, VIDEO_PROMPT_FOCUS_RULE, VIDEO_WARDROBE_SCOPE_RULE,
+    nsfwVideoActionRule,
     ...(input.sequenceHandoff ? [VIDEO_SEQUENCE_TEXT_HANDOFF_RULE] : []),
     '源头分镜是本次摄影与排程的唯一决策依据：保持给定镜数、时间边界、景别、机位、运镜、观察对象及注意交接，不重新规划全片，不因导演风格或运镜选择为空另选摄影。先阅读 sourceStoryContent 全文，再由你自行识别人物本名、别名、代词指向、画面主体、画外说话人及完整对白。plannedSubject 是先前计划，不是允许名单；若名称或代词与原剧情不符，由你依据全文澄清身份，不借身份澄清改换镜头，不能因名称不在项目人物表中拒绝结果。',
     'characterIdentityFacts 和 globalContinuityFacts 是项目已保存的性别、物种、外观等资料，audioLedgerFacts 是已保存的声源、台词、时刻及声音备注，需结合全文理解并保持一致；资料缺失不能靠固定人类模板补写，未知声线不凭名字或画面前后顺序推断，画外说话人无需改成画面主体。',

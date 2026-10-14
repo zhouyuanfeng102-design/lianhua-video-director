@@ -15,6 +15,8 @@ import { H3IdentityMetadataError } from './h3DeliverySchema';
 import type { H3IdentityBindings } from './types';
 import { VIDEO_ACTING_CAMERA_TRANSLATION_RULE } from './videoActingCameraRules';
 import { VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE, withVideoActionChoreographyScope } from './videoActionChoreographyRules';
+import { MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE } from './nsfwPromptRules';
+import { hasNsfwDetailSignal } from './promptConstraints';
 
 export interface TranslateVideoPromptToEnglishOptions {
   /** Target-specific format scope; historical callers retain the H3/ordinary contract. */
@@ -222,6 +224,7 @@ export const translateVideoPromptToEnglish = async ({
 
   const sourceIsH3 = Boolean(readH3PromptProtocol(sourcePrompt))
     || (acceptAiAuthoredContent && /^(?:subject_definitions|integrated_multimodal_description):/mu.test(sourcePrompt));
+  const sourceHasNsfwVideoAction = hasNsfwDetailSignal(sourcePrompt, stagingContext ? JSON.stringify(stagingContext) : '');
   let serializationRepairs = 0;
   const checkedRequest = async (system: string, user: string, includesStagingContext = false, withIdentityEnvelope = false, serializationRepair = false): Promise<string> => {
     assertCurrent();
@@ -251,6 +254,9 @@ export const translateVideoPromptToEnglish = async ({
       if (sourceIsH3) {
         const languageRule = h3DescriptionLanguageRule('英文');
         if (!scopedSystem.includes(languageRule)) scopedSystem += `\n\n${languageRule}`;
+      }
+      if (sourceHasNsfwVideoAction && !scopedSystem.includes(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE)) {
+        scopedSystem += `\n\n${MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE}`;
       }
       if (promptFormat === 'seedance') {
         scopedSystem = scopedSystem.split(H3_DIALOGUE_FORMAT_RULE).join('')

@@ -3,6 +3,8 @@ import { getH3IdentityBindingIssues, h3IdentityBindingRetentionIssue, H3_IDENTIT
 import { CHARACTER_PARTICIPATION_RULE, characterParticipationCoverageIssues, characterParticipationIssues } from './characterParticipation';
 import type { H3IdentityBindings, PromptCharacterParticipation } from './types';
 import { VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE } from './videoActionChoreographyRules';
+import { MOSE_JIANGHU_NSFW_VIDEO_ACTION_PRESERVATION_RULE } from './nsfwPromptRules';
+import { hasNsfwDetailSignal } from './promptConstraints';
 
 /** Final H3 uses one clock: seconds since this submitted clip began. */
 export const H3_CLIP_TIME_RULE = [
@@ -307,6 +309,12 @@ export const repairH3PromptProtocolWithAi = async ({
   const requiredProtocol = baselineProtocol ? withAdditionalReferenceTags(baselineProtocol, selectedReferenceTags) : undefined;
   const maxAttempts = Number.isFinite(remainingAttempts) ? Math.max(0, Math.min(3, Math.floor(remainingAttempts))) : 3;
   if (maxAttempts === 0) throw new Error(`本轮3次自动修复预算已用完，H3格式仍有错误（${language}阶段）：${issue}本次新结果未保存，原有结果保持不变。`);
+  const sourceHasNsfwVideoAction = hasNsfwDetailSignal(
+    formatReferencePrompt,
+    candidatePrompt,
+    sourceContext?.sourcePrompt,
+    sourceContext?.sourceStoryContent,
+  );
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     const system = [
       `你是MiniMax H3最终交付格式的AI修复器。这是第${attempt}/${maxAttempts}次AI修复。上一轮AI复核返回的${language}正文没有保留H3协议结构；本次请亲自修复，返回完整${language}H3提示词。`,
@@ -320,6 +328,7 @@ export const repairH3PromptProtocolWithAi = async ({
       H3_CLIP_TIME_RULE,
       H3_FINAL_BODY_FORMAT_RULE,
       VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE,
+      sourceHasNsfwVideoAction ? MOSE_JIANGHU_NSFW_VIDEO_ACTION_PRESERVATION_RULE : '',
       h3DescriptionLanguageRule(language),
       language === '英文' ? AUDIO_TRANSLATION_SCOPE_RULE : AUDIO_EXISTING_SCOPE_RULE,
       '本次仅修复协议序列化与本次格式转换造成的遗漏。对白以sourceContext的当前段原稿/已确认sourcePrompt为准，不能把具体原话压成“催促声/交谈声”等声音概述，也不能将未定台词交给视频模型自由编词；不利用旧格式基准恢复已在AI复核中去掉的配乐。源稿的无对白区间、原有非语言声与非说话动作按原范围保留；明确要求的不可辨人声仅在不与无对白要求冲突的区间保留，不把视觉姓名/资料/参考职责变成发声内容，不新增剧情、声源或台词。',
