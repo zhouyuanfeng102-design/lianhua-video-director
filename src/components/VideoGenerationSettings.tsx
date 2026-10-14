@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ChangeEvent } from 'react';
-import { Copy, Film, FolderOpen, Save, Settings2, Trash2, Upload, X } from 'lucide-react';
+import { Copy, Film, FolderOpen, RefreshCw, Save, Settings2, Trash2, Upload, X } from 'lucide-react';
 import { formatUserFacingError } from '../userFacingError';
 import { importComfyVideoWorkflow } from '../comfyuiVideo';
 import { assertNoEmbeddedVideoCredentials, defaultRunningHubVideoApi, videoApiSubmitEndpoint } from '../videoGenerationApi';
@@ -8,6 +8,8 @@ import { RunningHubVideoSettings } from './RunningHubVideoSettings';
 import { RhTvBridgeSettings } from './RhTvBridgeSettings';
 import { defaultRhTvApi } from '../rhtvBridge';
 import { defaultRunningHubVideoConfig } from '../runningHubVideo';
+import { fetchGenericVideoModels, genericVideoApiBaseUrl, genericVideoApiEndpoints } from '../genericVideoApi';
+import { discoverGenericVideoApi } from '../videoApiDiscovery';
 import type { VideoGenerationSource } from '../videoGenerationTypes';
 import { isVideoWorkflowReady, uniqueVideoWorkflowName } from '../videoWorkflowLibrary';
 import type { AppSettings, VideoTaskApiConfig } from '../types';
@@ -42,19 +44,38 @@ export function VideoGenerationSettings({ settings, onChange, getCurrentSettings
   const [templateError, setTemplateError] = useState('');
   const [profileName, setProfileName] = useState('');
   const [importing, setImporting] = useState(false);
+  const [loadingModels, setLoadingModels] = useState(false);
+  const [autoFilling, setAutoFilling] = useState(false);
+  const [modelList, setModelList] = useState<{ connection: string; models: string[] } | null>(null);
   const [pathMode, setPathMode] = useState<'standard' | 'custom'>(settings.comfyuiVideo?.promptPath && settings.comfyuiVideo.promptPath !== '/prompt' ? 'custom' : 'standard');
   const inputRef = useRef<HTMLInputElement>(null);
   const advancedDialogRef = useRef<HTMLElement>(null);
   const mounted = useRef(true);
   const importEpoch = useRef(0);
+  const modelEpoch = useRef(0);
+  const modelAbort = useRef<AbortController | null>(null);
+  const panelRef = useRef(panel); panelRef.current = panel;
   const latest = useRef({ settings, onChange, getCurrentSettings }); latest.current = { settings, onChange, getCurrentSettings };
   const currentSettings = () => latest.current.getCurrentSettings?.() || latest.current.settings;
   const update = (make: (current: AppSettings) => Partial<AppSettings>) => {
     const current = currentSettings(); const patch = make(current);
     latest.current.settings = { ...current, ...patch }; latest.current.onChange(patch);
   };
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; importEpoch.current += 1; }; }, []);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; importEpoch.current += 1; modelEpoch.current += 1; modelAbort.current?.abort(); }; }, []);
   const api = settings.videoTaskApi;
+  const generic = !api.provider || api.provider === 'generic';
+  const apiAddress = genericVideoApiBaseUrl(api);
+  const apiEndpoints = genericVideoApiEndpoints(api);
+  const modelConnection = (current: AppSettings) => JSON.stringify([current.activeVideoApiProfileId || null, current.videoTaskApi.provider || 'generic',
+    current.videoTaskApi.baseUrl || '', current.videoTaskApi.endpoint, current.videoTaskApi.apiKey,
+    current.videoTaskApi.authHeader || '', current.videoTaskApi.authScheme || '', Boolean(allowPrivateNetwork)]);
+  const connection = modelConnection(settings);
+  const models = modelList?.connection === connection ? modelList.models : [];
+  useEffect(() => {
+    modelEpoch.current += 1; modelAbort.current?.abort(); modelAbort.current = null;
+    setLoadingModels(false); setAutoFilling(false);
+    setModelList((current) => panel === 'api' && current?.connection === connection ? current : null);
+  }, [connection, panel]);
   const profiles = settings.videoApiProfiles || [];
   const comfy = settings.comfyuiVideo || defaultComfyVideoConfig;
   const workflowReadiness = useMemo(() => new Map(comfy.workflows.map((workflow) => [workflow.id, isVideoWorkflowReady(workflow)])), [comfy.workflows]);
@@ -65,8 +86,50 @@ export function VideoGenerationSettings({ settings, onChange, getCurrentSettings
   useEffect(() => { if (comfy.promptPath && comfy.promptPath !== '/prompt') setPathMode('custom'); }, [comfy.promptPath]);
   const patchApi = (patch: Partial<VideoTaskApiConfig>) => update((current) => {
     const next = { ...current.videoTaskApi, ...patch };
+    if (!Object.prototype.hasOwnProperty.call(patch, 'parameterCapabilities')
+      && (['provider', 'baseUrl', 'endpoint', 'statusEndpointTemplate', 'apiKey', 'authHeader', 'authScheme'] as const)
+        .some((key) => Object.prototype.hasOwnProperty.call(patch, key) && patch[key] !== current.videoTaskApi[key])) delete next.parameterCapabilities;
     return { videoTaskApi: next, videoApiProfiles: (current.videoApiProfiles || []).map((profile) => profile.id === current.activeVideoApiProfileId ? { ...profile, ...next, updatedAt: Date.now() } : profile) };
   });
+  const fetchModels = async (autoFill = false) => {
+    const current = currentSettings(); const requestConnection = modelConnection(current);
+    if (current.videoTaskApi.provider && current.videoTaskApi.provider !== 'generic') { setError('当前接口协议已改变，请切回通用视频 API 后获取模型。'); return; }
+    const config = structuredClone(current.videoTaskApi);
+    // A chosen model may change while discovery runs. Connection/template edits
+    // must invalidate an automatic result rather than overwrite the newer edit.
+    const autoBaseline = JSON.stringify({ ...config, model: undefined });
+    const epoch = ++modelEpoch.current; const controller = new AbortController();
+    modelAbort.current?.abort(); modelAbort.current = controller;
+    setLoadingModels(true); setAutoFilling(autoFill); setMessage(''); setError('');
+    const isCurrent = () => mounted.current && epoch === modelEpoch.current && panelRef.current === 'api'
+      && requestConnection === modelConnection(currentSettings())
+      && (!autoFill || autoBaseline === JSON.stringify({ ...currentSettings().videoTaskApi, model: undefined }));
+    try {
+      if (autoFill) {
+        const result = await discoverGenericVideoApi(config, { signal: controller.signal, allowPrivateNetwork });
+        if (!isCurrent()) return;
+        const patch = { ...result.patch };
+        // Discovery supplies protocol fields; the user's address, credentials
+        // and current model remain authoritative, including edits made in flight.
+        delete patch.baseUrl; delete patch.apiKey; delete patch.model;
+        patchApi(patch);
+        setModelList({ connection: modelConnection(currentSettings()), models: result.models });
+        setMessage([result.message, ...result.warnings.filter((warning) => !result.message.includes(warning))].filter(Boolean).join(' '));
+        return;
+      }
+      const fetched = await fetchGenericVideoModels(config, { signal: controller.signal, allowPrivateNetwork });
+      if (!isCurrent()) return;
+      setModelList({ connection: requestConnection, models: fetched });
+      setMessage(fetched.length ? `已获取 ${fetched.length} 个模型，可选择列表中的模型或手动填写。` : '接口未返回模型列表，可以手动填写模型 ID。');
+    } catch (cause) {
+      if (isCurrent() && !controller.signal.aborted) {
+        const detail = formatUserFacingError(cause, autoFill ? '自动获取并补齐失败，请检查 API 地址与密钥。' : '获取模型列表失败，请检查 API 地址与密钥。');
+        setError(autoFill ? `${detail} 现有配置未改变。` : detail);
+      }
+    } finally {
+      if (mounted.current && epoch === modelEpoch.current) { modelAbort.current = null; setLoadingModels(false); setAutoFilling(false); }
+    }
+  };
   const patchComfy = (patch: Partial<ComfyVideoConfig>) => update((current) => ({ comfyuiVideo: { ...(current.comfyuiVideo || defaultComfyVideoConfig), ...patch } }));
   const selectProfile = (id: string) => update((current) => {
     const profile = current.videoApiProfiles?.find((item) => item.id === id);
@@ -100,7 +163,7 @@ export function VideoGenerationSettings({ settings, onChange, getCurrentSettings
       const now = Date.now();
       const profiles = [...(current.videoApiProfiles || [])];
       if (!profiles.some((item) => item.id === current.activeVideoApiProfileId)
-        && (current.videoTaskApi.endpoint.trim() || current.videoTaskApi.apiKey.trim())) {
+        && (current.videoTaskApi.baseUrl?.trim() || current.videoTaskApi.endpoint.trim() || current.videoTaskApi.apiKey.trim())) {
         profiles.push({ ...structuredClone(current.videoTaskApi), id: idFor('video-api'), name: profileName.trim() || '原视频接口', createdAt: now, updatedAt: now });
       }
       const entry: VideoApiProfile = { ...defaultRhTvApi, id: idFor('video-api'), name: 'rhTV H3 网页', createdAt: now, updatedAt: now };
@@ -172,13 +235,21 @@ export function VideoGenerationSettings({ settings, onChange, getCurrentSettings
         <label className="field"><span>连接名称</span><input aria-label="视频连接名称" value={profileName} placeholder="给这组连接起个名字" onChange={(event) => setProfileName(event.target.value)} /></label>
         <div className="vgs-actions"><button type="button" className="btn small" onClick={() => saveProfile(false)}><Save size={13} />保存连接</button><button type="button" className="btn small" onClick={() => saveProfile(true)}><Copy size={13} />另存为新接口</button><button type="button" className="btn small ghost" disabled={!selectedProfile} onClick={deleteProfile}><Trash2 size={13} />删除</button></div>
       </div></section>
-      <section className="vgs-card"><div className="vgs-card-title"><h3>连接与认证</h3><label className="check-row video-settings-enable-row"><input type="checkbox" checked={api.enabled} onChange={(event) => patchApi({ enabled: event.target.checked })} />启用视频 API</label></div>
-        <div className="vgs-fields vgs-fields-three"><label className="field"><span>接口协议</span><select aria-label="视频接口协议" value={api.provider || 'generic'} onChange={(event) => { const provider = event.target.value as VideoTaskApiConfig['provider']; if (provider === 'runninghub') applyRunningHubPreset(); else if (provider === 'rhtv_web') addRhTvProfile(); else patchApi(api.provider === 'rhtv_web' ? { provider, endpoint: '', statusEndpointTemplate: '', imageUploadEndpoint: '', cancelEndpointTemplate: '' } : { provider }); }}><option value="generic">通用视频 API</option><option value="minimax">MiniMax 官方视频 API</option><option value="runninghub">RunningHub AI 应用</option><option value="rhtv_web">rhTV 网页桥接（本机）</option></select></label>{api.provider !== 'rhtv_web' && <>{apiField('model', api.provider === 'runninghub' ? '显示名称（可选）' : '视频模型 ID', '填写接口支持的模型 ID')}{apiField('apiKey', 'API 密钥', '密钥仅保存在连接中', true)}
-        {api.provider === 'runninghub' ? <>{apiField('runningHubAppId', 'RunningHub AI 应用 ID', '复制应用 API 示例中的应用 ID')}<label className="field"><span>实际提交端点</span><input aria-label="实际提交端点" readOnly value={videoApiSubmitEndpoint(api) || '请先填写应用 ID'} /></label></> : apiField('endpoint', '提交端点', 'https://…/videos')}{apiField('statusEndpointTemplate', '任务查询端点', 'https://…/videos/{id}')}</>}</div>
+      <section className="vgs-card"><div className="vgs-card-title"><h3>接口连接</h3><label className="check-row video-settings-enable-row"><input type="checkbox" checked={api.enabled} onChange={(event) => patchApi({ enabled: event.target.checked })} />启用视频 API</label></div>
+        <div className="vgs-fields vgs-fields-three"><label className="field"><span>接口协议</span><select aria-label="视频接口协议" value={api.provider || 'generic'} onChange={(event) => { const provider = event.target.value as VideoTaskApiConfig['provider']; if (provider === 'runninghub') applyRunningHubPreset(); else if (provider === 'rhtv_web') addRhTvProfile(); else patchApi(api.provider === 'rhtv_web' ? { provider, baseUrl: '', endpoint: '', statusEndpointTemplate: '', imageUploadEndpoint: '', cancelEndpointTemplate: '' } : { provider }); }}><option value="generic">通用视频 API</option><option value="minimax">MiniMax 官方视频 API</option><option value="runninghub">RunningHub AI 应用</option><option value="rhtv_web">rhTV 网页桥接（本机）</option></select></label>
+        {generic ? <><label className="field"><span>API 地址</span><input aria-label="视频 API 地址" value={apiAddress} placeholder="例如 https://api.example.com" onChange={(event) => patchApi({ baseUrl: event.target.value })} /></label>{apiField('apiKey', 'API 密钥', '密钥仅保存在连接中', true)}</>
+          : api.provider !== 'rhtv_web' && <>{apiField('model', api.provider === 'runninghub' ? '显示名称（可选）' : '视频模型 ID', '填写接口支持的模型 ID')}{apiField('apiKey', 'API 密钥', '密钥仅保存在连接中', true)}
+            {api.provider === 'runninghub' ? <>{apiField('runningHubAppId', 'RunningHub AI 应用 ID', '复制应用 API 示例中的应用 ID')}<label className="field"><span>实际提交端点</span><input aria-label="实际提交端点" readOnly value={videoApiSubmitEndpoint(api) || '请先填写应用 ID'} /></label></> : apiField('endpoint', '提交端点', 'https://…/videos')}{apiField('statusEndpointTemplate', '任务查询端点', 'https://…/videos/{id}')}</>}</div>
+        {generic && <div className="vgs-provider-note"><span>{api.endpoint.trim() || api.statusEndpointTemplate.trim() ? '已保留自定义任务端点。' : '填写 API 地址可自动生成标准任务端点。'} 自动补齐会获取模型，并按接口说明更新端点、认证与结果映射等高级配置。</span><button type="button" className="btn small ghost" disabled={loadingModels || !apiAddress.trim()} onClick={() => { void fetchModels(true); }}><RefreshCw size={13} />{autoFilling ? '正在补齐…' : '自动获取并补齐'}</button></div>}
         {api.provider === 'rhtv_web' ? <RhTvBridgeSettings config={api} onChange={patchApi} /> : <div className="vgs-connection-footer">{permission}<button type="button" className="btn small" onClick={openAdvanced}><Settings2 size={14} />高级协议与请求模板</button></div>}
         {api.provider === 'minimax' && <div className="vgs-provider-note"><span>官方接口使用首尾帧，请核对模型与连接。</span><button type="button" className="btn small ghost" onClick={() => patchApi({ endpoint: 'https://api.minimaxi.com/v1/video_generation', statusEndpointTemplate: 'https://api.minimaxi.com/v1/query/video_generation?task_id={id}', taskIdPath: 'task_id', statusPath: 'status', fileIdPath: 'file_id', fileEndpointTemplate: 'https://api.minimaxi.com/v1/files/retrieve?file_id={id}', fileUrlPath: 'file.download_url', authHeader: 'Authorization', authScheme: 'Bearer' })}>填入 MiniMax 国内官方端点</button></div>}
         {api.provider === 'runninghub' && <div className="vgs-provider-note"><span>应用 ID、节点映射以该应用 API 示例为准，在高级设置填写 nodeInfoList。</span><button type="button" className="btn small ghost" onClick={applyRunningHubPreset}>恢复 RunningHub 预设</button></div>}
       </section>
+      {generic && <section className="vgs-card vgs-model-card"><div className="vgs-card-title"><h3>模型</h3><span>可从完整列表选择，也可手动填写</span></div>
+        <label className="field"><span>视频模型 ID</span><div className="vgs-model-control"><input aria-label="视频模型 ID" value={api.model || ''} placeholder="可手动输入或获取列表" onChange={(event) => patchApi({ model: event.target.value })} />
+          <select aria-label="选择视频模型" value={models.includes(api.model || '') ? api.model : ''} disabled={!models.length || loadingModels} onChange={(event) => { const current = currentSettings(); if (modelList?.connection !== modelConnection(current)) { setError('API 配置已改变，请重新获取模型列表。'); return; } if (modelList.models.includes(event.target.value)) patchApi({ model: event.target.value }); }}><option value="" disabled>{models.length ? `选择模型（${models.length}）` : '请先获取模型'}</option>{models.map((model) => <option key={model} value={model}>{model}</option>)}</select>
+          <button type="button" className="btn small" disabled={loadingModels || !apiAddress.trim()} onClick={() => { void fetchModels(); }}><RefreshCw size={13} />{loadingModels && !autoFilling ? '获取中' : '获取模型'}</button></div></label>
+      </section>}
     </div> : <div className="vgs-main comfyui-video-settings-form">
       <section className="vgs-card"><div className="vgs-card-title"><h3>ComfyUI 连接</h3><label className="check-row video-settings-enable-row"><input type="checkbox" checked={comfy.enabled} onChange={(event) => patchComfy({ enabled: event.target.checked })} />启用 ComfyUI 视频</label></div>
         <div className="vgs-fields"><label className="field"><span>ComfyUI 视频地址</span><input aria-label="ComfyUI 视频地址" value={comfy.baseUrl} placeholder="http://127.0.0.1:8188" onChange={(event) => patchComfy({ baseUrl: event.target.value })} /></label><label className="field"><span>认证密钥（本地通常留空）</span><input aria-label="ComfyUI 视频认证密钥" type="password" value={comfy.apiKey} onChange={(event) => patchComfy({ apiKey: event.target.value })} /></label>
@@ -199,7 +270,12 @@ export function VideoGenerationSettings({ settings, onChange, getCurrentSettings
       <header><div><h2>视频 API 高级设置</h2><p>当前连接：{selectedProfile?.name || api.model || '通用视频接口'}。只修改配置，不发送生成请求。</p></div><button type="button" className="btn small" onClick={closeAdvanced}><X size={14} />关闭</button></header>
       <div className="vgs-dialog-tabs" role="tablist" aria-label="视频 API 高级设置分类">{([['request', '请求模板'], ['response', '认证与结果映射'], ['media', '图片上传与取消']] as const).map(([value, label]) => <button type="button" className={`btn small ${advancedTab === value ? 'primary' : ''}`} role="tab" aria-selected={advancedTab === value} key={value} onClick={() => setAdvancedTab(value)}>{label}</button>)}</div>
       <div className="vgs-dialog-content">
-        {advancedTab === 'request' && <div className="vgs-request-editor"><label className="field"><span>请求模板 JSON（留空使用协议默认请求）</span><textarea aria-label="视频请求模板 JSON" spellCheck={false} value={templateText} onChange={(event) => setTemplateText(event.target.value)} placeholder={'{ "prompt": "{{prompt}}", "images": "{{images}}", "parameters": "{{parameters}}" }'} /></label><p>可用：{'{{prompt}}、{{model}}、{{images}}、{{references}}、{{first_image}}、{{last_image}}、{{image_1}}、{{image_2}}、{{parameters}}'}。数组与对象保持原类型，密钥不要写入模板。</p>{api.provider === 'runninghub' && <p>RunningHub 的 nodeInfoList 按应用示例填真实节点 ID，fieldValue 可用 {'{{prompt}}'} 或 {'{{image_1}}'}。</p>}</div>}
+        {advancedTab === 'request' && <div className="vgs-request-editor">
+          {generic && <div className="vgs-endpoint-settings"><div className="vgs-card-title"><h3>任务端点</h3><button type="button" className="btn small" onClick={() => { patchApi({ baseUrl: genericVideoApiBaseUrl(currentSettings().videoTaskApi), endpoint: '', statusEndpointTemplate: '' }); setMessage('已切回自动任务端点，请求模板保持原设置。'); setError(''); }}>使用地址自动生成端点</button></div>
+            <div className="vgs-fields">{apiField('endpoint', '提交端点', '留空由 API 地址自动生成')}{apiField('statusEndpointTemplate', '任务查询端点', '留空由 API 地址自动生成')}</div>
+            <p className="vgs-endpoint-summary">当前提交：<code>{apiEndpoints.submit || '请先填写 API 地址'}</code><br />当前查询：<code>{apiEndpoints.status || '请先填写 API 地址'}</code></p>
+          </div>}
+          <label className="field"><span>请求模板 JSON（留空使用协议默认请求）</span><textarea aria-label="视频请求模板 JSON" spellCheck={false} value={templateText} onChange={(event) => setTemplateText(event.target.value)} placeholder={'{ "prompt": "{{prompt}}", "images": "{{images}}", "parameters": "{{parameters}}" }'} /></label><p>可用：{'{{prompt}}、{{model}}、{{images}}、{{references}}、{{first_image}}、{{last_image}}、{{image_1}}、{{image_2}}、{{parameters}}'}。数组与对象保持原类型，密钥不要写入模板。</p>{api.provider === 'runninghub' && <p>RunningHub 的 nodeInfoList 按应用示例填真实节点 ID，fieldValue 可用 {'{{prompt}}'} 或 {'{{image_1}}'}。</p>}</div>}
         {advancedTab === 'response' && <div className="vgs-fields vgs-fields-three">{apiField('authHeader', '认证头名称', 'Authorization')}{apiField('authScheme', '认证前缀', 'Bearer')}{apiField('taskIdPath', '任务 ID 字段路径', 'id')}{apiField('statusPath', '任务状态字段路径', 'status')}{apiField('resultUrlPath', '视频下载 URL 字段路径', 'result.url')}{apiField('progressPath', '进度字段路径', 'progress')}{apiField('errorPath', '服务端错误字段路径', 'error.message')}{apiField('fileIdPath', '文件 ID 字段路径', 'file_id')}{apiField('fileEndpointTemplate', '根据文件 ID 取下载 URL', 'https://…/files/{id}')}{apiField('fileUrlPath', '文件下载 URL 字段路径', 'file.download_url')}</div>}
         {advancedTab === 'media' && <div className="vgs-media-editor"><div className="vgs-fields">{apiField('imageUploadEndpoint', '参考图片上传端点（可选）', '不填使用图片 data URL')}{apiField('imageUploadField', '上传表单字段', 'file')}{apiField('imageUploadUrlPath', '上传响应图片 URL 字段', 'url')}{apiField('cancelEndpointTemplate', '取消本任务端点（可选）', 'https://…/videos/{id}/cancel')}<label className="field"><span>取消请求方法</span><select aria-label="取消请求方法" value={api.cancelMethod || 'POST'} onChange={(event) => patchApi({ cancelMethod: event.target.value as 'POST' | 'DELETE' })}><option value="POST">POST</option><option value="DELETE">DELETE</option></select></label></div><p>没有取消接口时只停止本地追踪，不保证服务器停止或退款；不会重新提交原任务。</p></div>}
       </div>

@@ -90,6 +90,7 @@ interface Window {
       method?: string;
       headers?: Record<string, string>;
       body?: string;
+      bodyEncoding?: 'utf8' | 'base64';
       multipart?: {
         fields?: Record<string, string> | Array<{ name: string; value: string }>;
         files: Array<{ fieldName?: string; name?: string; fileName: string; dataUrl: string }>;

@@ -2,6 +2,7 @@ import { readH3PromptProtocol } from './h3PromptProtocol';
 import { parseMasterTimelinePrompt } from './masterTimeline';
 import { hasCurrentOfficialH3Prompt } from './officialPrompt';
 import { sourceContentHash } from './sourceIntegrity';
+import { hasCurrentSeedancePrompt } from './seedanceSource';
 import type { Project, SequencePromptHandoffStamp, Storyboard, VideoSegment, VideoSequencePlan } from './types';
 import {
   normalizeSequencePromptHandoffStamp,
@@ -53,6 +54,8 @@ export interface SequencePromptOpeningTiming {
  * the preceding PROMPT, never a claim that a video or frame already exists. */
 export interface SequencePromptHandoffContext {
   version: typeof SEQUENCE_PROMPT_HANDOFF_VERSION;
+  /** Missing on historical H3 evidence; Seedance retains its own provenance. */
+  promptFormat?: 'seedance';
   projectId: string;
   planId: string;
   segmentId: string;
@@ -64,7 +67,7 @@ export interface SequencePromptHandoffContext {
   previousStoryboardId: string;
   previousDurationSec: number;
   previousSegmentContent: string;
-  previousPromptKind: 'official-h3' | 'canonical';
+  previousPromptKind: 'official-h3' | 'canonical' | 'seedance';
   /** Literal read-only provenance, not a new-segment replay instruction. */
   readonly previousFinalPrompt: string;
   /** The complete last shot is context for its terminal state, not a replay. */
@@ -82,6 +85,8 @@ export interface SequencePromptHandoffContext {
   /** Explicit timing semantics, included in the source provenance fingerprint. */
   readonly openingTiming: SequencePromptOpeningTiming;
   previousPromptFingerprint: string;
+  /** Binds Seedance source facts without treating its prose as canonical. */
+  previousTargetSourceFingerprint?: string;
   /** Stable identity for async guards, independent of task/video timestamps. */
   sourceFingerprint: string;
 }
@@ -93,7 +98,12 @@ export interface SequencePromptHandoffBuildResult {
   issue?: string;
 }
 
-type HandoffProject = Pick<Project, 'id' | 'sequencePlans' | 'storyboards'>;
+type HandoffProject = Pick<Project, 'id' | 'sequencePlans' | 'storyboards'> & Partial<Project>;
+
+const currentSeedance = (project: HandoffProject, board: Storyboard): boolean => (
+  ['assets', 'characters', 'locations', 'props', 'scenes'].every((key) => Array.isArray(project[key as keyof Project]))
+  && hasCurrentSeedancePrompt(project as Project, board)
+);
 
 const text = (value: unknown): string => typeof value === 'string' ? value : '';
 // Normalize line endings only. Never remove words, tags or dialogue to make a
@@ -110,6 +120,9 @@ const lastPromptShot = (
   kind: SequencePromptHandoffContext['previousPromptKind'],
   durationSec: number,
 ): SequencePromptHandoffContext['previousLastShot'] => {
+  // Seedance has no mandatory local shot syntax. Its full AI-authored prose
+  // remains authoritative; do not manufacture a final shot from canonical.
+  if (kind === 'seedance') return undefined;
   if (kind === 'canonical') {
     try {
       const shots = parseMasterTimelinePrompt(prompt, durationSec);
@@ -154,6 +167,7 @@ const locateSegment = (
 
 const preparedStamp = (context: SequencePromptHandoffContext): SequencePromptHandoffStamp => ({
   version: SEQUENCE_PROMPT_HANDOFF_VERSION,
+  ...(context.promptFormat === 'seedance' ? { promptFormat: 'seedance' as const } : {}),
   projectId: context.projectId,
   planId: context.planId,
   segmentId: context.segmentId,
@@ -168,6 +182,7 @@ const preparedStamp = (context: SequencePromptHandoffContext): SequencePromptHan
 
 export const buildSequencePromptHandoff = (
   project: HandoffProject, planId: string, segmentId: string,
+  format: 'h3' | 'seedance' = 'h3',
 ): SequencePromptHandoffBuildResult => {
   const { plan, segment, previous, issue } = locateSegment(project, planId, segmentId);
   if (issue || !plan || !segment) return { issue };
@@ -188,7 +203,13 @@ export const buildSequencePromptHandoff = (
   }
   let previousPromptKind: SequencePromptHandoffContext['previousPromptKind'];
   let previousFinalPrompt: string;
-  if (text(board.officialPromptZh).trim()) {
+  if (format === 'seedance') {
+    if (!currentSeedance(project, board)) {
+      return { issue: `第 ${previous.index} 段的中文 Seedance 稿已失效或尚未完整保存，请先更新该段 Seedance 提示词。` };
+    }
+    previousPromptKind = 'seedance';
+    previousFinalPrompt = board.seedance25Output!.promptZh;
+  } else if (text(board.officialPromptZh).trim()) {
     if (!hasCurrentOfficialH3Prompt(board)) {
       return { issue: `第 ${previous.index} 段的中文H3稿已失效或尚未完整保存，请先更新该段提示词。` };
     }
@@ -206,6 +227,7 @@ export const buildSequencePromptHandoff = (
   const previousTailWindow = { startSec: Math.max(0, previous.durationSec - 2), endSec: previous.durationSec };
   const evidence: Omit<SequencePromptHandoffContext, 'sourceFingerprint'> = {
     version: SEQUENCE_PROMPT_HANDOFF_VERSION,
+    ...(format === 'seedance' ? { promptFormat: 'seedance' as const } : {}),
     projectId: project.id,
     planId: plan.id,
     segmentId: segment.id,
@@ -252,6 +274,7 @@ export const buildSequencePromptHandoff = (
       firstShotTimingInstruction: 'previousTailWindow的上段末1–2秒只供读取、理解末端动作，previousLastShot整镜也只作只读证据，不是下段复播时长。仅在既有首镜正文内标清“本段0.00–0.50秒：接续上段末端动作；从0.50秒起：立即推进本段新动作或对白”，首镜剩余时间不得继续重演上段。若动作确需微调，由AI明确实际短重合的结束时刻并同步新内容起点，最晚0.80秒即推进本段；0.80秒是上限，不是默认复播时长，更不是整个首镜。不能复制上段完整末镜、已说完对白或其他旧事件，不新增镜头或At切点，短重合计入既定段长，不把15秒变成15.5秒。原文明确换场或跳时则保留原转场，不虚构连续动作，也不借此回放上段。',
     },
     previousPromptFingerprint: promptHash(previousFinalPrompt),
+    ...(format === 'seedance' ? { previousTargetSourceFingerprint: board.seedance25Output!.sourceFingerprint } : {}),
   };
   const context = { ...evidence, sourceFingerprint: sourceContentHash(JSON.stringify(evidence)) };
   return { context, stamp: preparedStamp(context) };
@@ -260,7 +283,7 @@ export const buildSequencePromptHandoff = (
 /** Only source/result prompt content and fixed segment coordinates count.
  * English translation, saved image results and job progress cannot stale a
  * Chinese handoff. Canonical and reviewed official prose both remain bound. */
-const resultFingerprint = (board: Storyboard): string => sourceContentHash(JSON.stringify({
+const resultFingerprint = (board: Storyboard, format: 'h3' | 'seedance' = 'h3'): string => sourceContentHash(JSON.stringify({
   id: board.id,
   planId: board.sequencePlanId,
   segmentId: board.segmentId,
@@ -268,17 +291,21 @@ const resultFingerprint = (board: Storyboard): string => sourceContentHash(JSON.
   durationSec: board.durationSec,
   finalPrompt: promptText(board.finalPrompt),
   canonicalPrompt: promptText(board.promptPlan?.canonicalPrompt || board.finalPrompt),
-  officialPromptZh: promptText(board.officialPromptZh),
+  ...(format === 'seedance' ? {
+    seedancePromptZh: promptText(board.seedance25Output?.promptZh),
+    seedanceSourceFingerprint: board.seedance25Output?.sourceFingerprint || '',
+  } : { officialPromptZh: promptText(board.officialPromptZh) }),
 }));
 
 export const sealSequencePromptHandoff = (
   board: Storyboard, stamp: SequencePromptHandoffStamp,
 ): SequencePromptHandoffStamp => {
   const sealed = normalizeSequencePromptHandoffStamp({
-    ...stamp, storyboardId: board.id, resultFingerprint: resultFingerprint(board),
+    ...stamp, storyboardId: board.id, resultFingerprint: resultFingerprint(board, stamp.promptFormat || 'h3'),
   });
   if (!sealed || sealed.planId !== board.sequencePlanId || sealed.segmentId !== board.segmentId
-    || sealed.segmentIndex !== board.segmentIndex || !text(board.finalPrompt).trim()) {
+    || sealed.segmentIndex !== board.segmentIndex || !text(board.finalPrompt).trim()
+    || (stamp.promptFormat === 'seedance' && !text(board.seedance25Output?.promptZh).trim())) {
     throw new Error('文本衔接来源与当前分段不一致，不能保存为已对齐。');
   }
   return sealed;
@@ -291,7 +318,10 @@ export const stampSequencePromptHandoff = (
   if (sourceFingerprint !== sourceContentHash(JSON.stringify(evidence))) {
     throw new Error('上段文本衔接资料已变化，本次结果不能标记为已对齐。');
   }
-  return { ...board, sequencePromptHandoff: sealSequencePromptHandoff(board, preparedStamp(context)) };
+  const stamp = sealSequencePromptHandoff(board, preparedStamp(context));
+  return context.promptFormat === 'seedance'
+    ? { ...board, seedance25Output: { ...board.seedance25Output!, sequencePromptHandoff: stamp } }
+    : { ...board, sequencePromptHandoff: stamp };
 };
 
 export interface SequencePromptHandoffStatus {
@@ -303,6 +333,7 @@ export interface SequencePromptHandoffStatus {
 
 export const getSequencePromptHandoffStatus = (
   board: Storyboard, project: HandoffProject,
+  format: 'h3' | 'seedance' = 'h3',
 ): SequencePromptHandoffStatus => {
   if (!board.sequencePlanId && !board.segmentId) return { kind: 'not-sequence', label: '独立提示词' };
   if (!board.sequencePlanId || !board.segmentId) return { kind: 'unavailable', label: '分段关联不完整', issue: '当前提示词缺少完整的分段关联。' };
@@ -313,23 +344,25 @@ export const getSequencePromptHandoffStatus = (
   }
   if (!location.previous) return { kind: 'first', label: '首段，无需上段衔接' };
   const previousSegmentIndex = location.previous.index;
-  if (!board.sequencePromptHandoff) return { kind: 'legacy', label: '尚未按上段末镜对齐', previousSegmentIndex };
-  const stamp = normalizeSequencePromptHandoffStamp(board.sequencePromptHandoff);
-  const build = buildSequencePromptHandoff(project, board.sequencePlanId, board.segmentId);
-  if (!stamp || !build.stamp || stamp.projectId !== project.id || stamp.planId !== board.sequencePlanId || stamp.segmentId !== board.segmentId
+  const rawStamp = format === 'seedance' ? board.seedance25Output?.sequencePromptHandoff : board.sequencePromptHandoff;
+  if (!rawStamp) return { kind: 'legacy', label: '尚未按上段末镜对齐', previousSegmentIndex };
+  const stamp = normalizeSequencePromptHandoffStamp(rawStamp);
+  const build = buildSequencePromptHandoff(project, board.sequencePlanId, board.segmentId, format);
+  if (!stamp || (stamp.promptFormat || 'h3') !== format || (format === 'seedance' && !currentSeedance(project, board))
+    || !build.stamp || stamp.projectId !== project.id || stamp.planId !== board.sequencePlanId || stamp.segmentId !== board.segmentId
     || stamp.segmentIndex !== board.segmentIndex || stamp.storyboardId !== board.id
     || stamp.previousSegmentId !== build.stamp.previousSegmentId
     || stamp.previousSegmentIndex !== build.stamp.previousSegmentIndex
     || stamp.previousStoryboardId !== build.stamp.previousStoryboardId
     || stamp.previousPromptFingerprint !== build.stamp.previousPromptFingerprint
     || stamp.sourceFingerprint !== build.stamp.sourceFingerprint
-    || stamp.resultFingerprint !== resultFingerprint(board)) {
+    || stamp.resultFingerprint !== resultFingerprint(board, format)) {
     return { kind: 'stale', label: '衔接依据或本稿已变化，需重新对齐', previousSegmentIndex,
       issue: build.issue || '保存时的上段末镜、本段剧情、最终提示词或衔接时间合同与当前内容不一致，旧稿不会自动视为已按新规则修复。' };
   }
   return { kind: 'current', label: `已按第 ${previousSegmentIndex} 段末镜完成文本衔接`, previousSegmentIndex };
 };
 
-export const isSequencePromptHandoffCurrent = (board: Storyboard, project: HandoffProject): boolean => (
-  ['not-sequence', 'first', 'current'].includes(getSequencePromptHandoffStatus(board, project).kind)
+export const isSequencePromptHandoffCurrent = (board: Storyboard, project: HandoffProject, format: 'h3' | 'seedance' = 'h3'): boolean => (
+  ['not-sequence', 'first', 'current'].includes(getSequencePromptHandoffStatus(board, project, format).kind)
 );

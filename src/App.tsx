@@ -166,6 +166,7 @@ import { H3PromptDisplay } from "./components/H3PromptDisplay";
 import { matchesVideoSelection, selectVideoAsset, type VideoAssetSelection } from "./videoAssetPreview";
 import { findVideoAssetSourceTask, frozenVideoReferenceAsset, relatedVideoAssets, removeVideoTaskKeepingProvenance } from "./videoProvenance";
 import { inspectVideoBatchDeletion, removeVideoBatchKeepingProvenance } from "./videoBatchDeletion";
+import { applyVideoApiParameterCapabilities } from "./videoApiParameterSettings";
 import { resolveVideoPromptNavigation } from "./videoPromptNavigation";
 import type { VideoBatchContinuationPlan, VideoPromptFormat, VideoPromptSource } from "./videoGenerationTypes";
 import { videoTaskBatchStatus, type VideoTaskBatchStatus } from "./videoTaskBatchStatus";
@@ -316,7 +317,9 @@ import {
   type StoryPreparationMode,
 } from "./services/llm";
 import { canonicalCharacterVariantName, characterVariantDisplayName } from "./characterVariants";
-import { requestSemanticSequencePlan } from "./services/semanticSequencePlanner";
+import { MAX_SEMANTIC_SEQUENCE_REPAIRS, requestSemanticSequencePlan, type SemanticSequencePlannerProgress } from "./services/semanticSequencePlanner";
+import { createSemanticPlanningStatus, recordSemanticPlanningDiagnostic, type SemanticPlanningStatus } from "./semanticSequenceProgress";
+import { SemanticPlanningProgressView } from "./components/SemanticPlanningProgressView";
 import { isSemanticSequencePlan, normalizeSemanticSequenceRequestedTotalDuration, semanticSegmentSourceContext, semanticSequenceSourceFingerprint, semanticSequenceCharacters } from "./semanticSequencePlan";
 import { officialH3ContextForStoryboard } from "./officialH3Context";
 import { buildVideoSceneContext } from "./videoSceneContext";
@@ -1660,6 +1663,7 @@ const Card = ({
   id,
   role,
   "data-planning-mode": planningMode,
+  "data-duration-mode": durationMode,
 }: {
   children: ReactNode;
   className?: string;
@@ -1667,8 +1671,9 @@ const Card = ({
   id?: string;
   role?: AriaRole;
   "data-planning-mode"?: string;
+  "data-duration-mode"?: string;
 }) => (
-  <section id={id} role={role} className={`card ${className}`} style={style} data-planning-mode={planningMode}>
+  <section id={id} role={role} className={`card ${className}`} style={style} data-planning-mode={planningMode} data-duration-mode={durationMode}>
     {children}
   </section>
 );
@@ -2174,6 +2179,8 @@ export default function App() {
     useState(() => initialSequencePlan?.compressedRiskAcknowledgedFingerprint || "");
   const [planningBusy, setPlanningBusy] =
     useState<PlanningBusyState>(false);
+  const [semanticPlanningProgress, setSemanticPlanningProgress] = useState<SemanticPlanningStatus | null>(null);
+  const semanticPlanningProgressRef = useRef<SemanticPlanningStatus | null>(null);
   // Keep the last full-film generation failure visible in the planning step.
   // A failed H3 conversion must not strand the user on an empty/old master;
   // the retained estimate and the retry button remain usable.
@@ -2202,6 +2209,25 @@ export default function App() {
     initialDirectorSettingsSnapshot.shotCount || state.settings.defaultShotCount,
   );
   const [pace, setPace] = useState<Pace>(initialDirectorSettingsSnapshot.pace || "standard");
+  const [generationPromptFormat, setGenerationPromptFormatState] = useState<'h3' | 'seedance'>(() => {
+    const saved = chapterWorkspace(state.project).directorControls?.generationPromptFormat;
+    return (initialSequencePlan?.generationPromptFormat || saved) === 'seedance' ? 'seedance' : 'h3';
+  });
+  const generationPromptFormatRef = useRef(generationPromptFormat);
+  generationPromptFormatRef.current = generationPromptFormat;
+  const setGenerationPromptFormat = (format: 'h3' | 'seedance') => {
+    if (busy || sequenceBatchRunning || planningBusy || sequencePromptRefreshRef.current || hasActiveStoryboardBuild()) return;
+    generationPromptFormatRef.current = format;
+    setGenerationPromptFormatState(format);
+    setState((current) => {
+      const chapterId = activeChapter(current.project)?.id;
+      const workspace = chapterWorkspace(current.project, chapterId);
+      return { ...current, project: withChapterWorkspace({ ...current.project,
+        sequencePlans: current.project.sequencePlans.map((plan) => plan.id === activePlanIdRef.current
+          ? { ...plan, generationPromptFormat: format } : plan),
+      }, { directorControls: { ...workspace.directorControls, generationPromptFormat: format } }, chapterId) };
+    });
+  };
   const [aspectRatio, setAspectRatio] = useState(initialDirectorSettingsSnapshot.aspectRatio || "16:9");
   const [resolution, setResolution] = useState(initialDirectorSettingsSnapshot.resolution || "2K");
   const [audioMode, setAudioMode] = useState<"stereo" | "none">(
@@ -2664,6 +2690,15 @@ export default function App() {
       sequencePlanningRequestIdentityRef.current = "";
       semanticSequencePlanningActiveRef.current = false;
       setPlanningBusy(false);
+      const lastProgress = semanticPlanningProgressRef.current;
+      if (lastProgress && lastProgress.stage !== "stopped") {
+        const stopped = { ...lastProgress, stage: "stopped" as const,
+          elapsedMs: lastProgress.elapsedMs + Math.max(0, Date.now() - lastProgress.updatedAt), updatedAt: Date.now(),
+          detail: "剧情或规划参数已变化，本次分段已停止。" };
+        semanticPlanningProgressRef.current = stopped;
+        setSemanticPlanningProgress(stopped);
+        recordSemanticPlanningDiagnostic(stopped);
+      }
     }
   }, [sequencePlanningIdentity]);
 
@@ -2787,6 +2822,7 @@ export default function App() {
     setShotMode(loadedDirectorSnapshot.shotMode || controls.shotMode);
     setShotCount(loadedDirectorSnapshot.shotCount || controls.shotCount);
     setPace(loadedDirectorSnapshot.pace || controls.pace);
+    setGenerationPromptFormatState((loadedPlan?.generationPromptFormat || savedControls?.generationPromptFormat) === 'seedance' ? 'seedance' : 'h3');
     setAspectRatio(loadedDirectorSnapshot.aspectRatio || controls.aspectRatio);
     setResolution(loadedDirectorSnapshot.resolution || controls.resolution);
     setAudioMode(loadedDirectorSnapshot.audioMode || controls.audioMode);
@@ -2891,6 +2927,8 @@ export default function App() {
     setBusy(false);
     setStoryExpansionBusy(false);
     setPlanningBusy(false);
+    semanticPlanningProgressRef.current = null;
+    setSemanticPlanningProgress(null);
     restoreChapterUiState(loadedState);
     const look = resolveWorkspaceDirectorLook(loadedState, {});
     setAssetKind("character");
@@ -3446,6 +3484,7 @@ export default function App() {
   const effectiveWorkflowPreview: Workflow =
     directorWorkflow === "grid" ? "grid" : smartDirectorDecision.workflow;
   const storyboardGenerationIdentity = JSON.stringify([
+    generationPromptFormat,
     storyboardRequestSourceIdentity({
       project: editorProject, story: storyInput, title: storyName,
       scenes: directorSourceScenes, scene: directorScene,
@@ -3480,8 +3519,10 @@ export default function App() {
     activeConverter,
   ]);
   const storyboardGenerationIdentityRef = useRef(storyboardGenerationIdentity);
+  const canonicalGenerationFingerprint = sourceContentHash(JSON.stringify(JSON.parse(storyboardGenerationIdentity).slice(1)));
   if (!chapterWorkerInBackground()) storyboardGenerationIdentityRef.current = storyboardGenerationIdentity;
   const segmentStoryboardConfigurationIdentity = JSON.stringify([
+    generationPromptFormat,
     activeSequencePlan?.semanticPlanningSnapshot,
     storyboardRequestSourceIdentity({
       project: editorProject,
@@ -3794,6 +3835,7 @@ export default function App() {
   };
 
   const restoreSequencePlanTiming = (plan: VideoSequencePlan) => {
+    setGenerationPromptFormatState(plan.generationPromptFormat === 'seedance' ? 'seedance' : 'h3');
     // A saved segment can be 6s in a legacy plan whose selected duration was
     // 15s. Restore the user's plan-level choice, never the viewed clip length.
     setPlanningSegmentDurationPreset(durationPresetForSeconds(plan.segmentDurationSec));
@@ -4056,12 +4098,21 @@ export default function App() {
   };
 
   const cancelSemanticSequencePlanning = () => {
+    const cancelledActiveRequest = Boolean(sequencePlanningAbortRef.current);
     sequencePlanningOperationRef.current += 1;
     sequencePlanningAbortRef.current?.abort();
     sequencePlanningAbortRef.current = null;
     sequencePlanningRequestIdentityRef.current = "";
     semanticSequencePlanningActiveRef.current = false;
     setPlanningBusy(false);
+    const lastProgress = semanticPlanningProgressRef.current;
+    if (cancelledActiveRequest && lastProgress && lastProgress.stage !== "stopped") {
+      const stopped = { ...lastProgress, stage: "stopped" as const,
+        elapsedMs: lastProgress.elapsedMs + Math.max(0, Date.now() - lastProgress.updatedAt), updatedAt: Date.now() };
+      semanticPlanningProgressRef.current = stopped;
+      setSemanticPlanningProgress(stopped);
+      recordSemanticPlanningDiagnostic(stopped);
+    }
     notify("已停止 AI 分段；已有计划、提示词和成片保持不变。");
   };
 
@@ -4120,8 +4171,25 @@ export default function App() {
       && sourceContentHash(JSON.stringify(stateRef.current.project.characters)) === charactersIdentity
       && sourceContentHash(JSON.stringify(buildVideoSceneContext({ locations: stateRef.current.project.locations,
         chapterId: requestChapterId }))) === sceneContextIdentity;
+    const startedAt = Date.now();
+    const progressContext = { operationId: `${preflightProjectId}:${startedAt}:${operation}`,
+      projectId: preflightProjectId, chapterId: requestChapterId,
+      provider: snapshot.settings.textApi.provider, model: snapshot.settings.textApi.model,
+      apiKey: snapshot.settings.textApi.apiKey };
+    const updateProgress = (progress: Omit<SemanticSequencePlannerProgress, "stage"> & { stage: SemanticPlanningStatus["stage"] }) => {
+      if (!isCurrent()) return;
+      const status = createSemanticPlanningStatus(progress, progressContext);
+      semanticPlanningProgressRef.current = status;
+      setSemanticPlanningProgress(status);
+      recordSemanticPlanningDiagnostic(status);
+    };
+    const initialProgress = { stage: "preparing" as const, requestNumber: 0,
+      maxRequests: MAX_SEMANTIC_SEQUENCE_REPAIRS + 1, elapsedMs: 0, durationMode, segmentDurationSec,
+      ...(requestedTotalDurationSec !== undefined ? { totalDurationSec: requestedTotalDurationSec,
+        requiredSegmentCount: Math.round(requestedTotalDurationSec / segmentDurationSec) } : {}) };
     setPlanningBusy("segmenting");
     setSequenceMasterGenerationIssue("");
+    updateProgress(initialProgress);
     try {
       const sourceStory = await resolveSourceIntegrityForAction(sourceCandidate, "AI 理解剧情并分段", isCurrent);
       if (sourceStory === undefined || !isCurrent()) return;
@@ -4164,10 +4232,11 @@ export default function App() {
       }, controller.signal, {
         planId: createId("sequence"),
         isCurrent,
+        onProgress: updateProgress,
         onRepair: ({ attempt, maxAttempts, detail }) => {
           if (isCurrent()) notify(`AI 正在修复分段数据（${attempt}/${maxAttempts}）：${getSafeErrorDiagnostics(detail).message}`);
         },
-      }), chapterId: requestChapterId };
+      }), chapterId: requestChapterId, generationPromptFormat };
       if (!isCurrent()) return;
       let committed = false;
       setState((current) => {
@@ -4215,10 +4284,17 @@ export default function App() {
       if (!isCurrent()) return;
       reportRuntimeError("sequence-semantic-planning", error);
       const message = error instanceof Error ? error.message : "AI 剧情分段失败，请重试。";
+      if (semanticPlanningProgressRef.current?.stage !== "failed") updateProgress({
+        ...(semanticPlanningProgressRef.current || initialProgress), stage: "failed",
+        elapsedMs: Date.now() - startedAt, detail: message,
+      });
       if (activeChapter(stateRef.current.project)?.id === requestChapterId) { setSequenceMasterGenerationIssue(message); setSequenceStage("plan"); }
       notify(message, "error");
     } finally {
       if (sequencePlanningAbortRef.current === controller && sequencePlanningOperationRef.current === operation) {
+        const lastProgress = semanticPlanningProgressRef.current;
+        if (lastProgress?.stage === "preparing") updateProgress({ ...lastProgress, stage: "stopped",
+          elapsedMs: Date.now() - startedAt, detail: "本次分段未发送模型请求。" });
         sequencePlanningAbortRef.current = null;
         sequencePlanningRequestIdentityRef.current = "";
         semanticSequencePlanningActiveRef.current = false;
@@ -4532,6 +4608,7 @@ export default function App() {
 
       const draftPlan: VideoSequencePlan = {
         ...plan,
+        generationPromptFormat,
         requestedTotalDurationSec: completedTotalDuration,
         totalDurationSec: completedTotalDuration,
         fitStatus: masterDurationEstimate?.fitStatus || plan.fitStatus,
@@ -5667,7 +5744,7 @@ export default function App() {
     });
   }, [projectLibrary]);
 
-  const chapterDirectorControls = { activeSceneId, activeStoryboardId, selectedDirectorSceneIds, directorWorkflow, directorInputMode, durationPreset, customDuration, planningSegmentDurationPreset, planningCustomSegmentDuration, productionMode, sequenceStage, sequenceSettingsOpen, durationMode, totalDuration, totalDurationTouched, segmentationMode, activePlanId, activeSegmentId, confirmedSequencePlanFingerprint, acceptedSequencePlanMismatchFingerprint, acknowledgedCompressedPlanFingerprint, durationEstimate, estimateConfirmed, shotMode, shotCount, pace, aspectRatio, resolution, audioMode, styleId, ruleSetId, converterId, directorStyleId, directorCategory, directorStyleName, directorStyleSummary, cameraTerms, lightingTerms, visualStyle, extraRequirement, selectedAssetIds };
+  const chapterDirectorControls = { activeSceneId, activeStoryboardId, selectedDirectorSceneIds, directorWorkflow, directorInputMode, durationPreset, customDuration, planningSegmentDurationPreset, planningCustomSegmentDuration, productionMode, sequenceStage, sequenceSettingsOpen, durationMode, totalDuration, totalDurationTouched, segmentationMode, activePlanId, activeSegmentId, confirmedSequencePlanFingerprint, acceptedSequencePlanMismatchFingerprint, acknowledgedCompressedPlanFingerprint, durationEstimate, estimateConfirmed, shotMode, shotCount, pace, generationPromptFormat, aspectRatio, resolution, audioMode, styleId, ruleSetId, converterId, directorStyleId, directorCategory, directorStyleName, directorStyleSummary, cameraTerms, lightingTerms, visualStyle, extraRequirement, selectedAssetIds };
   const chapterDirectorControlsRef = useRef(chapterDirectorControls);
   chapterDirectorControlsRef.current = chapterDirectorControls;
   const controlsReadyRef = useRef(false);
@@ -6928,6 +7005,18 @@ export default function App() {
     override?: StoryboardGenerationOverride,
   ): Promise<Storyboard | undefined> => {
     if (sequencePromptRefreshRef.current || hasActiveStoryboardBuild()) return undefined;
+    const requestPromptFormat = generationPromptFormatRef.current;
+    if (!override?.segment && !override?.fullTimeline) {
+      const saved = stateRef.current.project.storyboards.find((board) => board.id === activeStoryboardId);
+      if (saved && !saved.sourceStale && hasCurrentTextApiConversion(saved)
+        && saved.promptGenerationSourceFingerprint === canonicalGenerationFingerprint
+        && (requestPromptFormat === 'seedance' || !saved.officialPromptZh || saved.officialPromptEnError)) {
+        const context = officialH3ContextForStoryboard(stateRef.current.project, saved);
+        const chineseReady = requestPromptFormat === 'seedance' ? hasCurrentSeedancePrompt(stateRef.current.project, saved) : hasCurrentOfficialH3Prompt(saved, context);
+        const englishReady = requestPromptFormat === 'seedance' ? hasCurrentSeedancePrompt(stateRef.current.project, saved, 'en') : hasCurrentOfficialH3EnglishPrompt(saved, context);
+        return refreshDerivedTargetPrompt(saved, chineseReady && !englishReady ? 'translate-english' : 'regenerate', undefined, undefined, requestPromptFormat);
+      }
+    }
     const segmentForGeneration = override?.segment;
     const fullTimeline = Boolean(override?.fullTimeline);
     const reportOverrideFailure = (reason: string): void => {
@@ -7026,7 +7115,7 @@ export default function App() {
     const requestExistingSegmentBoardSnapshot = JSON.stringify(existingSegmentBoard);
     const requestEpoch = workspaceEpochRef.current;
     const requestHandoff = segmentForGeneration && override?.sequencePlanId && !fullTimeline
-      ? buildSequencePromptHandoff(stateRef.current.project, override.sequencePlanId, segmentForGeneration.id)
+      ? buildSequencePromptHandoff(stateRef.current.project, override.sequencePlanId, segmentForGeneration.id, requestPromptFormat)
       : undefined;
     const requestBatchIdentity = sequenceBatchIdentityRef.current;
     if (requestHandoff?.issue) {
@@ -7036,7 +7125,7 @@ export default function App() {
     }
     const handoffSourceIsCurrent = (): boolean => {
       if (!segmentForGeneration || !override?.sequencePlanId || fullTimeline) return true;
-      const latest = buildSequencePromptHandoff(stateRef.current.project, override.sequencePlanId, segmentForGeneration.id);
+      const latest = buildSequencePromptHandoff(stateRef.current.project, override.sequencePlanId, segmentForGeneration.id, requestPromptFormat);
       return !latest.issue && latest.context?.sourceFingerprint === requestHandoff?.context?.sourceFingerprint;
     };
     const requestMasterBoard = override?.sequencePlanId
@@ -7739,7 +7828,9 @@ export default function App() {
         : [];
       if (!isGenerationRequestCurrent()) return undefined;
       let chineseCheckpoint: Storyboard | undefined;
+      let canonicalCheckpointSaved = false;
       const commitQualifiedBoard = (complete: Storyboard): boolean => {
+        if (!segmentForGeneration && !fullTimeline) complete = { ...complete, promptGenerationSourceFingerprint: canonicalGenerationFingerprint };
         runtimeFailureStage = "storyboard-commit";
         // Our state wrapper executes functional updates synchronously against
         // stateRef.current, so this flag reports the reducer's actual decision.
@@ -7857,6 +7948,16 @@ export default function App() {
       let complete: Storyboard;
       try {
         complete = await generateSingleSegmentPrompt({
+          targetPromptFormat: requestPromptFormat,
+          buildSeedanceInput: (board) => buildOfficialSeedanceInput(state.project, board),
+          onQualifiedCanonical: requestPromptFormat !== 'seedance' || fullTimeline && override?.deferCommit ? undefined : async (qualified) => {
+            const saved = { ...qualified, ...(!segmentForGeneration ? { promptGenerationSourceFingerprint: canonicalGenerationFingerprint } : {}) };
+            if (!commitQualifiedBoard(saved)) throw new Error("当前项目或本段已变化，公共分镜未覆盖已有内容。");
+            chineseCheckpoint = structuredClone(saved);
+            canonicalCheckpointSaved = true;
+            if (activeChapter(stateRef.current.project)?.id === requestChapterId) setActiveStoryboardId(saved.id);
+            await saveStateAsync(stateRef.current);
+          },
           sequenceHandoff: requestHandoff?.context,
           sequenceSegmentContext: semanticContext,
           sceneContext: buildVideoSceneContext({ board: convertedCandidate, locations: state.project.locations,
@@ -7865,12 +7966,13 @@ export default function App() {
           reviewWithAi: true,
           onAiTranslationReview: () => { if (isGenerationRequestCurrent()) notify("正在调用同一 API 对照完整中文校验并修复英文，主体与对白交给 AI 复核。"); },
           onQualifiedChinese: fullTimeline && override?.deferCommit ? undefined : async (qualified) => {
-            if (!commitQualifiedBoard(qualified)) {
+            const saved = { ...qualified, ...(!segmentForGeneration ? { promptGenerationSourceFingerprint: canonicalGenerationFingerprint } : {}) };
+            if (!commitQualifiedBoard(saved)) {
               const error = new Error("当前项目或本段已变化，中文结果未覆盖已有内容。");
               error.name = "AbortError";
               throw error;
             }
-            chineseCheckpoint = structuredClone(qualified);
+            chineseCheckpoint = structuredClone(saved);
             if (activeChapter(stateRef.current.project)?.id === requestChapterId) setActiveStoryboardId(qualified.id);
             await saveStateAsync(stateRef.current);
             if (isGenerationRequestCurrent()) notify("中文提示词已保存，正在生成英文；英文失败可单独重试。");
@@ -7890,7 +7992,7 @@ export default function App() {
           isCurrent: isGenerationRequestCurrent,
           onStage: (stage) => {
             runtimeFailureStage = stage === "translate" ? "storyboard-translate" : "storyboard-convert";
-            if (stage === "review" && isGenerationRequestCurrent()) notify("正在调用同一 API 校验并修复中文提示词的说话人、口型、逐镜方位与连续性。");
+            if (stage === "review" && isGenerationRequestCurrent()) notify(requestPromptFormat === 'seedance' ? "公共分镜已保存，正在编写 Seedance 中文提示词。" : "正在调用同一 API 校验并修复中文提示词的说话人、口型、逐镜方位与连续性。");
           },
           request: (systemPrompt, userPrompt, stage, transport) => requestTextModel(
             transport ? { ...state.settings.textApi, maxTokens: transport.maxTokens } : state.settings.textApi,
@@ -7910,7 +8012,7 @@ export default function App() {
         const detail = error instanceof Error ? error.message : "未知转化错误";
         if (/MiniMax H3 官方格式/u.test(detail)) runtimeFailureStage = "storyboard-official-format";
         throw new Error(chineseCheckpoint
-          ? `中文结果已回填，后续处理未完成：${detail}；请检查本段及保存状态后继续。`
+          ? `${canonicalCheckpointSaved && !chineseCheckpoint.seedance25Output ? '公共分镜已保存' : '中文结果已回填'}，后续处理未完成：${detail}；可继续重试未完成的目标稿。`
           : `最终视频提示词生成失败：${detail}；新结果未保存，原有结果保持不变。`);
       }
       if (!isGenerationRequestCurrent()) return undefined;
@@ -7925,16 +8027,17 @@ export default function App() {
         if (!segmentForGeneration && matchedConverter.id !== converterId) setConverterId(matchedConverter.id);
         setActiveStoryboardId(complete.id);
         if (segmentForGeneration || override?.keepDirector) setView("director");
-        if (!segmentForGeneration && !override?.keepDirector) setView("storyboard");
+        if (!segmentForGeneration && !override?.keepDirector) setView(requestPromptFormat === 'seedance' ? 'director' : "storyboard");
       } else {
         setBackgroundState((current) => ({ ...current, project: withChapterWorkspace(current.project, {
           directorControls: { ...chapterWorkspace(current.project, requestChapterId).directorControls, activeStoryboardId: complete.id,
             ...(segmentForGeneration ? { activeSegmentId: segmentForGeneration.id } : {}) },
         }, requestChapterId) }));
       }
-      if (complete.officialPromptEnError) {
-        reportRuntimeError("storyboard-translate", complete.officialPromptEnError);
-        notify(`中文已完成并保存；英文待重试：${complete.officialPromptEnError}。可点击“仅重试英文”继续。`, "error");
+      const targetEnglishError = requestPromptFormat === 'seedance' ? complete.seedance25Output?.englishError : complete.officialPromptEnError;
+      if (targetEnglishError) {
+        reportRuntimeError("storyboard-translate", targetEnglishError);
+        notify(`中文已完成并保存；英文待重试：${targetEnglishError}。可点击“仅重试英文”继续。`, "error");
       } else notify(
         segmentForGeneration && override
           ? `第 ${segmentForGeneration.index}/${override.segmentCount} 段已生成并经转化器输出 ${complete.shots.length} 镜中英文双版最终提示词，本段局部时长 ${duration} 秒。`
@@ -8247,13 +8350,144 @@ export default function App() {
   const regenerateStoryboardEnglish = (boardId: string): Promise<void> =>
     reviseStandaloneStoryboardPrompt(boardId, "translate-english");
 
+  const refreshDerivedTargetPrompt = async (
+    sourceBoard: Storyboard,
+    mode: "regenerate" | "translate-english" | "continuity-repair" | "dialogue-repair" = "regenerate",
+    plan?: VideoSequencePlan,
+    segment?: VideoSegment,
+    format: 'h3' | 'seedance' = 'seedance',
+  ): Promise<Storyboard | undefined> => {
+    if (sequencePromptRefreshRef.current || busy || hasActiveStoryboardBuild()) return undefined;
+    const snapshot = stateRef.current;
+    if (!canUseFinalPromptConverter(snapshot.settings.textApi)) {
+      notify("请先启用并配置文本 API，已保存分镜和提示词保持不变。", "error");
+      return undefined;
+    }
+    const epoch = workspaceEpochRef.current;
+    const projectId = snapshot.project.id;
+    const apiIdentity = sourceContentHash(JSON.stringify(snapshot.settings.textApi));
+    const batchIdentity = sequenceBatchIdentityRef.current;
+    const requestFormat = generationPromptFormatRef.current;
+    const label = format === 'seedance' ? 'Seedance' : 'H3';
+    const evidenceFingerprint = (project: Project, board: Storyboard) => format === 'seedance'
+      ? getOfficialSeedanceSourceFingerprint(buildOfficialSeedanceInput(project, board))
+      : buildOfficialH3SourceFingerprint(board, officialH3ContextForStoryboard(project, board));
+    const handoff = plan && segment ? buildSequencePromptHandoff(snapshot.project, plan.id, segment.id, format) : undefined;
+    if (handoff?.issue || mode === 'continuity-repair' && !handoff?.context) {
+      notify(handoff?.issue || "首段无需修复上段衔接。", "error"); return undefined;
+    }
+    if (mode === 'translate-english' && plan && (format === 'seedance' ? sourceBoard.seedance25Output?.sequencePromptHandoff : sourceBoard.sequencePromptHandoff)
+      && getSequencePromptHandoffStatus(sourceBoard, snapshot.project, format).kind !== 'current') {
+      notify(`上段末态或本段中文已变化，请先修复${label}衔接，再补英文。`, "error"); return undefined;
+    }
+    let expectedBoard = JSON.stringify(sourceBoard);
+    let expectedEvidence = evidenceFingerprint(snapshot.project, sourceBoard);
+    let versionSaved = false;
+    const operation = { controller: new AbortController(), projectId,
+      configurationIdentity: segmentStoryboardConfigurationIdentityRef.current, apiIdentity };
+    sequencePromptRefreshRef.current = operation;
+    const busyOwner = ++storyboardBusyOwnerRef.current;
+    const isCurrent = () => {
+      const current = stateRef.current;
+      const board = current.project.storyboards.find((entry) => entry.id === sourceBoard.id);
+      if (operation.controller.signal.aborted || sequencePromptRefreshRef.current !== operation
+        || workspaceEpochRef.current !== epoch || current.project.id !== projectId
+        || generationPromptFormatRef.current !== requestFormat
+        || sourceContentHash(JSON.stringify(current.settings.textApi)) !== apiIdentity
+        || !board || board.sourceStale || JSON.stringify(board) !== expectedBoard
+        || evidenceFingerprint(current.project, board) !== expectedEvidence) return false;
+      if (batchIdentity && (sequenceBatchIdentityRef.current !== batchIdentity || !sequenceOperationIsCurrent(batchIdentity))) return false;
+      if (plan && segment) {
+        const livePlan = current.project.sequencePlans.find((entry) => entry.id === plan.id);
+        const liveSegment = livePlan?.segments.find((entry) => entry.id === segment.id);
+        const liveHandoff = buildSequencePromptHandoff(current.project, plan.id, segment.id, format);
+        if (!livePlan || !liveSegment || liveSegment.locked || liveSegment.storyboardId !== board.id
+          || sequenceStoryboardGenerationIdentity(projectId, livePlan.id, liveSegment, livePlan.segments.length)
+            !== sequenceStoryboardGenerationIdentity(projectId, plan.id, segment, plan.segments.length)
+          || liveHandoff.issue || liveHandoff.context?.sourceFingerprint !== handoff?.context?.sourceFingerprint) return false;
+      }
+      return true;
+    };
+    const commit = async (qualified: Storyboard) => {
+      if (!isCurrent()) throw new Error("当前项目、分镜或目标格式已变化，结果未覆盖已有内容。");
+      let accepted = false;
+      setState((current) => {
+        if (!isCurrent()) return current;
+        const now = Date.now();
+        let saved = { ...qualified, ...(format === 'h3' && sourceBoard.seedance25Output ? { seedance25Output: sourceBoard.seedance25Output } : {}), updatedAt: now };
+        if (!versionSaved && mode !== 'translate-english' && (format === 'seedance' ? sourceBoard.seedance25Output : sourceBoard.officialPromptZh)) {
+          const history = sourceBoard.revisions || [];
+          saved = { ...saved, revisions: [...history, createStoryboardRevision(sourceBoard, history,
+            { reason: format === 'seedance' ? 'pre-seedance-regenerate' : 'pre-regenerate', label: `${label}提示词更新前`, createdAt: now })] };
+          versionSaved = true;
+        } else if (versionSaved) {
+          saved = { ...saved, revisions: current.project.storyboards.find((entry) => entry.id === sourceBoard.id)?.revisions };
+        }
+        expectedBoard = JSON.stringify(saved);
+        expectedEvidence = evidenceFingerprint(current.project, saved);
+        accepted = true;
+        return { ...current, project: { ...current.project,
+          storyboards: current.project.storyboards.map((entry) => entry.id === saved.id ? saved : entry),
+          sequencePlans: current.project.sequencePlans.map((entry) => entry.id === plan?.id ? { ...entry,
+            segments: entry.segments.map((item) => item.id === segment?.id ? { ...item, storyboardId: saved.id,
+              status: 'ready' as const, failureReason: undefined } : item) } : entry), updatedAt: now } };
+      });
+      if (!accepted) throw new Error("结果未能保存至当前分镜，请重试。");
+      await saveStateAsync(stateRef.current);
+    };
+    setBusy(true);
+    try {
+      const result = await generateSingleSegmentPrompt({
+        board: sourceBoard, targetPromptFormat: format,
+        buildSeedanceInput: (board) => buildOfficialSeedanceInput(snapshot.project, board),
+        context: officialH3ContextForStoryboard(snapshot.project, sourceBoard),
+        sequenceHandoff: handoff?.context,
+        sequenceSegmentContext: plan && segment && isSemanticSequencePlan(plan) ? semanticSegmentSourceContext(plan, segment) : undefined,
+        converter: snapshot.converterPresets.find((entry) => entry.id === sourceBoard.converterPresetId && entry.enabled)
+          || snapshot.converterPresets.find((entry) => entry.id === converterId && entry.enabled),
+        ruleSet: snapshot.ruleSets.find((entry) => entry.id === sourceBoard.ruleSetId),
+        purpose: mode === 'continuity-repair' ? 'continuity-repair' : mode === 'dialogue-repair' ? 'dialogue-repair' : undefined,
+        mode: mode === 'translate-english' ? 'translate-english' : 'generate',
+        skipConversion: mode !== 'continuity-repair' && mode !== 'dialogue-repair',
+        reviewWithAi: true, clean: cleanVideoPrompt, isCurrent,
+        maxOutputTokens: snapshot.settings.textApi.maxTokens,
+        onQualifiedCanonical: commit, onQualifiedChinese: commit,
+        onStage: (stage) => { if (isCurrent()) notify(stage === 'translate' ? `${label}中文已保存，正在生成英文。`
+          : stage === 'convert' ? '正在修复当前段公共分镜衔接。' : `正在编写${label}中文提示词。`); },
+        request: (system, user, _stage, transport) => requestTextModel(transport
+          ? { ...snapshot.settings.textApi, maxTokens: transport.maxTokens } : snapshot.settings.textApi,
+        system, user, operation.controller.signal, { disableThinking: true }),
+      });
+      if (!isCurrent()) return undefined;
+      await commit(result);
+      const saved = stateRef.current.project.storyboards.find((entry) => entry.id === result.id);
+      const englishError = format === 'seedance' ? result.seedance25Output?.englishError : result.officialPromptEnError;
+      notify(englishError ? `${label}中文已保存，英文待单独重试。` : `${label}中英文提示词已保存。`, englishError ? 'error' : 'normal');
+      return saved;
+    } catch (error) {
+      if (!isCurrent()) return undefined;
+      const reason = formatUserFacingError(error);
+      if (plan && segment) setState((current) => ({ ...current, project: { ...current.project,
+        sequencePlans: current.project.sequencePlans.map((entry) => entry.id === plan.id ? { ...entry,
+          segments: entry.segments.map((item) => item.id === segment.id ? { ...item, status: 'failed' as const, failureReason: reason } : item) } : entry) } }));
+      notify(`已保存的公共分镜和中文稿保留；${label}后续处理未完成：${reason}`, 'error');
+      return undefined;
+    } finally {
+      if (sequencePromptRefreshRef.current === operation) sequencePromptRefreshRef.current = null;
+      if (workspaceEpochRef.current === epoch && busyOwner === storyboardBusyOwnerRef.current) setBusy(false);
+    }
+  };
+
   const refreshSequenceSegmentOfficialPrompt = async (
     plan: VideoSequencePlan,
     segment: VideoSegment,
     sourceBoard: Storyboard,
     sourceContext: OfficialH3ProjectContext,
     mode: "regenerate" | "translate-english" | "continuity-repair" | "dialogue-repair" = "regenerate",
+    format: 'h3' | 'seedance' = generationPromptFormatRef.current,
   ): Promise<boolean> => {
+    if (format === 'seedance' || mode === 'regenerate' && !sourceBoard.officialPromptZh && hasCurrentTextApiConversion(sourceBoard))
+      return Boolean(await refreshDerivedTargetPrompt(sourceBoard, mode, plan, segment, format));
     if (sequencePromptRefreshRef.current || busy || hasActiveStoryboardBuild()) return false;
     const snapshot = stateRef.current;
     const sourceHandoffStatus = getSequencePromptHandoffStatus(sourceBoard, snapshot.project);
@@ -8445,7 +8679,7 @@ export default function App() {
             converterPresetId: refreshedOfficialBoard.converterPresetId,
             targetModelId: refreshedOfficialBoard.targetModelId,
             targetOutput: refreshedOfficialBoard.targetOutput,
-            seedance25Output: undefined,
+            seedance25Output: liveBoard.seedance25Output,
             officialPromptZh: refreshedChinesePrompt,
             officialPromptSource: refreshedOfficialBoard.officialPromptSource,
             h3IdentityBindings: refreshedOfficialBoard.h3IdentityBindings,
@@ -8559,7 +8793,7 @@ export default function App() {
       const segment = plan?.segments.find((entry) => entry.id === board.segmentId && entry.storyboardId === board.id);
       if (!plan || !segment) { notify("当前分段关联已变化，未修改提示词。", "error"); return; }
       if (segment.locked) { notify("当前段已锁定，请先解锁后再修复。", "error"); return; }
-      await refreshSequenceSegmentOfficialPrompt(plan, segment, board, officialH3ContextForStoryboard(project, board), "dialogue-repair");
+      await refreshSequenceSegmentOfficialPrompt(plan, segment, board, officialH3ContextForStoryboard(project, board), "dialogue-repair", 'h3');
       return;
     }
     await reviseStandaloneStoryboardPrompt(boardId, "dialogue-repair");
@@ -8569,6 +8803,7 @@ export default function App() {
    * failure record when preflight or model conversion fails. */
   const generateCurrentSequenceSegment = async (): Promise<void> => {
     if (busy || sequenceBatchRunning || sequencePromptRefreshRef.current || hasActiveStoryboardBuild()) return;
+    const format = generationPromptFormatRef.current;
     let plan = stateRef.current.project.sequencePlans.find(
       (item) => item.id === (activePlanIdRef.current || activeSequencePlan?.id),
     ) || activeSequencePlan;
@@ -8671,9 +8906,10 @@ export default function App() {
       promptProject.storyboards,
       plan.id,
       promptContext,
+      format, promptProject,
     );
     if (promptAction.action === "complete") {
-      if (segment.index > 1 && linkedStoryboard && getSequencePromptHandoffStatus(linkedStoryboard, promptProject).kind !== "current") {
+      if (segment.index > 1 && linkedStoryboard && getSequencePromptHandoffStatus(linkedStoryboard, promptProject, format).kind !== "current") {
         await refreshSequenceSegmentOfficialPrompt(plan, segment, linkedStoryboard, promptContext, "continuity-repair");
         return;
       }
@@ -8812,6 +9048,7 @@ export default function App() {
     repairOnly = false,
   ): Promise<void> => {
     if (sequenceBatchIdentityRef.current || sequencePromptRefreshRef.current || busy || hasActiveStoryboardBuild()) return;
+    const format = generationPromptFormatRef.current;
     let sourcePlan = stateRef.current.project.sequencePlans.find(
       (item) => item.id === plan.id,
     );
@@ -8881,12 +9118,14 @@ export default function App() {
       sourcePlan,
       pendingProject.storyboards,
       (storyboard) => officialH3ContextForStoryboard(pendingProject, storyboard),
+      format, pendingProject,
     ));
     const orderedSegments = [...sourcePlan.segments].sort((left, right) => left.index - right.index);
     const firstPendingIndex = orderedSegments.find((segment) => {
       const board = pendingProject.storyboards.find((entry) => entry.id === segment.storyboardId);
       return !segment.locked && (canonicalPendingIds.has(segment.id) || promptPendingIds.has(segment.id)
-        || Boolean(board?.sequencePromptHandoff && getSequencePromptHandoffStatus(board, pendingProject).kind !== "current"));
+        || Boolean(board && (format === 'seedance' ? board.seedance25Output?.sequencePromptHandoff : board.sequencePromptHandoff)
+          && getSequencePromptHandoffStatus(board, pendingProject, format).kind !== "current"));
     })?.index;
     // Include the suffix so a changed parent's freshly generated ending can
     // invalidate an initially current child before that child is processed.
@@ -8938,12 +9177,13 @@ export default function App() {
           liveProject.storyboards,
           livePlan.id,
           livePromptContext,
+          format, liveProject,
         );
         const needsHandoffRepair = Boolean(liveBoard && liveSegment.index > 1
           && (repairOnly || (livePromptAction.action === "complete" || livePromptAction.action === "translate-english")
-            && getSequencePromptHandoffStatus(liveBoard, liveProject).kind !== "current"));
-        if (repairOnly && (!liveBoard || !hasCurrentOfficialH3Prompt(liveBoard, livePromptContext))) {
-          notify(`第 ${liveSegment.index} 段没有可复用的有效中文H3稿，请先生成本段提示词；本次只修衔接，不补造分镜，后续未调用。`, "error");
+            && getSequencePromptHandoffStatus(liveBoard, liveProject, format).kind !== "current"));
+        if (repairOnly && (!liveBoard || !(format === 'seedance' ? hasCurrentSeedancePrompt(liveProject, liveBoard) : hasCurrentOfficialH3Prompt(liveBoard, livePromptContext)))) {
+          notify(`第 ${liveSegment.index} 段没有可复用的有效中文${format === 'seedance' ? 'Seedance' : 'H3'}稿，请先生成本段提示词；本次只修衔接，不补造分镜，后续未调用。`, "error");
           break;
         }
         if (liveSegment.locked || livePromptAction.action === "complete" && !needsHandoffRepair) {
@@ -8975,7 +9215,11 @@ export default function App() {
           );
           const stillCurrent = sequenceOperationIsCurrent(requestedIdentity);
           if (!stillCurrent) break;
-          if (refreshed) successCount += 1;
+          if (refreshed && (format !== 'seedance' || (() => {
+            const completedProject = stateRef.current.project;
+            const completedBoard = completedProject.storyboards.find((board) => board.id === liveBoard!.id);
+            return Boolean(completedBoard && hasCurrentSeedancePrompt(completedProject, completedBoard, 'en'));
+          })())) successCount += 1;
           processedCount += 1;
           setSequenceBatchProgress({
             completed: processedCount,
@@ -9044,7 +9288,8 @@ export default function App() {
             failureReason || "生成结果缺少有效分镜提示词，请重试本段。",
           );
         } else if (hasRealCompletedBoard && completedBoard
-          && hasCurrentOfficialH3EnglishPrompt(completedBoard, officialH3ContextForStoryboard(stateRef.current.project, completedBoard))) {
+          && (format === 'seedance' ? hasCurrentSeedancePrompt(stateRef.current.project, completedBoard, 'en')
+            : hasCurrentOfficialH3EnglishPrompt(completedBoard, officialH3ContextForStoryboard(stateRef.current.project, completedBoard)))) {
           successCount += 1;
         }
         processedCount += 1;
@@ -9087,6 +9332,7 @@ export default function App() {
               completedProject.storyboards,
               plan.id,
               officialH3ContextForStoryboard(completedProject, completedProject.storyboards.find((board) => board.id === candidate.storyboardId)),
+              format, completedProject,
             ).action === "translate-english").length || 0;
         notify(
           `${repairOnly ? "文本衔接修复" : "顺序生成"}结束：处理 ${processedCount}/${pendingIds.length} 段，中英文完成 ${successCount} 段${pendingEnglishCount ? `，中文已就绪但英文待完成 ${pendingEnglishCount} 段` : ""}；${repairOnly ? "原稿已保存为版本，没有生成视频。" : "未完成段可再次续跑，合格中文不会因英文失败重做。"}`,
@@ -9125,6 +9371,7 @@ export default function App() {
     const manifest = buildSequencePromptManifest(
       plan,
       stateRef.current.project.storyboards,
+      generationPromptFormatRef.current, stateRef.current.project,
     );
     downloadText(
       `${safeFileName(plan.title || plan.sourceStoryTitle, "全片分段提示词")}.json`,
@@ -9509,6 +9756,7 @@ export default function App() {
     exportSequencePromptsAsText,
     exportSequencePromptsAsJson,
     planningBusy,
+    semanticPlanningProgress,
     sequenceMasterGenerationIssue,
     durationEstimate: currentDurationEstimate,
     sequenceSettingsOpen,
@@ -9579,6 +9827,8 @@ export default function App() {
     setAssetFormStyleSource,
     handleCopyPrompt,
     buildStoryboard,
+    generationPromptFormat,
+    setGenerationPromptFormat,
     regenerateStoryboardEnglish,
     assetSearch,
     setAssetSearch,
@@ -9663,6 +9913,10 @@ export default function App() {
       case "video":
         return <VideoDirectorView key={state.project.id} project={state.project} settings={state.settings}
           onChangeExecution={(patch) => setState((current) => ({ ...current, settings: { ...current.settings, ...patch } }))}
+          onVideoApiParametersChange={(profileId, expected, capabilities) => setState((current) => {
+            const settings = applyVideoApiParameterCapabilities(current.settings, profileId, expected, capabilities);
+            return settings === current.settings ? current : { ...current, settings };
+          })}
           controller={videoController} launchRequest={videoLaunchRequest}
           onChapterDraftChange={(projectId, chapterId, draft) => setBackgroundState((current) => {
             const owner = current.project.id === projectId ? current.project : current.projects.find((project) => project.id === projectId);
@@ -9850,7 +10104,7 @@ export default function App() {
           </div>
         </div>
       </aside>
-      <main className="main">
+      <main className={`main${view === "director" ? " main-director-compact" : ""}`}>
         <header className="topbar">
           <div className="crumb">
             <div>
@@ -10738,6 +10992,8 @@ interface AppContext {
   sequenceBatchProgress: SequenceBatchProgress;
   cancelSequenceGeneration: (announce?: boolean) => void;
   generateCurrentSequenceSegment: () => Promise<void>;
+  generationPromptFormat: 'h3' | 'seedance';
+  setGenerationPromptFormat: (format: 'h3' | 'seedance') => void;
   regenerateCurrentSequenceSegmentPrompt: () => Promise<void>;
   generateAllSequenceSegments: (plan: VideoSequencePlan) => Promise<void>;
   repairCurrentSequencePromptContinuity: () => Promise<void>;
@@ -10747,6 +11003,7 @@ interface AppContext {
   exportSequencePromptsAsText: (plan: VideoSequencePlan, format: VideoPromptFormat, language: "zh" | "en") => void;
   exportSequencePromptsAsJson: (plan: VideoSequencePlan) => void;
   planningBusy: PlanningBusyState;
+  semanticPlanningProgress: SemanticPlanningStatus | null;
   sequenceMasterGenerationIssue: string;
   durationEstimate: SourcedStoryDurationEstimate | null;
   sequenceSettingsOpen: boolean;
@@ -11697,14 +11954,17 @@ function SequenceFilmstrip({
   project,
   activeSegmentId,
   onSelect,
+  generationPromptFormat,
 }: {
   plan?: VideoSequencePlan;
   project: Project;
   activeSegmentId: string;
   onSelect: (segmentId: string) => void;
+  generationPromptFormat?: "h3" | "seedance";
 }) {
-  const handoffStatuses = useMemo(() => new Map(project.storyboards.map((board) => [board.id, getSequencePromptHandoffStatus(board, project)])),
-    [project.id, project.sequencePlans, project.storyboards]);
+  const targetFormat = generationPromptFormat || plan?.generationPromptFormat || "h3";
+  const handoffStatuses = useMemo(() => new Map(project.storyboards.map((board) => [board.id, getSequencePromptHandoffStatus(board, project, targetFormat)])),
+    [project.id, project.sequencePlans, project.storyboards, targetFormat]);
   if (!plan) return null;
   return (
     <div className="sequence-filmstrip" role="tablist" aria-label="全片视频段">
@@ -11715,8 +11975,10 @@ function SequenceFilmstrip({
           project.storyboards,
           plan.id,
           officialH3ContextForStoryboard(project, storyboard),
+          targetFormat,
+          project,
         );
-        const statusLabel = sequenceSegmentPromptStatusLabel(segment, promptAction.action);
+        const statusLabel = sequenceSegmentPromptStatusLabel(segment, promptAction.action, targetFormat);
         const handoffStatus = storyboard && handoffStatuses.get(storyboard.id);
         return (
         <button
@@ -11731,18 +11993,20 @@ function SequenceFilmstrip({
             {segment.locked && <Lock size={10} />}
             第 {segment.index} 段
           </span>
-          <strong>{segment.title}</strong>
-          <small title={handoffStatus && segment.index > 1 ? `${handoffStatus.label}${handoffStatus.issue ? `：${handoffStatus.issue}` : ""}` : undefined}>
+          <strong title={segment.title}>{segment.title}</strong>
+          <small title={`${formatTime(segment.globalStartSec)}—${formatTime(segment.globalEndSec)} · ${segment.durationSec}秒 · ${statusLabel}${handoffStatus && segment.index > 1 ? ` · ${handoffStatus.label}${handoffStatus.issue ? `：${handoffStatus.issue}` : ""}` : ""}`}>
             {formatTime(segment.globalStartSec)}—{formatTime(segment.globalEndSec)} · {segment.durationSec}秒 · {statusLabel}{handoffStatus && segment.index > 1 ? ` · ${handoffStatus.kind === "current" ? "衔接已对齐" : handoffStatus.kind === "legacy" ? "待文字衔接" : "衔接待更新"}` : ""}
           </small>
           {Boolean(segment.autoExtendedBySec && segment.autoExtendedBySec > 0) && (
-            <small className="sequence-segment-auto-extension">
-              完整镜头/台词 · 自动延长 +{formatTime(segment.autoExtendedBySec || 0)}
+            <small className="sequence-segment-auto-extension" title={`完整镜头/台词 · 自动延长 +${formatTime(segment.autoExtendedBySec || 0)}`}>
+              <span className="sequence-segment-notice-detail">完整镜头/台词 · 自动</span>
+              延长 +{formatTime(segment.autoExtendedBySec || 0)}
             </small>
           )}
           {segment.failureReason && (
             <small className="sequence-segment-failure" title={formatUserFacingError(segment.failureReason)}>
-              {segment.status === "failed" ? "失败" : "待处理"}：{formatUserFacingError(segment.failureReason)}
+              {segment.status === "failed" ? "失败" : "待处理"}
+              <span className="sequence-segment-notice-detail">：{formatUserFacingError(segment.failureReason)}</span>
             </small>
           )}
         </button>
@@ -11755,6 +12019,7 @@ function SequenceFilmstrip({
 function SequencePlannerPanel(ctx: AppContext) {
   const {
     state,
+    generationPromptFormat,
     durationMode,
     setDurationMode,
     totalDuration,
@@ -11770,6 +12035,7 @@ function SequencePlannerPanel(ctx: AppContext) {
     setPlanningCustomSegmentDuration,
     resolvedPlanningSegmentDuration,
     planningBusy,
+    semanticPlanningProgress,
     sequenceMasterGenerationIssue,
     durationEstimate,
     setSequenceSettingsOpen,
@@ -11808,6 +12074,7 @@ function SequencePlannerPanel(ctx: AppContext) {
     confirmSequencePlan,
     notify,
   } = ctx;
+  const generationPromptFormatLabel = generationPromptFormat === "seedance" ? "Seedance" : "MiniMax H3";
   const fitLabels: Record<string, string> = {
     comfortable: "宽松",
     balanced: "均衡",
@@ -11816,6 +12083,8 @@ function SequencePlannerPanel(ctx: AppContext) {
   };
   const segmentCount = activeSequencePlan?.segments.length || 0;
   const usesSemanticPlanning = !activeSequencePlan || isSemanticSequencePlan(activeSequencePlan);
+  const visibleSemanticProgress = semanticPlanningProgress?.projectId === state.project.id
+    && semanticPlanningProgress.chapterId === activeChapter(state.project)?.id ? semanticPlanningProgress : null;
   const planningStage = activeSequencePlan?.planningStage
     || (segmentCount > 0 ? "segmented" : undefined);
   const [planningOptionsOpen, setPlanningOptionsOpen] = useState(!activeSequencePlan);
@@ -11867,6 +12136,8 @@ function SequencePlannerPanel(ctx: AppContext) {
         state.project,
         state.project.storyboards.find((board) => board.id === activeSequenceSegment.storyboardId),
       ),
+      generationPromptFormat,
+      state.project,
     )
     : undefined;
   const planStatusText = planIssues.length
@@ -11894,7 +12165,7 @@ function SequencePlannerPanel(ctx: AppContext) {
         : activeSequencePlanNeedsReview
           ? "计划已新建或编辑，请确认后再进入单段导演。"
           : usesSemanticPlanning
-            ? "AI 分段已确认；每段使用自身剧情、对白归属和衔接状态生成 H3。"
+            ? `AI 分段已确认；每段使用自身剧情、对白归属和衔接状态生成${generationPromptFormatLabel}提示词。`
             : "计划完整：所有剧情节拍已连续覆盖，每段均不超过生成上限。";
   const planConfirmDisabled = Boolean(
     planningStage !== "segmented"
@@ -11978,9 +12249,10 @@ function SequencePlannerPanel(ctx: AppContext) {
 
       <div className="sequence-planning-options">
         <div className="sequence-planning-options-head">
-          <span role="status">
+          <span role="status" aria-live={visibleSemanticProgress ? "off" : "polite"}>
             {usesSemanticPlanning
-              ? planningBusy ? "AI 正在理解剧情并编排分段…"
+              ? visibleSemanticProgress ? <SemanticPlanningProgressView status={visibleSemanticProgress} notify={notify} />
+                : planningBusy ? "准备 AI 分段…"
                 : semanticDurationSummary
               : planningBusy === "estimating"
               ? "正在估算全片时长…"
@@ -12053,11 +12325,13 @@ function SequencePlannerPanel(ctx: AppContext) {
               }}
             >自定义总时长</button>
           </div>
-          <small className="compact-note">{durationMode === "fixed"
+          <small className="compact-note" title={durationMode === "fixed"
             ? "AI 在指定总时长内安排原剧情。"
-            : "AI 按原剧情决定段数与总时长。"}</small>
+            : "AI 按原剧情决定段数与总时长。"}>{durationMode === "fixed"
+            ? "按指定总时长编排"
+            : "AI 决定段数与总时长"}</small>
         </Field>
-        {durationMode === "fixed" && <Field label="全片总秒数" className="sequence-control-card sequence-total-duration-card">
+        {durationMode === "fixed" && <Field label="总秒数" className="sequence-control-card sequence-total-duration-card">
           <input
             aria-label="全片总秒数"
             type="number"
@@ -12072,8 +12346,8 @@ function SequencePlannerPanel(ctx: AppContext) {
             }}
             onBlur={() => setTotalDuration(normalizeSemanticSequenceRequestedTotalDuration(totalDuration, resolvedPlanningSegmentDuration))}
           />
-          <small className="compact-note" role="status">
-            {semanticFixedSegmentCount} 段 × {resolvedPlanningSegmentDuration} 秒 = {semanticRequestedTotalDuration} 秒；每段足额，无短尾段。
+          <small className="compact-note" role="status" title={`${semanticFixedSegmentCount} 段 × ${resolvedPlanningSegmentDuration} 秒 = ${semanticRequestedTotalDuration} 秒；每段足额，无短尾段。`}>
+            {semanticFixedSegmentCount} 段 × {resolvedPlanningSegmentDuration} 秒 = {semanticRequestedTotalDuration} 秒
           </small>
         </Field>}
         </>}
@@ -12127,7 +12401,7 @@ function SequencePlannerPanel(ctx: AppContext) {
           <small className="compact-note" role="status">{fullSegmentDurationNote}</small>
         </Field>
         </>}
-        <Field label="单段生成时长" className="sequence-control-card">
+        <Field label={usesSemanticPlanning ? "单段时长" : "单段生成时长"} className="sequence-control-card sequence-segment-duration-card">
           <div className="sequence-duration-choice">
             <div className="segmented" role="group" aria-label="单段生成时长预设">
               {(["5s", "10s", "15s", "custom"] as DurationPreset[]).map(
@@ -12172,15 +12446,20 @@ function SequencePlannerPanel(ctx: AppContext) {
               />
             )}
           </div>
+          {usesSemanticPlanning && <small className="compact-note" title={`每段完整 ${resolvedPlanningSegmentDuration} 秒；预设 5、10、15 秒，也可自定义单段时长。`}>
+            每段完整 {resolvedPlanningSegmentDuration} 秒
+          </small>}
         </Field>
-        <Field label="剧情分段方式" className="sequence-control-card sequence-segmentation-mode-card">
+        <Field label={usesSemanticPlanning ? "分段方式" : "剧情分段方式"} className="sequence-control-card sequence-segmentation-mode-card">
           <div className="segmented" role="status" aria-label="剧情分段方式">
             <span className="segment active violet">AI 语义分段</span>
           </div>
-          <small className="compact-note">{usesSemanticPlanning
+          <small className="compact-note" title={usesSemanticPlanning
             ? durationMode === "fixed"
               ? "由 AI 在指定段数和总时长内分配原剧情动作与对白；每段固定时长，不增加剧情事件，不用重复剧情填满片段。"
               : "由 AI 按剧情语义分配动作与对白；总时长 = 段数 × 单段时长，不按字数硬切，不用重复剧情填满最后一段。"
+            : "每段必须等于所选秒数；AI 在固定分段窗口内安排完整镜头、动作和对白，并自行审核修复，不由本地拆镜。"}>{usesSemanticPlanning
+            ? "按剧情语义分配动作与对白"
             : "每段必须等于所选秒数；AI 在固定分段窗口内安排完整镜头、动作和对白，并自行审核修复，不由本地拆镜。"}</small>
         </Field>
       </div>
@@ -12451,6 +12730,7 @@ function SequencePlannerPanel(ctx: AppContext) {
             project={state.project}
             activeSegmentId={activeSegmentId}
             onSelect={chooseSequenceSegment}
+            generationPromptFormat={generationPromptFormat}
           />
           <div className="sequence-segment-editor">
               <div className="sequence-editor-head">
@@ -12469,7 +12749,7 @@ function SequencePlannerPanel(ctx: AppContext) {
               </div>
               <div className="row sequence-edit-actions">
                 <Badge tone={activeSegmentPromptAction?.action === "complete" ? "green" : activeSegmentPromptAction?.action === "refresh-official" || activeSegmentPromptAction?.action === "translate-english" ? "amber" : activeSequenceSegment.status === "failed" ? "pink" : "violet"}>
-                  {sequenceSegmentPromptStatusLabel(activeSequenceSegment, activeSegmentPromptAction?.action || "generate-storyboard")}
+                  {generationPromptFormatLabel} · {sequenceSegmentPromptStatusLabel(activeSequenceSegment, activeSegmentPromptAction?.action || "generate-storyboard", generationPromptFormat)}
                 </Badge>
                 <Button
                   small
@@ -12478,7 +12758,7 @@ function SequencePlannerPanel(ctx: AppContext) {
                   disabled={activeSequenceSegment.locked || ctx.busy || Boolean(ctx.sequenceBatchRunning)}
                   onClick={() => void generateCurrentSequenceSegment()}
                 >
-                  {activeSegmentPromptAction?.action === "translate-english" ? "仅重试英文" : activeSegmentPromptAction?.action === "refresh-official" ? "刷新本段提示词" : "重试本段"}
+                  {activeSegmentPromptAction?.action === "translate-english" ? `仅重试${generationPromptFormatLabel}英文` : activeSegmentPromptAction?.action === "refresh-official" ? `刷新本段${generationPromptFormatLabel}` : `重试本段${generationPromptFormatLabel}`}
                 </Button>
                 <Button
                   small
@@ -12910,6 +13190,8 @@ function DirectorView(ctx: AppContext) {
     durationPreset,
     setDurationPreset,
     setCustomDuration,
+    generationPromptFormat,
+    setGenerationPromptFormat,
     planningSegmentDurationPreset,
     setPlanningSegmentDurationPreset,
     setPlanningCustomSegmentDuration,
@@ -12944,10 +13226,6 @@ function DirectorView(ctx: AppContext) {
     pace,
     setPace,
     activeDuration,
-    aspectRatio,
-    setAspectRatio,
-    resolution,
-    setResolution,
     audioMode,
     setAudioMode,
     styleId,
@@ -12976,6 +13254,7 @@ function DirectorView(ctx: AppContext) {
     reportRuntimeError,
     handleCopyPrompt,
   } = ctx;
+  const generationPromptFormatLabel = generationPromptFormat === "seedance" ? "Seedance" : "MiniMax H3";
   const editingSequenceSegmentDuration = productionMode === "sequence" && sequenceSettingsOpen;
   const visibleDurationPreset = editingSequenceSegmentDuration
     ? planningSegmentDurationPreset
@@ -13243,14 +13522,16 @@ function DirectorView(ctx: AppContext) {
       state.project.storyboards,
       activeSequencePlan.id,
       officialPromptContext || officialH3ContextForStoryboard(state.project, directorResultStoryboard),
+      generationPromptFormat,
+      state.project,
     )
     : undefined;
   const activeSequenceHandoff = useMemo(() => productionMode === "sequence" && directorResultStoryboard
-    ? getSequencePromptHandoffStatus(directorResultStoryboard, state.project) : undefined,
-    [productionMode, directorResultStoryboard, state.project.id, state.project.sequencePlans, state.project.storyboards]);
+    ? getSequencePromptHandoffStatus(directorResultStoryboard, state.project, generationPromptFormat) : undefined,
+    [productionMode, directorResultStoryboard, state.project.id, state.project.sequencePlans, state.project.storyboards, generationPromptFormat]);
   const activeSequenceHandoffEvidence = useMemo(() => productionMode === "sequence" && activeSequencePlan && activeSequenceSegment
-    ? buildSequencePromptHandoff(state.project, activeSequencePlan.id, activeSequenceSegment.id) : undefined,
-    [productionMode, activeSequencePlan, activeSequenceSegment, state.project.id, state.project.sequencePlans, state.project.storyboards]);
+    ? buildSequencePromptHandoff(state.project, activeSequencePlan.id, activeSequenceSegment.id, generationPromptFormat) : undefined,
+    [productionMode, activeSequencePlan, activeSequenceSegment, state.project.id, state.project.sequencePlans, state.project.storyboards, generationPromptFormat]);
   const validOfficialPrompt = hasCurrentOfficialPrompt
     ? directorResultStoryboard?.officialPromptZh || ""
     : "";
@@ -13258,7 +13539,7 @@ function DirectorView(ctx: AppContext) {
     && hasCurrentOfficialH3EnglishPrompt(directorResultStoryboard, officialPromptContext)
       ? directorResultStoryboard.officialPromptEn || ""
       : "";
-  const [directorPromptFormat, setDirectorPromptFormat] = useState<VideoPromptFormat>("h3");
+  const [directorPromptFormat, setDirectorPromptFormat] = useState<VideoPromptFormat>(generationPromptFormat);
   const validOrdinaryEnglishPrompt = directorResultStoryboard?.englishPromptSource === directorResultStoryboard?.finalPrompt
     && !getVideoPromptInstructionLeak(directorResultStoryboard?.englishPrompt || "")
     ? directorResultStoryboard?.englishPrompt || "" : "";
@@ -13329,7 +13610,7 @@ function DirectorView(ctx: AppContext) {
     return savedIdentity;
   };
   const generateSeedanceOfficialPrompt = async (): Promise<void> => {
-    if (!directorResultStoryboard || !seedancePromptInput?.canonicalPrompt.trim() || seedancePromptBusy) return;
+    if (!directorResultStoryboard || !seedancePromptInput?.canonicalPrompt.trim() || seedancePromptBusy || busy || sequenceBatchRunning) return;
     const requestInput = structuredClone(seedancePromptInput);
     let requestIdentity = seedanceLiveSaveIdentity(getCurrentState().project.storyboards.find((board) => board.id === directorResultStoryboard.id) || directorResultStoryboard);
     const requestFingerprint = getOfficialSeedanceSourceFingerprint(requestInput);
@@ -13360,7 +13641,7 @@ function DirectorView(ctx: AppContext) {
     }
   };
   const retrySeedanceEnglish = async (): Promise<void> => {
-    if (!directorResultStoryboard || !seedanceOutputFresh || !seedanceOutput?.promptZh || seedancePromptBusy) return;
+    if (!directorResultStoryboard || !seedanceOutputFresh || !seedanceOutput?.promptZh || seedancePromptBusy || busy || sequenceBatchRunning) return;
     const requestIdentity: SeedanceOutputSaveIdentity = {
       ...getCurrentWorkspaceIdentity(),
       chapterId: directorResultStoryboard.chapterId || getCurrentWorkspaceIdentity().chapterId,
@@ -13394,9 +13675,10 @@ function DirectorView(ctx: AppContext) {
     }
   };
   useEffect(() => {
-    setDirectorPromptFormat("h3");
+    setDirectorPromptFormat(generationPromptFormat);
+    setPromptLanguage("zh");
     setSeedancePromptError("");
-  }, [directorResultStoryboard?.id]);
+  }, [state.project.id, directorLookChapterId, activeSequencePlan?.id, activeSequenceSegment?.id, directorResultStoryboard?.id, generationPromptFormat]);
   useEffect(() => {
     const englishAvailable = directorPromptFormat === "seedance" ? seedanceEnglishPromptValid
       : directorPromptFormat === "ordinary" ? validOrdinaryEnglishPrompt : validEnglishPrompt;
@@ -14459,7 +14741,23 @@ function DirectorView(ctx: AppContext) {
                 </section>
   );
   return (
-    <div className="grid director-view" style={{ gap: 10 }}>
+    <div className="grid director-view director-top-compact" style={{ gap: 10 }}>
+      <Card className="director-generation-format-card">
+        <div className="director-generation-format-row">
+          <strong id="director-generation-format-title">目标提示词格式</strong>
+          <div className="segmented director-generation-format-switch" role="group" aria-labelledby="director-generation-format-title">
+            <button type="button" aria-pressed={generationPromptFormat === "seedance"}
+              className={`segment ${generationPromptFormat === "seedance" ? "active violet" : ""}`}
+              disabled={busy || sequenceBatchRunning || seedancePromptBusy}
+              onClick={() => setGenerationPromptFormat("seedance")}>Seedance</button>
+            <button type="button" aria-pressed={generationPromptFormat === "h3"}
+              className={`segment ${generationPromptFormat === "h3" ? "active" : ""}`}
+              disabled={busy || sequenceBatchRunning || seedancePromptBusy}
+              onClick={() => setGenerationPromptFormat("h3")}>MiniMax H3</button>
+          </div>
+          <span className="faint small-text" title={`生成${generationPromptFormatLabel}中英文稿；已保存的其他格式可在结果中查看。`}>生成中英文稿；旧稿在结果中查看。</span>
+        </div>
+      </Card>
       {activeStoryboard && <Card className="soft prompt-video-links">
         <div className="row-between">
           <span>当前提示词：{activeStoryboard.sourceStoryTitle || "已保存原稿"}{activeStoryboard.segmentIndex ? ` · 第 ${activeStoryboard.segmentIndex} 段` : ""}</span>
@@ -14708,6 +15006,7 @@ function DirectorView(ctx: AppContext) {
                   project={state.project}
                   activeSegmentId={activeSegmentId}
                   onSelect={chooseSequenceSegment}
+                  generationPromptFormat={generationPromptFormat}
                 />
                 <Badge tone="violet">
                   {activeSequenceSegment
@@ -14955,32 +15254,9 @@ function DirectorView(ctx: AppContext) {
                       <Film size={14} />
                       画面与规则
                     </span>
-                    <small>输出规格和规则预设</small>
+                    <small>节奏、声音和规则预设</small>
                   </div>
-                  <div className="grid grid-3 compact-director-fields director-look-pane">
-                    <Field label="画幅">
-                      <select
-                        value={aspectRatio}
-                        onChange={(event) => setAspectRatio(event.target.value)}
-                      >
-                        <option>16:9</option>
-                        <option>9:16</option>
-                        <option>1:1</option>
-                        <option>4:3</option>
-                        <option>21:9</option>
-                      </select>
-                    </Field>
-                    <Field label="分辨率">
-                      <select
-                        value={resolution}
-                        onChange={(event) => setResolution(event.target.value)}
-                      >
-                        <option>1080p</option>
-                        <option>2K</option>
-                        <option>4K</option>
-                        <option>按模型默认</option>
-                      </select>
-                    </Field>
+                  <div className="grid grid-3 compact-director-fields director-look-pane director-rule-pane">
                     <Field label="节奏">
                       <select
                         value={pace}
@@ -15180,13 +15456,13 @@ function DirectorView(ctx: AppContext) {
               <div className="director-generate-bar">
                 <span className="compact-note">
                   {productionMode === "sequence" && sequenceBatchRunning
-                    ? `顺序生成 ${sequenceBatchProgress.completed}/${sequenceBatchProgress.total}${sequenceBatchProgress.currentSegmentIndex ? ` · 当前第 ${sequenceBatchProgress.currentSegmentIndex} 段` : ""} · 仅处理提示词`
+                    ? `顺序生成${generationPromptFormatLabel} ${sequenceBatchProgress.completed}/${sequenceBatchProgress.total}${sequenceBatchProgress.currentSegmentIndex ? ` · 当前第 ${sequenceBatchProgress.currentSegmentIndex} 段` : ""} · 仅处理提示词`
                     : productionMode === "sequence" && !activeSequencePlanReadyForGeneration
                     ? activeSequencePlanMasterIssue
                       || "全片计划已变化或尚未确认，请返回①全片规划处理"
                     : productionMode === "sequence" && activeSequenceSegment
-                    ? `当前第 ${activeSequenceSegment.index} 段 · 本段 0—${formatTime(activeSequenceSegment.durationSec)} · ${aspectRatio}`
-                    : `当前：${workflowLabels[effectiveWorkflowPreview as Workflow]} · 剧情文字 · ${aspectRatio}`}
+                    ? `当前第 ${activeSequenceSegment.index} 段 · 本段 0—${formatTime(activeSequenceSegment.durationSec)}`
+                    : `当前：${workflowLabels[effectiveWorkflowPreview as Workflow]} · 剧情文字`}
                 </span>
                 <div className="row wrap sequence-generation-actions">
                   {productionMode === "sequence" && sequenceSettingsOpen && (
@@ -15225,20 +15501,20 @@ function DirectorView(ctx: AppContext) {
                     }}
                     >
                       {busy
-                        ? "中英文生成中…"
+                        ? `${generationPromptFormatLabel}中英文生成中…`
                         : productionMode === "sequence" && sequenceSettingsOpen
                         ? "请先确认全片导演参数"
                       : productionMode === "sequence"
                         ? activeSequencePromptAction?.action === "refresh-official"
-                          ? "刷新当前段提示词"
+                          ? `刷新当前段${generationPromptFormatLabel}提示词`
                           : activeSequencePromptAction?.action === "translate-english"
-                            ? "仅重试英文"
+                            ? `仅重试${generationPromptFormatLabel}英文`
                           : activeSequencePromptAction?.action === "complete"
-                            ? "当前段提示词已生成"
-                            : "生成当前段提示词"
+                            ? `当前段${generationPromptFormatLabel}已生成`
+                            : `生成当前段${generationPromptFormatLabel}提示词`
                         : shotMode === "auto"
-                          ? "AI 分镜并生成提示词"
-                          : `AI 按 ${shotCount} 镜分镜并生成提示词`}
+                          ? `AI 分镜并生成${generationPromptFormatLabel}提示词`
+                          : `AI 按 ${shotCount} 镜分镜并生成${generationPromptFormatLabel}提示词`}
                   </Button>
                   {productionMode === "sequence" && activeSequenceHasRealResult && (
                     <Button
@@ -15248,7 +15524,7 @@ function DirectorView(ctx: AppContext) {
                       title={sequenceBatchRunning ? "顺序生成结束或取消后可重新生成本段" : activeSequenceSegment?.locked ? "请先解锁当前段" : "重新生成当前段中英文提示词，原稿保存为历史版本"}
                       onClick={() => void ctx.regenerateCurrentSequenceSegmentPrompt()}
                     >
-                      重新生成本段提示词
+                      重新生成本段{generationPromptFormatLabel}提示词
                     </Button>
                   )}
                   {productionMode === "sequence" && activeSequencePlan && (
@@ -15273,11 +15549,13 @@ function DirectorView(ctx: AppContext) {
                             activeSequencePlan,
                             state.project.storyboards,
                             (storyboard) => officialH3ContextForStoryboard(state.project, storyboard),
+                            generationPromptFormat,
+                            state.project,
                           ).length === 0
                         }
                         onClick={() => void generateAllSequenceSegments(activeSequencePlan)}
                       >
-                        顺序生成全部
+                        顺序生成未完成的{generationPromptFormatLabel}
                       </Button>
                     )
                   )}
@@ -15290,17 +15568,21 @@ function DirectorView(ctx: AppContext) {
                         disabled={busy || sequenceBatchRunning || sequenceSettingsOpen || !activeSequencePlanReadyForGeneration || activeSequencePlan.segments.length < 2}
                         onClick={() => void ctx.repairSequencePromptContinuity(activeSequencePlan)}
                       >
-                        仅修复上下段衔接
+                        仅修复{generationPromptFormatLabel}上下段衔接
                       </Button>
                     </>
                   )}
                 </div>
               </div>
             </Card>
-            <Card className="director-side-panel">
+            <Card className="director-side-panel director-result-compact">
               <div className="row-between director-reference-head">
                 <div className="card-title" style={{ marginBottom: 0 }}>
-                  <div><h2>{directorPane === "result" ? "生成结果" : "参考图"}</h2></div>
+                  <div><h2>{directorPane === "result" ? "生成结果" : "分镜生图参考图"}</h2></div>
+                </div>
+                <div className="segmented director-panel-tabs reference-result-tabs">
+                  <button className={`segment ${directorPane === "result" ? "active" : ""}`} onClick={() => setDirectorPane("result")}>提示词结果</button>
+                  <button className={`segment ${directorPane === "references" ? "active violet" : ""}`} onClick={() => setDirectorPane("references")}>分镜生图参考图{directorResultStoryboard?.imageToImage?.referenceAssetIds.length ? `（${directorResultStoryboard.imageToImage.referenceAssetIds.length}）` : ""}</button>
                 </div>
                 {(productionMode === "sequence" && activeSequencePlan || directorPane === "result" && directorResultStoryboard && (directorPromptFormat === "h3" ? validOfficialPrompt
                   : directorPromptFormat === "ordinary" ? directorResultStoryboard.finalPrompt : seedanceOutputFresh)) && (
@@ -15329,13 +15611,9 @@ function DirectorView(ctx: AppContext) {
                 <span>人物资料已更新，本段提示词待刷新。旧稿与已提交任务保留。</span>
                 <Button small disabled={busy || sequenceBatchRunning} onClick={() => void ctx.refreshStoryboardCharacterDossier(directorResultStoryboard.id)}>按新资料更新本段提示词</Button>
               </div>}
-              <div className="segmented director-panel-tabs reference-result-tabs">
-                <button className={`segment ${directorPane === "result" ? "active" : ""}`} onClick={() => setDirectorPane("result")}>提示词结果</button>
-                <button className={`segment ${directorPane === "references" ? "active violet" : ""}`} onClick={() => setDirectorPane("references")}>参考图{directorResultStoryboard?.imageToImage?.referenceAssetIds.length ? `（${directorResultStoryboard.imageToImage.referenceAssetIds.length}）` : ""}</button>
-              </div>
               {directorPane === "references" && (directorResultStoryboard ? (
                 <StoryboardDirectImageTools ctx={ctx} storyboard={directorResultStoryboard} />
-              ) : <Empty title="暂无可用分镜" description="先生成分镜内容，再选择参考图；生图仍使用提示词结果下方原来的按钮。" />)}
+              ) : <Empty title="暂无可用分镜" description="先生成分镜内容，再选择分镜生图参考图；生图仍使用提示词结果下方原来的按钮。" />)}
               {directorPane === "result" &&
                 (directorResultStoryboard && (validOfficialPrompt || seedancePromptInput?.canonicalPrompt.trim()) ? (
                   <div className="director-result-pane">
@@ -15353,7 +15631,7 @@ function DirectorView(ctx: AppContext) {
                     {productionMode === "sequence" && activeSequenceSegment && (
                       <div className="sequence-result-status" role="status">
                         <Badge tone={activeSequenceSegment.index > 1 && activeSequenceHandoff?.kind !== "current" ? "amber" : activeSequencePromptAction?.action === "complete" ? "green" : activeSequencePromptAction?.action === "translate-english" ? "amber" : activeSequenceSegment.status === "failed" ? "pink" : "violet"}>
-                          第 {activeSequenceSegment.index} 段 · {sequenceSegmentPromptStatusLabel(activeSequenceSegment, activeSequencePromptAction?.action || "generate-storyboard")}
+                          第 {activeSequenceSegment.index} 段 · {generationPromptFormatLabel} · {sequenceSegmentPromptStatusLabel(activeSequenceSegment, activeSequencePromptAction?.action || "generate-storyboard", generationPromptFormat)}
                         </Badge>
                         {activeSequenceHandoff && <span aria-label="本段文本衔接状态" title={activeSequenceHandoff.issue}>{activeSequenceHandoff.label}</span>}
                         {activeSequenceSegment.index > 1 && <details className="sequence-text-handoff-details">
@@ -15369,7 +15647,7 @@ function DirectorView(ctx: AppContext) {
                         {activeSequenceSegment.failureReason && (
                           <span className="sequence-segment-error-text">{formatUserFacingError(activeSequenceSegment.failureReason)}</span>
                         )}
-                        {!validEnglishPrompt && directorResultStoryboard.officialPromptEnError && (
+                        {generationPromptFormat === "h3" && !validEnglishPrompt && directorResultStoryboard.officialPromptEnError && (
                           <span className="sequence-segment-error-text">英文未完成：{formatUserFacingError(directorResultStoryboard.officialPromptEnError)}</span>
                         )}
                         {(activeSequenceSegment.failureReason || activeSequencePromptAction?.action === "translate-english") && (
@@ -15380,13 +15658,13 @@ function DirectorView(ctx: AppContext) {
                             disabled={busy || sequenceBatchRunning || activeSequenceSegment.locked}
                             onClick={() => void generateCurrentSequenceSegment()}
                           >
-                            {activeSequencePromptAction?.action === "translate-english" ? "仅重试英文" : "重试本段"}
+                            {activeSequencePromptAction?.action === "translate-english" ? `仅重试${generationPromptFormatLabel}英文` : `重试本段${generationPromptFormatLabel}`}
                           </Button>
                         )}
                       </div>
                     )}
-                    <div className="card-title director-result-head" style={{ marginTop: 2 }}>
-                      <div>
+                    <div className="card-title director-result-head" style={{ marginTop: 0 }}>
+                      <div className="director-result-metadata">
                         <h2>{directorPromptFormat === "seedance" ? "Seedance 2.5 官方格式" : directorPromptFormat === "ordinary" ? "普通原稿" : "MiniMax H3 官方格式"}</h2>
                         <p>
                         {directorResultStoryboard.durationSec} 秒 ·{" "}
@@ -15397,6 +15675,10 @@ function DirectorView(ctx: AppContext) {
                             ]
                           }
                         </p>
+                        <span className="faint director-result-target-label" title={`目标生成：${generationPromptFormatLabel}。格式标签只切换已保存稿件。`}>目标：{generationPromptFormatLabel}</span>
+                        {directorPromptFormat !== "seedance" ? <span className="faint director-result-language-note" title="English只改变画面等描述语言；对白保留剧情原语言，只有剧情明确要求时才使用英文对白。">英文翻译描述，保留原对白</span> : (
+                          <span className="faint director-result-language-note" title="Seedance 中文和英文稿独立保存；英文只翻译画面、动作和声音描述，对白保留剧情原语言；时长沿用导演台设置，无有效值时按30秒。">中英文独立保存，保留原对白</span>
+                        )}
                       </div>
                       <div className="row result-language-tools">
                         <div className="segmented" role="group" aria-label="官方提示词格式">
@@ -15475,7 +15757,7 @@ function DirectorView(ctx: AppContext) {
                           复制
                         </Button>
                         {directorPromptFormat === "seedance" && seedanceOutputFresh && <Button small
-                          icon={<RefreshCw size={14} />} disabled={seedancePromptBusy}
+                          icon={<RefreshCw size={14} />} disabled={seedancePromptBusy || busy || sequenceBatchRunning}
                           onClick={() => void generateSeedanceOfficialPrompt()}>{seedancePromptBusy ? "生成中…" : "重新生成 Seedance"}</Button>}
                       </div>
                     </div>
@@ -15485,19 +15767,17 @@ function DirectorView(ctx: AppContext) {
                         {savedOfficialH3Warnings.map((warning) => <div key={warning}>{warning}</div>)}
                       </details>
                     )}
-                    {directorPromptFormat !== "seedance" ? <div className="faint small-text director-result-language-note" title="English只改变画面等描述语言；对白保留剧情原语言，只有剧情明确要求时才使用英文对白。">English翻译画面描述，对白保留剧情指定语言。</div> : (
-                      <div className="faint small-text director-result-language-note" title="Seedance 中文和英文稿独立保存；英文只翻译画面、动作和声音描述，对白保留剧情原语言；时长沿用导演台设置，无有效值时按30秒。">Seedance 中英文稿独立保存；英文只翻译描述，对白保留剧情原语言；时长沿用导演台设置，无有效值时按30秒。</div>
-                    )}
                     {directorPromptFormat === "seedance" && seedanceOutputFresh && (seedanceOutput?.englishError || seedanceEnglishIssue) && (
                       <div className="sequence-result-status" role="status">
                         <span>中文稿已保存，英文版待重试：{formatUserFacingError(seedanceEnglishIssue || seedanceOutput?.englishError || "")}</span>
-                        <Button small variant="ghost" disabled={seedancePromptBusy} onClick={() => void retrySeedanceEnglish()}>{seedancePromptBusy ? "重试中…" : "仅重试英文"}</Button>
+                        <Button small variant="ghost" disabled={seedancePromptBusy || busy || sequenceBatchRunning} onClick={() => void retrySeedanceEnglish()}>{seedancePromptBusy ? "重试中…" : "仅重试英文"}</Button>
                       </div>
                     )}
                     {directorPromptFormat === "seedance" && seedanceOutputFresh && seedanceOutput?.warnings.length ? (
-                      <div className="sequence-result-status" role="status">
-                        <span>Seedance 生成提醒：{seedanceOutput.warnings.join("；")}</span>
-                      </div>
+                      <details className="sequence-result-status director-result-warning-details" role="status">
+                        <summary>Seedance 生成提醒（{seedanceOutput.warnings.length} 项）</summary>
+                        <div>{seedanceOutput.warnings.join("；")}</div>
+                      </details>
                     ) : null}
                     <div className="prompt-copy director-result-copy h3-prompt-copy" role="region" aria-label="视频提示词正文" tabIndex={0}>
                       {directorPromptFormat === "h3" ? <H3PromptDisplay
@@ -15512,7 +15792,7 @@ function DirectorView(ctx: AppContext) {
                           <strong>{seedanceChineseIssue ? "Seedance 原保存稿含转换规则" : seedanceOutput ? "Seedance 官方稿已过期" : "Seedance 2.5 官方稿尚未生成"}</strong>
                           <div style={{ marginTop: 6 }}>{seedanceChineseIssue ? "原保存稿混入了转换器要求，请重新生成 Seedance 官方稿；沿用当前剧情、分镜和对白，原保存稿可在下方查看。" : seedanceOutput ? "当前剧情、分镜、参考素材或 Seedance 生成策略已变化；旧稿保留，主动重新生成可应用新策略。" : "调用文本 AI 编写 Seedance 中文，先保存中文再翻译英文，沿用已确认剧情、分镜和时间轴。"}</div>
                           {seedancePromptError && <div className="sequence-segment-error-text" style={{ marginTop: 6 }}>{formatUserFacingError(seedancePromptError)}</div>}
-                          <Button small variant="primary" disabled={seedancePromptBusy} onClick={() => void generateSeedanceOfficialPrompt()}>{seedancePromptBusy ? "生成中…" : "生成 Seedance 2.5 官方稿"}</Button>
+                          <Button small variant="primary" disabled={seedancePromptBusy || busy || sequenceBatchRunning} onClick={() => void generateSeedanceOfficialPrompt()}>{seedancePromptBusy ? "生成中…" : "生成 Seedance 2.5 官方稿"}</Button>
                         </div>
                       )}
                     </div>
@@ -15579,7 +15859,7 @@ function DirectorView(ctx: AppContext) {
                           : `留空按原镜头数量；填写 1–${STORYBOARD_IMAGE_PLAN_MAX_COUNT} 后由 AI 规划对应张数，不改变视频镜头和时长。`}
                         <span aria-label="当前分镜图片参考图">{directorResultStoryboard.imageToImage?.referenceAssetIds.length
                           ? ` 已选 ${directorResultStoryboard.imageToImage.referenceAssetIds.length} 张参考图，本批每张图片均带原图图生图。`
-                          : " 未选参考图，沿用文字生图；可到参考图栏选择。"}</span>
+                          : " 未选参考图，沿用文字生图；可到分镜生图参考图栏选择。"}</span>
                         <span aria-label="当前分镜图分辨率">{directorStoryboardOutputSize.issue
                           ? ` 分镜图分辨率需调整：${directorStoryboardOutputSize.issue}`
                           : ` 分镜图请求 ${directorStoryboardOutputSize.width}×${directorStoryboardOutputSize.height} px（同步图像工作台）。`}</span>
@@ -15599,8 +15879,8 @@ function DirectorView(ctx: AppContext) {
                               ? `第 ${activeSequenceSegment.index} 段生成中断`
                               : `第 ${activeSequenceSegment.index} 段尚未生成`
                           : directorResultStoryboard?.finalPrompt?.trim()
-                            ? "官方交付稿已失效"
-                            : "还没有最近结果"
+                            ? `${generationPromptFormatLabel}交付稿待生成或刷新`
+                            : `还没有${generationPromptFormatLabel}结果`
                       }
                       description={
                         productionMode === "sequence" && activeSequenceSegment
@@ -15609,8 +15889,8 @@ function DirectorView(ctx: AppContext) {
                               ? "参考素材已变化；将调用 API 按当前参考图重新生成本段中英文提示词，保留本段镜数和时间边界，不重做全片或其他分段。"
                               : "本段还没有真实分镜和非空最终提示词。")
                           : directorResultStoryboard?.finalPrompt?.trim()
-                            ? "分镜或参考素材已变化，请重新生成提示词以刷新完整的 MiniMax H3 中英文交付稿。"
-                            : "先回到提示词导演台生成一组最终分镜提示词。"
+                            ? `沿用当前剧情与分镜，生成或刷新${generationPromptFormatLabel}中英文交付稿。`
+                            : `已选择${generationPromptFormatLabel}，可直接从当前剧情生成分镜和目标提示词。`
                       }
                       action={
                         <div className="row wrap">
@@ -15622,9 +15902,13 @@ function DirectorView(ctx: AppContext) {
                               disabled={busy || sequenceBatchRunning || activeSequenceSegment.locked}
                             onClick={() => void generateCurrentSequenceSegment()}
                           >
-                              {activeSequenceHasRealResult ? "刷新本段提示词" : "重试本段"}
+                              {activeSequenceHasRealResult ? `刷新本段${generationPromptFormatLabel}` : `重试本段${generationPromptFormatLabel}`}
                           </Button>
                           )}
+                          {productionMode !== "sequence" && <Button small variant="primary" icon={<WandSparkles size={14} />}
+                            disabled={busy || seedancePromptBusy} onClick={() => void buildStoryboard()}>
+                            生成{generationPromptFormatLabel}提示词
+                          </Button>}
                           <Button
                             small
                             onClick={() => setView("director")}

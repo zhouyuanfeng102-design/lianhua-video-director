@@ -5,10 +5,12 @@ import { videoReferenceSlotIndex } from './videoReferenceSlots';
 import { getH3IdentityBindingIssues, normalizeH3IdentityBindings } from './h3IdentityBindings';
 import { officialH3ContextForStoryboard } from './officialH3Context';
 import { characterParticipationAliases, resolvePromptCharacterParticipation, resolveStoryboardCharacterParticipation } from './characterParticipation';
-import { assetReferenceCharacterOwners } from './assetCharacterBinding';
+import { videoReferenceCharacterOwners, videoReferenceCharacterBindingWarning, type VideoCharacterReferenceState } from './videoReferenceCharacters';
 import { maskVideoPictureReferenceLiterals as maskReferenceLiterals, videoPictureReferencePattern as pictureReferencePattern } from './videoPictureReferences';
 import { prepareVideoSeedanceReferenceDraft } from './videoSeedanceReferenceBinding';
+import { videoSeedanceReferencePlan } from './videoSeedanceReferencePlan';
 export { collectVideoPictureReferenceNumbers } from './videoPictureReferences';
+export { videoReferenceCharacterOwners, videoReferenceCharacterBindingWarning } from './videoReferenceCharacters';
 
 /** This is an editing provenance record, not a second prompt or an AI review.
  * Rendering always starts from the same authored text, so repeated selections
@@ -29,14 +31,7 @@ export interface VideoH3ReferenceBinding {
   characterStates?: VideoH3CharacterReferenceState[];
 }
 
-export interface VideoH3CharacterReferenceState {
-  characterId: string;
-  name: string;
-  status: 'unselected' | 'bound' | 'pending';
-  /** Actual Picture numbers when known; otherwise selected physical slots. */
-  slots: number[];
-  reason?: string;
-}
+export type VideoH3CharacterReferenceState = VideoCharacterReferenceState;
 
 export interface PreparedVideoH3ReferenceDraft {
   draft: VideoGenerationDraft;
@@ -48,7 +43,8 @@ export interface PreparedVideoH3ReferenceDraft {
 }
 
 export type VideoH3ReferenceContext = Omit<VideoReferenceUsageContext, 'api'> & {
-  api?: VideoReferenceUsageContext['api'] & Pick<VideoTaskApiConfig, 'runningHubMappedFields' | 'requestTemplate' | 'rhtvMode'>;
+  api?: VideoReferenceUsageContext['api'] & Pick<VideoTaskApiConfig, 'runningHubMappedFields' | 'requestTemplate' | 'rhtvMode'>
+    & Partial<Pick<VideoTaskApiConfig, 'baseUrl' | 'endpoint'>>;
 };
 
 const unique = <T,>(values: readonly T[]): T[] => [...new Set(values)];
@@ -72,29 +68,6 @@ const manifestSourcePictures = (value: unknown): Array<{ number: number; assetId
 const isH3 = (text: string): boolean => /(?:^|\n)(?:integrated_multimodal_description|subject_definitions):/u.test(text);
 const imageAsset = (asset: ReferenceAsset): boolean => !['video', 'audio'].includes(asset.type)
   && !['video', 'audio'].includes(asset.mediaType || '') && !/^(?:video|audio)\//u.test(asset.mimeType || '');
-
-/** A corrupt explicit selection is not permission to fall back to asset ownership. */
-export const videoReferenceCharacterBindingWarning = (reference: Pick<VideoImageReference, 'characterIds'>): string | undefined => {
-  const ids: unknown = reference.characterIds;
-  return ids !== undefined && (!Array.isArray(ids) || Array.from(ids).some((id) => typeof id !== 'string'))
-    ? '人物绑定资料格式无效，已按未绑定处理；未借用资产人物，仅提示，不阻止生成。' : undefined;
-};
-
-/** Only explicit provenance is evidence. Never infer a person from filename,
- * face position, character ordinal, baseName or another visual form. */
-export const videoReferenceCharacterOwners = (
-  project: Project, asset: ReferenceAsset, reference?: VideoImageReference,
-): Character[] => {
-  if (!imageAsset(asset) || project.assets.filter((entry) => entry.id === asset.id).length !== 1) return [];
-  const exactCharacters = (ids: readonly string[]): Character[] => unique(ids).flatMap((id) => {
-    const matches = project.characters.filter((character) => character.id === id);
-    // Archived dossiers remain in storage for old tasks, but are not current
-    // owners. Do not silently redirect a stale explicit ID to its replacement.
-    return matches.length === 1 && !matches[0].dossier?.archivedIntoCharacterId ? matches : [];
-  });
-  if (reference?.characterIds !== undefined) return videoReferenceCharacterBindingWarning(reference) ? [] : exactCharacters(reference.characterIds);
-  return assetReferenceCharacterOwners(project, asset);
-};
 
 /** Scene replacement needs the same explicit provenance as an identity photo.
  * A scene-looking filename, asset category or selected use is not location ID. */
@@ -369,7 +342,7 @@ const videoH3ReferenceUsageEdit = (
 export const prepareVideoH3ReferenceDraft = (
   project: Project, draft: VideoGenerationDraft, context: VideoH3ReferenceContext,
 ): PreparedVideoH3ReferenceDraft => {
-  if (draft.source?.promptFormat === 'seedance') return prepareVideoSeedanceReferenceDraft(project, draft, videoH3PictureNumbers(draft.references, context));
+  if (draft.source?.promptFormat === 'seedance') return prepareVideoSeedanceReferenceDraft(project, draft, videoSeedanceReferencePlan(draft.references, context));
   const referenceProject = videoH3ReferenceProject(project, draft);
   const binding = videoH3BindingForPrompt(project, draft);
   const basePrompt = binding?.basePrompt || draft.prompt;

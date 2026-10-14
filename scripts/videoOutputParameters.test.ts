@@ -21,8 +21,10 @@ import * as referenceSlots from '../src/videoReferenceSlots';
 import * as audioReferences from '../src/videoAudioReferences';
 import * as errorDiagnostics from '../src/errorDiagnostics';
 import * as videoTaskErrorDiagnostics from '../src/videoTaskErrorDiagnostics';
-import { buildVideoApiBody } from '../src/videoGenerationApi';
+import { buildVideoApiBody, videoApiSubmitEndpoint } from '../src/videoGenerationApi';
 import { bindComfyVideoWorkflow } from '../src/comfyuiVideo';
+import * as videoApiCapabilities from '../src/videoApiCapabilities';
+import * as videoApiDiscovery from '../src/videoApiDiscovery';
 import { createInitialState } from '../src/storage';
 import { buildOfficialH3SourceFingerprint } from '../src/officialPrompt';
 import { officialH3ContextForStoryboard } from '../src/officialH3Context';
@@ -71,7 +73,9 @@ const input = (tree: React.ReactNode, label: string) => {
 };
 
 test('普通 API 可编辑时长与分辨率，云端只显示真实显式映射能力', () => {
-  assert.deepEqual(output.availableVideoParameterKeys('api'), ['duration', 'resolution', 'seed']);
+  assert.deepEqual(output.availableVideoParameterKeys('api'), ['duration', 'aspect_ratio', 'resolution', 'seed']);
+  assert.deepEqual(output.availableVideoParameterKeys('api', { provider: 'generic', baseUrl: 'https://video.laoliimage2.win' }), ['duration', 'aspect_ratio', 'resolution']);
+  assert.deepEqual(output.availableVideoParameterKeys('api', { provider: 'generic', baseUrl: 'https://video.laoliimage2.win', requestTemplate: '{"seed":"{{seed}}"}' }), ['duration', 'aspect_ratio', 'resolution', 'seed']);
   assert.deepEqual(output.availableVideoParameterKeys('runninghub'), []);
   assert.deepEqual(output.availableVideoParameterKeys('comfyui'), []);
   const api = { provider: 'runninghub' as const, runningHubMappedFields: [
@@ -81,6 +85,114 @@ test('普通 API 可编辑时长与分辨率，云端只显示真实显式映射
   ] };
   assert.deepEqual(output.availableVideoParameterKeys('runninghub', api), ['duration', 'resolution']);
   assert.deepEqual(output.availableVideoParameterKeys('api', api), ['duration', 'resolution']);
+});
+
+const apiParameterFixture = () => {
+  const api = { ...createInitialState().settings.videoTaskApi, provider: 'generic' as const, model: 'range-model', baseUrl: 'https://parameters.example.test',
+    endpoint: '', statusEndpointTemplate: '', apiKey: '', requestTemplate: '' };
+  api.parameterCapabilities = { scope: videoApiCapabilities.videoApiCapabilityScope(api), source: 'mixed', fetchedAt: 1,
+    models: {
+      'range-model': { controls: { duration: { kind: 'number', min: 4, max: 30, step: 1, source: 'openapi' },
+        aspect_ratio: { kind: 'select', options: ['16:9', '9:16', '1:1'], restricted: true, source: 'openapi' },
+        resolution: { kind: 'select', options: ['720p', '1080p'], restricted: true, source: 'models' } }, defaults: { duration: 6, aspect_ratio: '16:9', resolution: '720p' } },
+      'enum-model': { controls: { duration: { kind: 'select', options: ['5', '10'], restricted: true },
+        aspect_ratio: { kind: 'select', options: ['auto', '2:1'], restricted: false } }, defaults: {} },
+    } };
+  return api;
+};
+
+test('单段与批量上游enum只提供允许选项；非法旧值保留显示且可清除', () => {
+  for (const scope of ['single', 'batch'] as const) {
+    const api = apiParameterFixture(); const changes: unknown[] = []; const prefix = scope === 'single' ? '本次' : '批量';
+    const text = '{"resolution":"legacy-size","aspect_ratio":"16:9"}';
+    const props: VideoOutputParametersProps = { scope, source: 'api', availableKeys: output.availableVideoParameterKeys('api', api), parameterText: text,
+      ...output.videoOutputParameterPresentation(api), onChange: (...args) => changes.push(args) };
+    const tree = Output(props);
+    assert.equal(nodesOf(tree).find((node) => node.type === 'input' && node.props['aria-label'] === `${prefix}视频分辨率`), undefined);
+    const choices = nodesOf(tree).find((node) => node.type === 'select' && node.props['aria-label'] === `${prefix}视频分辨率选项`)!;
+    assert.equal(choices.props.value, '__custom__'); assert.match(textOf(choices), /已保存原值：legacy-size/u);
+    assert.match(textOf(tree), /已保存值不在上游允许选项中/u); assert.deepEqual(changes, []);
+    choices.props.onChange({ target: { value: 'value:fake-size' } }); assert.deepEqual(changes, []);
+    choices.props.onChange({ target: { value: 'value:1080p' } }); assert.deepEqual(changes, [['resolution', '1080p']]);
+    nodesOf(tree).find((node) => node.props['aria-label'] === `清除${prefix}视频分辨率覆盖`)!.props.onClick();
+    assert.deepEqual(changes[1], ['resolution', '']); assert.equal(text, '{"resolution":"legacy-size","aspect_ratio":"16:9"}');
+  }
+});
+
+test('读取上游数值范围和默认值展示min/max/step，render不覆盖草稿', () => {
+  for (const scope of ['single', 'batch'] as const) {
+    const api = apiParameterFixture(); const changes: unknown[] = []; const prefix = scope === 'single' ? '本次' : '批量';
+    const render = (text: string) => Output({ scope, source: 'api', availableKeys: ['duration', 'aspect_ratio', 'resolution'], parameterText: text,
+      ...output.videoOutputParameterPresentation(api), onChange: (...args) => changes.push(args) });
+    const tree = render('{}'); const duration = input(tree, `${prefix}视频时长（秒）`);
+    assert.equal(duration.props.type, 'number'); assert.equal(duration.props.min, 4); assert.equal(duration.props.max, 30); assert.equal(duration.props.step, 1);
+    assert.equal(duration.props.value, ''); assert.match(textOf(tree), /上游范围 4–30 秒/u); assert.match(textOf(tree), /上游默认 6 秒/u);
+    assert.deepEqual(changes, []); assert.match(textOf(render('{"duration":31}')), /超出上游范围/u);
+    assert.match(textOf(render('{"duration":5.5}')), /不符合上游步长/u);
+    const invalid = render('{"duration":"old-text"}'); assert.equal(input(invalid, `${prefix}视频时长（秒）`).props.type, 'text');
+    assert.equal(input(invalid, `${prefix}视频时长（秒）`).props.value, 'old-text'); assert.match(textOf(invalid), /不是有效数字/u);
+  }
+});
+
+test('切换model/site只读取匹配的上游限制，unknown继续可手填且不猜选项', () => {
+  const api = apiParameterFixture(); const original = JSON.stringify(api);
+  const render = (selected = api) => Output({ scope: 'single', source: 'api', availableKeys: output.availableVideoParameterKeys('api', selected),
+    parameterText: '{"duration":12,"aspect_ratio":"custom-ratio"}', ...output.videoOutputParameterPresentation(selected), onChange: () => assert.fail('render cannot write') });
+  assert.equal(input(render(), '本次视频时长（秒）').props.max, 30);
+  const enumTree = render({ ...api, model: 'enum-model' });
+  assert.equal(nodesOf(enumTree).some((node) => node.type === 'input' && node.props['aria-label'] === '本次视频时长（秒）'), false);
+  assert.equal(input(enumTree, '本次视频画面比例').props.value, 'custom-ratio'); assert.match(textOf(enumTree), /上游推荐选项；也可自定义/u);
+  for (const unknown of [{ ...api, model: 'unknown-model' }, { ...api, baseUrl: 'https://another.example.test' }]) {
+    const tree = render(unknown); assert.equal(input(tree, '本次视频时长（秒）').props.value, '12');
+    assert.equal(input(tree, '本次视频画面比例').props.value, 'custom-ratio'); assert.match(textOf(tree), /上游未提供参数限制/u);
+    assert.equal(nodesOf(tree).filter((node) => node.type === 'select').length, 3);
+    assert.match(textOf(tree), /常用选项，上游支持情况未读取/u);
+    assert.deepEqual(output.videoOutputParameterPresentation(unknown).defaultValues, {});
+  }
+  assert.equal(JSON.stringify(api), original);
+  assert.deepEqual(output.availableVideoParameterKeys('api', { provider: 'minimax' }), ['duration', 'resolution', 'seed']);
+  assert.deepEqual(output.availableVideoParameterKeys('api', { provider: 'rhtv_web' }), ['duration', 'resolution']);
+});
+
+test('旧RunningHub自由比例和MP单位不继承通用模型白名单或数值输入转换', () => {
+  const view = output.videoOutputParameterPresentation({ provider: 'runninghub', runningHubMappedFields: [
+    { nodeId: 'legacy', fieldName: 'aspect_ratio', kind: 'parameter', parameter: 'aspect_ratio', originalValue: '4:3 (Custom landscape)' },
+    { nodeId: 'legacy', fieldName: 'megapixels', kind: 'parameter', parameter: 'resolution', originalValue: '0.98' },
+  ] });
+  const tree = Output({ scope: 'single', source: 'runninghub', availableKeys: ['aspect_ratio', 'resolution'], parameterText: '{}', ...view, onChange: () => assert.fail('render cannot write') });
+  assert.equal(view.upstreamParameters, false); assert.equal(input(tree, '本次视频画面比例').props.type, 'text');
+  assert.equal(input(tree, '本次视频分辨率').props.type, 'text'); assert.equal(view.defaultValues.aspect_ratio, '4:3 (Custom landscape)');
+  assert.equal(nodesOf(tree).some((node) => node.type === 'select'), false); assert.doesNotMatch(textOf(tree), /上游未提供参数限制/u);
+});
+
+test('未知参数提供常用时长比例分辨率可选，注明支持情况未知并保留自定义', () => {
+  for (const scope of ['single', 'batch'] as const) {
+    const changes: unknown[] = []; const prefix = scope === 'single' ? '本次' : '批量';
+    const tree = Output({ scope, source: 'api', upstreamParameters: true, availableKeys: ['duration', 'aspect_ratio', 'resolution'],
+      parameterText: '{}', onChange: (...args) => changes.push(args) });
+    assert.match(textOf(tree), /常用选项，上游支持情况未读取/u); assert.deepEqual(changes, []);
+    for (const [key, label, choice] of [['duration', '视频时长（秒）', '30'], ['aspect_ratio', '视频画面比例', '3:4'], ['resolution', '视频分辨率', '480p']] as const) {
+      const select = nodesOf(tree).find((node) => node.type === 'select' && node.props['aria-label'] === `${prefix}${label}选项`)!;
+      assert.equal(select.props.value, '__default__'); assert.ok(select);
+      select.props.onChange({ target: { value: `value:${choice}` } }); assert.deepEqual(changes.at(-1), [key, choice]);
+      input(tree, `${prefix}${label}`).props.onChange({ target: { value: 'custom-upstream-value' } });
+      assert.deepEqual(changes.at(-1), [key, 'custom-upstream-value']);
+    }
+    assert.deepEqual(output.changeVideoParameterText('{}', 'duration', '30').value, { duration: 30 });
+  }
+});
+
+test('已知range常用值只展示范围步长内值；自由string仍有常用建议', () => {
+  assert.deepEqual(output.videoOutputParameterChoices('duration', { kind: 'number', min: 8, max: 18, step: 2 }, true), { options: ['10'], common: true });
+  assert.deepEqual(output.videoOutputParameterChoices('duration', { kind: 'number', min: 40, max: 60 }, true), { options: [], common: false });
+  assert.deepEqual(output.videoOutputParameterChoices('duration', { kind: 'select', options: ['6', '12'], restricted: true }, true), { options: ['6', '12'], common: false });
+  const tree = Output({ scope: 'single', source: 'api', upstreamParameters: true, availableKeys: ['aspect_ratio'], parameterText: '{"aspect_ratio":"21:9"}',
+    controls: { aspect_ratio: { kind: 'text', restricted: false, source: 'openapi' } }, onChange: () => {} });
+  assert.equal(input(tree, '本次视频画面比例').props.value, '21:9'); assert.match(textOf(tree), /上游未限定可选值；常用选项可选/u);
+  const ratioField = nodesOf(tree).find((node) => node.type === 'div' && node.props.className === 'field vop-field'
+    && nodesOf(node).some((child) => child.props['aria-label'] === '本次视频画面比例'))!;
+  assert.doesNotMatch(textOf(ratioField), /上游支持情况未读取/u);
+  assert.deepEqual(output.videoOutputParameterChoices('aspect_ratio', { kind: 'text' }, false), { options: [], common: false }, 'workflow text fields have no generic presets');
 });
 test('RunningHub 比例节点保留完整 COMBO 值并显示可选下拉', () => {
   const api = { provider: 'runninghub' as const, runningHubMappedFields: [
@@ -247,8 +359,11 @@ function harness(kind: 'single' | 'batch', initial = fixture(), extras: Props = 
     // props remain inspectable without running their own hooks or effects.
     './VideoAudioReferences': { ProjectVoicePresetEditor: () => null, VideoAudioReferenceEditor: () => null },
     '../videoAudioReferences': audioReferences,
+    '../videoApiCapabilities': videoApiCapabilities, '../videoApiDiscovery': videoApiDiscovery,
+    '../videoGenerationApi': { videoApiSubmitEndpoint },
     '../videoResultRecovery': {}, '../comfyuiVideo': {}, '../videoGenerationSource': source, '../runningHubVideo': runningHub, '../runningHubPromptPictures': runningHubPromptPictures,
     '../videoOutputParameters': output, './VideoOutputParameters': { VideoOutputParameters: Output }, '../videoRuntimeStore': {},
+    './VideoApiParameterReader': { VideoApiParameterReader: () => null },
     '../videoProvenance': provenance, '../videoDirectorReferences': references, '../videoDirectorDraft': drafts,
     '../videoBatch': batch, '../videoBatchSelection': selection, './PreviousVideoTailDialog': { PreviousVideoTailDialog: () => null }, '../videoTailReference': tails, '../videoTailCharacters': tailCharacters, '../videoReferenceUsage': referenceUsage, '../videoReferenceSlots': referenceSlots,
   };
@@ -406,6 +521,30 @@ test('单段真实组件：未失焦 JSON 与快捷输入合并，未改 prompt�
   assert.equal(h.starts.length, 0); assert.equal(h.required('textarea', '本次生成使用的完整提示词').props.value, '原文保持 10 秒，不自动改写');
   h.click('生成视频'); assert.deepEqual(h.starts[0].parameters, { seed: 42, custom: { keep: '原值' }, duration: 8, resolution: '1080P' });
   h.dispose();
+});
+test('只有 API 地址的通用连接可准备单段和批量，地址变化撤销旧确认', () => {
+  const initial = fixture();
+  initial.settings.videoTaskApi = { ...initial.settings.videoTaskApi, baseUrl: 'https://video.laoliimage2.win', endpoint: '', statusEndpointTemplate: '', model: 'WAN3.0-不可参考视频' };
+  const original = JSON.stringify(initial.project);
+  const single = harness('single', initial);
+  single.change('textarea', '本次生成使用的完整提示词', '镜头缓慢推进，保留原文');
+  assert.equal(single.starts.length, 0);
+  single.click('生成视频');
+  assert.equal(single.starts.length, 1, 'the recording-only controller receives the draft without a real API call');
+  assert.deepEqual(single.starts[0].parameters, {}, 'opening the new connection adds no default overrides');
+  single.dispose();
+
+  const multi = ordinaryBatchHarness(initial);
+  multi.click('全选中文'); multi.click('检查并生成 2 段视频');
+  assert.equal(multi.batches.length, 0, 'preparing the fee confirmation cannot submit');
+  assert.equal(multi.required('input', '确认批量生成费用').props.checked, false);
+  assert.equal(multi.required('button', '确认生成 2 段').props.disabled, true);
+  multi.update({ settings: { ...initial.settings, videoTaskApi: { ...initial.settings.videoTaskApi, baseUrl: 'https://video.laoliimage2.win/v1' } } });
+  assert.equal(multi.find('input', '确认批量生成费用'), undefined, 'changing only the API address invalidates the old connection confirmation');
+  multi.click('检查并生成 2 段视频');
+  assert.equal(multi.required('input', '确认批量生成费用').props.checked, false);
+  assert.equal(multi.batches.length, 0);
+  assert.equal(JSON.stringify(initial.project), original); multi.dispose();
 });
 test('单段真实组件：错误 JSON 保留，修复后输入恢复；不可映射值不隐藏控件', () => {
   const h = harness('single', cloudFixture());

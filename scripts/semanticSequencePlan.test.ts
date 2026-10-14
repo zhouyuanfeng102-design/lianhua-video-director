@@ -115,12 +115,32 @@ test('fixed totals use actual array length with or without a legacy count, never
   }
 });
 
+test('explicit fixed-budget diagnoses preserve reasons without requiring draft segments and cannot materialize', () => {
+  const request: SemanticSequencePlanningInput = { ...input(), durationMode: 'fixed', requestedTotalDurationSec: 90 };
+  const diagnosis = { reason: '  交谈与必须串行的动作在本次安排中发生冲突。\n', fitStatus: 'insufficient' as const };
+  const expected = { ...diagnosis, segmentCount: 0, segments: [] };
+  for (const candidate of [diagnosis, { ...diagnosis, segments: [] }, { ...wireResponse(5), ...diagnosis },
+    { ...response(6), ...diagnosis }, { data: diagnosis }, { result: JSON.stringify(diagnosis) }]) {
+    const parsed = parseSemanticSequenceResponse(JSON.stringify(candidate), request);
+    assert.deepEqual(parsed, expected);
+    assert.throws(() => materialize(parsed, request), /规划失败的诊断不能保存/u);
+  }
+  assert.deepEqual(parseSemanticSequenceResponse(`${JSON.stringify(wireResponse(6))}\n${JSON.stringify(diagnosis)}\n{"note":"完成"}`, request), expected,
+    'a later explicit failure must not fall back to an earlier successful example');
+  for (const reason of [undefined, null, '', ' \n\t']) {
+    assert.throws(() => parseSemanticSequenceResponse(JSON.stringify({ ...diagnosis, reason }), request), /必须提供非空 reason/u);
+  }
+  assert.throws(() => parseSemanticSequenceResponse(JSON.stringify(diagnosis), input()), /segments 必须是非空数组/u,
+    'AI duration mode retains its existing complete-delivery self-repair contract');
+});
+
 test('count-free wrapped responses preserve prose and later truncated responses never publish an earlier plan', () => {
   const authored = wireResponse(3);
   const json = JSON.stringify(authored);
   const expected = { ...authored, segmentCount: 3 };
   for (const raw of [json, `说明\n\`\`\`json\n${json}\n\`\`\``, JSON.stringify({ data: authored }),
-    JSON.stringify({ result: json }), JSON.stringify(json), `${json}\n{"note":"完成"}`]) {
+    JSON.stringify({ result: json }), JSON.stringify(json), `${json}\n{"note":"完成"}`,
+    `${json}\n{"fitStatus":"balanced","reason":"尾部说明，不是分段计划"}`]) {
     assert.deepEqual(parseSemanticSequenceResponse(raw, input()), expected);
   }
   for (const raw of [json.slice(0, -1), `${JSON.stringify(wireResponse(1))}\n${json.slice(0, -1)}`,

@@ -60,9 +60,9 @@ export function StoryboardImageToImagePanel({
     }
   };
 
-  return <section className="storyboard-i2i-panel" aria-label="本段分镜参考图" aria-busy={uploading}>
+  return <section className="storyboard-i2i-panel" aria-label="本段分镜生图参考图" aria-busy={uploading}>
     <header className="storyboard-i2i-header">
-      <h4 id={`${id}-references`}>本段参考图 <span>{segmentLabel} · 已选 {draftIds.length} 张</span></h4>
+      <h4 id={`${id}-references`}>分镜生图参考图 <span>{segmentLabel} · 已选 {draftIds.length} 张</span></h4>
       <div className="storyboard-i2i-tools">
         <button type="button" className="btn small ghost" disabled={!draftIds.length} onClick={() => onChange({ ...settings, referenceAssetIds: [] })}>清空选图</button>
         <button type="button" className="btn small" disabled={uploadDisabled} onClick={() => uploadRef.current?.click()}>{uploading ? '上传中…' : '本地上传'}</button>
@@ -91,6 +91,6 @@ export function StoryboardImageToImagePanel({
       })}
       {!visibleAssets.length && <div className="storyboard-i2i-empty">{query ? '没有匹配图片，请更换搜索词。' : '暂无可用参考图，请从本地上传。'}</div>}
     </div>
-    <p className="storyboard-i2i-hint">支持多张，不必选满。在“提示词结果”使用原来的生图按钮；默认或自定义数量的每张图片都使用当前所选原图，不影响 H3 提示词及视频槽位。</p>
+    <p className="storyboard-i2i-hint">支持多张，不必选满。在“提示词结果”使用原来的生图按钮；默认或自定义数量的每张分镜图片都使用当前所选原图。视频参考图在视频导演台独立选择。</p>
   </section>;
 }

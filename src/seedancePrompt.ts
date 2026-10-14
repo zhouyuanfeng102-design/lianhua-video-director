@@ -378,8 +378,8 @@ export const generateOfficialSeedancePrompt = async ({ input, request, isCurrent
 
 export interface GenerateSeedanceBilingualOutputOptions extends GenerateOfficialSeedancePromptOptions {
   /** Save the qualified Chinese immediately and advance only this own checkpoint identity. */
-  onChinese: (output: Seedance25Output) => boolean;
-  onEnglish: (output: Seedance25Output) => boolean;
+  onChinese: (output: Seedance25Output) => boolean | Promise<boolean>;
+  onEnglish: (output: Seedance25Output) => boolean | Promise<boolean>;
 }
 
 export const generateSeedanceBilingualOutput = async ({ input, request, isCurrent, onChinese, onEnglish }: GenerateSeedanceBilingualOutputOptions): Promise<Seedance25Output> => {
@@ -389,7 +389,7 @@ export const generateSeedanceBilingualOutput = async ({ input, request, isCurren
     sourceFingerprint: compiled.sourceFingerprint, referenceManifest: compiled.referenceManifest.assets.map((asset) => ({ ...asset })),
     warnings: compiled.warnings, generatedAt: Date.now(), englishError: '',
   };
-  if (!onChinese(chinese)) assertSeedanceRequestCurrent(() => false);
+  if (!await onChinese(chinese)) assertSeedanceRequestCurrent(() => false);
   assertSeedanceRequestCurrent(isCurrent);
   let output: Seedance25Output;
   try {
@@ -400,6 +400,6 @@ export const generateSeedanceBilingualOutput = async ({ input, request, isCurren
     if (error instanceof Error && error.name === 'AbortError') throw error;
     output = { ...chinese, englishError: error instanceof Error ? error.message : '英文版 Seedance 提示词生成失败。' };
   }
-  if (!onEnglish(output)) assertSeedanceRequestCurrent(() => false);
+  if (!await onEnglish(output)) assertSeedanceRequestCurrent(() => false);
   return output;
 };

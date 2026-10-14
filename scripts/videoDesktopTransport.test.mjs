@@ -155,6 +155,30 @@ test('video multipart uploads retain all files, safe names, exact binary bytes a
   assert.doesNotMatch(result.body.toString(), /\r\nX-Injected:/u);
 });
 
+test('video binary upload chunks send their original bytes across IPC', async (t) => {
+  const bytes = Buffer.from([0, 255, 128, 13, 10, 65, 0, 239, 187, 191]);
+  const harness = loadMain(t);
+  let received;
+  const fixture = await httpFixture(t, async (req, res) => {
+    const chunks = [];
+    for await (const chunk of req) chunks.push(chunk);
+    received = { method: req.method, type: req.headers['content-type'], bytes: Buffer.concat(chunks) };
+    res.setHeader('Content-Type', 'application/json');
+    res.end('{"ok":true}');
+  });
+  const result = await harness.getVideoTransport().request({ requestId: 'binary-upload', url: fixture.url, method: 'PUT',
+    headers: { 'Content-Type': 'application/octet-stream' }, body: bytes.toString('base64'), bodyEncoding: 'base64' }, owner());
+  assert.equal(result.status, 200);
+  assert.deepEqual(received, { method: 'PUT', type: 'application/octet-stream', bytes });
+  assert.equal(videoRequestOptions({ method: 'POST', body: '普通 JSON 正文' }).body, '普通 JSON 正文');
+  for (const body of ['%%%%', 'YWJj\n', 'YQ=', 'YQ=A', 'YR==']) {
+    assert.throws(() => videoRequestOptions({ method: 'PUT', body, bodyEncoding: 'base64' }), /Base64/u);
+  }
+  assert.throws(() => videoRequestOptions({ bodyEncoding: 'base64' }), /Base64/u);
+  assert.throws(() => videoRequestOptions({ body: '{}', bodyEncoding: 'unknown' }), /编码/u);
+  assert.throws(() => videoRequestOptions({ method: 'GET', body: '', bodyEncoding: 'base64' }), /GET\/HEAD/u);
+});
+
 test('cancel closes only the owner request and does not retry paid submissions', async (t) => {
   const harness = loadMain(t);
   let submissions = 0;

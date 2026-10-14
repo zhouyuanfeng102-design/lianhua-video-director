@@ -14,6 +14,8 @@ import { isVideoWorkflowReady, uniqueVideoWorkflowName } from '../src/videoWorkf
 import * as videoWorkflowLibrary from '../src/videoWorkflowLibrary';
 import { createRunningHubTutorialVideoWorkflow, defaultRunningHubVideoConfig } from '../src/runningHubVideo';
 import { defaultRhTvApi } from '../src/rhtvBridge';
+import { genericVideoApiBaseUrl, genericVideoApiEndpoints } from '../src/genericVideoApi';
+import type { VideoTaskApiConfig } from '../src/types';
 
 // Compile the actual production component in memory. A small hook runner lets
 // its real callbacks/effects rerender without a browser, Electron, CSS loader,
@@ -75,7 +77,18 @@ const workflowJson = JSON.stringify({
 });
 const workflow = (id: string, name = id): ComfyVideoWorkflowPreset => ({ id, name, ...importComfyVideoWorkflow(workflowJson), createdAt: 1, updatedAt: 2 });
 
-function harness(initial = fixture()) {
+type DiscoveryResult = { models: string[]; patch: Partial<VideoTaskApiConfig>; source: 'openapi' | 'standard'; message: string; warnings: string[] };
+type DiscoveryOptions = { signal?: AbortSignal; allowPrivateNetwork?: boolean };
+const autoDiscoveryFixture = (config: VideoTaskApiConfig): DiscoveryResult => {
+  const base = genericVideoApiBaseUrl(config).replace(/\/+$/u, '');
+  return { models: ['video-fixture', 'video-second', 'image-model'], source: 'openapi', message: '已依据接口说明补齐高级配置。', warnings: [], patch: {
+    endpoint: `${base}/v1/videos`, statusEndpointTemplate: `${base}/v1/videos/{id}`, authHeader: 'X-Api-Key', authScheme: '',
+    taskIdPath: 'data.id', statusPath: 'data.status', resultUrlPath: 'data.output.url', requestTemplate: '',
+    fileIdPath: '', fileEndpointTemplate: '', fileUrlPath: '', imageUploadEndpoint: '', imageUploadField: '', imageUploadUrlPath: '', cancelEndpointTemplate: '',
+  } };
+};
+function harness(initial = fixture(), modelFetcher?: (config: VideoTaskApiConfig, options: DiscoveryOptions) => Promise<string[]>,
+  discoveryFetcher?: (config: VideoTaskApiConfig, options: DiscoveryOptions) => Promise<DiscoveryResult>) {
   let current = structuredClone(initial);
   let displayed: AppSettings | undefined;
   let tree: React.ReactElement;
@@ -88,16 +101,27 @@ function harness(initial = fixture()) {
   const confirms: string[] = [];
   const confirmAnswers: boolean[] = [];
   const permissions: boolean[] = [];
+  const modelRequests: Array<{ config: VideoTaskApiConfig; options: { signal?: AbortSignal; allowPrivateNetwork?: boolean } }> = [];
+  const discoveryRequests: Array<{ config: VideoTaskApiConfig; options: DiscoveryOptions }> = [];
   const listeners = new Map<string, Set<(event: any) => void>>();
   const Icon = () => null;
   const Manager = () => null;
   const RunningHub = () => null;
   const dependencies = {
-    React, Copy: Icon, Film: Icon, FolderOpen: Icon, Save: Icon, Settings2: Icon, Trash2: Icon, Upload: Icon, X: Icon,
+    React, Copy: Icon, Film: Icon, FolderOpen: Icon, RefreshCw: Icon, Save: Icon, Settings2: Icon, Trash2: Icon, Upload: Icon, X: Icon,
     VideoWorkflowManager: Manager, RunningHubVideoSettings: RunningHub, defaultRunningHubVideoConfig,
     RhTvBridgeSettings: () => null, defaultRhTvApi,
     formatUserFacingError, importComfyVideoWorkflow, assertNoEmbeddedVideoCredentials, defaultRunningHubVideoApi,
     videoApiSubmitEndpoint, defaultComfyVideoConfig, isVideoWorkflowReady, uniqueVideoWorkflowName,
+    genericVideoApiBaseUrl, genericVideoApiEndpoints,
+    fetchGenericVideoModels: (config: VideoTaskApiConfig, options: { signal?: AbortSignal; allowPrivateNetwork?: boolean }) => {
+      modelRequests.push({ config: structuredClone(config), options });
+      return modelFetcher ? modelFetcher(config, options) : Promise.resolve(['video-fixture', 'video-second', 'image-model']);
+    },
+    discoverGenericVideoApi: (config: VideoTaskApiConfig, options: DiscoveryOptions) => {
+      discoveryRequests.push({ config: structuredClone(config), options });
+      return discoveryFetcher ? discoveryFetcher(config, options) : Promise.resolve(autoDiscoveryFixture(config));
+    },
     window: {
       confirm: (message: string) => { confirms.push(message); return confirmAnswers.shift() ?? false; },
       addEventListener: (name: string, callback: (event: any) => void) => { if (!listeners.has(name)) listeners.set(name, new Set()); listeners.get(name)!.add(callback); },
@@ -154,7 +178,7 @@ function harness(initial = fixture()) {
   };
   const dispose = () => { slots.forEach((slot) => slot.cleanup?.()); disposed = true; };
   render();
-  return { render, all, find, required, click, change, importFile, dispose, Manager, RunningHub, patches, confirms, confirmAnswers, permissions,
+  return { render, all, find, required, click, change, importFile, dispose, Manager, RunningHub, patches, confirms, confirmAnswers, permissions, modelRequests, discoveryRequests,
     state: () => current,
     text: () => textOf(tree!),
     staleDisplay: () => { displayed = current; },
@@ -216,13 +240,17 @@ const test = async (name: string, run: () => void | Promise<void>) => { await ru
 await test('common settings stay in bounded cards; advanced fields are mounted only on demand', () => {
   const h = harness();
   for (const label of ['已保存的视频接口', '视频接口协议', '默认视频生成方式']) h.required('select', label);
-  for (const label of ['视频连接名称', '视频模型 ID', '提交端点', '任务查询端点', 'API 密钥']) h.required('input', label);
+  for (const label of ['视频连接名称', '视频模型 ID', '视频 API 地址', 'API 密钥']) h.required('input', label);
+  h.required('button', '获取模型'); h.required('button', '自动获取并补齐'); h.required('select', '选择视频模型');
+  assert.doesNotMatch(h.text(), /老李/u, 'the generic settings UI does not advertise a specific service');
+  assert.equal(h.find('input', '提交端点'), undefined); assert.equal(h.find('input', '任务查询端点'), undefined);
   assert.equal(h.required('input', 'API 密钥').props.type, 'password');
   assert.deepEqual(nodesOf(h.required('select', '视频接口协议').props.children).filter((node) => node.type === 'option').map((node) => node.props.value), ['generic', 'minimax', 'runninghub', 'rhtv_web']);
-  assert.equal(h.all().filter((node) => node.props.className === 'vgs-card').length, 2);
+  assert.equal(h.all().filter((node) => String(node.props.className || '').split(' ').includes('vgs-card')).length, 3);
   assert.equal(h.all().filter((node) => node.type === 'textarea' || node.type === 'details' || node.props.role === 'dialog').length, 0);
   assert.equal(h.find('input', '认证头名称'), undefined);
   h.click('高级协议与请求模板'); h.required('section', '视频 API 高级设置'); h.required('textarea', '视频请求模板 JSON');
+  h.required('input', '提交端点'); h.required('input', '任务查询端点');
   assert.equal(h.find('input', '认证头名称'), undefined);
   h.click('认证与结果映射');
   for (const label of ['认证头名称', '认证前缀', '任务 ID 字段路径', '任务状态字段路径', '视频下载 URL 字段路径', '进度字段路径', '服务端错误字段路径', '文件 ID 字段路径', '根据文件 ID 取下载 URL', '文件下载 URL 字段路径']) h.required('input', label);
@@ -248,6 +276,118 @@ await test('ComfyUI has separate connection and workflow cards without inline ma
   manager.props.onClose(); h.render(); assert.equal(h.all().some((node) => node.type === h.Manager), false); h.dispose();
 });
 
+await test('manual generic address and advanced automatic endpoints preserve secrets and custom request templates', () => {
+  const settings = fixture(); const template = '{"custom":"{{prompt}}"}'; settings.videoTaskApi.requestTemplate = template;
+  const h = harness(settings); const oldEndpoints = { endpoint: settings.videoTaskApi.endpoint, statusEndpointTemplate: settings.videoTaskApi.statusEndpointTemplate };
+  h.change('input', '视频 API 地址', 'https://new-service.invalid/v1');
+  assert.equal(h.state().videoTaskApi.baseUrl, 'https://new-service.invalid/v1');
+  assert.equal(h.state().videoTaskApi.endpoint, oldEndpoints.endpoint, 'editing the base address preserves explicit legacy overrides');
+  assert.match(h.text(), /已保留自定义任务端点/u);
+  h.click('高级协议与请求模板'); h.click('使用地址自动生成端点');
+  assert.equal(h.state().videoTaskApi.endpoint, ''); assert.equal(h.state().videoTaskApi.statusEndpointTemplate, '');
+  assert.equal(h.state().videoTaskApi.apiKey, 'fake-video-secret'); assert.equal(h.state().videoTaskApi.requestTemplate, template);
+  assert.match(h.text(), /new-service\.invalid\/v1\/videos/u); h.click('关闭');
+  assert.equal(h.find('button', '填入老李视频地址'), undefined); h.dispose();
+});
+
+await test('automatic completion uses each current website and applies one protocol patch while preserving key, model and profiles', async () => {
+  for (const baseUrl of ['https://site-a.example.invalid', 'https://site-b.example.invalid/prefix']) {
+    const settings = fixture(); settings.videoTaskApi = { ...settings.videoTaskApi, baseUrl,
+      requestTemplate: '{"old":"{{prompt}}"}', fileIdPath: 'file_id', fileEndpointTemplate: 'https://api.minimaxi.com/v1/files/retrieve?file_id={id}', fileUrlPath: 'file.download_url',
+      imageUploadEndpoint: 'https://old.example.invalid/upload', cancelEndpointTemplate: 'https://old.example.invalid/cancel/{id}' };
+    settings.videoApiProfiles = [{ ...settings.videoTaskApi, id: 'active', name: '当前服务', createdAt: 1, updatedAt: 2 },
+      { ...settings.videoTaskApi, id: 'other', name: '其它服务', createdAt: 3, updatedAt: 4 }];
+    settings.activeVideoApiProfileId = 'active';
+    const h = harness(settings); const other = structuredClone(settings.videoApiProfiles[1]);
+    h.click('自动获取并补齐'); assert.equal(h.required('button', '正在补齐…').props.disabled, true);
+    assert.equal(h.required('button', '获取模型').props.disabled, true); await h.settle();
+    assert.equal(h.discoveryRequests.length, 1); assert.equal(h.discoveryRequests[0].config.baseUrl, baseUrl);
+    assert.equal(h.discoveryRequests[0].options.allowPrivateNetwork, true);
+    assert.equal(h.patches.length, 1, 'protocol fields and the active profile are saved atomically');
+    const applied = h.state().videoTaskApi;
+    assert.equal(applied.baseUrl, baseUrl); assert.equal(applied.apiKey, 'fake-video-secret'); assert.equal(applied.model, 'video-fixture');
+    assert.equal(applied.endpoint, `${baseUrl}/v1/videos`); assert.equal(applied.statusEndpointTemplate, `${baseUrl}/v1/videos/{id}`);
+    assert.equal(applied.authHeader, 'X-Api-Key'); assert.equal(applied.requestTemplate, '');
+    for (const field of ['fileIdPath', 'fileEndpointTemplate', 'fileUrlPath', 'imageUploadEndpoint', 'cancelEndpointTemplate'] as const) assert.equal(applied[field], '', `${field}: previous service mapping cleared by explicit automatic completion`);
+    const choices = nodesOf(h.required('select', '选择视频模型').props.children).filter((node) => node.type === 'option').map((node) => node.props.value);
+    assert.deepEqual(choices, ['', 'video-fixture', 'video-second', 'image-model'], 'the list survives the endpoint and authentication patch without model filtering');
+    assert.equal(h.required('select', '选择视频模型').props.disabled, false);
+    assert.equal(h.state().videoApiProfiles![0].endpoint, applied.endpoint); assert.equal(h.state().videoApiProfiles![0].apiKey, applied.apiKey);
+    assert.equal(h.state().videoApiProfiles![0].model, applied.model); assert.deepEqual(h.state().videoApiProfiles![1], other);
+    h.change('select', '选择视频模型', 'image-model'); assert.equal(h.state().videoTaskApi.model, 'image-model'); h.dispose();
+  }
+});
+
+await test('automatic completion failures preserve every existing field and present errors without a stale model list', async () => {
+  const h = harness(fixture(), undefined, async () => { throw new Error('请求失败，请检查 API 地址与密钥。'); });
+  const before = structuredClone(h.state()); h.click('自动获取并补齐'); await h.settle();
+  assert.deepEqual(h.state(), before); assert.deepEqual(h.patches, []); assert.ok(h.all().some((node) => node.props.role === 'alert'));
+  assert.equal(h.required('button', '自动获取并补齐').props.disabled, false); assert.equal(h.required('select', '选择视频模型').props.disabled, true); h.dispose();
+});
+
+await test('automatic completion ignores switched or edited connections and preserves models edited in flight', async () => {
+  for (const changed of ['address', 'key', 'profile', 'panel', 'advanced', 'external', 'unmount']) {
+    let release!: (result: DiscoveryResult) => void;
+    const h = harness(fixture(), undefined, () => new Promise<DiscoveryResult>((resolve) => { release = resolve; })); h.click('自动获取并补齐');
+    const response = autoDiscoveryFixture(h.discoveryRequests[0].config);
+    if (changed === 'address') h.change('input', '视频 API 地址', 'https://different.example.invalid');
+    if (changed === 'key') h.change('input', 'API 密钥', 'different-synthetic-secret');
+    if (changed === 'profile') h.external((state) => ({ ...state, activeVideoApiProfileId: 'new-profile' }), true);
+    if (changed === 'panel') h.click('ComfyUI 视频');
+    if (changed === 'advanced') { h.click('高级协议与请求模板'); h.change('input', '任务查询端点', 'https://latest.example.invalid/tasks/{id}'); }
+    if (changed === 'external') { h.staleDisplay(); h.external((state) => ({ ...state, videoTaskApi: { ...state.videoTaskApi, baseUrl: 'https://changed-externally.example.invalid' } })); }
+    if (changed === 'unmount') h.dispose();
+    const before = structuredClone(h.state()); const patchCount = h.patches.length; release(response); await h.settle();
+    assert.deepEqual(h.state(), before, `${changed}: older discovery cannot overwrite newer settings`); assert.equal(h.patches.length, patchCount);
+    assert.doesNotMatch(h.text(), /已依据接口说明/u); if (changed !== 'unmount') h.dispose();
+  }
+  let release!: (result: DiscoveryResult) => void;
+  const h = harness(fixture(), undefined, () => new Promise<DiscoveryResult>((resolve) => { release = resolve; })); h.click('自动获取并补齐');
+  h.change('input', '视频模型 ID', 'chosen-while-loading');
+  const response = autoDiscoveryFixture(h.discoveryRequests[0].config); response.patch.model = 'stale-model'; response.patch.apiKey = 'stale-key'; response.patch.baseUrl = 'https://stale.example.invalid';
+  release(response); await h.settle(); assert.equal(h.state().videoTaskApi.model, 'chosen-while-loading'); assert.equal(h.state().videoTaskApi.apiKey, 'fake-video-secret');
+  assert.equal(h.state().videoTaskApi.baseUrl, fixture().videoTaskApi.baseUrl); assert.match(h.text(), /已依据接口说明/u); h.dispose();
+});
+
+await test('model discovery keeps the complete server list and never replaces the chosen or manually entered model', async () => {
+  const h = harness(); const before = structuredClone(h.state().videoTaskApi); h.click('获取模型');
+  assert.equal(h.required('button', '获取中').props.disabled, true); await h.settle();
+  assert.deepEqual(h.state().videoTaskApi, before, 'discovery is read-only and does not choose a model');
+  const choices = nodesOf(h.required('select', '选择视频模型').props.children).filter((node) => node.type === 'option').map((node) => node.props.value);
+  assert.deepEqual(choices, ['', 'video-fixture', 'video-second', 'image-model'], 'image or alias IDs are not filtered');
+  assert.equal(h.modelRequests[0].config.apiKey, 'fake-video-secret'); assert.equal(h.modelRequests[0].options.allowPrivateNetwork, true);
+  h.change('select', '选择视频模型', 'image-model'); assert.equal(h.state().videoTaskApi.model, 'image-model');
+  h.change('input', '视频模型 ID', 'manual-model'); assert.equal(h.state().videoTaskApi.model, 'manual-model');
+  assert.equal(h.required('select', '选择视频模型').props.value, ''); assert.doesNotMatch(h.text(), /fake-video-secret/u); h.dispose();
+});
+
+await test('late model responses cannot populate a different address, secret, profile or page', async () => {
+  for (const changed of ['address', 'key', 'profile', 'panel', 'external'] as const) {
+    let release!: (models: string[]) => void;
+    const h = harness(fixture(), () => new Promise<string[]>((resolve) => { release = resolve; })); h.click('获取模型');
+    if (changed === 'address') h.change('input', '视频 API 地址', 'https://different.invalid');
+    if (changed === 'key') h.change('input', 'API 密钥', 'different-synthetic-secret');
+    if (changed === 'profile') h.external((state) => ({ ...state, activeVideoApiProfileId: 'new-profile' }), true);
+    if (changed === 'panel') h.click('ComfyUI 视频');
+    if (changed === 'external') { h.staleDisplay(); h.external((state) => ({ ...state, videoTaskApi: { ...state.videoTaskApi, baseUrl: 'https://changed-externally.invalid' } })); }
+    const before = structuredClone(h.state()); release(['old-request-model']); await h.settle();
+    assert.deepEqual(h.state(), before, `${changed}: old model responses never change saved settings`);
+    assert.equal(h.all().some((node) => node.type === 'option' && node.props.value === 'old-request-model'), false, `${changed}: old results stay out of the picker`);
+    assert.doesNotMatch(h.text(), /已获取 1 个模型/u); h.dispose();
+  }
+});
+
+await test('model selection checks authoritative connection and unmounted fetches cannot update settings', async () => {
+  const h = harness(); h.click('获取模型'); await h.settle(); h.staleDisplay();
+  h.external((state) => ({ ...state, videoTaskApi: { ...state.videoTaskApi, apiKey: 'latest-synthetic-secret' } }));
+  h.change('select', '选择视频模型', 'video-second'); assert.equal(h.state().videoTaskApi.model, 'video-fixture');
+  assert.match(h.text(), /API 配置已改变/u); h.dispose();
+  let release!: (models: string[]) => void;
+  const disposed = harness(fixture(), () => new Promise<string[]>((resolve) => { release = resolve; }));
+  disposed.click('获取模型'); disposed.dispose(); assert.equal(disposed.modelRequests[0].options.signal?.aborted, true);
+  release(['after-unmount']); await disposed.settle(); assert.equal(disposed.patches.length, 0);
+});
+
 await test('rhTV creates a dedicated profile and retains saved or unsaved previous connections', () => {
   for (const saved of [false, true]) {
     const settings = fixture(); const original = structuredClone(settings.videoTaskApi);
@@ -266,6 +406,12 @@ await test('rhTV creates a dedicated profile and retains saved or unsaved previo
     h.change('select', '已保存的视频接口', h.state().videoApiProfiles![0].id);
     assert.deepEqual(h.state().videoTaskApi, original); h.dispose();
   }
+  const addressOnly = fixture(); addressOnly.videoTaskApi = { ...addressOnly.videoTaskApi, baseUrl: 'https://address-only.invalid', endpoint: '', apiKey: '' };
+  const h = harness(addressOnly); const original = structuredClone(addressOnly.videoTaskApi);
+  h.change('select', '视频接口协议', 'rhtv_web');
+  assert.equal(h.state().videoApiProfiles!.length, 2, 'an unsaved base-address-only connection is kept before adding the bridge');
+  h.change('select', '已保存的视频接口', h.state().videoApiProfiles![0].id);
+  assert.deepEqual(h.state().videoTaskApi, original); h.dispose();
 });
 
 await test('RunningHub is a third independent tab without replacing legacy video API or local ComfyUI', () => {
@@ -401,7 +547,7 @@ await test('Generic, MiniMax and RunningHub retain their real protocol controls 
   assert.equal(h.required('input', '实际提交端点').props.readOnly, true);
   h.click('恢复 RunningHub 预设'); assert.equal(h.state().videoTaskApi.runningHubAppId, '654321'); assert.equal(h.state().videoTaskApi.apiKey, 'fake-video-secret');
   h.click('高级协议与请求模板'); assert.match(h.text(), /nodeInfoList.*fieldValue/u); h.click('关闭');
-  h.change('select', '视频接口协议', 'generic'); h.required('input', '提交端点');
+  h.change('select', '视频接口协议', 'generic'); h.required('input', '视频 API 地址'); assert.equal(h.find('input', '提交端点'), undefined);
   assert.equal(h.state().videoTaskApi.apiKey, 'fake-video-secret');
   for (const node of h.all().filter((node) => node.type === 'input' && String(node.props.value || '').includes('fake-video-secret'))) assert.equal(node.props.type, 'password');
   assert.doesNotMatch(h.text(), /fake-video-secret/u); h.dispose();

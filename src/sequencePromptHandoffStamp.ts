@@ -21,6 +21,7 @@ export const normalizeSequencePromptHandoffStamp = (value: unknown): SequencePro
   if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
   const raw = value as Record<string, unknown>;
   if (raw.version !== SEQUENCE_PROMPT_HANDOFF_VERSION
+    || (raw.promptFormat !== undefined && raw.promptFormat !== 'seedance')
     || !idValue(raw.projectId) || !idValue(raw.planId) || !idValue(raw.segmentId) || !idValue(raw.storyboardId)
     || !idValue(raw.previousSegmentId) || !idValue(raw.previousStoryboardId)
     || raw.segmentId === raw.previousSegmentId || raw.storyboardId === raw.previousStoryboardId
@@ -31,6 +32,7 @@ export const normalizeSequencePromptHandoffStamp = (value: unknown): SequencePro
     || !hashValue(raw.resultFingerprint)) return undefined;
   return {
     version: SEQUENCE_PROMPT_HANDOFF_VERSION,
+    ...(raw.promptFormat === 'seedance' ? { promptFormat: 'seedance' as const } : {}),
     projectId: raw.projectId,
     planId: raw.planId,
     segmentId: raw.segmentId,

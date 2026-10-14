@@ -1,9 +1,36 @@
 import type { VideoTaskApiConfig } from './types';
 import type { ComfyVideoWorkflowPreset, VideoGenerationSource } from './videoGenerationTypes';
-import type { RunningHubVideoFieldControl } from './runningHubVideoTypes';
+import { isLaoliVideoBuiltinProtocol } from './genericVideoApi';
+import { getVideoApiModelParameterCapabilities } from './videoApiCapabilities';
+import type { VideoApiParameterControl } from './videoApiCapabilityTypes';
+
+/** Display-only API schema metadata; RunningHub keeps its existing wire values. */
+export type VideoOutputParameterControl = VideoApiParameterControl;
+
+type ParameterPresentationApi = Pick<VideoTaskApiConfig, 'runningHubParameterControls' | 'runningHubMappedFields'>
+  & Partial<Pick<VideoTaskApiConfig, 'provider' | 'model' | 'baseUrl' | 'endpoint' | 'statusEndpointTemplate' | 'parameterCapabilities'>>;
 
 export const videoOutputParameterKeys = ['duration', 'aspect_ratio', 'resolution', 'steps', 'width', 'height'] as const;
 export type VideoOutputParameterKey = typeof videoOutputParameterKeys[number];
+
+/** Convenience suggestions only. Unknown upstream constraints remain unknown. */
+export const videoOutputParameterCommonOptions: Partial<Record<VideoOutputParameterKey, readonly string[]>> = {
+  duration: ['5', '10', '15', '20', '30'],
+  aspect_ratio: ['16:9', '9:16', '1:1', '4:3', '3:4'],
+  resolution: ['480p', '720p', '1080p'],
+};
+
+export const videoOutputParameterChoices = (key: VideoOutputParameterKey, control?: VideoOutputParameterControl, upstreamParameters = false): { options: string[]; common: boolean } => {
+  const explicit = [...new Set(control?.options || [])].filter((option) => option !== '');
+  if (explicit.length || !upstreamParameters || control?.restricted) return { options: explicit, common: false };
+  const common = [...(videoOutputParameterCommonOptions[key] || [])];
+  const options = control?.kind === 'number' ? common.filter((option) => {
+    const value = Number(option);
+    return Number.isFinite(value) && (control.min === undefined || value >= control.min) && (control.max === undefined || value <= control.max)
+      && (control.step === undefined || control.step <= 0 || Math.abs((value - (control.min ?? 0)) / control.step - Math.round((value - (control.min ?? 0)) / control.step)) <= 1e-8);
+  }) : common;
+  return { options, common: options.length > 0 };
+};
 
 export const isVideoOutputParameterKey = (key: string): key is VideoOutputParameterKey =>
   (videoOutputParameterKeys as readonly string[]).includes(key);
@@ -11,11 +38,12 @@ export const isVideoOutputParameterKey = (key: string): key is VideoOutputParame
 /** Capabilities come from explicit mappings, never node names or current override values. */
 export const availableVideoParameterKeys = (
   source: VideoGenerationSource,
-  api?: Pick<VideoTaskApiConfig, 'provider' | 'runningHubMappedFields' | 'requestTemplate'>,
+  api?: Pick<VideoTaskApiConfig, 'provider' | 'runningHubMappedFields' | 'requestTemplate'> & Partial<Pick<VideoTaskApiConfig, 'baseUrl' | 'endpoint'>>,
   workflow?: Pick<ComfyVideoWorkflowPreset, 'mapping'>,
 ): string[] => {
   if (source === 'comfyui') return Object.keys(workflow?.mapping.parameters || {});
   if (source === 'api' && api?.provider === 'rhtv_web') return ['duration', 'resolution'];
+  if (source === 'api' && api && isLaoliVideoBuiltinProtocol({ ...api, endpoint: api.endpoint || '' })) return ['duration', 'aspect_ratio', 'resolution'];
   if (source === 'runninghub' || api?.provider === 'runninghub' && Array.isArray(api.runningHubMappedFields)) return [...new Set(
     (api?.runningHubMappedFields || []).flatMap((field) => field.kind === 'parameter' && field.parameter ? [field.parameter] : []),
   )];
@@ -32,7 +60,7 @@ export const availableVideoParameterKeys = (
     try { visit(JSON.parse(api.requestTemplate || '{}')); } catch { /* A damaged template exposes no capabilities. */ }
     return [...found];
   }
-  return ['duration', 'resolution', 'seed'];
+  return !api?.provider || api.provider === 'generic' ? ['duration', 'aspect_ratio', 'resolution', 'seed'] : ['duration', 'resolution', 'seed'];
 };
 
 export const readVideoParameterText = (text: string): { value: Record<string, unknown>; issue: string } => {
@@ -60,11 +88,17 @@ export const videoParameterInputText = (value: unknown): string =>
 
 /** Presentation comes from the selected connection (including frozen task snapshots). */
 export const videoOutputParameterPresentation = (
-  api?: Pick<VideoTaskApiConfig, 'runningHubParameterControls' | 'runningHubMappedFields'>,
+  api?: ParameterPresentationApi,
   parameters: Record<string, unknown> = {},
-): { controls: Record<string, RunningHubVideoFieldControl>; defaultValues: Record<string, unknown> } => {
-  const controls = { ...api?.runningHubParameterControls };
+): { controls: Record<string, VideoOutputParameterControl>; defaultValues: Record<string, unknown>; upstreamParameters: boolean } => {
+  const controls: Record<string, VideoOutputParameterControl> = { ...api?.runningHubParameterControls };
   const defaultValues: Record<string, unknown> = {};
+  const upstreamParameters = Boolean(api) && (!api?.provider || api.provider === 'generic') && !api?.runningHubMappedFields;
+  if (upstreamParameters && api) {
+    const capabilities = getVideoApiModelParameterCapabilities(api);
+    Object.assign(controls, capabilities?.controls);
+    Object.assign(defaultValues, capabilities?.defaults);
+  }
   for (const field of api?.runningHubMappedFields || []) {
     if (field.kind !== 'parameter' || !field.parameter) continue;
     Object.defineProperty(defaultValues, field.parameter, { value: field.originalValue, enumerable: true });
@@ -88,13 +122,13 @@ export const videoOutputParameterPresentation = (
       }
     }
   }
-  return { controls, defaultValues };
+  return { controls, defaultValues, upstreamParameters };
 };
 
 /** Request overrides are shown separately from the story's planned segment duration. */
 export const videoOutputParameterSummary = (
   parameters: Record<string, unknown>,
-  api?: Pick<VideoTaskApiConfig, 'runningHubParameterControls' | 'runningHubMappedFields'>,
+  api?: ParameterPresentationApi,
 ): string => {
   const { controls } = videoOutputParameterPresentation(api, parameters);
   return videoOutputParameterKeys

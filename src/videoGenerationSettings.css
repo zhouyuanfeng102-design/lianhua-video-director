@@ -22,6 +22,10 @@
 .video-settings-redesign .vgs-permission { font-size: calc(10px * var(--ui-font-scale, 1)); margin: 0; }
 .video-settings-redesign .vgs-provider-note { display: flex; align-items: center; gap: 8px; justify-content: space-between; background: #f5f7fb; padding: 6px 8px; border-radius: 7px; font-size: calc(10px * var(--ui-font-scale, 1)); color: var(--muted); }
 .video-settings-redesign .vgs-provider-note > span { min-width: 0; }
+.video-settings-redesign .vgs-provider-note > .btn { flex: 0 0 auto; }
+.video-settings-redesign .vgs-model-control { display: grid; grid-template-columns: minmax(0,1fr) minmax(145px,220px) auto; gap: 7px; align-items: center; min-width: 0; }
+.video-settings-redesign .vgs-model-control > .btn { min-height: 31px; white-space: nowrap; }
+.video-settings-redesign .vgs-model-card .vgs-card-title > span { text-align: right; }
 .video-settings-redesign .vgs-workflow-row { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: end; gap: 12px; }
 .video-settings-redesign .vgs-workflow-summary { background: #edf8fb; border: 1px solid #c7e5ed; color: #28697b; padding: 9px 10px; border-radius: 8px; display: flex; flex-wrap: wrap; gap: 5px; font-size: calc(11px * var(--ui-font-scale, 1)); }
 .video-settings-redesign .vgs-workflow-summary > span { min-width: 0; overflow-wrap: anywhere; }
@@ -39,6 +43,9 @@
 .vgs-request-editor { height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 7px; }
 .vgs-request-editor > .field { flex: 1 1 auto; min-height: 0; grid-template-rows: auto minmax(0,1fr); }
 .vgs-request-editor textarea { min-height: 130px; height: 100%; resize: none; font: calc(12px * var(--ui-font-scale, 1))/1.6 Consolas,monospace; padding: 10px; }
+.vgs-endpoint-settings { flex: 0 0 auto; display: grid; gap: 8px; border: 1px solid #dce3ec; background: #f6f9fc; border-radius: 8px; padding: 10px; }
+.vgs-endpoint-summary { overflow-wrap: anywhere; }
+.vgs-endpoint-summary code { font-size: inherit; }
 .vgs-api-dialog > footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 9px; border-top: 1px solid #e1e5ec; font-size: calc(10px * var(--ui-font-scale, 1)); }
 .vgs-api-dialog > footer > div { min-width: 0; }
 .vgs-api-dialog > footer p { margin: 0; color: #b42343; }
@@ -72,5 +79,9 @@
 .rhtv-job p, .rhtv-job .vgs-actions { margin-top: 8px; }
 .rhtv-job small { opacity: 0.7; }
 @media (max-width: 600px) {
+  .video-settings-redesign .vgs-model-control { grid-template-columns: minmax(0,1fr) auto; }
+  .video-settings-redesign .vgs-model-control > input { grid-column: 1/-1; }
+  .video-settings-redesign .vgs-provider-note { flex-wrap: wrap; }
+  .video-settings-redesign .vgs-fields-three { grid-template-columns: minmax(0,1fr); }
   .video-settings-redesign .rhtv-settings .vgs-fields-three { grid-template-columns: minmax(0, 1fr); }
 }

@@ -4,6 +4,7 @@ import {
   SEMANTIC_SEQUENCE_PLANNING_TAG, SEMANTIC_SEQUENCE_REPAIR_TAG,
   SEMANTIC_SEQUENCE_SELF_REPAIR_TAG, SemanticSequenceSelfAssessmentError,
 } from '../src/services/semanticSequencePlanner';
+import type { SemanticSequencePlannerProgress } from '../src/services/semanticSequencePlanner';
 import { SEMANTIC_SEQUENCE_FIT_STATUS_RULE, SemanticSequenceTechnicalError, validateSemanticSequencePlan } from '../src/semanticSequencePlan';
 import type { SemanticSequencePlanningInput, SemanticSequenceResponse } from '../src/semanticSequencePlan';
 import { requestTextModel, TextModelHttpError, TextModelResponseError } from '../src/services/llm';
@@ -94,8 +95,9 @@ const assertAiDurationRequest = (payload: HttpPayload): void => {
 
 test('valid generation is exactly one paid-model-shaped call, no separate review or full-film master', async () => {
   const authored = response(3);
+  const progress: SemanticSequencePlannerProgress[] = [];
   const requests = install(() => textReply(authored));
-  const plan = await requestSemanticSequencePlan(config(), input(), undefined, options);
+  const plan = await requestSemanticSequencePlan(config(), input(), undefined, { ...options, onProgress: (event) => progress.push(event) });
   assert.equal(requests.length, 1);
   assert.match(prompt(requests[0], 'system'), new RegExp(SEMANTIC_SEQUENCE_PLANNING_TAG));
   assert.match(prompt(requests[0], 'system'), /本次回答内完成自检/u);
@@ -112,6 +114,11 @@ test('valid generation is exactly one paid-model-shaped call, no separate review
   assert.equal(plan.createdAt, 12345);
   assert.equal(plan.segments.some((segment) => segment.storyboardId !== undefined || segment.sourceShotIds !== undefined), false);
   assert.deepEqual(validateSemanticSequencePlan(plan), []);
+  assert.deepEqual(progress.map((event) => event.stage), ['requesting', 'parsing', 'materializing', 'completed']);
+  assert.ok(progress.every((event) => event.requestNumber === 1 && event.maxRequests === 4
+    && event.durationMode === 'ai-estimated' && event.segmentDurationSec === 15
+    && event.totalDurationSec === undefined && event.requiredSegmentCount === undefined
+    && Number.isFinite(event.elapsedMs) && event.elapsedMs >= 0));
 });
 
 test('a consistent legacy segmentCount remains compatible without another model call', async () => {
@@ -221,7 +228,7 @@ test('repeated legacy count contradictions keep the latest failed candidate and 
   assert.deepEqual(progress, [1, 2, 3]);
 });
 
-test('semantic boundaries are planned after complete speech and oral-action sequencing in both initial and existing self-repair', async () => {
+test('semantic boundaries follow complete speech and oral-action sequencing without adding a dialogue audit', async () => {
   const completeStory = '成年甲喝完水并放下杯子后对成年乙说：“请等我把话说完。”成年乙听完后说：“好，我听着。”随后两人继续前行。';
   for (const fixed of [false, true]) {
     const request = { ...(fixed ? fixedInput() : input()), story: completeStory };
@@ -245,12 +252,12 @@ test('semantic boundaries are planned after complete speech and oral-action sequ
       assert.equal(received.segmentDurationSec, 15);
       for (const key of ['speechRate', 'dialogueBudget', 'requiredDialogues', 'localShotCount']) assert.equal(key in received, false);
       if (fixed) assertFixedDurationRequest(payload); else assertAiDurationRequest(payload);
-      if (index === 0) return textReply({ ...accepted, fitStatus: 'insufficient' });
-      assert.match(rule, new RegExp(SEMANTIC_SEQUENCE_SELF_REPAIR_TAG));
+      if (!fixed && index === 0) return textReply({ ...accepted, fitStatus: 'insufficient' });
+      if (!fixed) assert.match(rule, new RegExp(SEMANTIC_SEQUENCE_SELF_REPAIR_TAG));
       return textReply(accepted);
     });
     const plan = await requestSemanticSequencePlan(config(), request, undefined, options);
-    assert.equal(requests.length, 2, 'model self-assessment reuses its existing retry, never adds a dialogue audit stage');
+    assert.equal(requests.length, fixed ? 1 : 2, 'fixed planning stays in one response; AI adaptation retains existing self-repair');
     assert.deepEqual(plan.segments[0].semanticSource?.dialogues, accepted.segments[0].semanticSource.dialogues);
     assert.equal(plan.totalDurationSec, fixed ? 90 : 30);
   }
@@ -338,7 +345,7 @@ test('changing fitStatus errors retain the latest candidate and finish with a sa
   assert.equal(requests.length, 4);
 });
 
-test('normalized INSUFFICIENT still invokes AI self-repair and respects fixed versus AI duration authority', async () => {
+test('normalized INSUFFICIENT stops fixed planning and retains existing AI adaptation self-repair', async () => {
   for (const request of [input(), fixedInput()]) {
     const fixed = request.durationMode === 'fixed';
     const insufficient = { ...response(fixed ? 6 : 1), fitStatus: ' \tINSUFFICIENT\n' };
@@ -352,13 +359,18 @@ test('normalized INSUFFICIENT still invokes AI self-repair and respects fixed ve
       assert.equal(repair.technicalIssues, undefined, 'recognized insufficient is a model assessment, not a format failure');
       return textReply(response(fixed ? 6 : 3));
     });
-    const plan = await requestSemanticSequencePlan(config(), request, undefined, options);
-    assert.equal(requests.length, 2);
-    assert.equal(plan.totalDurationSec, fixed ? 90 : 45);
-    assert.equal(plan.fitStatus, 'balanced');
+    if (fixed) {
+      await assert.rejects(requestSemanticSequencePlan(config(), request, undefined, options), SemanticSequenceSelfAssessmentError);
+      assert.equal(requests.length, 1);
+    } else {
+      const plan = await requestSemanticSequencePlan(config(), request, undefined, options);
+      assert.equal(requests.length, 2);
+      assert.equal(plan.totalDurationSec, 45);
+      assert.equal(plan.fitStatus, 'balanced');
+    }
     const exhausted = install(() => textReply(insufficient));
     await assert.rejects(requestSemanticSequencePlan(config(), request, undefined, options), SemanticSequenceSelfAssessmentError);
-    assert.equal(exhausted.length, 4, 'normalizing spelling must never hide a genuine insufficient self-assessment');
+    assert.equal(exhausted.length, fixed ? 1 : 4, 'normalizing spelling preserves the mode-specific failure contract');
   }
 });
 
@@ -859,6 +871,11 @@ test('fixed 90-second generation sends an explicit six-window contract and saves
   const plan = await requestSemanticSequencePlan(config(), request, undefined, options);
   assert.equal(requests.length, 1);
   assert.match(prompt(requests[0], 'system'), new RegExp(SEMANTIC_SEQUENCE_PLANNING_TAG));
+  const rule = prompt(requests[0], 'system');
+  assert.ok(rule.indexOf('T=90秒') < rule.indexOf('你是原文语义分段规划器'), 'fixed budget precedes shared prose');
+  assert.match(rule, /固定模式先排整片、后切窗口/u);
+  assert.match(rule, /全部对白原字、说话人和发话顺序保持/u);
+  assert.match(rule, /段界只负责生成窗口/u);
   assert.equal(plan.durationMode, 'fixed');
   assert.equal(plan.requestedTotalDurationSec, 90);
   assert.equal(plan.totalDurationSec, 90);
@@ -882,6 +899,7 @@ test('incorrect fixed N is repaired by AI without local removal, duplication or 
       assertFixedDurationRequest(payload);
       if (index === 0) return textReply(wrong);
       assert.match(prompt(payload, 'system'), new RegExp(SEMANTIC_SEQUENCE_REPAIR_TAG));
+      assert.match(prompt(payload, 'system'), /段数错误时重新分配尚未确认的段界、事件归属和停顿/u);
       const repair = JSON.parse(prompt(payload, 'user').slice('semantic_sequence_repair='.length));
       assert.ok(repair.technicalIssues.some((issue: string) => issue.includes(String(wrongCount)) && issue.includes('6')
         && /固定|自定义/u.test(issue)));
@@ -918,7 +936,7 @@ test('a legacy declaration of the requested fixed count cannot hide a short actu
   assert.deepEqual(plan.segments.map((segment) => segment.content), corrected.segments.map((segment) => segment.content));
 });
 
-test('fixed initial, technical repair, truncation recovery and self-repair share unchanged T and N', async () => {
+test('fixed initial, technical repair and truncation recovery share unchanged T and N', async () => {
   const repairs: number[] = [];
   const corrected = response(6);
   corrected.segments.forEach((segment) => { segment.content += '最终由AI重新分配的完整正文。'; });
@@ -934,21 +952,16 @@ test('fixed initial, technical repair, truncation recovery and self-repair share
       assert.match(prompt(payload, 'system'), /本次从完整输入重新交付完整JSON/u);
       const repair = JSON.parse(prompt(payload, 'user').slice('semantic_sequence_repair='.length));
       assert.equal(repair.previousResponse, '');
-      return textReply({ ...response(6), fitStatus: 'insufficient' });
+      return textReply(corrected);
     }
-    assert.match(prompt(payload, 'system'), new RegExp(SEMANTIC_SEQUENCE_SELF_REPAIR_TAG));
-    assert.match(prompt(payload, 'system'), /重新分配真实事件/u);
-    assert.match(prompt(payload, 'system'), /不能增加或删减用户已定的段数/u);
-    const repair = JSON.parse(prompt(payload, 'user').slice('semantic_sequence_repair='.length));
-    assert.equal(repair.modelSelfAssessment, 'insufficient');
-    return textReply(corrected);
+    throw new Error('fixed delivery must not start another request after its recovered response');
   });
   const plan = await requestSemanticSequencePlan(config(), fixedInput(), undefined, {
     ...options, onRepair: ({ attempt, maxAttempts }) => { repairs.push(attempt); assert.equal(maxAttempts, 3); },
   });
-  assert.equal(requests.length, 4);
-  assert.deepEqual(repairs, [1, 2, 3]);
-  assert.deepEqual(requests.map((payload) => wire(payload).max_tokens), [8192, 8192, 16384, 16384]);
+  assert.equal(requests.length, 3);
+  assert.deepEqual(repairs, [1, 2]);
+  assert.deepEqual(requests.map((payload) => wire(payload).max_tokens), [8192, 8192, 16384]);
   assert.equal(plan.durationMode, 'fixed');
   assert.equal(plan.requestedTotalDurationSec, 90);
   assert.equal(plan.totalDurationSec, 90);
@@ -957,8 +970,9 @@ test('fixed initial, technical repair, truncation recovery and self-repair share
   assert.deepEqual(plan.segments.map((segment) => segment.content), corrected.segments.map((segment) => segment.content));
 });
 
-test('fixed insufficient self-assessment stops after three repairs with the unchanged custom budget', async () => {
+test('fixed insufficient self-assessment stops immediately, retaining the reason and unchanged budget', async () => {
   const repairs: number[] = [];
+  const progress: SemanticSequencePlannerProgress[] = [];
   const requests = install((payload, index) => {
     assertFixedDurationRequest(payload);
     if (index > 0) assert.match(prompt(payload, 'system'), new RegExp(SEMANTIC_SEQUENCE_SELF_REPAIR_TAG));
@@ -966,18 +980,27 @@ test('fixed insufficient self-assessment stops after three repairs with the unch
   });
   await assert.rejects(requestSemanticSequencePlan(config(), fixedInput(), undefined, {
     ...options, onRepair: ({ attempt, detail }) => { repairs.push(attempt); assert.match(detail, /insufficient/u); },
+    onProgress: (event) => progress.push(event),
   }), (error: unknown) => {
     assert.ok(error instanceof SemanticSequenceSelfAssessmentError);
     assert.match(error.message, /自定义总时长\s*90\s*秒/u);
     assert.match(error.message, /每段\s*15\s*秒/u);
-    assert.match(error.message, /不足以完整安排剧情/u);
-    assert.match(error.message, /重试\s*3\s*次/u);
-    assert.match(error.message, /共\s*4\s*次请求/u);
-    assert.match(error.message, /修改总时长或选择 AI 适配/u);
+    assert.equal(error.reason, '合成故事的完整发话需要超过这六段。');
+    assert.match(error.message, /本次 AI 规划失败的原因/u);
+    assert.match(error.message, /不能据此认定客观最低时长/u);
+    assert.doesNotMatch(error.message, /已自动重试|修改总时长或选择 AI 适配/u);
     return true;
   });
-  assert.equal(requests.length, 4);
-  assert.deepEqual(repairs, [1, 2, 3]);
+  assert.equal(requests.length, 1);
+  assert.deepEqual(repairs, []);
+  assert.deepEqual(progress.map((event) => event.stage), ['requesting', 'parsing', 'failed']);
+  assert.ok(progress.every((event) => event.requestNumber === 1 && event.durationMode === 'fixed'
+    && event.totalDurationSec === 90 && event.segmentDurationSec === 15 && event.requiredSegmentCount === 6));
+  assert.match(progress.at(-1)!.detail!, /合成故事的完整发话需要超过这六段/u);
+  const diagnosticOnly = install(() => textReply({ fitStatus: 'insufficient', reason: '必须串行的动作在本次分配中未排好。' }));
+  await assert.rejects(requestSemanticSequencePlan(config(), fixedInput(), undefined, options), (error: unknown) =>
+    error instanceof SemanticSequenceSelfAssessmentError && error.reason === '必须串行的动作在本次分配中未排好。');
+  assert.equal(diagnosticOnly.length, 1, 'a clear reason never has to regenerate six failure drafts');
   const wrongN = install((payload) => { assertFixedDurationRequest(payload); return textReply(response(7)); });
   await assert.rejects(requestSemanticSequencePlan(config(), fixedInput(), undefined, options), (error: unknown) => {
     assert.ok(error instanceof SemanticSequenceTechnicalError);
@@ -1064,7 +1087,7 @@ test('fixed cancellation and stale identity prevent both publication and any nex
     await assert.rejects(requestSemanticSequencePlan(config(), fixedInput(), undefined, { ...options, isCurrent: () => current }), abortError);
     assert.equal(stale.length, 1);
   }
-  for (const failure of failureKinds.slice(1)) {
+  for (const failure of failureKinds.slice(1, 3)) {
     const controller = new AbortController();
     const cancelled = install((payload) => { assertFixedDurationRequest(payload); return failure; });
     await assert.rejects(requestSemanticSequencePlan(config(), fixedInput(), controller.signal, { ...options, onRepair: () => controller.abort() }), abortError);
@@ -1075,6 +1098,22 @@ test('fixed cancellation and stale identity prevent both publication and any nex
       ...options, isCurrent: () => current, onRepair: () => { current = false; },
     }), abortError);
     assert.equal(stale.length, 1);
+  }
+});
+
+test('progress callbacks cannot publish or send another request after cancelling the run', async () => {
+  for (const cancelAt of ['requesting', 'parsing', 'materializing', 'completed', 'repairing'] as const) {
+    const controller = new AbortController();
+    const progress: SemanticSequencePlannerProgress[] = [];
+    const requests = install(() => textReply(response(cancelAt === 'repairing' ? 5 : 6)));
+    await assert.rejects(requestSemanticSequencePlan(config(), fixedInput(), controller.signal, {
+      ...options, onProgress: (event) => {
+        progress.push(event);
+        if (event.stage === cancelAt) controller.abort();
+      },
+    }), abortError);
+    assert.equal(requests.length, cancelAt === 'requesting' ? 0 : 1);
+    assert.equal(progress.at(-1)!.stage, cancelAt, 'cancelled runs emit no later failure or completion event');
   }
 });
 

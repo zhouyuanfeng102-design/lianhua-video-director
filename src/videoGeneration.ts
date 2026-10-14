@@ -5,6 +5,8 @@ import { assertNoEmbeddedVideoCredentials, buildVideoApiBody, defaultMiniMaxVide
 import { compileRunningHubVideoApi, resolveConfiguredVideoApi } from './runningHubVideo';
 import { migrateRunningHubVideoApiImageProtocol, resolveRunningHubVideoImageProtocol } from './runningHubImageProtocol';
 import { nestedValue } from './videoTasks';
+import { decodeVideoBinaryBody, genericVideoStatusEndpoint, isLaoliVideoApi, isLaoliVideoBuiltinProtocol, laoliVideoUsesInlineImages, uploadLaoliVideoImage } from './genericVideoApi';
+import { hasObsoleteVideoFileMapping, videoApiFileQueryEndpoint } from './videoApiLegacyConfig';
 import { defaultComfyVideoConfig } from './videoGenerationTypes';
 import { defaultRhTvApi, RHTV_ORIGIN } from './rhtvBridge';
 import { findProjectVideoTask, snapshotVideoAssetSourceTask } from './videoProvenance';
@@ -67,7 +69,7 @@ const record = (value: unknown): value is Record<string, unknown> => Boolean(val
 const id = (prefix: string) => `${prefix}_${globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`}`;
 const completedFileResult = (task: VideoGenerationTask): string | undefined => {
   const config = task.videoJob?.snapshot.connection.api;
-  if (!config || !task.response || task.resultUrl) return undefined;
+  if (!config || !task.response || task.resultUrl || hasObsoleteVideoFileMapping(config)) return undefined;
   const result = parseVideoApiResult(task.response, config);
   return result.status === 'succeeded' ? result.fileId : undefined;
 };
@@ -124,7 +126,7 @@ const sameFrozenAudioSources = (left: VideoGenerationSnapshot | undefined, right
       || canonicalText([audio.relativePath, audio.checksum, audio.dataUrl]) === canonicalText([b[index].relativePath, b[index].checksum, b[index].dataUrl])));
 };
 const apiCredentialConfig = (config: Omit<VideoTaskApiConfig, 'apiKey'>) => Object.fromEntries(Object.entries(config)
-  .filter(([key]) => !['apiKey', 'id', 'name', 'createdAt', 'updatedAt', 'runningHubParameterControls'].includes(key))
+  .filter(([key]) => !['apiKey', 'id', 'name', 'createdAt', 'updatedAt', 'runningHubParameterControls', 'parameterCapabilities'].includes(key))
   .map(([key, value]) => [key, key === 'runningHubMappedFields' && Array.isArray(value)
     ? value.map((field) => {
       if (!record(field) || field.kind !== 'image') return field;
@@ -1157,7 +1159,7 @@ export class VideoGenerationEngine {
         response = await bridge.rhtvRequest({ ...payload, method: payload.method || 'GET', requestId });
       } else if (bridge?.videoRequest) response = await bridge.videoRequest({ ...payload, method: payload.method || 'GET', requestId });
       else {
-        let body: BodyInit | undefined = payload.body;
+        let body: BodyInit | undefined = payload.bodyEncoding === 'base64' && payload.body !== undefined ? decodeVideoBinaryBody(payload.body) : payload.body;
         if (payload.multipart) {
           const form = new FormData();
           const fields = payload.multipart.fields || {};
@@ -2030,7 +2032,7 @@ export class VideoGenerationEngine {
         this.ensureActive(task);
         let image = task.videoJob!.snapshot.images[index];
         const uploaded = task.videoJob!.preparation!.uploadedImages[index];
-        if (image.freezeState === 'frozen' && uploaded) { imageValues.push(uploaded); continue; }
+        if (image.freezeState === 'frozen' && uploaded && !(config && laoliVideoUsesInlineImages(config))) { imageValues.push(uploaded); continue; }
         const frozen = await this.freezeImage(task, image);
         image = frozen.image;
         const images = [...task.videoJob!.snapshot.images]; images[index] = image;
@@ -2050,7 +2052,9 @@ export class VideoGenerationEngine {
           const remote = nestedValue(result, 'upload_id');
           if (typeof remote !== 'string' || !/^[a-f0-9]{64}_(?:png|jpeg|webp)$/u.test(remote)) throw new Error('rhTV 原图暂存未返回有效标识');
           uploadedValue = remote;
-        } else if (config!.imageUploadEndpoint) {
+        } else if (isLaoliVideoBuiltinProtocol(config!) && !laoliVideoUsesInlineImages(config!)) {
+          uploadedValue = await uploadLaoliVideoImage(config!, dataUrl, headers, (payload) => this.request(task, payload));
+        } else if (config!.imageUploadEndpoint && !laoliVideoUsesInlineImages(config!)) {
           const result = await this.request(task, { url: config!.imageUploadEndpoint, method: 'POST', headers, multipart: {
             files: [{ fieldName: config!.imageUploadField || 'file', fileName: image.fileName || 'reference.png', dataUrl }],
           } });
@@ -2127,7 +2131,11 @@ export class VideoGenerationEngine {
       this.ensureActive(task);
       if (!this.tailReady(task) || !this.chainDependencyReady(task)) throw new Error('保存提交边界期间上一段或尾帧失效；本段没有发送生成请求，请处理依赖后建立新任务。');
       postStarted = true;
-      const result = await this.request(task, { url: draft.backend === 'api' ? videoApiSubmitEndpoint(config!) : join(comfy!.baseUrl, comfy!.promptPath || '/prompt'), method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      const result = await this.request(task, { url: draft.backend === 'api' ? videoApiSubmitEndpoint(config!) : join(comfy!.baseUrl, comfy!.promptPath || '/prompt'), method: 'POST', headers: { ...headers, 'Content-Type': 'application/json',
+        // Task identity is durable before the first POST and unique per result.
+        // A missing receipt never triggers a new-key automatic resubmission.
+        ...(draft.backend === 'api' && isLaoliVideoApi(config!) ? { 'Idempotency-Key': task.id } : {}),
+      }, body: JSON.stringify(body) });
       const mapped = draft.backend === 'api' ? parseVideoApiResult(result, config!) : {
         remoteTaskId: record(result) && result.prompt_id ? String(result.prompt_id) : '', status: 'submitted' as const, stage: 'queued' as const, resultUrl: undefined, message: '已进入 ComfyUI 队列', fileId: undefined, downloadError: undefined,
       };
@@ -3115,7 +3123,7 @@ export class VideoGenerationEngine {
         const config = connection.api!;
         const submittedFileId = completedFileResult(task);
         if (submittedFileId) {
-          const endpoint = config.fileEndpointTemplate || (config.provider === 'minimax' ? defaultMiniMaxVideoApi.fileEndpointTemplate : '');
+          const endpoint = videoApiFileQueryEndpoint(config) || (config.provider === 'minimax' ? defaultMiniMaxVideoApi.fileEndpointTemplate : '');
           if (!endpoint) {
             this.patch(task, { error: '视频已生成，但接口快照缺少文件下载查询端点。' }, { stage: 'stopped', trackingStopped: true, message: '生成成功，尚无法取得下载地址；没有重新生成。' }); return;
           }
@@ -3134,7 +3142,7 @@ export class VideoGenerationEngine {
         }
         const statusEndpoint = config.provider === 'rhtv_web' ? defaultRhTvApi.statusEndpointTemplate : config.statusEndpointTemplate || (config.provider === 'minimax'
           ? defaultMiniMaxVideoApi.statusEndpointTemplate
-          : config.provider === 'runninghub' ? defaultRunningHubVideoApi.statusEndpointTemplate : '');
+          : config.provider === 'runninghub' ? defaultRunningHubVideoApi.statusEndpointTemplate : genericVideoStatusEndpoint(config));
         if (!statusEndpoint) { this.patch(task, { error: '此任务的接口快照没有状态查询端点。' }, { stage: 'stopped', trackingStopped: true, message: '缺少状态查询端点；任务未重新提交' }); return; }
         const queryUrl = statusEndpoint.replace(/\{id\}/gu, encodeURIComponent(task.remoteTaskId!));
         const response = await this.request(task, config.provider === 'runninghub'
@@ -3143,6 +3151,7 @@ export class VideoGenerationEngine {
         if (!currentPoll()) return;
         const mapped = parseVideoApiResult(response, config);
         if (config.provider === 'rhtv_web' && mapped.remoteTaskId !== task.remoteTaskId) throw new Error('rhTV 返回的任务身份不符，未接收其他任务结果');
+        if ((config.baseUrl?.trim() || isLaoliVideoApi(config)) && mapped.remoteTaskId && mapped.remoteTaskId !== task.remoteTaskId) throw new Error('视频接口返回的任务编号与原任务不一致，未接收其他任务结果。');
         if (mapped.status === 'failed') {
           const remoteGenerationEnded = videoTaskRemoteGenerationEnded({ ...task, response });
           if (!remoteGenerationEnded) {
@@ -3166,7 +3175,7 @@ export class VideoGenerationEngine {
         }
         let resultUrl = mapped.resultUrl || task.resultUrl;
         if (mapped.status === 'succeeded' && !resultUrl && mapped.fileId) {
-          const endpoint = config.fileEndpointTemplate || (config.provider === 'minimax' ? defaultMiniMaxVideoApi.fileEndpointTemplate : '');
+          const endpoint = videoApiFileQueryEndpoint(config) || (config.provider === 'minimax' ? defaultMiniMaxVideoApi.fileEndpointTemplate : '');
           if (endpoint) {
             const file = await this.request(task, { url: endpoint.replace(/\{id\}/gu, encodeURIComponent(mapped.fileId)), headers });
             if (!currentPoll()) return;

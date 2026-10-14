@@ -1,6 +1,7 @@
 import { normalizeStoryReferenceContext, normalizeStoryReferenceAssetSubjects, recoverInterruptedStoryReferenceRecognition } from './storyReferences';
 import { normalizeAppColorMode, normalizeAppColorTheme } from './appTheme';
 import { normalizeProjectVoicePresets } from './videoAudioReferences';
+import { repairLegacyVideoApiConfig } from './videoApiLegacyConfig';
 ﻿import type {
   AppSettings,
   AppState,
@@ -2899,6 +2900,7 @@ const normalizePersistedProject = (
     const promptEn = typeof value.promptEn === 'string' ? value.promptEn : '';
     const sourceFingerprint = typeof value.sourceFingerprint === 'string' ? value.sourceFingerprint : '';
     if (!promptZh || !sourceFingerprint) return undefined;
+    const seedanceHandoff = normalizeSequencePromptHandoffStamp(value.sequencePromptHandoff);
     return {
       targetId: 'seedance-2.5',
       promptZh,
@@ -2911,6 +2913,7 @@ const normalizePersistedProject = (
       generatedAt: typeof value.generatedAt === 'number' && Number.isFinite(value.generatedAt) ? value.generatedAt : 0,
       ...(typeof value.englishSourceFingerprint === 'string' ? { englishSourceFingerprint: value.englishSourceFingerprint } : {}),
       ...(typeof value.englishError === 'string' && value.englishError ? { englishError: value.englishError } : {}),
+      ...(seedanceHandoff?.promptFormat === 'seedance' ? { sequencePromptHandoff: seedanceHandoff } : {}),
     };
   };
 
@@ -3116,7 +3119,7 @@ export const normalizeState = (raw: unknown): AppState => {
     || imageApi.activeRunningHubWorkflowId !== undefined) {
     Object.assign(imageApi, normalizeRunningHubImageConfig(imageApi));
   }
-  const videoTaskApi = mergeDefined(fallback.settings.videoTaskApi, incomingSettings.videoTaskApi);
+  const videoTaskApi = repairLegacyVideoApiConfig(mergeDefined(fallback.settings.videoTaskApi, incomingSettings.videoTaskApi));
   const comfyuiVideo = mergeDefined(defaultComfyVideoConfig, incomingSettings.comfyuiVideo);
   comfyuiVideo.workflows = Array.isArray(comfyuiVideo.workflows) ? comfyuiVideo.workflows : [];
   const migratedAt = now();
@@ -3197,7 +3200,7 @@ export const normalizeState = (raw: unknown): AppState => {
       && Number.isInteger(incomingSettings.videoExecutionConcurrency)
       && incomingSettings.videoExecutionConcurrency >= 1 && incomingSettings.videoExecutionConcurrency <= 100
       ? incomingSettings.videoExecutionConcurrency : 1,
-    videoApiProfiles: Array.isArray(incomingSettings.videoApiProfiles) ? incomingSettings.videoApiProfiles : [],
+    videoApiProfiles: Array.isArray(incomingSettings.videoApiProfiles) ? incomingSettings.videoApiProfiles.map((profile) => profile && typeof profile === 'object' ? repairLegacyVideoApiConfig(profile) : profile) : [],
     activeVideoApiProfileId: typeof incomingSettings.activeVideoApiProfileId === 'string' ? incomingSettings.activeVideoApiProfileId : null,
     apiCredentialBook: Array.isArray(incomingSettings.apiCredentialBook)
       ? savedArray<ApiCredentialEntry>(incomingSettings.apiCredentialBook)

@@ -255,7 +255,7 @@ const semanticConnection = (connection: unknown): unknown => {
   }
   // UI ranges/choices do not change the cloud request or historical identity.
   const api = record(connection.api)
-    ? Object.fromEntries(Object.entries(connection.api).filter(([key]) => key !== 'runningHubParameterControls'))
+    ? Object.fromEntries(Object.entries(connection.api).filter(([key]) => !['runningHubParameterControls', 'parameterCapabilities'].includes(key)))
     : connection.api;
   // Empty-slot encoding adds no selected image or new workflow identity.
   // Keep pre-0.7.7 completed/in-flight fingerprints stable so a software

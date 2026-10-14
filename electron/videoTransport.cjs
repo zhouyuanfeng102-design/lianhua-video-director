@@ -14,10 +14,18 @@ const videoRequestOptions = (payload, signal) => {
   const method = String(payload.method || 'POST').toUpperCase();
   if (!['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD'].includes(method)) throw new Error('不支持的视频接口请求方法');
   if (payload.body != null && typeof payload.body !== 'string') throw new Error('视频接口正文必须是字符串');
+  if (payload.bodyEncoding != null && !['utf8', 'base64'].includes(payload.bodyEncoding)) throw new Error('视频接口正文编码无效');
+  if (payload.bodyEncoding === 'base64' && (payload.multipart != null || typeof payload.body !== 'string')) throw new Error('二进制视频上传必须提供 Base64 正文');
   if (payload.body != null && payload.multipart != null) throw new Error('视频接口不能同时发送 JSON 和文件表单');
   if (['GET', 'HEAD'].includes(method) && (payload.body != null || payload.multipart != null)) throw new Error('GET/HEAD 视频接口不能发送正文');
   const headers = { ...(payload.headers || {}) };
   let body = payload.body;
+  if (payload.bodyEncoding === 'base64') {
+    if (body.length > Math.ceil(128 * 1024 * 1024 / 3) * 4) throw new Error('视频接口请求数据超过 128 MB 传输上限');
+    if (body.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/u.test(body)) throw new Error('视频上传 Base64 正文无效');
+    body = Buffer.from(body, 'base64');
+    if (body.toString('base64') !== payload.body) throw new Error('视频上传 Base64 正文无效');
+  }
   if (body && Buffer.byteLength(body, 'utf8') > 128 * 1024 * 1024) throw new Error('视频接口请求数据超过 128 MB 传输上限');
   if (payload.multipart != null) {
     const fields = Array.isArray(payload.multipart.fields) ? payload.multipart.fields : Object.entries(payload.multipart.fields || {}).map(([name, value]) => ({ name, value }));

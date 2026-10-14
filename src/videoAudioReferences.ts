@@ -59,6 +59,7 @@ export const stripVideoAudioPromptBinding = (prompt: string, binding: VideoGener
 
 const authoredPrompt = (draft: VideoGenerationDraft): string => {
   const prompt = stripVideoAudioPromptBinding(draft.prompt, draft.audioReferenceBinding);
+  if (draft.seedanceReferenceBinding && prompt === draft.seedanceReferenceBinding.renderedPrompt) return draft.seedanceReferenceBinding.basePrompt;
   return draft.h3ReferenceBinding && prompt === draft.h3ReferenceBinding.renderedPrompt ? draft.h3ReferenceBinding.basePrompt : prompt;
 };
 const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');

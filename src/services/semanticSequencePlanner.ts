@@ -7,7 +7,7 @@ import type { SemanticSequencePlanningInput } from '../semanticSequencePlan';
 import { STORY_PACING_RULE } from '../storyPacing';
 import { STORY_CAUSALITY_RULE } from '../storyCausalityRules';
 import { VIDEO_SCENE_CONTEXT_RULE } from '../videoSceneContext';
-import type { TextApiConfig, VideoSequencePlan } from '../types';
+import type { SequenceDurationMode, TextApiConfig, VideoSequencePlan } from '../types';
 import { videoPacingWithoutCreativeRequirement } from '../videoCreativeDirection';
 import { requestTextModel, TextModelHttpError, TextModelResponseError } from './llm';
 
@@ -19,9 +19,22 @@ export interface SemanticSequenceRepairProgress {
   detail: string;
 }
 
+export interface SemanticSequencePlannerProgress {
+  stage: 'requesting' | 'parsing' | 'materializing' | 'repairing' | 'completed' | 'failed';
+  requestNumber: number;
+  maxRequests: number;
+  elapsedMs: number;
+  durationMode: SequenceDurationMode;
+  totalDurationSec?: number;
+  segmentDurationSec: number;
+  requiredSegmentCount?: number;
+  detail?: string;
+}
+
 export interface SemanticSequencePlannerOptions {
   isCurrent?: () => boolean;
   onRepair?: (progress: SemanticSequenceRepairProgress) => void;
+  onProgress?: (progress: SemanticSequencePlannerProgress) => void;
   planId?: string;
   now?: () => number;
 }
@@ -35,12 +48,15 @@ export const SEMANTIC_SEQUENCE_SELF_REPAIR_TAG = 'RAW_STORY_SEMANTIC_SEQUENCE_MO
 
 /** The model's explicit self-assessment, never a local story/timing judgment. */
 export class SemanticSequenceSelfAssessmentError extends Error {
-  readonly issues = ['AI 自检明确返回 fitStatus=insufficient，尚未交付可完成的语义分段计划'];
-  constructor(attempts?: number, fixedBudget?: { totalDurationSec: number; segmentDurationSec: number }) {
+  readonly issues: readonly string[];
+  constructor(attempts?: number, fixedBudget?: { totalDurationSec: number; segmentDurationSec: number }, readonly reason?: string) {
+    const assessment = 'AI 自检明确返回 fitStatus=insufficient，尚未交付可完成的语义分段计划';
+    const detail = reason?.trim() ? `本次 AI 规划失败的原因：${reason}` : assessment;
     super(`${attempts ? `AI 分段已自动重试 ${MAX_SEMANTIC_SEQUENCE_REPAIRS} 次（共 ${attempts} 次请求）。` : ''}${fixedBudget
-      ? `AI 仍认为自定义总时长 ${fixedBudget.totalDurationSec} 秒（每段 ${fixedBudget.segmentDurationSec} 秒）不足以完整安排剧情；自定义时长未被擅自增加。可修改总时长或选择 AI 适配后重新分段。`
-      : 'AI 在本轮自修复后仍认为分段不足，未保存不完整计划，原结果保持不变；请重新进行 AI 语义分段。'}`);
+      ? `本次 AI 未完成自定义总时长 ${fixedBudget.totalDurationSec} 秒（每段 ${fixedBudget.segmentDurationSec} 秒）的分段规划。${detail}。这是本次规划的自评，不能据此认定客观最低时长；未针对该自评自动重新请求，也未更改预算，原结果保持不变。`
+      : `AI 在本轮自修复后仍未交付完整分段，原结果保持不变；${detail}。请重新进行 AI 语义分段。`}`);
     this.name = 'SemanticSequenceSelfAssessmentError';
+    this.issues = [assessment, ...(reason?.trim() ? [reason] : [])];
   }
 }
 
@@ -81,7 +97,7 @@ const SEMANTIC_SEQUENCE_COMMON_RULE = [
       } }],
       dialogues: [{ id: 'dialogue-1', speaker: '原文说话人', text: '原文台词' }] },
   }] }),
-  '最终只输出JSON正文，从{开始到}结束，不输出思考、解释、代码围栏或模板占位词。JSON字符串内的双引号、反斜线和换行必须正确转义；对白仍保持原字，不因转义改变台词内容。先确认完整原文的全部事件、对白及结局均已安排到实际segments，再完整结束数组和根对象；不能只输出前几段、以省略号代替后段或提前结束后把缺段当成完成。',
+  '最终只输出JSON正文，从{开始到}结束，不输出思考、解释、代码围栏或模板占位词。JSON字符串内的双引号、反斜线和换行必须正确转义；对白仍保持原字，不因转义改变台词内容。返回可完整安排的状态前，先确认完整原文的全部事件、对白及结局均已安排到实际segments，再完整结束数组和根对象；不能只输出前几段、以省略号代替后段或提前结束后把缺段当成完成。',
 ].join('\n');
 
 const SEMANTIC_SEQUENCE_AI_DURATION_RULE = [
@@ -98,15 +114,18 @@ const requiredFixedSegmentCount = (input: SemanticSequencePlanningInput): number
 const semanticSequencePlanningRule = (input: SemanticSequencePlanningInput): string => input.durationMode !== 'fixed'
   ? SEMANTIC_SEQUENCE_PLANNING_RULE
   : [
+      `本阶段durationAdjustmentPolicy=fixed-total-duration，durationMode=fixed：用户自定义全片总时长T=${input.requestedTotalDurationSec}秒，每段D=${input.segmentDurationSec}秒，已确定N=${requiredFixedSegmentCount(input)}段。T、D、N均固定；成功结果的segments数组必须实际完整输出${requiredFixedSegmentCount(input)}项，每段完整D秒，总长精确T秒，不另外填写segmentCount。不能擅自增减段数或更改总时长。`,
+      '固定模式先排整片、后切窗口：先完整理解story中的人物关系、全部发话、事件先后、因果与结局；先在全片T秒内安排连续对白、换人交接和必要反应，再把允许同时发生的动作、环境信息与人物反应放进这些发话期间，重新分配全片尚未确认的事件，最后才切成N个完整D秒生成窗口。全部规划在本次回答内部完成，仅返回现有JSON，不先输出全片稿、镜头表或额外审核结果。',
+      '全部对白原字、说话人和发话顺序保持，剧情事件、因果和结局保持。不先给各段指定互不相连的完整场面，再将谈判或长发话挤进某一段；段界只负责生成窗口，连续场面、行进、谈判与持续战斗可以跨段真实推进，不要求每段重新开场、重新登场或重复已完成动作。优先在自然话轮交接处切分；必要的连续长话分配原字接续、同一声源和明确接点，不重复开头、不丢结尾。',
+      '合并独立环境铺垫、重复呈现和不必要的停顿：相关人物与环境信息可在原有发话和行动期间呈现，行走、接近、取物等不妨碍发音的动作可与相关交代同步，原文允许的持续事件可与现场对白同时推进，不在每次反应后从头重演同一动作。只有原文允许的事件才能并行，命令后才执行的动作、因果先后和口部互斥动作必须保留，不删除事件或对白。',
+      '结合完整制作要求合理安排自然发话与真实动作，不按字数、句数、固定语速或最低镜数套公式，不靠抢话、声音重叠或机械加速朗读硬塞预算，不用凝视、换景、空镜或重复结尾填时。首轮回答内先调整全片未确认的分配，不能因第一次局部安排拥挤就认定固定时长做不到。',
       SEMANTIC_SEQUENCE_COMMON_RULE,
-      `本阶段durationAdjustmentPolicy=fixed-total-duration，durationMode=fixed：用户自定义全片总时长T=${input.requestedTotalDurationSec}秒，每段D=${input.segmentDurationSec}秒，已确定N=${requiredFixedSegmentCount(input)}段。T、D、N均固定，segments数组必须实际完整输出${requiredFixedSegmentCount(input)}项，每段完整D秒，总长精确T秒；不另外填写segmentCount。不能擅自增减段数或更改总时长。`,
-      '结合完整剧情和制作要求，在固定N个完整窗口内编排自然推进的事件、对白和动作阶段；不按字数硬切，不按句数、固定语速或最低镜数分配。用真实动作过程、必要反应及用户节奏合理安排，不为填满总时长重复已完成动作、对白或结尾，不用换景、凝视或空镜制造假推进，不添加原文没有的新剧情。',
-      '优先自行调整事件和完整对白在相邻窗口的分配，保证原话、说话人、因果和结局完整，不删剧情、截台词、抢话或加速朗读以硬塞预算。若你自检后确认固定T确实不足，返回fitStatus=insufficient，并在reason明确说明不能完整安排的原因；本地不会把不足计划伪装成成功。固定模式下不通过加段解决不足，实际总时长始终按用户选择。',
+      '固定模式的失败诊断例外：上述完整segments与片段字段要求用于成功结果。若本次内部重新分配后仍未排好完整剧情，明确返回fitStatus=insufficient，并用非空reason说明具体冲突的发话或必须串行动作；这只是本次规划失败的自评，不宣称已经证实客观最低时长。失败结果可以只返回reason、fitStatus，或令segments为空数组，不必为失败诊断凑齐N段。固定模式不会自动拿相同预算重新完整生成，不能靠加段、删对白或谎报成功处理失败。',
     ].join('\n');
 
 /** Repair legacy duplicate counts through the same AI and full story, never by
  * dropping a field locally or accepting a possibly incomplete segment list. */
-const SEMANTIC_SEQUENCE_LEGACY_COUNT_REPAIR_RULE = '若上一答含旧字段segmentCount且与segments实际数量不一致，先依据完整story确认是旧数字填错还是segments漏段。保留已正确安排的事件与对白，补全原文遗漏或修正实际分段安排，再交付只含reason、fitStatus、segments的新格式；不能只删除segmentCount就把可能漏剧情的数组当成完整，也不能为凑旧数字复制、填充或裁掉剧情段。';
+const SEMANTIC_SEQUENCE_LEGACY_COUNT_REPAIR_RULE = '若上一答含旧字段segmentCount且与segments实际数量不一致，先依据完整story确认是旧数字填错还是segments漏段。保留原文事件与完整对白，补全原文遗漏或修正实际分段安排；上一答的段界、事件归属和停顿是尚未确认的草稿，段数错误时允许重新分配，不能锁死错误草稿。再交付只含reason、fitStatus、segments的新格式；不能只删除segmentCount就把可能漏剧情的数组当成完整，也不能为凑旧数字复制、填充或裁掉剧情段。';
 
 /** A bounded delivery allowance, not a word-count estimate or a plot decision. */
 const semanticOutputGrowthCeiling = (maxTokens: number): number => Math.max(maxTokens, 65_536);
@@ -174,6 +193,7 @@ export const requestSemanticSequencePlan = async (
   signal?: AbortSignal,
   options: SemanticSequencePlannerOptions = {},
 ): Promise<VideoSequencePlan> => {
+  const startedAt = Date.now();
   const assertCurrent = (): void => {
     if (signal?.aborted || (options.isCurrent && !options.isCurrent())) {
       const error = new Error('原文、单段时长或导演设置已变化，语义分段已取消，原结果保持不变。');
@@ -201,85 +221,106 @@ export const requestSemanticSequencePlan = async (
   let previousIssues: readonly string[] = [];
   let modelReportedInsufficient = false;
   let recoveringOutput = false;
-  for (let attempt = 0; attempt <= MAX_SEMANTIC_SEQUENCE_REPAIRS; attempt += 1) {
+  let requestNumber = 0;
+  const emitProgress = (stage: SemanticSequencePlannerProgress['stage'], detail?: string): void => {
     assertCurrent();
-    if (attempt > 0) {
-      options.onRepair?.({ attempt, maxAttempts: MAX_SEMANTIC_SEQUENCE_REPAIRS, detail: previousIssues.join('；') });
+    options.onProgress?.({ stage, requestNumber, maxRequests: MAX_SEMANTIC_SEQUENCE_REPAIRS + 1,
+      elapsedMs: Math.max(0, Date.now() - startedAt), durationMode: snapshot.durationMode ?? 'ai-estimated',
+      segmentDurationSec: snapshot.segmentDurationSec,
+      ...(fixedBudget ? { totalDurationSec: fixedBudget.totalDurationSec, requiredSegmentCount: requiredFixedSegmentCount(snapshot) } : {}),
+      ...(detail ? { detail } : {}) });
+    assertCurrent();
+  };
+  try {
+    for (let attempt = 0; attempt <= MAX_SEMANTIC_SEQUENCE_REPAIRS; attempt += 1) {
       assertCurrent();
-    }
-    const system = attempt === 0 ? `${SEMANTIC_SEQUENCE_PLANNING_TAG}\n${planningRule}`
-      : modelReportedInsufficient
-        ? `${SEMANTIC_SEQUENCE_SELF_REPAIR_TAG}\n${planningRule}\n上一回答由你自己明确返回fitStatus=insufficient，这不是本地内容判断。请在同一规划流程中自行修正：${fixedBudget
-          ? `${deliveryTimeInstruction}；结合完整原文重新分配真实事件、完整发话和必要反应，不能增加或删减用户已定的段数。若固定预算确实不能容纳全部剧情，明确返回insufficient及原因，不谎报成功`
-          : 'D保持不变，结合完整原文增加足额D段或重新分配事件与完整发话，N不固定'}；保留全部事件、原话、说话人、连续状态与导演要求，不靠删对白、抢话、重复或空转解决。完成自检后只返回完整JSON。`
-        : recoveringOutput
-          ? `${SEMANTIC_SEQUENCE_REPAIR_TAG}\n${planningRule}\n上次未取得完整分段正文。本次从完整输入重新交付完整JSON，不能续写残余片段或只返回补丁。${deliveryTimeInstruction}；保留全部事件、台词与归属。精简辅助理由的措辞，不省略剧情正文、原文证据或必要字段，不用减少段数掩盖输出额度问题。`
-          : `${SEMANTIC_SEQUENCE_REPAIR_TAG}\n${planningRule}\n本次只修复返回JSON的技术问题：格式、字段形状或数值契约。按technicalIssues指出的字段路径和原因逐项修复；若只有fitStatus错误，只修正状态字段的表达，解释放入reason，保留原自评含义，不默认填成功值。保留已正确的剧情、语义归属与对白，不借修复重新创作。${SEMANTIC_SEQUENCE_LEGACY_COUNT_REPAIR_RULE}${deliveryTimeInstruction}。若段数/时间字段不自洽，结合完整原文修复完整结果，不能由本地删除或拼接片段。只返回完整JSON，不能返回补丁。`;
-    const user = attempt === 0 ? envelope('semantic_sequence_input', inputPayload)
-      : envelope('semantic_sequence_repair', { input: inputPayload, previousResponse,
-        ...(modelReportedInsufficient ? { modelSelfAssessment: 'insufficient', selfAssessmentIssues: previousIssues } : { technicalIssues: previousIssues }) });
-    let raw: string;
-    try {
-      raw = await requestTextModel(requestConfig, system, user, signal, { disableThinking: true, jsonObject });
-    } catch (error) {
-      assertCurrent();
-      let detail: string | undefined;
-      if (error instanceof TextModelResponseError && ['length', 'reasoning_only', 'empty_content'].includes(error.code)) {
-        const previousTokens = requestConfig.maxTokens;
-        if (error.code !== 'empty_content') requestConfig.maxTokens = nextOutputAllowance(previousTokens, growthCeiling, providerLimit);
-        detail = `${error.code === 'length' ? '模型输出被截断' : error.code === 'reasoning_only' ? '模型只返回思考内容' : '接口返回空正文'}；重新请求完整JSON，输出额度 ${previousTokens} → ${requestConfig.maxTokens} tokens`;
-      } else if (error instanceof TextModelHttpError) {
-        if (jsonObject && rejectsJsonOutputOption(error)) {
-          jsonObject = false;
-          detail = '接口明确不支持JSON输出参数，改用提示词中的同一JSON协议重试';
-        } else if (error.status === 400 || error.status === 422) {
-          const limit = explicitOutputLimit(error.message);
-          if (limit !== undefined && limit < requestConfig.maxTokens) {
-            providerLimit = Math.min(providerLimit ?? limit, limit);
-            requestConfig.maxTokens = limit;
-            detail = `接口明确要求输出额度不超过 ${limit} tokens，按接口上限重新请求完整JSON`;
+      if (attempt > 0) {
+        options.onRepair?.({ attempt, maxAttempts: MAX_SEMANTIC_SEQUENCE_REPAIRS, detail: previousIssues.join('；') });
+        assertCurrent();
+        emitProgress('repairing', previousIssues.join('；'));
+      }
+      const system = attempt === 0 ? `${SEMANTIC_SEQUENCE_PLANNING_TAG}\n${planningRule}`
+        : modelReportedInsufficient
+          ? `${SEMANTIC_SEQUENCE_SELF_REPAIR_TAG}\n${planningRule}\n上一回答由你自己明确返回fitStatus=insufficient，这不是本地内容判断。请在同一规划流程中自行修正：D保持不变，结合完整原文增加足额D段或重新分配事件与完整发话，N不固定；保留全部事件、原话、说话人、连续状态与导演要求，不靠删对白、抢话、重复或空转解决。完成自检后只返回完整JSON。`
+          : recoveringOutput
+            ? `${SEMANTIC_SEQUENCE_REPAIR_TAG}\n${planningRule}\n上次未取得完整分段正文。本次从完整输入重新交付完整JSON，不能续写残余片段或只返回补丁。${deliveryTimeInstruction}；保留全部事件、台词与归属。精简辅助理由的措辞，不省略剧情正文、原文证据或必要字段，不用减少段数掩盖输出额度问题。`
+            : `${SEMANTIC_SEQUENCE_REPAIR_TAG}\n${planningRule}\n本次只修复返回JSON的技术问题：格式、字段形状或数值契约。按technicalIssues指出的字段路径和原因逐项修复；若只有fitStatus错误，只修正状态字段的表达，解释放入reason，保留原自评含义，不默认填成功值。保留原文事实与完整对白，不借修复新增剧情；段数正确且归属无误时保持既有分配，段数错误时重新分配尚未确认的段界、事件归属和停顿，不锁死错误草稿。${SEMANTIC_SEQUENCE_LEGACY_COUNT_REPAIR_RULE}${deliveryTimeInstruction}。若段数/时间字段不自洽，结合完整原文修复完整结果，不能由本地删除或拼接片段。只返回完整JSON，不能返回补丁。`;
+      const user = attempt === 0 ? envelope('semantic_sequence_input', inputPayload)
+        : envelope('semantic_sequence_repair', { input: inputPayload, previousResponse,
+          ...(modelReportedInsufficient ? { modelSelfAssessment: 'insufficient', selfAssessmentIssues: previousIssues } : { technicalIssues: previousIssues }) });
+      let raw: string;
+      try {
+        requestNumber = attempt + 1;
+        emitProgress('requesting');
+        raw = await requestTextModel(requestConfig, system, user, signal, { disableThinking: true, jsonObject });
+      } catch (error) {
+        assertCurrent();
+        let detail: string | undefined;
+        if (error instanceof TextModelResponseError && ['length', 'reasoning_only', 'empty_content'].includes(error.code)) {
+          const previousTokens = requestConfig.maxTokens;
+          if (error.code !== 'empty_content') requestConfig.maxTokens = nextOutputAllowance(previousTokens, growthCeiling, providerLimit);
+          detail = `${error.code === 'length' ? '模型输出被截断' : error.code === 'reasoning_only' ? '模型只返回思考内容' : '接口返回空正文'}；重新请求完整JSON，输出额度 ${previousTokens} → ${requestConfig.maxTokens} tokens`;
+        } else if (error instanceof TextModelHttpError) {
+          if (jsonObject && rejectsJsonOutputOption(error)) {
+            jsonObject = false;
+            detail = '接口明确不支持JSON输出参数，改用提示词中的同一JSON协议重试';
+          } else if (error.status === 400 || error.status === 422) {
+            const limit = explicitOutputLimit(error.message);
+            if (limit !== undefined && limit < requestConfig.maxTokens) {
+              providerLimit = Math.min(providerLimit ?? limit, limit);
+              requestConfig.maxTokens = limit;
+              detail = `接口明确要求输出额度不超过 ${limit} tokens，按接口上限重新请求完整JSON`;
+            }
           }
         }
+        if (!detail || !(error instanceof Error)) throw error;
+        if (attempt === MAX_SEMANTIC_SEQUENCE_REPAIRS) throw exhaustedSemanticRecovery(error, detail);
+        previousResponse = '';
+        previousIssues = [detail];
+        modelReportedInsufficient = false;
+        recoveringOutput = true;
+        continue;
       }
-      if (!detail || !(error instanceof Error)) throw error;
-      if (attempt === MAX_SEMANTIC_SEQUENCE_REPAIRS) throw exhaustedSemanticRecovery(error, detail);
-      previousResponse = '';
-      previousIssues = [detail];
-      modelReportedInsufficient = false;
-      recoveringOutput = true;
-      continue;
-    }
-    assertCurrent();
-    let response;
-    try { response = parseSemanticSequenceResponse(raw, snapshot); }
-    catch (error) {
-      if (!(error instanceof SemanticSequenceTechnicalError)) throw error;
       assertCurrent();
-      if (attempt === MAX_SEMANTIC_SEQUENCE_REPAIRS) throw exhaustedSemanticRecovery(error);
-      previousResponse = raw;
-      previousIssues = error.issues;
-      modelReportedInsufficient = false;
-      recoveringOutput = error.kind === 'incomplete-json';
-      if (recoveringOutput) {
-        const previousTokens = requestConfig.maxTokens;
-        requestConfig.maxTokens = nextOutputAllowance(previousTokens, growthCeiling, providerLimit);
-        previousIssues = [...previousIssues, `本次输出额度 ${previousTokens} → ${requestConfig.maxTokens} tokens，由AI重新返回完整JSON`];
+      emitProgress('parsing');
+      let response;
+      try { response = parseSemanticSequenceResponse(raw, snapshot); }
+      catch (error) {
+        if (!(error instanceof SemanticSequenceTechnicalError)) throw error;
+        assertCurrent();
+        if (attempt === MAX_SEMANTIC_SEQUENCE_REPAIRS) throw exhaustedSemanticRecovery(error);
+        previousResponse = raw;
+        previousIssues = error.issues;
+        modelReportedInsufficient = false;
+        recoveringOutput = error.kind === 'incomplete-json';
+        if (recoveringOutput) {
+          const previousTokens = requestConfig.maxTokens;
+          requestConfig.maxTokens = nextOutputAllowance(previousTokens, growthCeiling, providerLimit);
+          previousIssues = [...previousIssues, `本次输出额度 ${previousTokens} → ${requestConfig.maxTokens} tokens，由AI重新返回完整JSON`];
+        }
+        continue;
       }
-      continue;
+      assertCurrent();
+      if (response.fitStatus === 'insufficient') {
+        const error = new SemanticSequenceSelfAssessmentError(undefined, fixedBudget, response.reason);
+        if (fixedBudget) throw error;
+        if (attempt === MAX_SEMANTIC_SEQUENCE_REPAIRS) throw new SemanticSequenceSelfAssessmentError(attempt + 1, undefined, response.reason);
+        previousResponse = raw;
+        previousIssues = error.issues;
+        modelReportedInsufficient = true;
+        recoveringOutput = false;
+        continue;
+      }
+      emitProgress('materializing');
+      const plan = materializeSemanticSequencePlan(snapshot, response, { planId, now: options.now?.() ?? Date.now() });
+      assertCurrent();
+      emitProgress('completed');
+      return plan;
     }
+    throw new SemanticSequenceTechnicalError(['语义分段技术修复次数已用尽']);
+  } catch (error) {
     assertCurrent();
-    if (response.fitStatus === 'insufficient') {
-      const error = new SemanticSequenceSelfAssessmentError(undefined, fixedBudget);
-      if (attempt === MAX_SEMANTIC_SEQUENCE_REPAIRS) throw new SemanticSequenceSelfAssessmentError(attempt + 1, fixedBudget);
-      previousResponse = raw;
-      previousIssues = error.issues;
-      modelReportedInsufficient = true;
-      recoveringOutput = false;
-      continue;
-    }
-    const plan = materializeSemanticSequencePlan(snapshot, response, { planId, now: options.now?.() ?? Date.now() });
-    assertCurrent();
-    return plan;
+    if (!(error instanceof Error && error.name === 'AbortError')) emitProgress('failed', error instanceof Error ? error.message : 'AI 分段请求失败');
+    throw error;
   }
-  throw new SemanticSequenceTechnicalError(['语义分段技术修复次数已用尽']);
 };

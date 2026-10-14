@@ -11,6 +11,8 @@ export interface VideoDesktopRequest {
   method?: string;
   headers?: Record<string, string>;
   body?: string;
+  /** Binary upload chunks cross IPC as base64 and are decoded before sending. */
+  bodyEncoding?: 'utf8' | 'base64';
   multipart?: { fields?: Record<string, string> | Array<{ name: string; value: string }>; files: Array<{ fieldName?: string; name?: string; fileName: string; dataUrl: string }> };
   responseType?: 'text' | 'base64' | 'auto';
 }
@@ -90,7 +92,7 @@ export interface VideoGenerationDraft {
   prompt: string;
   /** Exact authored identity anchors used only to serialize image bindings. */
   h3ReferenceBinding?: import('./videoH3ReferenceBinding').VideoH3ReferenceBinding;
-  /** Original Seedance token-to-asset mapping for exact image-slot serialization. */
+  /** Seedance source mapping, request-local reference prose and frozen identities. */
   seedanceReferenceBinding?: import('./videoSeedanceReferenceBinding').VideoSeedanceReferenceBinding;
   /** Informational reference warnings only; never a submission gate. */
   h3ReferenceWarnings?: string[];

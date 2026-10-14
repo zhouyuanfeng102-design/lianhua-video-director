@@ -50,6 +50,7 @@ export interface SemanticSequenceResponse {
   segmentCount: number;
   reason: string;
   fitStatus: SequenceFitStatus;
+  /** Empty only for an explicit fixed-mode insufficient diagnosis. */
   segments: SemanticSequenceResponseSegment[];
 }
 
@@ -291,7 +292,8 @@ export const normalizeSemanticSegmentSource = (value: unknown): SemanticSegmentS
   try { return readSemanticSource(value, 'semanticSource'); } catch { return undefined; }
 };
 
-const hasPlanProtocol = (value: Record<string, unknown>): boolean => has(value, 'segmentCount') || has(value, 'segments');
+const hasPlanProtocol = (value: Record<string, unknown>): boolean => has(value, 'segmentCount') || has(value, 'segments')
+  || (normalizeFitStatus(value.fitStatus) === 'insufficient' && typeof value.reason === 'string' && Boolean(value.reason.trim()));
 const nextNonWhitespace = (raw: string, start: number): number => {
   let index = start;
   while (index < raw.length && /\s/u.test(raw[index])) index += 1;
@@ -323,7 +325,7 @@ const readJsonSpan = (raw: string, start: number, limit = raw.length): JsonSpan 
             const key: unknown = JSON.parse(raw.slice(stringStart, index + 1));
             if (raw[before] === '{' || raw[before] === ',') {
               pendingKeys[top] = typeof key === 'string' ? key : undefined;
-              if (key === 'segmentCount' || key === 'segments') planLike = true;
+              if (key === 'segmentCount' || key === 'segments' || key === 'fitStatus') planLike = true;
             }
           } catch { /* Never expose JSON.parse's content-bearing error. */ }
         }
@@ -416,7 +418,7 @@ const parseJsonObject = (raw: string): Record<string, unknown> => {
       const parsed: unknown = JSON.parse(raw.slice(index, span.end));
       planLike = planLike || hasEncodedPlanProtocol(parsed);
       const value = decodeJsonObject(parsed, diagnostics(index, span.end));
-      candidates.push({ ...span, value, planLike: planLike || hasPlanProtocol(value) });
+      candidates.push({ ...span, value, planLike: hasEncodedPlanProtocol(parsed) || hasPlanProtocol(value) });
     } catch (error) {
       candidates.push({ ...span, planLike, error: error instanceof SemanticSequenceTechnicalError ? error
         : new SemanticSequenceTechnicalError(['响应 JSON 语法无效'], 'invalid-json', diagnostics(index, span.end)) });
@@ -445,6 +447,15 @@ const parseJsonObject = (raw: string): Record<string, unknown> => {
 export const parseSemanticSequenceResponse = (raw: string, input: SemanticSequencePlanningInput): SemanticSequenceResponse => {
   assertSemanticSequencePlanningInput(input);
   const value = parseJsonObject(raw);
+  const fitStatus = normalizeFitStatus(value.fitStatus);
+  // A clear fixed-budget failure is a diagnosis, not an incomplete successful
+  // delivery. Do not require N draft bodies before preserving its reason.
+  if (input.durationMode === 'fixed' && fitStatus === 'insufficient') {
+    if (typeof value.reason !== 'string' || !value.reason.trim()) {
+      throw new SemanticSequenceTechnicalError(['固定模式 fitStatus=insufficient 必须提供非空 reason，说明本次规划失败的具体原因']);
+    }
+    return { segmentCount: 0, reason: value.reason, fitStatus, segments: [] };
+  }
   const issues: string[] = [];
   const segmentCount = Array.isArray(value.segments) ? value.segments.length : 0;
   if (!Array.isArray(value.segments) || !segmentCount) issues.push('segments 必须是非空数组');
@@ -465,7 +476,6 @@ export const parseSemanticSequenceResponse = (raw: string, input: SemanticSequen
     }
   }
   if (typeof value.reason !== 'string') issues.push('reason 必须是字符串');
-  const fitStatus = normalizeFitStatus(value.fitStatus);
   if (fitStatus === undefined) issues.push(fitStatusIssue(value));
   const totalUnits = Math.round(input.segmentDurationSec * 100) * segmentCount;
   if (totalUnits > 360000) issues.push(`实际 ${segmentCount} 段 × 每段 ${input.segmentDurationSec} 秒 = ${totalUnits / 100} 秒，超过全片 3600 秒上限`);
@@ -493,6 +503,7 @@ export const materializeSemanticSequencePlan = (
   const snapshot = copySemanticSequencePlanningInput(input);
   // Recheck typed callers too; never publish a partial or manually coerced plan.
   const parsed = parseSemanticSequenceResponse(JSON.stringify(response), snapshot);
+  if (!parsed.segments.length) throw new SemanticSequenceTechnicalError(['本次 AI 固定时长规划失败的诊断不能保存为分段计划']);
   const totalDurationSec = Math.round(snapshot.segmentDurationSec * 100) * parsed.segments.length / 100;
   const windows = requestedSegmentDurationWindows(totalDurationSec, snapshot.segmentDurationSec);
   const now = options.now ?? Date.now();

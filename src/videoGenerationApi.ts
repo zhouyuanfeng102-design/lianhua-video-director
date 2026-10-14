@@ -5,6 +5,7 @@ import { mapVideoTaskResponse, nestedValue } from './videoTasks';
 import { bindRunningHubVideoRequest } from './runningHubVideo';
 import { videoReferenceUsage } from './videoReferenceUsage';
 import { assertVideoReferenceSlots, videoReferenceSlotIndex, videoReferenceSlotSpan } from './videoReferenceSlots';
+import { buildLaoliVideoApiBody, genericVideoSubmitEndpoint, isLaoliVideoBuiltinProtocol, parseGenericVideoApiResult } from './genericVideoApi';
 
 export const defaultMiniMaxVideoApi: VideoTaskApiConfig = {
   enabled: true, provider: 'minimax', model: 'MiniMax-Hailuo-2.3',
@@ -45,10 +46,10 @@ export const defaultRunningHubVideoApi: VideoTaskApiConfig = {
 };
 
 /** Resolve the standard RunningHub submit URL without ever putting a credential in it. */
-export const videoApiSubmitEndpoint = (config: Pick<VideoTaskApiConfig, 'provider' | 'endpoint' | 'runningHubAppId'>): string => {
+export const videoApiSubmitEndpoint = (config: Pick<VideoTaskApiConfig, 'provider' | 'endpoint' | 'runningHubAppId'> & Partial<Pick<VideoTaskApiConfig, 'baseUrl'>>): string => {
   if (config.provider === 'rhtv_web') return defaultRhTvApi.endpoint;
   const endpoint = config.endpoint.trim();
-  if (config.provider !== 'runninghub') return endpoint;
+  if (config.provider !== 'runninghub') return config.provider === 'generic' || !config.provider ? genericVideoSubmitEndpoint(config) : endpoint;
   const appId = config.runningHubAppId?.trim();
   if (!appId) return '';
   const template = endpoint || defaultRunningHubVideoApi.endpoint;
@@ -192,6 +193,7 @@ export const buildVideoApiBody = (config: Omit<VideoTaskApiConfig, 'apiKey'>, dr
     for (const audio of audios) if (!JSON.stringify(result).includes(JSON.stringify(audio).slice(1, -1))) throw new Error('视频 API 模板没有包含所有已选音频，请检查参考音频节点映射。');
     return result;
   }
+  if (isLaoliVideoBuiltinProtocol(config)) return buildLaoliVideoApiBody(config, draft, images);
   return { ...(config.model ? { model: config.model } : {}), ...draft.parameters, prompt: draft.prompt,
     ...(images.length ? { images } : {}),
     ...(firstIndex >= 0 ? { first_frame_image: images[firstIndex] } : {}),
@@ -302,6 +304,10 @@ export const parseVideoApiResult = (body: unknown, config: Omit<VideoTaskApiConf
       : /^(?:preparing|queueing|queued|pending|submitted|created)$/u.test(rawStatus) ? 'submitted' : 'unknown';
     return { remoteTaskId: mapped.remoteTaskId, stage: status === 'running' ? 'running' : 'queued', status,
       message: rawStatus ? `RunningHub 状态：${rawStatus}` : '等待 RunningHub 返回任务状态' };
+  }
+  if ((config.provider === 'generic' || !config.provider) && (config.baseUrl?.trim() || isLaoliVideoBuiltinProtocol(config))) {
+    const generic = parseGenericVideoApiResult(body, config);
+    return { ...generic, stage: generic.status === 'succeeded' ? 'downloading' : generic.status === 'failed' ? 'failed' : generic.status === 'running' ? 'running' : 'queued' };
   }
   const resultUrl = mapped.resultUrl;
   const status = /preparing|queueing|queued|pending/iu.test(rawStatus) ? 'submitted' : resultUrl ? 'succeeded' : mapped.status === 'draft' || mapped.status === 'submitting' ? 'unknown' : mapped.status;

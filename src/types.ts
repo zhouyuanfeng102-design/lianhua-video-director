@@ -386,6 +386,7 @@ export interface Seedance25Output {
   generatedAt: number;
   englishSourceFingerprint?: string;
   englishError?: string;
+  sequencePromptHandoff?: SequencePromptHandoffStamp;
 }
 
 export interface ReferenceAsset extends StoryboardImageFrameMetadata {
@@ -765,6 +766,8 @@ export interface VideoSegment {
 }
 
 export interface VideoSequencePlan {
+  /** Output preference only; absent on older plans means H3. */
+  generationPromptFormat?: 'h3' | 'seedance';
   storyReferenceContext?: StoryReferenceContext;
   storyReferenceFingerprint?: string;
   id: string;
@@ -817,6 +820,8 @@ export interface VideoSequencePlan {
  * A prepared source stamp is not current until the reviewed Chinese result is
  * sealed with its own storyboard identity and result fingerprint. */
 export interface SequencePromptHandoffStamp {
+  /** Legacy stamps without this field describe the H3/canonical path. */
+  promptFormat?: 'seedance';
   version: 'sequence-prompt-handoff-v1';
   projectId: string;
   planId: string;
@@ -840,6 +845,8 @@ export interface StoryboardImageToImageSettings {
 }
 
 export interface Storyboard {
+  /** Digest of standalone source/configuration, independent of the output format. */
+  promptGenerationSourceFingerprint?: string;
   storyReferenceContext?: StoryReferenceContext;
   storyReferenceFingerprint?: string;
   id: string;
@@ -1462,6 +1469,8 @@ export interface ImageApiExecutionSnapshot {
 
 export interface VideoTaskApiConfig {
   enabled: boolean;
+  /** Generic video service address; legacy explicit endpoints remain supported. */
+  baseUrl?: string;
   endpoint: string;
   statusEndpointTemplate: string;
   apiKey: string;
@@ -1476,6 +1485,8 @@ export interface VideoTaskApiConfig {
   rhtvResolution?: string;
   rhtvAspectRatio?: string;
   model?: string;
+  /** Read-only upstream UI metadata; excluded from execution and credential identities. */
+  parameterCapabilities?: import('./videoApiCapabilityTypes').VideoApiParameterCapabilities;
   /** RunningHub AI 应用 ID；仅 provider 为 runninghub 时使用。 */
   runningHubAppId?: string;
   /** Prefer final video outputs from these cloud node IDs; never pick image previews. */

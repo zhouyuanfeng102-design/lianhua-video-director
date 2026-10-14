@@ -1,15 +1,20 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import ts from 'typescript';
-import { createInitialState } from '../src/storage';
+import { createInitialState, defaultStylePresets } from '../src/storage';
+import { activeChapter, chapterScopeProject, chapterWorkspace, withChapterWorkspace } from '../src/chapters';
 import { buildLocalSequencePlan } from '../src/storySegmentation';
 import { canUseFinalPromptConverter, replaceProjectSourceDocument, resolveSequenceSegmentDuration, upsertSequencePlan } from '../src/appEffects';
 import { materializeSemanticSequencePlan, normalizeSemanticSequenceRequestedTotalDuration, type SemanticSequencePlanningInput } from '../src/semanticSequencePlan';
-import { storyDraftIdentity } from '../src/storyDraft';
+import { readProjectStoryDraft, storyDraftIdentity } from '../src/storyDraft';
 import { storyboardRequestApiIdentity } from '../src/storyboardRequestIdentity';
 import { buildVideoCreativeDirection } from '../src/videoCreativeDirection';
 import { sourceContentHash } from '../src/sourceContentHash';
-import { requestSemanticSequencePlan as productionSemanticSequencePlanner, type SemanticSequencePlannerOptions } from '../src/services/semanticSequencePlanner';
+import { matchingStoryVisualConversion } from '../src/storyVisualConversion';
+import { buildVideoSceneContext } from '../src/videoSceneContext';
+import { MAX_SEMANTIC_SEQUENCE_REPAIRS, requestSemanticSequencePlan as productionSemanticSequencePlanner,
+  type SemanticSequencePlannerOptions, type SemanticSequencePlannerProgress } from '../src/services/semanticSequencePlanner';
+import { createSemanticPlanningStatus, recordSemanticPlanningDiagnostic, type SemanticPlanningStatus } from '../src/semanticSequenceProgress';
 import { createRuntimeErrorLogEntry, type RuntimeErrorLogEntry } from '../src/runtimeErrorLog';
 import type { AppState, SequenceDurationMode, Storyboard, TextApiConfig } from '../src/types';
 
@@ -46,7 +51,8 @@ const responseWithoutCount = (count = 2) => {
   return { reason: result.reason, fitStatus: result.fitStatus, segments: result.segments };
 };
 type RequestCall = { input: SemanticSequencePlanningInput; signal?: AbortSignal; options: SemanticSequencePlannerOptions };
-const fixture = (holdPreflight = false, useProductionPlanner = false, timing: { durationMode?: SequenceDurationMode; totalDuration?: number } = {}) => {
+const fixture = (holdPreflight = false, useProductionPlanner = false,
+  timing: { durationMode?: SequenceDurationMode; totalDuration?: number; segmentDuration?: number } = {}) => {
   let state = createInitialState();
   state.settings.textApi = { ...state.settings.textApi, enabled: true, provider: 'openai_compatible', baseUrl: 'https://qa-semantic.invalid/v1', apiKey: '', model: 'mock-semantic' };
   const oldPlan = buildLocalSequencePlan({ title: '历史总稿', story: '历史人物在旧门口站立。', totalDurationSec: 15, segmentDurationSec: 15, segmentationMode: 'fixed', sourceSceneIds: [] });
@@ -59,12 +65,14 @@ const fixture = (holdPreflight = false, useProductionPlanner = false, timing: { 
     officialPromptEn: 'HISTORICAL_FINAL_EN', createdAt: 1, updatedAt: 1,
   };
   state.project = { ...state.project, id: 'semantic-callback-project', characters: [], locations: [], props: [], assets: [], generationTasks: [],
-    scenes: [], storyboards: [oldBoard], sequencePlans: [oldPlan], sourceDocuments: [{ id: 'original-source', name: '铜铃交接', content: story, createdAt: 1, updatedAt: 1 }] };
+    scenes: [], storyboards: [oldBoard], sequencePlans: [oldPlan], sourceDocuments: [{ id: 'original-source', name: '铜铃交接', content: story, createdAt: 1, updatedAt: 1 }],
+    activeChapterId: 'original-source', chapterWorkspaces: {}, storyDraft: { name: '铜铃交接', content: story, updatedAt: 1 } };
   state.projects = [state.project]; state.activeProjectId = state.project.id;
   const stateRef = { current: state }; const epoch = { current: 1 }; const identity = { current: 'initial-story-duration-director' };
   const controller: { current: AbortController | null } = { current: null };
   const draft = { current: { storyName: '铜铃交接', storyInput: story } };
   const calls: RequestCall[] = []; const notices: string[] = []; const persisted: string[] = []; const runtimeErrors: RuntimeErrorLogEntry[] = [];
+  const progressHistory: Array<SemanticPlanningStatus | null> = []; const diagnostics: SemanticPlanningStatus[] = [];
   const ui: Record<string, unknown> = {};
   let release!: () => void; let started!: () => void; let releasePreflight!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
@@ -73,7 +81,15 @@ const fixture = (holdPreflight = false, useProductionPlanner = false, timing: { 
   let fail = false; let nextId = 0;
   const dependencies: Record<string, unknown> = {
     canUseFinalPromptConverter, resolveSequenceSegmentDuration, normalizeSemanticSequenceRequestedTotalDuration, upsertSequencePlan, storyDraftIdentity,
-    storyboardRequestApiIdentity, buildVideoCreativeDirection, sourceContentHash,
+    storyboardRequestApiIdentity, buildVideoCreativeDirection, sourceContentHash, defaultStylePresets,
+    activeChapter, chapterScopeProject, chapterWorkspace, withChapterWorkspace, readProjectStoryDraft,
+    matchingStoryVisualConversion, buildVideoSceneContext, generationPromptFormat: 'h3',
+    MAX_SEMANTIC_SEQUENCE_REPAIRS, createSemanticPlanningStatus,
+    semanticPlanningProgressRef: { current: null },
+    recordSemanticPlanningDiagnostic: (status: SemanticPlanningStatus) => {
+      diagnostics.push(structuredClone(status));
+      recordSemanticPlanningDiagnostic(status);
+    },
     planningBusy: false, busy: false, sequenceBatchRunning: false, directorSettingsConfirmed: true,
     directorSettingsConfirmationIssue: '未确认导演参数', storyInput: story, directorScene: undefined,
     stateRef, workspaceEpochRef: epoch, sequencePlanningIdentityRef: identity, storyDraftRef: draft,
@@ -83,7 +99,8 @@ const fixture = (holdPreflight = false, useProductionPlanner = false, timing: { 
     activePlanIdRef: { current: oldPlan.id }, activeStyle: { id: 'style', name: '合成风格', visual: '写实', camera: '', lighting: '', sound: '' },
     directorStyleId: 'director', directorStyleName: '合成导演', directorStyleSummary: '保持原事件', visualStyle: '写实',
     resolveVisualStylePrompt: (name: string) => name, cameraTerms: ['中景'], lightingTerms: ['晨光'], extraRequirement: '最终制作要求',
-    storyName: '铜铃交接', planningSegmentDurationPreset: '15s', planningCustomSegmentDuration: 15,
+    storyName: '铜铃交接', planningSegmentDurationPreset: timing.segmentDuration !== undefined ? 'custom' : '15s',
+    planningCustomSegmentDuration: timing.segmentDuration ?? 15,
     durationMode: timing.durationMode || 'ai-estimated', totalDuration: timing.totalDuration ?? 90,
     liveDirectorSettingsFingerprint: 'confirmed-director', storyPacing: { pace: 'standard' }, shotMode: 'auto', shotCount: 2,
     createId: () => `new-semantic-${++nextId}`, getSafeErrorDiagnostics: (message: string) => ({ message }),
@@ -104,11 +121,23 @@ const fixture = (holdPreflight = false, useProductionPlanner = false, timing: { 
     },
     setState: (updater: (current: AppState) => AppState) => { state = updater(state); stateRef.current = state; },
     requestSemanticSequencePlan: async (config: TextApiConfig, input: SemanticSequencePlanningInput, signal?: AbortSignal, options: SemanticSequencePlannerOptions = {}) => {
-      calls.push({ input, signal, options }); started(); await gate;
-      if (fail) throw new Error('EXPECTED_CALLBACK_FAILURE');
+      calls.push({ input, signal, options });
+      const emit = (stage: SemanticSequencePlannerProgress['stage']) => options.onProgress?.({
+        stage, requestNumber: 1, maxRequests: MAX_SEMANTIC_SEQUENCE_REPAIRS + 1, elapsedMs: 1,
+        durationMode: input.durationMode ?? 'ai-estimated', segmentDurationSec: input.segmentDurationSec,
+        ...(input.requestedTotalDurationSec !== undefined ? { totalDurationSec: input.requestedTotalDurationSec,
+          requiredSegmentCount: input.requestedTotalDurationSec / input.segmentDurationSec } : {}),
+      });
+      if (!useProductionPlanner) emit('requesting');
+      started(); await gate;
+      if (fail) { emit('failed'); throw new Error('EXPECTED_CALLBACK_FAILURE'); }
       if (useProductionPlanner) return productionSemanticSequencePlanner(config, input, signal, options);
       const result = input.durationMode === 'fixed' ? responseWithCount(input.requestedTotalDurationSec! / input.segmentDurationSec) : response;
-      return materializeSemanticSequencePlan(input, result, { planId: options.planId!, now: 10 });
+      const plan = materializeSemanticSequencePlan(input, result, { planId: options.planId!, now: 10 });
+      // Emit even if the signal was ignored, so the real App's guard must
+      // isolate progress from a cancelled or superseded delayed adapter.
+      emit('completed');
+      return plan;
     },
     setSequenceSettingsOpen: noop,
   };
@@ -121,15 +150,24 @@ const fixture = (holdPreflight = false, useProductionPlanner = false, timing: { 
     // retry must rely on the actual callback clearing it, not a permanent false.
     if (name === 'setPlanningBusy') dependencies.planningBusy = value;
   };
+  dependencies.setSemanticPlanningProgress = (value: SemanticPlanningStatus | null | ((current: SemanticPlanningStatus | null) => SemanticPlanningStatus | null)) => {
+    const ref = dependencies.semanticPlanningProgressRef as { current: SemanticPlanningStatus | null };
+    const next = typeof value === 'function' ? value(ref.current) : value;
+    ref.current = next; ui.setSemanticPlanningProgress = next; progressHistory.push(structuredClone(next));
+  };
   Object.defineProperty(dependencies, 'state', { get: () => state });
   const callbacks = new Function('d', `with(d){${compiled}; return {call:generateSemanticSequencePlan,cancel:cancelSemanticSequencePlanning};}`)(dependencies) as {
     call: () => Promise<void>; cancel: () => void;
   };
   return {
-    ...callbacks, ready, release, releasePreflight, calls, notices, persisted, runtimeErrors, ui, dependencies,
+    ...callbacks, ready, release, releasePreflight, calls, notices, persisted, runtimeErrors, progressHistory, diagnostics, ui, dependencies,
     mutate: (action: (current: AppState) => void) => { state = structuredClone(state); action(state); stateRef.current = state; },
     setFail: () => { fail = true; },
-    changeDraft: () => { draft.current = { storyName: '修改标题', storyInput: `${story}另一个用户修改。` }; },
+    changeDraft: () => {
+      draft.current = { storyName: '修改标题', storyInput: `${story}另一个用户修改。` };
+      state = { ...state, project: { ...state.project, storyDraft: { name: draft.current.storyName, content: draft.current.storyInput, updatedAt: 2 } } };
+      stateRef.current = state;
+    },
     changeIdentity: () => { identity.current = 'changed-story-duration-director'; },
     changeTiming: (mode: SequenceDurationMode, totalDuration: number) => {
       dependencies.durationMode = mode; dependencies.totalDuration = totalDuration;
@@ -158,10 +196,13 @@ const mutations: Array<[string, (h: ReturnType<typeof fixture>) => void]> = [
 ];
 for (const [label, mutate] of mutations) {
   const h = fixture(); const { pending } = await begin(h); mutate(h); const expected = JSON.stringify(h.state);
+  const expectedProgress = structuredClone(h.progressHistory); const expectedDiagnostics = structuredClone(h.diagnostics);
   h.release(); await pending;
   assert.equal(JSON.stringify(h.state), expected, `${label}: delayed response ignoring cancellation must not commit`);
   assert.equal(h.calls.length, 1); assert.equal(h.ui.setActivePlanId, undefined);
   assert.deepEqual(h.runtimeErrors, [], `${label}: cancelled/stale responses must not create a user-facing failure log`);
+  assert.deepEqual(h.progressHistory, expectedProgress, `${label}: late adapter progress must not replace the current status`);
+  assert.deepEqual(h.diagnostics, expectedDiagnostics, `${label}: late adapter progress must not append diagnostic records`);
 }
 {
   const h = fixture(); const before = structuredClone(h.state.project); const { pending } = await begin(h);
@@ -215,9 +256,12 @@ for (const [label, mutate] of [...mutations,
 ] as Array<[string, (h: ReturnType<typeof fixture>) => void]>) {
   const h = fixture(false, false, { durationMode: 'fixed', totalDuration: 30 }); const { pending } = await begin(h);
   assert.equal(h.calls[0].input.requestedTotalDurationSec, 30); mutate(h); const expected = JSON.stringify(h.state);
+  const expectedProgress = structuredClone(h.progressHistory); const expectedDiagnostics = structuredClone(h.diagnostics);
   h.release(); await pending;
   assert.equal(JSON.stringify(h.state), expected, `fixed ${label}: late response must not commit over the changed selection`);
   assert.equal(h.calls.length, 1); assert.equal(h.ui.setActivePlanId, undefined); assert.deepEqual(h.runtimeErrors, []);
+  assert.deepEqual(h.progressHistory, expectedProgress, `fixed ${label}: late progress cannot overwrite the current status`);
+  assert.deepEqual(h.diagnostics, expectedDiagnostics, `fixed ${label}: late progress cannot append diagnostics`);
 }
 {
   const h = fixture(false, false, { durationMode: 'fixed', totalDuration: 30 }); const before = structuredClone(h.state.project);
@@ -263,6 +307,40 @@ globalThis.fetch = async (url, init) => {
 const wireResponse = (content: string) => new Response(JSON.stringify({ choices: [{ message: { content }, finish_reason: 'stop' }] }),
   { status: 200, headers: { 'Content-Type': 'application/json' } });
 try {
+  {
+    const h = fixture(false, true, { durationMode: 'fixed', totalDuration: 180, segmentDuration: 30 });
+    const before = structuredClone(h.state.project); wireCalls.length = 0;
+    const reason = '原对白保持原字；本次规划未能安排开口交接与必须串行的动作，需重新分配画面时间。';
+    wireReply = () => wireResponse(JSON.stringify({ fitStatus: 'insufficient', reason }));
+    const { pending } = await begin(h); h.release(); await pending;
+    assert.equal(h.calls.length, 1); assert.equal(wireCalls.length, 1, 'explicit fixed-budget failure with no segments ends after one request');
+    assert.deepEqual(h.state.project, before, 'an insufficient candidate leaves the complete historical plan, H3 and source untouched');
+    assert.equal(h.ui.setActivePlanId, undefined);
+    assert.match(String(h.ui.setSequenceMasterGenerationIssue), /本次规划未能安排开口交接/u, 'the specific model reason reaches the App error display');
+    const failed = h.ui.setSemanticPlanningProgress as SemanticPlanningStatus;
+    assert.equal(failed.stage, 'failed'); assert.equal(failed.requestNumber, 1);
+    assert.equal(failed.durationMode, 'fixed'); assert.equal(failed.totalDurationSec, 180);
+    assert.equal(failed.segmentDurationSec, 30); assert.equal(failed.requiredSegmentCount, 6);
+    assert.ok(h.diagnostics.some((status) => status.stage === 'failed' && status.requestNumber === 1), 'the bounded failure is diagnosable without a new project write');
+    assert.equal(h.ui.setPlanningBusy, false); assert.equal(h.dependencies.planningBusy, false);
+    assert.equal((h.dependencies.sequencePlanningAbortRef as { current: unknown }).current, null);
+    assert.equal((h.dependencies.semanticSequencePlanningActiveRef as { current: unknown }).current, false);
+    assert.equal(h.runtimeErrors.length, 1);
+    assert.match(h.runtimeErrors[0].message, /本次规划未能安排开口交接/u);
+    // A fresh human action, with the same UI closure and cleared busy state,
+    // owns one new request. No automatic semantic replan was inserted.
+    wireReply = () => wireResponse(JSON.stringify(responseWithCount(6)));
+    await h.call();
+    assert.equal(h.calls.length, 2); assert.equal(wireCalls.length, 2, 'the next user click performs exactly one new fixed-budget request');
+    const plan = h.state.project.sequencePlans[0];
+    assert.equal(plan.durationMode, 'fixed'); assert.equal(plan.totalDurationSec, 180);
+    assert.equal(plan.segments.length, 6); assert.ok(plan.segments.every((segment) => segment.durationSec === 30));
+    assert.deepEqual(h.state.project.sequencePlans[1], before.sequencePlans[0]);
+    assert.deepEqual(h.state.project.storyboards, before.storyboards, 'the successful new plan retains the complete prior H3');
+    assert.equal(h.ui.setSequenceMasterGenerationIssue, ''); assert.equal(h.ui.setPlanningBusy, false);
+    assert.equal((h.ui.setSemanticPlanningProgress as SemanticPlanningStatus).stage, 'completed');
+    assert.equal(h.runtimeErrors.length, 1, 'progress diagnostics do not add runtime error logs or repeat the previous failure');
+  }
   {
     const h = fixture(false, true); const before = structuredClone(h.state.project); wireCalls.length = 0;
     wireReply = () => wireResponse(JSON.stringify(responseWithoutCount()));
@@ -379,4 +457,4 @@ try {
     assert.equal(h.runtimeErrors[0].status, 400); assert.match(h.runtimeErrors[0].message, /QA_HTTP400_ACCOUNT_BLOCKED: billing unavailable/u);
   }
 } finally { globalThis.fetch = originalFetch; }
-console.log('semanticSequenceApp: actual callbacks accept count-free plans for review, repair legacy count mismatches, exhaust three repairs safely and recover on the same UI retry, preserve old plans/H3, enforce fixed totals, block stale commits, and log provider failures (mock only).');
+console.log('semanticSequenceApp: fixed insufficiency ends after one request and retains its reason/history, manual retry recovers, existing technical repairs remain bounded, and stale callbacks cannot write results or progress (mock only).');
