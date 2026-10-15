@@ -273,6 +273,9 @@ import {
   hasDesktopStateStorage,
   loadState,
   loadDesktopState,
+  loadDesktopProject,
+  hasUnsavedDesktopProjects,
+  needsInitialDesktopSave,
   normalizeState,
   normalizeUiFontScalePercent,
   readImageAsDataUrl,
@@ -289,6 +292,7 @@ import {
   UNIFIED_VIDEO_CONVERTER_ID,
   type RecoveryStatus,
 } from "./storage";
+import { isProjectLibraryReference, projectLibraryReferenceOf } from "./projectLibraryRuntime";
 import {
   detectNsfwCharacterNames,
   fetchAvailableModels,
@@ -1934,6 +1938,7 @@ export default function App() {
   const promptMigrationAttempted = useRef<Set<string>>(new Set());
   const sourceIntegrityAcknowledgedHashRef = useRef("");
   const stateRef = useRef(state);
+  const lastAutosavedStateRef = useRef<AppState | null>(null);
   stateRef.current = state;
   const commitState = useCallback((
     update: React.SetStateAction<AppState>,
@@ -2059,6 +2064,9 @@ export default function App() {
   const getBusyEpoch = useCallback(() => busyEpochRef.current, []);
   const [newProjectOpen, setNewProjectOpen] = useState(false);
   const [projectLibraryOpen, setProjectLibraryOpen] = useState(false);
+  const [projectLoadingId, setProjectLoadingId] = useState("");
+  const projectLoadSequenceRef = useRef(0);
+  const projectLoadsRef = useRef(new Map<string, Promise<Project>>());
   const [selectedProjectIds, setSelectedProjectIds] = useState<string[]>([]);
   const [newProjectName, setNewProjectName] = useState("");
   const [newProjectDescription, setNewProjectDescription] = useState("");
@@ -2369,11 +2377,12 @@ export default function App() {
     return () => { active = false; };
   }, [acceptRecoveryConfig]);
 
-  const storyAnalysisIdentity = buildStoryAnalysisRequestIdentity(
+  const currentStoryReferenceFingerprint = useMemo(() => storyReferenceFingerprint(state.project), [state.project]);
+  const storyAnalysisIdentity = useMemo(() => buildStoryAnalysisRequestIdentity(
     editorProject,
     storyInput,
-    storyReferenceFingerprint(state.project),
-  );
+    currentStoryReferenceFingerprint,
+  ), [editorProject, storyInput, currentStoryReferenceFingerprint]);
   const storyAnalysisIdentityRef = useRef(storyAnalysisIdentity);
   if (!chapterWorkerInBackground()) storyAnalysisIdentityRef.current = storyAnalysisIdentity;
   const storyExpansionIdentityRef = useRef(storyAnalysisIdentity);
@@ -2388,7 +2397,7 @@ export default function App() {
     || pendingStoryReview.workspaceEpoch !== workspaceEpochRef.current
     || pendingStoryReview.before !== storyInput
     || pendingStoryReview.sourceName !== storyName
-    || pendingStoryReview.referenceFingerprint !== storyReferenceFingerprint(state.project)
+    || pendingStoryReview.referenceFingerprint !== currentStoryReferenceFingerprint
     || pendingStoryReview.settingsFingerprint !== storyVisualPreparationFingerprint(state, storyVisualDetailMode)
   ));
   const storyPreparationReviewSummary = pendingStoryReview?.projectId === state.project.id
@@ -2894,6 +2903,8 @@ export default function App() {
 
 
   const syncWorkspaceUiState = useCallback((loadedState: AppState) => {
+    projectLoadSequenceRef.current += 1;
+    setProjectLoadingId("");
     comicGenerationRef.current?.controller.abort();
     backgroundChapterRef.current = undefined;
     workspaceEpochRef.current += 1;
@@ -2943,6 +2954,7 @@ export default function App() {
         if (!active) return;
         if (desktopState) {
           stateRef.current = desktopState;
+          lastAutosavedStateRef.current = needsInitialDesktopSave(desktopState) ? null : desktopState;
           setStateInternal(desktopState);
           syncWorkspaceUiState(desktopState);
         }
@@ -3042,7 +3054,7 @@ export default function App() {
   }, [undo, redo, desktopStateReady]);
 
   useEffect(() => {
-    if (!desktopStateReady || closingSaveRef.current || restoringSnapshot) return;
+    if (!desktopStateReady || closingSaveRef.current || restoringSnapshot || state === lastAutosavedStateRef.current) return;
     let superseded = false;
     const timer = window.setTimeout(() => {
       if (closingSaveRef.current || restoringSnapshotRef.current) return;
@@ -3054,6 +3066,7 @@ export default function App() {
       void saveStateAsync(state, { coalesce: true })
         .then((result) => {
           if (superseded || stateRef.current !== state || closingSaveRef.current || restoringSnapshotRef.current) return;
+          lastAutosavedStateRef.current = state;
           setSaveStatus("saved");
           const backupWarnings = [
             result.snapshotError ? `恢复点创建失败：${result.snapshotError}` : "",
@@ -3124,7 +3137,7 @@ export default function App() {
   useEffect(() => {
     if (!desktopStateReady || !desktopBridge()?.recoveryStatus) return;
     const readRevision = recoveryConfigRevisionRef.current;
-    void desktopBridge()?.recoveryStatus?.().then((status) => {
+    void desktopBridge()?.recoveryStatus?.({ light: true }).then((status) => {
       receiveRecoveryStatus(status, readRevision);
       if (status.lastRecoveryNotice) setNotice({ text: status.lastRecoveryNotice, tone: "error" });
     }).catch(() => undefined);
@@ -3484,7 +3497,7 @@ export default function App() {
   );
   const effectiveWorkflowPreview: Workflow =
     directorWorkflow === "grid" ? "grid" : smartDirectorDecision.workflow;
-  const storyboardGenerationIdentity = JSON.stringify([
+  const storyboardGenerationIdentity = useMemo(() => JSON.stringify([
     generationPromptFormat,
     storyboardRequestSourceIdentity({
       project: editorProject, story: storyInput, title: storyName,
@@ -3518,11 +3531,15 @@ export default function App() {
     activeStyle,
     activeRuleSet,
     activeConverter,
-  ]);
+  ]), [generationPromptFormat, editorProject, storyInput, storyName, directorSourceScenes, directorScene,
+    directorWorkflow, durationPreset, customDuration, shotMode, shotCount, pace, aspectRatio,
+    resolution, audioMode, styleId, ruleSetId, converterId, directorStyleId, directorCategory,
+    directorStyleName, directorStyleSummary, cameraTerms, lightingTerms, visualStyle, extraRequirement,
+    state.settings.textApi, activeStyle, activeRuleSet, activeConverter]);
   const storyboardGenerationIdentityRef = useRef(storyboardGenerationIdentity);
-  const canonicalGenerationFingerprint = sourceContentHash(JSON.stringify(JSON.parse(storyboardGenerationIdentity).slice(1)));
+  const canonicalGenerationFingerprint = useMemo(() => sourceContentHash(JSON.stringify(JSON.parse(storyboardGenerationIdentity).slice(1))), [storyboardGenerationIdentity]);
   if (!chapterWorkerInBackground()) storyboardGenerationIdentityRef.current = storyboardGenerationIdentity;
-  const segmentStoryboardConfigurationIdentity = JSON.stringify([
+  const segmentStoryboardConfigurationIdentity = useMemo(() => JSON.stringify([
     generationPromptFormat,
     activeSequencePlan?.semanticPlanningSnapshot,
     storyboardRequestSourceIdentity({
@@ -3553,13 +3570,17 @@ export default function App() {
     state.stylePresets,
     state.ruleSets,
     state.converterPresets,
-  ]);
+  ]), [generationPromptFormat, activeSequencePlan?.semanticPlanningSnapshot, editorProject, state.project,
+    directorWorkflow, shotMode, shotCount, pace, aspectRatio, resolution, audioMode, styleId, ruleSetId,
+    converterId, directorStyleId, directorCategory, directorStyleName, directorStyleSummary, cameraTerms,
+    lightingTerms, visualStyle, extraRequirement, state.settings.textApi, state.stylePresets,
+    state.ruleSets, state.converterPresets]);
   const segmentStoryboardConfigurationIdentityRef = useRef(
     segmentStoryboardConfigurationIdentity,
   );
   if (!chapterWorkerInBackground()) segmentStoryboardConfigurationIdentityRef.current =
     segmentStoryboardConfigurationIdentity;
-  const sequencePromptApiIdentity = sourceContentHash(JSON.stringify(state.settings.textApi));
+  const sequencePromptApiIdentity = useMemo(() => sourceContentHash(JSON.stringify(state.settings.textApi)), [state.settings.textApi]);
   useEffect(() => {
     const operation = sequencePromptRefreshRef.current;
     if (chapterWorkerInBackground()) return;
@@ -5749,6 +5770,7 @@ export default function App() {
   const chapterDirectorControlsRef = useRef(chapterDirectorControls);
   chapterDirectorControlsRef.current = chapterDirectorControls;
   const controlsReadyRef = useRef(false);
+  const controlsWorkspaceRef = useRef("");
   useEffect(() => {
     if (!controlsReadyRef.current) {
       controlsReadyRef.current = true;
@@ -5758,6 +5780,11 @@ export default function App() {
     if (!desktopStateReady) return;
     const projectId = state.project.id;
     const chapterId = currentChapterId;
+    const workspaceKey = `${projectId}:${chapterId}`;
+    if (controlsWorkspaceRef.current !== workspaceKey) {
+      controlsWorkspaceRef.current = workspaceKey;
+      return;
+    }
     const controls = chapterDirectorControlsRef.current;
     setBackgroundState((current) => {
       if (current.project.id !== projectId || activeChapter(current.project)?.id !== chapterId
@@ -5992,18 +6019,93 @@ export default function App() {
     return resolvedText;
   };
 
-  const switchProject = (projectId: string) => {
+  const materializeProject = async (projectId: string): Promise<{ project: Project; hash?: string } | undefined> => {
     const current = stateRef.current;
     const target = current.project.id === projectId ? current.project
+      : current.projects.find((item) => item.id === projectId);
+    if (!target) return undefined;
+    const reference = projectLibraryReferenceOf(target);
+    if (!reference) return { project: target };
+    const epoch = workspaceEpochRef.current;
+    const operation = ++projectLoadSequenceRef.current;
+    const key = `${projectId}:${reference.hash}`;
+    setProjectLoadingId(projectId);
+    let pending = projectLoadsRef.current.get(key);
+    if (!pending) {
+      pending = loadDesktopProject(projectId, reference, current);
+      projectLoadsRef.current.set(key, pending);
+    }
+    try {
+      const project = await pending;
+      if (operation !== projectLoadSequenceRef.current || epoch !== workspaceEpochRef.current || closingSaveRef.current || restoringSnapshotRef.current) return undefined;
+      if (isProjectLibraryReference(project)) throw new Error("项目正文尚未加载完成，请重试。");
+      const currentOwner = stateRef.current.projects.find((item) => item.id === projectId);
+      if (!currentOwner) return undefined;
+      const currentReference = projectLibraryReferenceOf(currentOwner);
+      if (currentReference && currentReference.hash !== reference.hash) return undefined;
+      if (currentReference) {
+        const loaded = { project, hash: reference.hash };
+        const before = stateRef.current;
+        const adopted = withMaterializedProject(before, loaded);
+        // Loading is a representation change. Histories must also receive the
+        // full owner before later background-task updates are replayed into them.
+        const adoptHistory = (snapshot: AppState) => {
+          const archived = snapshot.projects.find((item) => item.id === projectId);
+          return archived && projectLibraryReferenceOf(archived)?.hash === reference.hash
+            ? withMaterializedProject(snapshot, loaded) : snapshot;
+        };
+        undoStack.current = undoStack.current.map(adoptHistory);
+        redoStack.current = redoStack.current.map(adoptHistory);
+        stateRef.current = adopted;
+        if (lastAutosavedStateRef.current === before && !hasUnsavedDesktopProjects(adopted)) lastAutosavedStateRef.current = adopted;
+        setStateInternal(adopted);
+      }
+      return { project, hash: reference.hash };
+    } catch (error) {
+      if (operation === projectLoadSequenceRef.current && epoch === workspaceEpochRef.current) {
+        notify(`打开项目失败：${error instanceof Error ? error.message : String(error)}`, "error");
+      }
+      return undefined;
+    } finally {
+      if (projectLoadsRef.current.get(key) === pending) projectLoadsRef.current.delete(key);
+      if (operation === projectLoadSequenceRef.current) setProjectLoadingId("");
+    }
+  };
+
+  const withMaterializedProject = (source: AppState, loaded: { project: Project; hash?: string }): AppState => {
+    const existing = source.projects.find((item) => item.id === loaded.project.id);
+    const reference = existing && projectLibraryReferenceOf(existing);
+    // A background completion or a newer workspace always wins over a captured read.
+    if (!reference) return source;
+    if (reference.hash !== loaded.hash) throw new Error("项目已更新，请重新打开。");
+    return { ...source, projects: source.projects.map((item) => item.id === loaded.project.id ? loaded.project : item) };
+  };
+
+  const projectRemovalSource = async (projectIds: readonly string[]): Promise<AppState | undefined> => {
+    const current = stateRef.current;
+    if (!projectIds.includes(current.project.id)) return stateWithCurrentDraft(current);
+    const fallback = current.projects.find((item) => !projectIds.includes(item.id));
+    if (!fallback) return stateWithCurrentDraft(current);
+    const loaded = await materializeProject(fallback.id);
+    if (!loaded) return undefined;
+    return stateWithCurrentDraft(withMaterializedProject(stateRef.current, loaded));
+  };
+
+  const switchProject = async (projectId: string) => {
+    const current = stateRef.current;
+    let target = current.project.id === projectId ? current.project
       : current.projects.find((item) => item.id === projectId);
     if (!target) {
       setSelectedProjectIds([]);
       notify("要打开的项目已不存在，项目库已刷新。", "error");
       return;
     }
+    const loaded = await materializeProject(projectId);
+    if (!loaded) return;
+    target = loaded.project;
     // Preserve progress delivered since the last render; this is workspace
     // navigation only and never cancels or recreates the video controller.
-    setState((latest) => openProjectWorkspace(stateWithCurrentDraft(latest), projectId));
+    setState((latest) => openProjectWorkspace(stateWithCurrentDraft(withMaterializedProject(latest, loaded)), projectId));
     const nextState = stateRef.current;
     const switched = nextState.project.id !== current.project.id;
     if (switched) syncWorkspaceUiState(nextState);
@@ -6013,12 +6115,14 @@ export default function App() {
     if (switched || target.backgroundSuspended) notify(`已${target.backgroundSuspended ? "返回" : "切换到"}项目“${target.name}”。`);
   };
 
-  const backgroundProject = (projectId: string) => {
+  const backgroundProject = async (projectId: string) => {
     const current = stateRef.current;
     const target = current.project.id === projectId ? current.project
       : current.projects.find((item) => item.id === projectId);
     if (!target) { notify("要挂起的项目已不存在，项目库已刷新。", "error"); return; }
-    setState((latest) => setProjectBackgroundSuspended(stateWithCurrentDraft(latest), projectId, true));
+    const loaded = await materializeProject(projectId);
+    if (!loaded) return;
+    setState((latest) => setProjectBackgroundSuspended(stateWithCurrentDraft(withMaterializedProject(latest, loaded)), projectId, true));
     // Keep the library open for an explicit choice of the next workspace.
     notify(`项目“${target.name || "未命名视频项目"}”已后台挂起，视频任务继续执行；现在可以打开其他项目或新建项目。`);
   };
@@ -6031,8 +6135,9 @@ export default function App() {
       : "";
   };
 
-  const handleDeleteProject = (projectId: string) => {
-    const sourceState = stateWithCurrentDraft(stateRef.current);
+  const handleDeleteProject = async (projectId: string) => {
+    const sourceState = await projectRemovalSource([projectId]);
+    if (!sourceState) return;
     const sourceProjects = sourceState.projects?.length
       ? sourceState.projects
       : [sourceState.project];
@@ -6091,13 +6196,14 @@ export default function App() {
     });
   };
 
-  const handleDeleteSelectedProjects = () => {
+  const handleDeleteSelectedProjects = async () => {
     const selectedIds = [...new Set(selectedProjectIds.filter(Boolean))];
     if (!selectedIds.length) {
       notify("请先勾选要删除的项目。", "error");
       return;
     }
-    const sourceState = stateWithCurrentDraft(stateRef.current);
+    const sourceState = await projectRemovalSource(selectedIds);
+    if (!sourceState) return;
     const sourceProjects = sourceState.projects?.length
       ? sourceState.projects
       : [sourceState.project];
@@ -10020,11 +10126,12 @@ export default function App() {
       className="app-shell"
       data-ui-font-scale={uiFontScalePercent}
       data-ui-font-size={uiFontSizeMode}
-      aria-busy={savingBeforeClose || restoringSnapshot || undefined}
-      onKeyDownCapture={savingBeforeClose || restoringSnapshot ? (event) => { event.preventDefault(); event.stopPropagation(); } : undefined}
+      aria-busy={savingBeforeClose || restoringSnapshot || Boolean(projectLoadingId) || (!desktopStateReady && !desktopLoadError) || undefined}
+      onKeyDownCapture={savingBeforeClose || restoringSnapshot || projectLoadingId || (!desktopStateReady && !desktopLoadError) ? (event) => { event.preventDefault(); event.stopPropagation(); } : undefined}
       style={{ "--ui-font-scale": uiFontScalePercent / 100 } as CSSProperties}
     >
       {(savingBeforeClose || restoringSnapshot) && <div className="save-close-overlay" role="status" aria-live="polite"><div><strong>{restoringSnapshot ? "正在恢复项目…" : "正在保存并关闭…"}</strong><p>{restoringSnapshot ? "正在保存恢复前的状态并读取恢复点，请稍候。" : "正在保存最新修改，请稍候。不会取消服务器上的生成任务。"}</p></div></div>}
+      {!savingBeforeClose && !restoringSnapshot && (projectLoadingId || (!desktopStateReady && !desktopLoadError)) && <div className="save-close-overlay project-loading-overlay" role="status" aria-live="polite"><div><strong>{projectLoadingId ? "正在打开项目…" : "正在打开项目库…"}</strong><p>请稍候，项目内容准备好后即可继续编辑。</p></div></div>}
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">
@@ -10687,6 +10794,10 @@ export default function App() {
                 const isActive = item.id === state.project.id;
                 const projectName = item.name || "未命名视频项目";
                 const isSelected = selectedProjectIdSet.has(item.id);
+                const counts = projectLibraryReferenceOf(item)?.counts || {
+                  sourceDocuments: item.sourceDocuments.length, scenes: item.scenes.length,
+                  storyboards: item.storyboards.length, assets: item.assets.length,
+                };
                 return (
                   <div
                     key={item.id}
@@ -10705,6 +10816,7 @@ export default function App() {
                     <button
                       type="button"
                       className="project-library-select"
+                      disabled={Boolean(projectLoadingId)}
                       onClick={() => switchProject(item.id)}
                     >
                       <span className="project-library-main">
@@ -10717,7 +10829,7 @@ export default function App() {
                           {item.description || "从故事到连续视频提示词的创作空间"}
                         </span>
                         <span className="project-library-meta">
-                          {item.sourceDocuments.length} 篇剧情 · {item.scenes.length} 个场景 · {item.storyboards.length} 组分镜 · {item.assets.length} 项资产
+                          {counts.sourceDocuments} 篇剧情 · {counts.scenes} 个场景 · {counts.storyboards} 组分镜 · {counts.assets} 项资产
                         </span>
                       </span>
                       <span className="project-library-time">
@@ -10840,8 +10952,8 @@ export default function App() {
               </div>
               <Button small variant="ghost" icon={<X size={14} />} onClick={() => setRecoveryOpen(false)}>关闭</Button>
             </div>
-            <div className={`prompt-validation ${recoveryStatus.stateValid ? "valid" : "invalid"}`}>
-              <strong>{recoveryStatus.stateValid ? "主状态可读" : "主状态需要恢复"}</strong>
+            <div className={`prompt-validation ${recoveryStatus.validation === "pending" ? "" : recoveryStatus.stateValid ? "valid" : "invalid"}`}>
+              <strong>{recoveryStatus.validation === "pending" ? "主状态待校验" : recoveryStatus.stateValid ? "主状态可读" : "主状态需要恢复"}</strong>
               <div>{recoveryStatus.stateFile}</div>
               {recoveryStatus.stateChecksum && <div>SHA-256：{recoveryStatus.stateChecksum}</div>}
               <div>系统密钥加密：{recoveryStatus.encryptionAvailable ? "可用" : "不可用"}</div>
@@ -10864,9 +10976,9 @@ export default function App() {
                 <div className="row-between list-item" key={snapshot.id}>
                   <div>
                     <div className="list-item-title">{new Date(snapshot.createdAt).toLocaleString()}</div>
-                    <div className="field-hint">{Math.round(snapshot.size / 1024)} KB · {snapshot.valid ? "校验通过" : "不可读"}</div>
+                    <div className="field-hint">{Math.round(snapshot.size / 1024)} KB · {snapshot.validation === "pending" ? "待校验" : snapshot.valid ? "校验通过" : "不可读"}</div>
                   </div>
-                  <Button small variant="ghost" disabled={!snapshot.valid || restoringSnapshot} onClick={() => restoreSnapshot(snapshot.id)}>{restoringSnapshot ? "恢复中…" : "恢复"}</Button>
+                  <Button small variant="ghost" disabled={(!snapshot.valid && snapshot.validation !== "pending") || restoringSnapshot} onClick={() => restoreSnapshot(snapshot.id)}>{restoringSnapshot ? "恢复中…" : "恢复"}</Button>
                 </div>
               ))}
               {!recoveryStatus.snapshots.length && <Empty title="暂无恢复点" description="创建恢复点后会显示在这里。" />}
@@ -16002,6 +16114,9 @@ function StoryboardView(ctx: AppContext) {
     state,
     activeStoryboardId,
     setActiveStoryboardId,
+    activePlanId,
+    setActivePlanId,
+    activeSegmentId,
     chooseSequenceSegment,
     handleDeleteSequencePlan,
     sequencePlanDeletionBlocked,
@@ -16032,6 +16147,22 @@ function StoryboardView(ctx: AppContext) {
       Boolean(item.sequencePlanId || item.segmentId)
       && !linkedSequenceBoardIds.has(item.id),
   );
+  const timelinePlans = useMemo(() => [...sequencePlans]
+    .reverse()
+    .sort((left, right) => left.createdAt - right.createdAt)
+    .map((plan, index) => ({ plan, label: `第 ${index + 1} 版方案` }))
+    .reverse(), [sequencePlans]);
+  const selectedTimelinePlan = timelinePlans.find(({ plan }) => plan.id === (board?.sequencePlanId || activePlanId))
+    || timelinePlans[0];
+  const timelineFilter = legacyBoards.some((item) => item.id === activeStoryboardId) ? "__standalone__"
+    : orphanSequenceBoards.some((item) => item.id === activeStoryboardId) ? "__unlinked__"
+    : selectedTimelinePlan?.plan.id || (legacyBoards.length ? "__standalone__" : "__unlinked__");
+  const visibleSequencePlan = timelineFilter === selectedTimelinePlan?.plan.id ? selectedTimelinePlan : undefined;
+  const pendingTimelineSegment = !board && visibleSequencePlan
+    ? visibleSequencePlan.plan.segments.find((segment) => segment.id === activeSegmentId)
+      || visibleSequencePlan.plan.segments[0]
+    : undefined;
+  const timelineFilterId = useId();
   const [selectedShotId, setSelectedShotId] = useState<string>("");
   const [showDebug, setShowDebug] = useState(false);
   const [shotPage, setShotPage] = useState(1);
@@ -16047,6 +16178,22 @@ function StoryboardView(ctx: AppContext) {
   const [draggedShotId, setDraggedShotId] = useState("");
   const [leftRevisionId, setLeftRevisionId] = useState("");
   const [rightRevisionId, setRightRevisionId] = useState("");
+  const chooseTimelineFilter = (value: string) => {
+    setShotPage(1); setSelectedShotId(""); setSelectedShotIds([]); setDraggedShotId(""); setShotSearch("");
+    if (value === "__standalone__" || value === "__unlinked__") {
+      setActiveStoryboardId((value === "__standalone__" ? legacyBoards : orphanSequenceBoards)[0]?.id || "");
+      return;
+    }
+    const plan = sequencePlans.find((item) => item.id === value);
+    if (!plan) return;
+    const firstSegment = [...plan.segments].sort((left, right) => left.index - right.index)[0];
+    if (firstSegment) chooseSequenceSegment(firstSegment.id, plan.id);
+    else {
+      ctx.cancelSequenceGeneration(false);
+      setActivePlanId(plan.id);
+      setActiveStoryboardId("");
+    }
+  };
   useEffect(() => {
     const persistedTargetId = board?.targetModelId || OFFICIAL_H3_TARGET_ID;
     const normalizedTargetId = normalizeOfficialTargetId(persistedTargetId) || OFFICIAL_H3_TARGET_ID;
@@ -16890,25 +17037,32 @@ function StoryboardView(ctx: AppContext) {
       />
       {(sequencePlans.length > 0 || boards.length > 0) && (
         <Card className="soft storyboard-switcher">
-          <div className="row-between">
-            <div className="grid" style={{ gap: 7, minWidth: 0, flex: 1 }}>
-              {sequencePlans.map((plan) => (
+          <div className="storyboard-plan-filter">
+            <label htmlFor={timelineFilterId}><SlidersHorizontal size={14} />方案筛选</label>
+            <select id={timelineFilterId} aria-label="筛选分镜方案" value={timelineFilter}
+              onChange={(event) => chooseTimelineFilter(event.target.value)}>
+              {timelinePlans.map(({ plan, label }) => (
+                <option key={plan.id} value={plan.id}>
+                  {label} · {plan.segments.length} 段 · {formatTime(plan.totalDurationSec)} · {new Date(plan.createdAt).toLocaleString("zh-CN", { hour12: false })}
+                </option>
+              ))}
+              {legacyBoards.length > 0 && <option value="__standalone__">独立分镜 · {legacyBoards.length} 份</option>}
+              {orphanSequenceBoards.length > 0 && <option value="__unlinked__">未关联分段分镜 · {orphanSequenceBoards.length} 份</option>}
+            </select>
+            {timelinePlans.length > 0 && <span className="storyboard-plan-count">共 {timelinePlans.length} 版</span>}
+            {visibleSequencePlan && <Button small variant="danger" className="storyboard-sequence-delete" icon={<Trash2 size={13} />}
+              ariaLabel={`删除方案：${visibleSequencePlan.label} ${visibleSequencePlan.plan.title}（${visibleSequencePlan.plan.segments.length}段）`}
+              disabled={sequencePlanDeletionBlocked || targetBusy}
+              title={sequencePlanDeletionBlocked || targetBusy ? "请先完成或停止当前提示词生成" : "删除当前方案及其分镜提示词，保留图片、视频和任务"}
+              onClick={() => {
+                if (!handleDeleteSequencePlan(visibleSequencePlan.plan.id)) return;
+                setShotPage(1); setSelectedShotId(""); setSelectedShotIds([]); setDraggedShotId("");
+              }}>删除方案</Button>}
+          </div>
+          <div className="storyboard-plan-content">
+              {visibleSequencePlan && [visibleSequencePlan.plan].map((plan) => (
                 <div key={plan.id} className="storyboard-sequence-group" data-plan-id={plan.id}>
-                  <div className="storyboard-sequence-head">
-                    <div className="storyboard-sequence-label">
-                      <strong className="small-text">{plan.title}</strong>
-                      <span className="muted small-text">{plan.segments.length} 段 · {formatTime(plan.totalDurationSec)} · {new Date(plan.createdAt).toLocaleString("zh-CN")}</span>
-                    </div>
-                    <Button small variant="danger" className="storyboard-sequence-delete" icon={<Trash2 size={13} />}
-                      ariaLabel={`删除方案：${plan.title}（${plan.segments.length}段）`}
-                      disabled={sequencePlanDeletionBlocked || targetBusy}
-                      title={sequencePlanDeletionBlocked || targetBusy ? "请先完成或停止当前提示词生成" : "删除这组分段方案及其分镜提示词，保留图片、视频和任务"}
-                      onClick={() => {
-                        if (!handleDeleteSequencePlan(plan.id)) return;
-                        setShotPage(1); setSelectedShotId(""); setSelectedShotIds([]); setDraggedShotId("");
-                      }}>删除方案</Button>
-                  </div>
-                  <div className="row wrap storyboard-sequence-segments">
+                  <div className="storyboard-sequence-segments" aria-label={`${visibleSequencePlan.label}分段`}>
                   {[...plan.segments]
                     .sort((left, right) => left.index - right.index)
                     .map((segment) => {
@@ -16918,21 +17072,25 @@ function StoryboardView(ctx: AppContext) {
                       return (
                         <button
                           key={segment.id}
-                          className={`segment ${linkedBoard?.id === activeStoryboardId ? "active violet" : ""}`}
+                          className={`segment ${(plan.id === activePlanId && segment.id === activeSegmentId) || (linkedBoard && linkedBoard.id === activeStoryboardId) ? "active violet" : ""}`}
+                          aria-label={`第 ${segment.index} 段 · 全局 ${formatTime(segment.globalStartSec)}—${formatTime(segment.globalEndSec)} · 本段 ${segment.durationSec}秒 · ${linkedBoard ? `${linkedBoard.shots.length}镜` : "待生成"}`}
+                          aria-pressed={(plan.id === activePlanId && segment.id === activeSegmentId) || Boolean(linkedBoard && linkedBoard.id === activeStoryboardId)}
                           onClick={() => {
                             chooseSequenceSegment(segment.id, plan.id);
                             setShotPage(1);
                             setSelectedShotId("");
                           }}
                         >
-                          第 {segment.index} 段 · 全局 {formatTime(segment.globalStartSec)}—{formatTime(segment.globalEndSec)} · 本段 {segment.durationSec}秒 · {linkedBoard ? `${linkedBoard.shots.length}镜` : "待生成"}
+                          <span className="storyboard-segment-top"><strong>第 {segment.index} 段</strong><span>{formatTime(segment.globalStartSec)}—{formatTime(segment.globalEndSec)}</span></span>
+                          <span className="storyboard-segment-bottom"><span>本段 {segment.durationSec} 秒</span><span>{linkedBoard ? `${linkedBoard.shots.length} 镜` : "待生成"}</span></span>
                         </button>
                       );
                     })}
                   </div>
+                  {plan.segments.length === 0 && <p className="muted small-text">此方案还没有分段，请在提示词导演台完成分段。</p>}
                 </div>
               ))}
-              {legacyBoards.length > 0 && (
+              {timelineFilter === "__standalone__" && legacyBoards.length > 0 && (
                 <div className="row wrap">
                   <strong className="small-text">独立分镜</strong>
                   {legacyBoards.map((item) => (
@@ -16950,7 +17108,7 @@ function StoryboardView(ctx: AppContext) {
                   ))}
                 </div>
               )}
-              {orphanSequenceBoards.length > 0 && (
+              {timelineFilter === "__unlinked__" && orphanSequenceBoards.length > 0 && (
                 <div className="row wrap">
                   <strong className="small-text">未关联分段分镜</strong>
                   {orphanSequenceBoards.map((item) => (
@@ -16968,7 +17126,6 @@ function StoryboardView(ctx: AppContext) {
                   ))}
                 </div>
               )}
-            </div>
             {board && !selectedShot && (
               <CompactPager
                 page={safeShotPage}
@@ -16982,8 +17139,8 @@ function StoryboardView(ctx: AppContext) {
       {!board ? (
         <Card>
           <Empty
-            title="还没有分镜"
-            description="在提示词导演台选择场景、时长和分镜数量后生成。"
+            title={pendingTimelineSegment ? `第 ${pendingTimelineSegment.index} 段待生成分镜` : "还没有分镜"}
+            description={pendingTimelineSegment ? "在提示词导演台生成本段后，即可在这里查看和编辑镜头。" : "在提示词导演台选择场景、时长和分镜数量后生成。"}
             action={
               <Button
                 variant="primary"

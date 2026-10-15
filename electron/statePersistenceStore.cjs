@@ -6,7 +6,8 @@ const {
   hydrateStateSecrets, normalizeRecoveryConfig,
 } = require('./stateSerialization.cjs');
 const { collectImageReferenceSnapshotsForExport } = require('./imageReferenceSnapshots.cjs');
-const { readProjectLibrary, writeProjectLibrary, projectLibrarySize, isProjectLibraryManifest } = require('./projectLibraryStore.cjs');
+const { readProjectLibrary, readWorkspaceLibrary, readLibraryProject, createProjectLibraryContext,
+  writeProjectLibrary, projectLibrarySize, isProjectLibraryManifest } = require('./projectLibraryStore.cjs');
 const { createStateMediaExternalizer, collectStateMediaFiles } = require('./stateMediaFiles.cjs');
 
 const localFileError = (error, operation = '保存本地文件') => {
@@ -83,7 +84,8 @@ const createStateStore = ({ dataRoot, fs = nodeFs, now = Date.now }) => {
   const recoveryConfigFile = path.join(root, 'recovery-config.json');
   const legacyOriginalFile = path.join(root, 'project-state.legacy-original.json');
   const mediaFiles = createStateMediaExternalizer({ assetRoot, fs, atomicWriteFile });
-  const readState = (raw) => readProjectLibrary(raw, { root, fs });
+  const libraryContext = createProjectLibraryContext();
+  const readState = (raw, options = {}) => readProjectLibrary(raw, { root, fs, ...options });
   const prepare = (content) => {
     const source = validateStateText(content);
     const secrets = collectSecrets(source);
@@ -91,7 +93,7 @@ const createStateStore = ({ dataRoot, fs = nodeFs, now = Date.now }) => {
     delete state.integrity;
     return { state, secrets };
   };
-  const prepareLibrary = (state) => writeProjectLibrary(state, { root, fs, writeFile: atomicWriteFile, savedAt: now() });
+  const prepareLibrary = (state) => writeProjectLibrary(state, { root, fs, writeFile: atomicWriteFile, savedAt: now(), context: libraryContext });
   const preserveLegacyState = () => {
     if (fs.existsSync(legacyOriginalFile)) return;
     const existing = fs.existsSync(stateFile) ? stateFile : `${stateFile}.previous`;
@@ -103,11 +105,12 @@ const createStateStore = ({ dataRoot, fs = nodeFs, now = Date.now }) => {
   };
   let lastSnapshotAt = 0;
   let lastRecoveryNotice = '';
+  let loadedWorkspaceRaw;
   const readConfig = () => {
     try { return normalizeRecoveryConfig(JSON.parse(fs.readFileSync(recoveryConfigFile, 'utf8'))); }
     catch { return normalizeRecoveryConfig({}); }
   };
-  const snapshotEntries = (validate = true) => {
+  const snapshotEntries = (validate = true, blockCache) => {
     try {
       return fs.readdirSync(snapshotRoot).filter((entry) => /^project-.*\.json$/i.test(entry)).flatMap((id) => {
         try {
@@ -115,8 +118,8 @@ const createStateStore = ({ dataRoot, fs = nodeFs, now = Date.now }) => {
           const stat = fs.statSync(filePath);
           if (!stat.isFile()) return [];
           let valid = false;
-          if (validate) { try { readState(fs.readFileSync(filePath, 'utf8')); valid = true; } catch { /* reported */ } }
-          return [{ id, name: id, createdAt: stat.mtimeMs, size: stat.size, valid }];
+          if (validate) { try { readState(fs.readFileSync(filePath, 'utf8'), { blockCache }); valid = true; } catch { /* reported */ } }
+          return [{ id, name: id, createdAt: stat.mtimeMs, size: stat.size, valid, validation: validate ? (valid ? 'valid' : 'invalid') : 'pending' }];
         } catch { return []; }
       }).sort((left, right) => right.createdAt - left.createdAt);
     } catch { return []; }
@@ -204,6 +207,9 @@ const createStateStore = ({ dataRoot, fs = nodeFs, now = Date.now }) => {
   const externalBackup = (payload, state, checksum) => {
     const config = readConfig();
     if (!config.backupOnSave || !config.backupDirectory) return null;
+    // A compact renderer snapshot is not a complete backup. Resolve all
+    // immutable pointers and retain each project's own migration version.
+    state = readState(payload, { annotateProjects: true });
     const resolved = path.resolve(config.backupDirectory);
     if (pathKey(resolved) === pathKey(root)) return null;
     const targetRoot = path.join(resolved, '莲华视频导演台备份');
@@ -290,6 +296,7 @@ const createStateStore = ({ dataRoot, fs = nodeFs, now = Date.now }) => {
       if (vaultChanged) replaceVault(nextVault);
       atomicWriteFile(stateFile, prepared.payload, fs);
       if (vaultChanged) fs.unlinkSync(vaultTransactionFile);
+      loadedWorkspaceRaw = prepared.payload;
     } catch (error) {
       try { recoverVaultTransaction(); }
       catch (recoveryError) {
@@ -308,30 +315,35 @@ const createStateStore = ({ dataRoot, fs = nodeFs, now = Date.now }) => {
       backupError = backup?.warning || '';
     }
     catch (error) { backupError = error instanceof Error ? error.message : String(error); }
-    return { ok: true, checksum: prepared.checksum, externalBackup: external, backupError, snapshotError };
+    return { ok: true, checksum: prepared.checksum, projectHashes: prepared.projectHashes, externalBackup: external, backupError, snapshotError };
   };
-  const load = (secrets) => {
+  const load = (secrets, { workspace = false } = {}) => {
     lastRecoveryNotice = '';
+    const readLoadedState = (raw) => {
+      const state = workspace ? readWorkspaceLibrary(raw, { root, fs, writeFile: atomicWriteFile, context: libraryContext }) : readState(raw);
+      if (workspace) loadedWorkspaceRaw = raw;
+      return state;
+    };
     try {
       if (!fs.existsSync(stateFile) && !fs.existsSync(`${stateFile}.previous`)
         && !fs.existsSync(legacyOriginalFile) && snapshotEntries(false).length === 0) return { content: null, notice: '' };
-      const state = readState(fs.readFileSync(stateFile, 'utf8'));
+      const state = readLoadedState(fs.readFileSync(stateFile, 'utf8'));
       return { content: JSON.stringify(hydrateStateSecrets(state, secrets)), notice: '' };
     } catch (error) {
       try {
-        const previous = readState(fs.readFileSync(`${stateFile}.previous`, 'utf8'));
+        const previous = readLoadedState(fs.readFileSync(`${stateFile}.previous`, 'utf8'));
         lastRecoveryNotice = '检测到主状态不可读或上次保存中断，已从保留的上一份状态打开；原文件未自动改写';
         return { content: JSON.stringify(hydrateStateSecrets(previous, secrets)), notice: lastRecoveryNotice };
       } catch { /* try snapshots */ }
       for (const snapshot of snapshotEntries(false)) {
         try {
-          const state = readState(fs.readFileSync(path.join(snapshotRoot, snapshot.id), 'utf8'));
+          const state = readLoadedState(fs.readFileSync(path.join(snapshotRoot, snapshot.id), 'utf8'));
           lastRecoveryNotice = `主状态不可读，已从 ${new Date(snapshot.createdAt).toLocaleString()} 的恢复点打开`;
           return { content: JSON.stringify(hydrateStateSecrets(state, secrets)), notice: lastRecoveryNotice };
         } catch { /* try an older snapshot */ }
       }
       try {
-        const legacy = readState(fs.readFileSync(legacyOriginalFile, 'utf8'));
+        const legacy = readLoadedState(fs.readFileSync(legacyOriginalFile, 'utf8'));
         lastRecoveryNotice = '当前项目库和恢复点无法读取，已从首次升级前保留的旧版存档打开；这份数据可能较旧，原文件均未自动改写';
         return { content: JSON.stringify(hydrateStateSecrets(legacy, secrets)), notice: lastRecoveryNotice };
       } catch { /* no intact migration copy remains */ }
@@ -339,21 +351,27 @@ const createStateStore = ({ dataRoot, fs = nodeFs, now = Date.now }) => {
       throw new Error(`${lastRecoveryNotice}；现有存档均已保留，已停止自动建立空项目库，请从恢复与备份检查`);
     }
   };
-  const recoveryStatus = () => {
+  const loadWorkspace = (secrets) => load(secrets, { workspace: true });
+  const loadProject = (projectId, hash) => readLibraryProject(lastRecoveryNotice && loadedWorkspaceRaw ? loadedWorkspaceRaw : fs.readFileSync(stateFile, 'utf8'), projectId, hash,
+    { root, fs, writeFile: atomicWriteFile, context: libraryContext });
+  const recoveryStatus = ({ light = false } = {}) => {
     let stateValid = false;
     let checksum = '';
     let stateSize = 0;
     let indexSize = 0;
     let storageFormat = '';
+    const blockCache = light ? undefined : new Map();
     try {
       const raw = fs.readFileSync(stateFile, 'utf8');
-      readState(raw);
+      if (light) validateStateText(raw, { allowLibraryManifest: true });
+      else readState(raw, { blockCache });
       stateValid = true;
       checksum = stateChecksum(raw);
       ({ stateSize, indexSize, storageFormat } = projectLibrarySize(raw, { root, fs }));
     } catch { /* status reports invalid */ }
     return { dataRoot: root, stateFile, stateValid, stateChecksum: checksum, stateSize, indexSize, storageFormat,
-      snapshots: snapshotEntries(), recovery: readConfig(), lastRecoveryNotice };
+      validation: light ? 'pending' : (stateValid ? 'valid' : 'invalid'),
+      snapshots: snapshotEntries(!light, blockCache), recovery: readConfig(), lastRecoveryNotice };
   };
   const createRestorePoint = (content) => {
     const prepared = prepare(content);
@@ -364,7 +382,7 @@ const createStateStore = ({ dataRoot, fs = nodeFs, now = Date.now }) => {
     const id = path.basename(String(snapshotId || ''));
     if (id !== snapshotId || !/^project-.*\.json$/i.test(id)) throw new Error('恢复点名称无效');
     const raw = fs.readFileSync(path.join(snapshotRoot, id), 'utf8');
-    const state = readState(raw);
+    const state = readState(raw, { annotateProjects: true });
     // Restoring an older complete-JSON snapshot also upgrades its media and
     // project storage without altering the original snapshot file.
     const prepared = prepare(JSON.stringify(state));
@@ -372,7 +390,8 @@ const createStateStore = ({ dataRoot, fs = nodeFs, now = Date.now }) => {
     if (fs.existsSync(stateFile)) writeSnapshot(fs.readFileSync(stateFile, 'utf8'), true);
     preserveLegacyState();
     atomicWriteFile(stateFile, library.payload, fs);
-    return JSON.stringify(hydrateStateSecrets(prepared.state, secrets));
+    loadedWorkspaceRaw = library.payload;
+    return JSON.stringify(hydrateStateSecrets(readState(library.payload), secrets));
   };
   const backup = (content) => {
     const prepared = prepare(content);
@@ -381,7 +400,7 @@ const createStateStore = ({ dataRoot, fs = nodeFs, now = Date.now }) => {
     if (result?.warning) throw new Error(result.warning);
     return result?.path || null;
   };
-  return { save, load, recoveryStatus, createRestorePoint, restoreSnapshot, backup, recoverVaultTransaction };
+  return { save, load, loadWorkspace, loadProject, recoveryStatus, createRestorePoint, restoreSnapshot, backup, recoverVaultTransaction };
 };
 
 module.exports = { createStateStore, atomicWriteFile, localFileError };

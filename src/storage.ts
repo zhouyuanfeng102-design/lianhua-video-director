@@ -16,6 +16,7 @@ import { normalizeVideoTransportImage, VIDEO_TRANSPORT_IMAGE_INVALID } from './v
   ImagePromptReverseResult,
   Location,
   Project,
+  ProjectLibraryReference,
   Prop,
   ReferenceAsset,
   RuleSet,
@@ -106,6 +107,18 @@ import {
 } from './visualStyles';
 import { encodeStateSnapshot, serializeStateSnapshot, type PersistedAppState } from './stateSerialization';
 import { createOrderedStateSaveQueue, createStateSerializationClient } from './stateSerializationClient';
+import {
+  createProjectLibraryPlaceholder,
+  hasUnsavedDesktopProjects,
+  isProjectLibraryReference,
+  prepareDesktopStateSave,
+  projectLibraryReferenceOf,
+  rememberPersistedProject,
+  rememberProjectSchema,
+  samePersistedData,
+  stateHasProjectLibraryReferences,
+} from './projectLibraryRuntime';
+export { hasUnsavedDesktopProjects, isProjectLibraryReference, projectLibraryReferenceOf } from './projectLibraryRuntime';
 export { stateUtf8ByteLength } from './stateSerialization';
 export type { PersistedActiveProjectReference, PersistedAppState } from './stateSerialization';
 
@@ -3110,21 +3123,71 @@ const normalizePersistedProject = (
   return recoverInterruptedStoryReferenceRecognition(migrateProjectChapters(migrateLegacyStoryboardImageNames(normalizedProject)));
 };
 
+const projectConverterMigrations = new WeakMap<Project, ReadonlySet<string>>();
+const initialDesktopSaveNeeded = new WeakMap<AppState, boolean>();
+const projectSchemaVersionOf = (incoming: Record<string, any>, fallback: number): number => (
+  typeof incoming.__projectSchemaVersion === 'number' && Number.isInteger(incoming.__projectSchemaVersion) && incoming.__projectSchemaVersion >= 0
+    ? incoming.__projectSchemaVersion : fallback
+);
+
+/** Only hydrated projects are migrated. A directory entry deliberately keeps
+ * its original schema until its immutable block is opened. */
+const normalizeTrackedProject = (
+  incoming: Record<string, any>,
+  fallback: Project,
+  collectionFallbacks: ProjectCollectionFallbacks,
+  settings: AppSettings,
+  normalizedRuleSets: RuleSet[],
+  sourceSchemaVersion: number,
+  migratedConverterIds: ReadonlySet<string>,
+): Project => {
+  const reference = projectLibraryReferenceOf(incoming);
+  if (incoming.__projectLibraryReference !== undefined) {
+    if (!reference || typeof incoming.id !== 'string' || !incoming.id.trim()) throw new Error('项目目录引用无效，现有项目未被覆盖');
+    const placeholder = createProjectLibraryPlaceholder({
+      id: incoming.id,
+      name: typeof incoming.name === 'string' ? incoming.name : '',
+      description: typeof incoming.description === 'string' ? incoming.description : '',
+      createdAt: typeof incoming.createdAt === 'number' && Number.isFinite(incoming.createdAt) ? incoming.createdAt : 0,
+      updatedAt: typeof incoming.updatedAt === 'number' && Number.isFinite(incoming.updatedAt) ? incoming.updatedAt : 0,
+      ...(incoming.backgroundSuspended === undefined ? {} : { backgroundSuspended: incoming.backgroundSuspended === true }),
+    }, reference);
+    projectConverterMigrations.set(placeholder, migratedConverterIds);
+    return placeholder;
+  }
+  const { __persistedProjectHash: hash, __projectSchemaVersion: _schema, ...canonical } = incoming;
+  const schemaVersion = projectSchemaVersionOf(incoming, sourceSchemaVersion);
+  const projectConverterIds = schemaVersion < UNIFIED_VIDEO_CONVERTER_SCHEMA_VERSION ? migratedConverterIds : new Set<string>();
+  const project = migrateProjectConverterPresetReferences(normalizePersistedProject(
+    canonical, fallback, collectionFallbacks, settings, normalizedRuleSets,
+    schemaVersion < RETIRED_AUTOMATIC_EXTRA_REQUIREMENT_SCHEMA_VERSION,
+  ), projectConverterIds);
+  const normalizedSchemaVersion = Math.max(CURRENT_SCHEMA_VERSION, schemaVersion);
+  rememberProjectSchema(project, normalizedSchemaVersion);
+  projectConverterMigrations.set(project, migratedConverterIds);
+  // Interrupted-task recovery and real migrations are dirty changes. Merely
+  // loading a checked block must not acknowledge changes absent from that file.
+  if (schemaVersion >= CURRENT_SCHEMA_VERSION && samePersistedData(canonical, project)) {
+    rememberPersistedProject(project, hash, normalizedSchemaVersion);
+  }
+  return project;
+};
+
 /** Keep archived projects readable without resurrecting default demo records. */
 const normalizeLibraryProject = (
   incoming: unknown,
   fallback: Project,
   settings: AppSettings,
   normalizedRuleSets: RuleSet[],
-  migrateAutomaticExtraRequirement: boolean,
+  sourceSchemaVersion: number,
   migratedConverterIds: ReadonlySet<string>,
 ): Project | null => {
   if (!isRecord(incoming) || typeof incoming.id !== 'string' || !incoming.id.trim()) return null;
-  return migrateProjectConverterPresetReferences(normalizePersistedProject({
+  return normalizeTrackedProject({
     ...incoming,
     name: typeof incoming.name === 'string' ? incoming.name : fallback.name,
     description: typeof incoming.description === 'string' ? incoming.description : fallback.description,
-  }, fallback, emptyProjectCollectionFallbacks(), settings, normalizedRuleSets, migrateAutomaticExtraRequirement), migratedConverterIds);
+  }, fallback, emptyProjectCollectionFallbacks(), settings, normalizedRuleSets, sourceSchemaVersion, migratedConverterIds);
 };
 
 const withoutImageProtocolRuntime = <T extends ImageApiConfig>(config: T): T => {
@@ -3138,8 +3201,6 @@ export const normalizeState = (raw: unknown): AppState => {
   if (!isRecord(raw)) return fallback;
   const source = raw;
   const persistedSchemaVersion = persistedSchemaVersionOf(source);
-  const migrateAutomaticExtraRequirement =
-    persistedSchemaVersion < RETIRED_AUTOMATIC_EXTRA_REQUIREMENT_SCHEMA_VERSION;
   const projectInput = isRecord(source.project) ? source.project : {};
   const incomingSettings = isRecord(source.settings) ? source.settings : {};
   const textApi = mergeDefined(fallback.settings.textApi, incomingSettings.textApi);
@@ -3312,6 +3373,16 @@ export const normalizeState = (raw: unknown): AppState => {
   );
   const normalizedRuleSets = videoConversionSourceMigration.ruleSets;
   const converterPresets = videoConversionSourceMigration.converterPresets;
+  // A lazy old block may be opened after the shared presets were migrated in
+  // an earlier session. Retired factory IDs absent from the current presets
+  // still need the same project-level reference migration; customized presets
+  // that remain in the library retain their IDs and exact prompt contents.
+  const projectConverterMigrationIds = new Set(converterMigration.migratedIds);
+  if (converterPresets.some((preset) => preset.id === UNIFIED_VIDEO_CONVERTER_ID)) {
+    legacyVideoConverterPresets.forEach((preset) => {
+      if (!converterPresets.some((current) => current.id === preset.id)) projectConverterMigrationIds.add(preset.id);
+    });
+  }
   const migratedStoryExpansionPresets = migrateLegacyStoryExpansionPresets(
     source.storyExpansionPresets,
     persistedSchemaVersion < COMPLETE_STORY_EXPANSION_PRESET_SCHEMA_VERSION,
@@ -3322,14 +3393,15 @@ export const normalizeState = (raw: unknown): AppState => {
   );
   const stylePresets = normalizedStylePresets(source.stylePresets, persistedSchemaVersion);
   const imagePromptRules = migrateImagePromptRulesState(source.imagePromptRules);
-  const normalizedProject = migrateProjectConverterPresetReferences(normalizePersistedProject(
+  const normalizedProject = normalizeTrackedProject(
     projectInput,
     fallback.project,
     fallback.project,
     settings,
     normalizedRuleSets,
-    migrateAutomaticExtraRequirement,
-  ), converterMigration.migratedIds);
+    persistedSchemaVersion,
+    projectConverterMigrationIds,
+  );
   const projectLibrary = new Map<string, Project>();
   if (Array.isArray(source.projects)) {
     source.projects.forEach((item) => {
@@ -3344,8 +3416,8 @@ export const normalizeState = (raw: unknown): AppState => {
         fallback.project,
         settings,
         normalizedRuleSets,
-        migrateAutomaticExtraRequirement,
-        converterMigration.migratedIds,
+        persistedSchemaVersion,
+        projectConverterMigrationIds,
       );
       if (normalized) projectLibrary.set(normalized.id, normalized);
     });
@@ -3363,7 +3435,7 @@ export const normalizeState = (raw: unknown): AppState => {
     ? requestedActiveId
     : normalizedProject.id;
   const activeProject = projectLibrary.get(activeProjectId) || normalizedProject;
-  return {
+  const normalizedState: AppState = {
     schemaVersion: schemaVersionOf(source),
     project: activeProject,
     projects,
@@ -3375,9 +3447,24 @@ export const normalizeState = (raw: unknown): AppState => {
     storyExpansionPresets,
     stylePresets
   };
+  initialDesktopSaveNeeded.set(normalizedState,
+    persistedSchemaVersion < CURRENT_SCHEMA_VERSION
+    || ['settings', 'imagePromptRules', 'ruleSets', 'converterPresets', 'storyExpansionPresets', 'stylePresets', 'activeProjectId']
+      .some((key) => !samePersistedData(source[key], normalizedState[key as keyof AppState])),
+  );
+  return normalizedState;
 };
 
+/** Initial load is read-only unless normalization actually changed settings,
+ * schema, or a hydrated project's contents / recoverable task state. */
+export const needsInitialDesktopSave = (state: AppState): boolean => (
+  initialDesktopSaveNeeded.get(state) === true || hasUnsavedDesktopProjects(state)
+);
+
 export const loadState = (): AppState => {
+  // Desktop storage is authoritative. Its old, quota-limited browser mirror
+  // can show stale projects and adds a second synchronous startup parse.
+  if (hasDesktopStateStorage()) return createInitialState();
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     return raw ? normalizeState(JSON.parse(raw)) : createInitialState();
@@ -3392,12 +3479,14 @@ export interface RecoverySnapshotInfo {
   createdAt: number;
   size: number;
   valid: boolean;
+  validation?: 'pending' | 'valid' | 'invalid';
 }
 
 export interface RecoveryStatus {
   dataRoot: string;
   stateFile: string;
   stateValid: boolean;
+  validation?: 'pending' | 'valid' | 'invalid';
   stateChecksum: string;
   stateSize: number;
   snapshots: RecoverySnapshotInfo[];
@@ -3425,10 +3514,15 @@ export type DesktopSaveResult = {
   externalBackup?: string | null;
   backupError?: string;
   snapshotError?: string;
+  projectHashes?: Record<string, string>;
 };
+
+export type DesktopProjectResult = { project: unknown; schemaVersion: number; hash: string };
 
 type DesktopStateBridge = {
   loadState?: () => Promise<string | null>;
+  loadWorkspaceState?: () => Promise<string | null>;
+  loadProject?: (projectId: string, hash?: string) => Promise<DesktopProjectResult>;
   saveState?: (content: string) => Promise<DesktopSaveResult>;
   saveMedia?: (payload: {
     sourceUrl?: string;
@@ -3437,7 +3531,7 @@ type DesktopStateBridge = {
     mimeType?: string;
     mediaType?: string;
   }) => Promise<string | null>;
-  recoveryStatus?: () => Promise<RecoveryStatus>;
+  recoveryStatus?: (options?: { light?: boolean }) => Promise<RecoveryStatus>;
   createRestorePoint?: (content: string) => Promise<{ ok: boolean; path: string }>;
   restoreSnapshot?: (id: string) => Promise<string>;
   chooseBackupDirectory?: () => Promise<RecoveryStatus['recovery'] | null>;
@@ -3464,16 +3558,59 @@ const desktopStateBridge = (): DesktopStateBridge | undefined => (
     : undefined
 );
 
-export const hasDesktopStateStorage = (): boolean => Boolean(desktopStateBridge()?.loadState && desktopStateBridge()?.saveState);
+export const hasDesktopStateStorage = (): boolean => {
+  const desktop = desktopStateBridge();
+  return Boolean((desktop?.loadWorkspaceState || desktop?.loadState) && desktop?.saveState);
+};
 
 export const desktopBridge = (): DesktopStateBridge | undefined => desktopStateBridge();
 
 export const loadDesktopState = async (): Promise<AppState | null> => {
-  const raw = await desktopStateBridge()?.loadState?.();
+  const desktop = desktopStateBridge();
+  const raw = await (desktop?.loadWorkspaceState ? desktop.loadWorkspaceState() : desktop?.loadState?.());
   if (!raw) return null;
   // Only an absent file is a new workspace. A broken saved state must never
   // silently become the temporary startup project and then be autosaved.
-  return normalizeState(JSON.parse(raw));
+  const state = normalizeState(JSON.parse(raw));
+  const reference = projectLibraryReferenceOf(state.project);
+  if (reference) {
+    // New bridges return a full active block. Retain a safe fallback for older
+    // compact snapshots whose activeProjectId points at an unopened entry.
+    const project = await loadDesktopProject(state.project.id, reference, state);
+    const hydrated = { ...state, project, projects: state.projects.map((item) => item.id === project.id ? project : item) };
+    initialDesktopSaveNeeded.set(hydrated, initialDesktopSaveNeeded.get(state) === true);
+    return hydrated;
+  }
+  return state;
+};
+
+/** Load and migrate precisely one project. Callers recheck their navigation
+ * ownership before applying the asynchronous result to the current workspace. */
+export const loadDesktopProject = async (
+  projectId: string,
+  referenceOrProject: ProjectLibraryReference | Project,
+  stateSnapshot: AppState,
+): Promise<Project> => {
+  const reference = 'hash' in referenceOrProject
+    ? referenceOrProject as ProjectLibraryReference : projectLibraryReferenceOf(referenceOrProject);
+  const liveEntry = stateSnapshot.projects.find((project) => project.id === projectId);
+  if (!reference) {
+    if (liveEntry && !isProjectLibraryReference(liveEntry)) return liveEntry;
+    throw new Error('项目目录引用无效，未切换项目');
+  }
+  const desktop = desktopStateBridge();
+  if (!desktop?.loadProject) throw new Error('当前桌面程序不支持按需打开项目，请更新后重试');
+  const loaded = await desktop.loadProject(projectId, reference.hash);
+  if (!isRecord(loaded.project) || loaded.project.id !== projectId || loaded.hash !== reference.hash
+    || typeof loaded.schemaVersion !== 'number' || !Number.isInteger(loaded.schemaVersion) || loaded.schemaVersion < 0
+    || loaded.schemaVersion !== reference.schemaVersion) throw new Error('项目文件与目录不一致，现有项目未修改，请重新打开项目库');
+  if (loaded.project.__projectLibraryReference !== undefined) throw new Error('项目正文尚未加载，未切换项目');
+  const project = normalizeLibraryProject({
+    ...loaded.project, __persistedProjectHash: loaded.hash, __projectSchemaVersion: loaded.schemaVersion,
+  }, createDefaultProject(), stateSnapshot.settings, stateSnapshot.ruleSets, loaded.schemaVersion,
+  liveEntry ? projectConverterMigrations.get(liveEntry) || new Set() : new Set());
+  if (!project) throw new Error('项目文件无效，未切换项目');
+  return project;
 };
 
 const stateSerializationPolicy = Object.freeze({
@@ -3508,13 +3645,17 @@ const saveStateDirect = async (state: AppState): Promise<DesktopSaveResult> => {
   // been applied. Rejected old-state saves must not even enter the encoder.
   if (stateRestoreInProgress) throw new Error(STATE_RESTORE_IN_PROGRESS_ERROR);
   const desktop = desktopStateBridge();
+  const compact = Boolean(desktop?.loadWorkspaceState && desktop?.loadProject && desktop?.saveState);
+  if (stateHasProjectLibraryReferences(state) && !compact) throw new Error('当前桌面程序无法安全保存尚未加载的项目，现有存档未修改');
+  const captured = compact ? prepareDesktopStateSave(state, CURRENT_SCHEMA_VERSION) : undefined;
+  const snapshot = captured?.state || state;
   // Freeze now, not after a previous write. Native postMessage captures the
   // call's graph while the expensive JSON/UTF-8/cache work runs off-thread.
   let encoding: Promise<ReturnType<typeof encodeStateSnapshot>>;
   try {
     encoding = desktop?.saveState
-      ? stateSerializationClient.encode(state, stateSerializationPolicy)
-      : Promise.resolve(encodeStateSnapshot(state, stateSerializationPolicy, false));
+      ? stateSerializationClient.encode(snapshot, stateSerializationPolicy)
+      : Promise.resolve(encodeStateSnapshot(snapshot, stateSerializationPolicy, false));
   } catch (error) {
     encoding = Promise.reject(error);
   }
@@ -3522,10 +3663,11 @@ const saveStateDirect = async (state: AppState): Promise<DesktopSaveResult> => {
   let result: DesktopSaveResult = { ok: true, checksum: '' };
   if (desktop?.saveState) result = await desktop.saveState(serialized);
   if (!result.ok) throw new Error('本地保存未完成，请检查数据目录后重试');
+  captured?.acknowledge(result.projectHashes);
   // Desktop state is authoritative. Large project libraries cannot fit into
   // browser storage; do not repeatedly clone/encode them merely to exceed its
   // much smaller quota. Keep existing browser data untouched.
-  if (desktop?.saveState && sizeBytes > DESKTOP_BROWSER_CACHE_BYTES) return result;
+  if (desktop?.saveState && (stateHasProjectLibraryReferences(snapshot) || sizeBytes > DESKTOP_BROWSER_CACHE_BYTES)) return result;
   try {
     if (browserCacheError || browserCache === undefined) throw new Error(browserCacheError?.message || '浏览器缓存编码失败');
     window.localStorage.setItem(STORAGE_KEY, browserCache);

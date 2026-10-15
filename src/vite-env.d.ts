@@ -20,7 +20,9 @@ interface Window {
       encryptionAvailable: boolean;
     }>;
     loadState: () => Promise<string | null>;
-    saveState: (content: string) => Promise<unknown>;
+    loadWorkspaceState?: () => Promise<string | null>;
+    loadProject?: (projectId: string, hash?: string) => Promise<import('./storage').DesktopProjectResult>;
+    saveState: (content: string) => Promise<import('./storage').DesktopSaveResult>;
     onBeforeClose: (callback: (event: { requestId: string }) => void) => () => void;
     onCloseCancelled: (callback: (event: { requestId: string }) => void) => () => void;
     completeBeforeClose: (payload: { requestId: string; ok: boolean; error?: string }) => Promise<boolean>;
@@ -31,7 +33,7 @@ interface Window {
       mimeType?: string;
       mediaType?: string;
     }) => Promise<string | null>;
-    recoveryStatus: () => Promise<import('./storage').RecoveryStatus>;
+    recoveryStatus: (options?: { light?: boolean }) => Promise<import('./storage').RecoveryStatus>;
     createRestorePoint: (content: string) => Promise<{ ok: boolean; path: string }>;
     restoreSnapshot: (id: string) => Promise<string>;
     chooseBackupDirectory: () => Promise<import('./storage').RecoveryStatus['recovery'] | null>;

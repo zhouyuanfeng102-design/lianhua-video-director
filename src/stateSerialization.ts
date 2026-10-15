@@ -1,9 +1,11 @@
 import type { AppSettings, AppState, ImageApiConfig, Project } from './types';
+import { projectForStateSerialization, stateHasProjectLibraryReferences, type PersistedProjectLibraryEntry } from './projectLibraryRuntime';
 
 export type PersistedActiveProjectReference = { id: string; __activeProjectReference: true };
-export type PersistedAppState = Omit<AppState, 'projects'> & {
+export type PersistedAppState = Omit<AppState, 'project' | 'projects'> & {
   schemaVersion: number;
-  projects: Array<Project | PersistedActiveProjectReference>;
+  project: Project | PersistedProjectLibraryEntry;
+  projects: Array<Project | PersistedProjectLibraryEntry | PersistedActiveProjectReference>;
 };
 
 export interface StateSerializationPolicy {
@@ -49,16 +51,17 @@ export const serializeStateSnapshot = (
   policy: StateSerializationPolicy,
 ): { serializedState: PersistedAppState; serialized: string; sizeBytes: number } => {
   let activeJson: string | undefined;
-  const projects = state.projects?.map((project): Project | PersistedActiveProjectReference => {
-    if (project.id !== state.project.id) return project;
+  const projects = state.projects?.map((project): Project | PersistedProjectLibraryEntry | PersistedActiveProjectReference => {
+    if (project.id !== state.project.id) return projectForStateSerialization(project);
     if (project !== state.project) {
       activeJson ??= JSON.stringify(state.project);
-      if (JSON.stringify(project) !== activeJson) return project;
+      if (JSON.stringify(project) !== activeJson) return projectForStateSerialization(project);
     }
     return { id: project.id, __activeProjectReference: true };
   });
   const serializedState: PersistedAppState = {
     ...state,
+    project: projectForStateSerialization(state.project),
     settings: {
       ...state.settings,
       imageApi: withoutImageProtocolRuntime(state.settings.imageApi),
@@ -98,9 +101,11 @@ export const encodeStateSnapshot = (
   policy: StateSerializationPolicy,
   desktop: boolean,
 ): EncodedStateSnapshot => {
+  const partial = stateHasProjectLibraryReferences(state);
+  if (partial && !desktop) throw new Error('部分项目尚未加载，不能将项目目录当作完整浏览器存档保存');
   const { serializedState, serialized, sizeBytes } = serializeStateSnapshot(state, policy);
   const result: EncodedStateSnapshot = { serialized, sizeBytes };
-  if (desktop && sizeBytes > policy.desktopBrowserCacheBytes) return result;
+  if (desktop && (partial || sizeBytes > policy.desktopBrowserCacheBytes)) return result;
   try {
     result.browserCache = JSON.stringify(stateWithoutSecrets(serializedState));
   } catch (error) {

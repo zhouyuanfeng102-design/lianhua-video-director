@@ -1892,6 +1892,16 @@ app.whenReady().then(() => {
     return result.content;
   });
 
+  handleTrustedIpc('lianhua:load-workspace-state', async () => {
+    const result = await getStatePersistence().run('load-workspace');
+    lastRecoveryNotice = result.notice || startupRecoveryNotice;
+    return result.content;
+  });
+
+  handleTrustedIpc('lianhua:load-project', async (_event, payload) => (
+    getStatePersistence().run('load-project', { projectId: payload?.projectId, hash: payload?.hash })
+  ));
+
   handleTrustedIpc('lianhua:save-state', async (_event, content) => {
     // Shared structural/integrity checks and per-project storage run in
     // the ordered worker before any vault/state writes. Await is still durable,
@@ -1903,8 +1913,8 @@ app.whenReady().then(() => {
     stateCloseGuards.get(event.sender)?.acknowledge(payload) || false
   ));
 
-  handleTrustedIpc('lianhua:recovery-status', async () => {
-    const status = await getStatePersistence().run('status');
+  handleTrustedIpc('lianhua:recovery-status', async (_event, options) => {
+    const status = await getStatePersistence().run('status', { light: options?.light === true });
     return {
       ...status,
       lastRecoveryNotice: status.lastRecoveryNotice || lastRecoveryNotice,

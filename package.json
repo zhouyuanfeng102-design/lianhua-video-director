@@ -1,12 +1,14 @@
 {
   "name": "lianhua-video-director",
-  "version": "2.3.4",
+  "version": "2.3.6",
   "productName": "莲华视频导演台",
   "private": true,
   "description": "莲华视频导演台：从小说到连续视频分镜与提示词",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
+    "deliver:2.3.6": "node scripts/createDelivery.mjs",
+    "deliver:2.3.5": "node scripts/createDelivery.mjs",
     "deliver:2.3.4": "node scripts/createDelivery.mjs",
     "deliver:2.3.3": "node scripts/createDelivery.mjs",
     "deliver:2.3.2": "node scripts/createDelivery.mjs",
@@ -418,7 +420,8 @@
     "test:character-participation-ui": "node scripts/videoCharacterParticipationUiQa.mjs",
     "test:image-thumbnails": "node --test scripts/imageThumbnail.test.mjs",
     "test:reference-picker-performance": "node scripts/referenceImagePickerPerformanceUiQa.mjs",
-    "test:generic-video-api": "tsx scripts/genericVideoApi.test.ts"
+    "test:generic-video-api": "tsx scripts/genericVideoApi.test.ts",
+    "test:large-library-startup": "node scripts/largeLibraryStartupUiQa.mjs"
   },
   "dependencies": {
     "playwright-core": "^1.62.1",

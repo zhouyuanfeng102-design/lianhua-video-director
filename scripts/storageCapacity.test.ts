@@ -51,8 +51,13 @@ Object.defineProperty(globalThis, 'window', { configurable: true, value: {
 } });
 await saveStateAsync(state);
 assert.equal(mirrorWrites, 1, 'small desktop state retains the secret-free browser fallback');
-assert.deepEqual(loadState().projects.map((project) => project.id), ['archived', 'active']);
+assert.equal(loadState().projects.length, 1, 'desktop startup uses a temporary workspace while authoritative desktop loading is pending');
+assert.ok(!['archived', 'active'].includes(loadState().project.id), 'desktop startup never exposes the stale browser mirror');
 assert.deepEqual((await loadDesktopState())?.projects.map((project) => project.id), ['archived', 'active']);
+const desktopWindow = globalThis.window;
+Object.defineProperty(globalThis, 'window', { configurable: true, value: { localStorage: desktopWindow.localStorage } });
+assert.deepEqual(loadState().projects.map((project) => project.id), ['archived', 'active'], 'browser-only startup retains its cache round trip');
+Object.defineProperty(globalThis, 'window', { configurable: true, value: desktopWindow });
 
 // Real-sized but synthetic text: a complete library above the old 64 MiB cap
 // remains supported, with no media, user fixture, network or disk writes.

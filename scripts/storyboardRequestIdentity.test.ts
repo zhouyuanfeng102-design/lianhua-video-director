@@ -3,11 +3,17 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import ts from 'typescript';
 import { createInitialState } from '../src/storage';
-import { isCurrentOperationIdentity, isCurrentSequenceOperation } from '../src/appEffects';
+import { isCurrentOperationIdentity, isCurrentSequenceOperation, mergeReferenceAssetIds } from '../src/appEffects';
 import { buildSequencePromptHandoff } from '../src/sequencePromptHandoff';
 import { sequencePlanReviewFingerprint } from '../src/sequencePlan';
 import { isSemanticSequencePlan, semanticSequenceSourceFingerprint } from '../src/semanticSequencePlan';
 import { storyboardRequestApiIdentity, storyboardRequestSourceIdentity } from '../src/storyboardRequestIdentity';
+import { activeChapter, chapterScopeProject } from '../src/chapters';
+import { sourceContentHash } from '../src/sourceIntegrity';
+import { readProjectStoryDraft, withProjectStoryDraft } from '../src/storyDraft';
+import { storyReferenceFingerprint } from '../src/storyReferences';
+import { storyReferenceVideoAssetIds } from '../src/comicSources';
+import { buildVideoSceneContext } from '../src/videoSceneContext';
 import type { AppState, ReferenceAsset, Scene, VideoSegment, VideoSequencePlan } from '../src/types';
 
 const source = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
@@ -38,8 +44,10 @@ assert.ok(buildStatement && ts.isVariableStatement(buildStatement));
 const build = buildStatement.declarationList.declarations[0].initializer;
 assert.ok(build && ts.isArrowFunction(build) && ts.isBlock(build.body));
 const guardCode = declarations(build.body.statements, [
-  'fullTimeline', 'requestProjectId', 'requestEpoch', 'requestHandoff', 'requestBatchIdentity',
+  'requestPromptFormat', 'fullTimeline', 'requestProjectId', 'requestChapterId', 'requestStoryReferenceFingerprint',
+  'chapterStoryReferenceAssetIds', 'existingSegmentBoard', 'requestEpoch', 'requestHandoff', 'requestBatchIdentity',
   'handoffSourceIsCurrent', 'requestMasterBoard', 'requestSequencePlan', 'requestSemanticFingerprint', 'requestReferenceIds',
+  'sceneContextForRequest', 'requestSceneContext', 'requestSceneContextIdentity',
   'currentRequestSourceIdentity', 'requestSourceIdentity', 'requestApiIdentity',
   'requestConfigurationIdentity', 'requestIdentity', 'buildOwner', 'isGenerationRequestCurrent',
 ]);
@@ -63,6 +71,12 @@ const environment = (state = fixture()) => {
   const source = state.project.sourceDocuments[0];
   const bindings: Record<string, any> = {
     state, activeSequencePlan: undefined, storyInput: source.content, storyName: source.name,
+    // Execute the production memo factories without React. These tests cover
+    // the actual request guards before and after a fresh render.
+    useMemo: <T>(factory: () => T) => factory(),
+    activeChapter, chapterScopeProject, generationPromptFormat: 'h3',
+    readProjectStoryDraft, storyReferenceFingerprint, storyReferenceVideoAssetIds,
+    buildVideoSceneContext, sourceContentHash, mergeReferenceAssetIds,
     directorSourceScenes: state.project.scenes, directorScene: state.project.scenes[0],
     selectedAssetIds: ['ref-selected'], extraRequirement: '动作和对白同时进行',
     storyboardRequestSourceIdentity, storyboardRequestApiIdentity,
@@ -74,7 +88,10 @@ const environment = (state = fixture()) => {
     directorCategory: '剧情', directorStyleName: '自然', directorStyleSummary: '自然动作',
     cameraTerms: [], lightingTerms: [], visualStyle: '写实',
   };
-  const identities = () => evaluate(identityCode, bindings, `({ ${identityNames.join(', ')} })`);
+  const identities = () => {
+    bindings.editorProject = chapterScopeProject(bindings.state.project);
+    return evaluate(identityCode, bindings, `({ ${identityNames.join(', ')} })`);
+  };
   return { bindings, identities };
 };
 const guardHarness = (segmented = false, batched = false) => {
@@ -101,6 +118,8 @@ const guardHarness = (segmented = false, batched = false) => {
   const storyboardBuildLeaseRef = { current: undefined as { owner: number; projectId: string; epoch: number } | undefined };
   Object.assign(bindings, {
     stateRef, workspaceEpochRef, storyDraftRef,
+    generationPromptFormatRef: { current: bindings.generationPromptFormat },
+    sourceScenesForGeneration: stateRef.current.project.scenes, sceneForGeneration: stateRef.current.project.scenes[0],
     storyboardGenerationIdentityRef, segmentStoryboardConfigurationIdentityRef,
     sourceSceneIds: ['scene-main'], segmentForGeneration: segmented ? segment : undefined,
     override: segmented ? { sequencePlanId: 'sequence-main', segmentCount: 1 } : undefined,
@@ -168,11 +187,11 @@ for (const segmented of [false, true]) {
   for (const mutation of ['story', 'name', 'source', 'scene', 'character', 'api-key', 'api-model'] as const) {
     test(`${segmented ? 'sequence' : 'single'} actual guard invalidates ${mutation} before a render`, () => {
       const qa = guardHarness(segmented); const current = qa.stateRef.current;
-      const project = { ...current.project };
+      let project = { ...current.project };
       let settings = current.settings;
       switch (mutation) {
-        case 'story': qa.storyDraftRef.current.storyInput += '新增剧情'; break;
-        case 'name': qa.storyDraftRef.current.storyName += '新标题'; break;
+        case 'story': qa.storyDraftRef.current.storyInput += '新增剧情'; project = withProjectStoryDraft(project, qa.storyDraftRef.current); break;
+        case 'name': qa.storyDraftRef.current.storyName += '新标题'; project = withProjectStoryDraft(project, qa.storyDraftRef.current); break;
         case 'source': project.sourceDocuments = project.sourceDocuments.map((item) => ({ ...item, content: '已提交新原文' })); break;
         case 'scene': project.scenes = project.scenes.map((item) => ({ ...item, content: '场景正文改变' })); break;
         case 'character': project.characters = project.characters.map((item) => item.id === 'character-main' ? { ...item, outfit: '新衣服' } : item); break;

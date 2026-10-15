@@ -6,6 +6,8 @@ contextBridge.exposeInMainWorld('lianhuaDesktop', {
   saveFile: (payload) => ipcRenderer.invoke('lianhua:save-file', payload),
   storagePaths: () => ipcRenderer.invoke('lianhua:storage-paths'),
   loadState: () => ipcRenderer.invoke('lianhua:load-state'),
+  loadWorkspaceState: () => ipcRenderer.invoke('lianhua:load-workspace-state'),
+  loadProject: (projectId, hash) => ipcRenderer.invoke('lianhua:load-project', { projectId, hash }),
   saveState: (content) => ipcRenderer.invoke('lianhua:save-state', content),
   onBeforeClose: (callback) => {
     const listener = (_event, payload) => callback(payload);
@@ -19,7 +21,7 @@ contextBridge.exposeInMainWorld('lianhuaDesktop', {
   },
   completeBeforeClose: (payload) => ipcRenderer.invoke('lianhua:complete-before-close', payload),
   saveMedia: (payload) => ipcRenderer.invoke('lianhua:save-media', payload),
-  recoveryStatus: () => ipcRenderer.invoke('lianhua:recovery-status'),
+  recoveryStatus: (options) => ipcRenderer.invoke('lianhua:recovery-status', options),
   createRestorePoint: (content) => ipcRenderer.invoke('lianhua:create-restore-point', content),
   restoreSnapshot: (id) => ipcRenderer.invoke('lianhua:restore-snapshot', id),
   chooseBackupDirectory: () => ipcRenderer.invoke('lianhua:choose-backup-directory'),

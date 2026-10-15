@@ -8,6 +8,7 @@ import { buildWorkbenchRenderRequest, createWorkbenchClip, emptyVideoWorkbenchDr
   normalizeVideoWorkbenchState, renderedWorkbenchAsset, sequenceWorkbenchAssets, videoWorkbenchDuration, workbenchSource,
   type VideoWorkbenchDraft, type VideoWorkbenchJob } from '../src/videoWorkbench';
 import { VideoWorkbenchEngine } from '../src/useVideoWorkbenchController';
+import { createProjectLibraryPlaceholder } from '../src/projectLibraryRuntime';
 
 const probe: WorkbenchVideoProbe = { durationSec: 15, width: 1280, height: 720, fps: 30, frameCount: 450, hasAudio: true, videoCodec: 'h264', audioCodec: 'aac', audioSampleRate: 48000, audioChannels: 2 };
 const checksum = (letter = 'a') => letter.repeat(64);
@@ -267,6 +268,50 @@ test('recovery marks old running jobs interrupted in both active and archived pr
   h.engine.recoverInterrupted();
   for (const id of [h.a.id, h.b.id]) assert.equal(h.owner(id).videoWorkbench?.jobs[0].status, 'interrupted');
   assert.equal(h.calls.extract.length, 0); assert.equal(h.calls.render.length, 0); h.engine.dispose();
+});
+
+test('startup recovery preserves lazy project identities and timestamps, changing only a real interrupted-job owner', () => {
+  for (const running of [false, true]) {
+    const active = { ...createProject('startup-active'), createdAt: 1, updatedAt: 2 };
+    const terminal = savedJob({ id: 'finished-workbench-job', projectId: 'startup-recovery-owner', status: 'succeeded' });
+    const recoveryOwner = { ...createProject('startup-recovery-owner'), createdAt: 1, updatedAt: 2,
+      videoWorkbench: { draft: emptyVideoWorkbenchDraft('startup-recovery-owner', 1),
+        jobs: [...(running ? [savedJob({ projectId: 'startup-recovery-owner' })] : []), terminal] } };
+    const references = Array.from({ length: 98 }, (_, index) => createProjectLibraryPlaceholder({
+      id: `unopened-${index}`, name: `unopened ${index}`, description: 'directory summary', createdAt: 1, updatedAt: 2,
+    }, { hash: checksum('b'), schemaVersion: 24, counts: { sourceDocuments: 1, scenes: 7, storyboards: 3, assets: 4 } }));
+    const projects = [active, recoveryOwner, ...references];
+    const original: AppState = { ...createInitialState(), project: active, activeProjectId: active.id, projects };
+    let state = original;
+    let changes = 0;
+    const engine = new VideoWorkbenchEngine({ getState: () => state,
+      setState: (update) => { const next = update(state); if (next !== state) changes++; state = next; }, onChange: () => {} });
+    try {
+      engine.recoverInterrupted();
+      assert.equal(state.project, active, 'an idle active project retains its exact object');
+      assert.equal(state.project.updatedAt, 2);
+      references.forEach((reference, index) => {
+        assert.equal(state.projects[index + 2], reference, 'unopened entries never become modified project bodies');
+        assert.equal(reference.updatedAt, 2, 'startup must preserve the timestamp covered by the referenced block hash');
+      });
+      if (!running) {
+        assert.equal(state, original, 'zero running jobs means zero workspace changes');
+        assert.equal(state.projects, projects);
+        assert.equal(state.projects[1], recoveryOwner);
+        assert.equal(changes, 0);
+      } else {
+        assert.equal(changes, 1, 'only the project with a real interrupted job is updated');
+        assert.notEqual(state.projects[1], recoveryOwner);
+        assert.equal(state.projects[1].videoWorkbench?.draft, recoveryOwner.videoWorkbench.draft);
+        assert.equal(state.projects[1].videoWorkbench?.jobs[0].status, 'interrupted');
+        assert.equal(state.projects[1].videoWorkbench?.jobs[1], terminal, 'completed jobs retain their exact objects');
+        assert.ok(state.projects[1].updatedAt > recoveryOwner.updatedAt);
+      }
+      const recovered = state;
+      engine.recoverInterrupted();
+      assert.equal(state, recovered, 'a second recovery pass is a no-op after interruption is recorded');
+    } finally { engine.dispose(); }
+  }
 });
 
 test('retry uses the stored frame mode/range and refuses a source replaced since the first attempt', async () => {

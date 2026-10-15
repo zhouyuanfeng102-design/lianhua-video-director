@@ -73,7 +73,16 @@ export class VideoWorkbenchEngine {
     const state = this.options.getState();
     return state.project.id === projectId ? state.project : state.projects.find((project) => project.id === projectId);
   }
-  private patch(projectId: string, update: (project: Project) => Project) { this.options.setState((state) => applyOwnedProjectUpdate(state, projectId, update)); }
+  private patch(projectId: string, update: (project: Project) => Project) {
+    this.options.setState((state) => {
+      const owner = state.project.id === projectId ? state.project : state.projects.find((project) => project.id === projectId);
+      if (!owner) return state;
+      const next = update(owner);
+      // Startup recovery visits the whole directory. An unchanged owner must
+      // retain its immutable reference and timestamp, including unopened entries.
+      return next === owner ? state : applyOwnedProjectUpdate(state, projectId, () => next);
+    });
+  }
   private bridge(): Bridge {
     if (!this.options.desktop?.probeWorkbenchVideo) throw new Error('视频工作台需要桌面版的本地媒体处理服务。');
     return this.options.desktop;
@@ -81,11 +90,14 @@ export class VideoWorkbenchEngine {
   recoverInterrupted() {
     const state = this.options.getState();
     const ids = new Set([state.project.id, ...state.projects.map((project) => project.id)]);
-    ids.forEach((id) => this.patch(id, (project) => {
+    ids.forEach((id) => {
+      if (!this.owner(id)?.videoWorkbench?.jobs.some((job) => job.status === 'running')) return;
+      this.patch(id, (project) => {
       if (!project.videoWorkbench?.jobs.some((job) => job.status === 'running')) return project;
       return { ...project, videoWorkbench: { ...project.videoWorkbench, jobs: project.videoWorkbench.jobs.map((job) => job.status === 'running'
         ? { ...job, status: 'interrupted', error: '软件关闭时处理未完成；原素材保留，可手动重试。', updatedAt: Date.now() } : job) } };
-    }));
+      });
+    });
   }
   async refreshStatus() {
     try { this.status = await this.bridge().videoWorkbenchStatus(); }

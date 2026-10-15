@@ -1144,12 +1144,23 @@ export interface ChapterWorkspace {
   directorLookDraft?: DirectorLookDraft;
 }
 
+export interface ProjectLibraryReference {
+  hash: string;
+  schemaVersion: number;
+  counts: { sourceDocuments: number; scenes: number; storyboards: number; assets: number };
+}
+
 export interface Project {
   id: string;
   name: string;
   description: string;
   /** Project-library workspace marker only; video workers continue normally. */
   backgroundSuspended?: boolean;
+  /** Unopened desktop-library entry. Empty collections are placeholders, never saved project contents. */
+  __projectLibraryReference?: ProjectLibraryReference;
+  /** Desktop transport metadata; removed before normalizing a loaded project. */
+  __persistedProjectHash?: string;
+  __projectSchemaVersion?: number;
   sourceDocuments: SourceDocument[];
   /** Adopted picture-description conversions; legacy projects omit this list. */
   storyVisualConversions?: StoryVisualConversionSnapshot[];
