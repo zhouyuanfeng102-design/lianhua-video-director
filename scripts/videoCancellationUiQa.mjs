@@ -34,7 +34,8 @@ const tasksFromSaved = () => page.evaluate(() => {
   const project = saved.project.generationTasks ? saved.project : saved.projects.find((entry) => entry.id === saved.activeProjectId);
   return project.generationTasks.map((task) => ({ id: task.id, remoteTaskId: task.remoteTaskId, status: task.status,
     stage: task.videoJob?.stage, stopped: task.videoJob?.trackingStopped, queue: task.videoJob?.batchQueueState,
-    cancelled: task.videoJob?.cancellationConfirmed, historyOnly: task.historyOnly, continuation: task.videoJob?.batchContinuation }));
+    cancelled: task.videoJob?.cancellationConfirmed, historyOnly: task.historyOnly, continuation: task.videoJob?.batchContinuation,
+    phase: task.videoJob?.preparation?.phase, error: task.error, remoteEnded: task.videoJob?.remoteGenerationEnded }));
 });
 const waitSaved = async (predicate, label) => waitForCondition({ label, timeoutMs: 20_000, intervalMs: 100, check: async () => predicate(await tasksFromSaved()) });
 const openTasks = async () => {
@@ -146,6 +147,16 @@ const run = async () => {
       const intermediate = ancestor('ancestor-b', 'ancestor-batch-b', active);
       const oldest = ancestor('ancestor-a', 'ancestor-batch-a', intermediate);
       project.generationTasks.push(oldest, intermediate);
+      project.generationTasks.push(...[1, 2, 3].map((index) => {
+        const stopped = task(`http524-stopped-${index}`, false);
+        Object.assign(stopped, { status: 'unknown', error: '接口返回错误（HTTP 524）。',
+          batchId: 'http524-stopped-batch', batchLabel: 'HTTP 524 后停止本地追踪', batchIndex: index, batchTotal: 3 });
+        Object.assign(stopped.videoJob, { stage: 'stopped', trackingStopped: true, batchQueueState: 'cancelled',
+          ...(index === 2 ? {} : { cancellationConfirmed: false }),
+          message: '已停止本地追踪；提交结果仍待确认，未取消服务器任务。',
+          preparation: { version: 1, phase: 'post-started', uploadedImages: [] } });
+        return stopped;
+      }));
       const success = task('batch-success', true, 4);
       Object.assign(success, { status: 'succeeded', resultAssetId: 'batch-result-video' });
       Object.assign(success.videoJob, { stage: 'succeeded', batchQueueState: 'done', generatedAt: now, completedAt: now, remoteGenerationEnded: true });
@@ -187,12 +198,53 @@ const run = async () => {
     check: async () => page.evaluate(() => window.__cancelQa.saveActive === 0 && window.__cancelQa.encoderActive === 0) });
   await page.evaluate(() => { const qa = window.__cancelQa; qa.input = null; qa.saveDelayMs = 1000; qa.encoderPosts = 0; qa.maxEncoderActive = 0; qa.postsWhileSaveActive = 0; qa.saveCalls = 0; });
 
+  let stoppedUnknownTasks = [];
   if (batchDeletionMode) {
+    const stoppedUnknownBatch = page.locator('[data-video-batch-id="http524-stopped-batch"]');
+    const deleteStoppedUnknown = stoppedUnknownBatch.getByRole('button', { name: '删除批次', exact: true });
+    const count = () => page.getByRole('tab', { name: /视频任务/u }).locator('.generation-task-count').innerText();
+    const stoppedUnknownRecords = (saved) => saved.filter((entry) => entry.id.startsWith('http524-stopped-'));
+    stoppedUnknownTasks = stoppedUnknownRecords(await tasksFromSaved());
+    const requestsBefore = await page.evaluate(() => ({ posts: window.__cancelQa.posts, cancelledRequests: window.__cancelQa.cancelledRequests }));
+    assert.equal(stoppedUnknownTasks.length, 3);
+    for (const entry of stoppedUnknownTasks) {
+      assert.equal(entry.status, 'unknown'); assert.equal(entry.phase, 'post-started');
+      assert.equal(entry.stage, 'stopped'); assert.equal(entry.stopped, true);
+      assert.equal(entry.remoteTaskId, undefined); assert.equal(entry.remoteEnded, undefined);
+      assert.notEqual(entry.cancelled, true); assert.match(entry.error, /HTTP 524/u);
+    }
+    assert.equal(await count(), '14');
+    assert.match(await stoppedUnknownBatch.innerText(), /已停止 3/u);
+    assert.equal(await deleteStoppedUnknown.isEnabled(), true, 'HTTP 524 tasks explicitly stopped locally are deletable even while remote outcome is unknown');
+    assert.equal(await stoppedUnknownBatch.locator('[data-video-batch-delete-reason]').count(), 0);
+    await deleteStoppedUnknown.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: path.join(output, 'batch-delete-stopped-http524.png'), fullPage: false });
+    screenshots.push('batch-delete-stopped-http524.png');
+    await deleteStoppedUnknown.click(); await stoppedUnknownBatch.waitFor({ state: 'detached' });
+    await waitSaved((saved) => stoppedUnknownRecords(saved).length === 3 && stoppedUnknownRecords(saved).every((entry) => entry.historyOnly),
+      'all three stopped HTTP 524 originals retained as hidden unresolved history');
+    assert.equal(await count(), '11', 'hidden HTTP 524 records are excluded from visible task count');
+    assert.deepEqual(stoppedUnknownRecords(await tasksFromSaved()), stoppedUnknownTasks.map((entry) => ({ ...entry, historyOnly: true })),
+      'deletion preserves original unknown/post-started records, HTTP 524 error and unconfirmed cancellation without inventing remote completion');
+    await page.getByRole('button', { name: '撤销（Ctrl+Z）', exact: true }).click();
+    await stoppedUnknownBatch.waitFor();
+    await waitSaved((saved) => stoppedUnknownRecords(saved).length === 3 && stoppedUnknownRecords(saved).every((entry) => !entry.historyOnly),
+      'undo restores the same three stopped HTTP 524 records');
+    assert.equal(await count(), '14');
+    assert.deepEqual(stoppedUnknownRecords(await tasksFromSaved()), stoppedUnknownTasks, 'undo preserves each original stopped unresolved task');
+    assert.equal(await deleteStoppedUnknown.isEnabled(), true);
+    await deleteStoppedUnknown.click(); await stoppedUnknownBatch.waitFor({ state: 'detached' });
+    await waitSaved((saved) => stoppedUnknownRecords(saved).length === 3 && stoppedUnknownRecords(saved).every((entry) => entry.historyOnly),
+      'stopped HTTP 524 batch can be cleared again after undo');
+    assert.equal(await count(), '11');
+    assert.deepEqual(await page.evaluate(() => ({ posts: window.__cancelQa.posts, cancelledRequests: window.__cancelQa.cancelledRequests })), requestsBefore,
+      'deleting, undoing and clearing stopped HTTP 524 tasks never submits or cancels a remote request');
+    checks.push('Three HTTP 524 unknown/post-started tasks display stopped 3 and can be cleared, undone and cleared again; originals stay hidden with unchanged unresolved evidence and no POST/cancel request');
+
     const batchA = page.locator('[data-video-batch-id="ancestor-batch-a"]');
     const batchB = page.locator('[data-video-batch-id="ancestor-batch-b"]');
     const deleteA = batchA.getByRole('button', { name: '删除批次', exact: true });
     const deleteB = batchB.getByRole('button', { name: '删除批次', exact: true });
-    const count = () => page.getByRole('tab', { name: /视频任务/u }).locator('.generation-task-count').innerText();
     const before = await tasksFromSaved();
     const childBefore = before.find((entry) => entry.id === 'running-4');
     assert.equal(await count(), '11');
@@ -304,6 +356,7 @@ const run = async () => {
   await openTasks(); await card('running-1').waitFor();
   if (batchDeletionMode) {
     assert.equal(await page.locator('[data-video-batch-id="cancel-batch"]').count(), 0);
+    assert.equal(await page.locator('[data-video-batch-id="http524-stopped-batch"]').count(), 0);
     assert.equal(await page.locator('[data-video-batch-id="active-batch"]').count(), 1);
     checks.push('Deleted batch stays absent after saving and navigation away/back while the running batch remains');
   }
@@ -312,6 +365,7 @@ const run = async () => {
   await waitForCondition({ label: 'final persistence settled', timeoutMs: 20_000, intervalMs: 100,
     check: async () => page.evaluate(() => window.__cancelQa.saveActive === 0 && window.__cancelQa.encoderActive === 0) });
   if (batchDeletionMode) {
+    const requestCountsBeforeReload = await page.evaluate(() => ({ posts: window.__cancelQa.posts, cancelledRequests: window.__cancelQa.cancelledRequests }));
     await page.evaluate(() => {
       const qa = window.__cancelQa;
       sessionStorage.setItem('__batch_deletion_counts__', JSON.stringify({ requests: qa.requests, posts: qa.posts,
@@ -324,8 +378,13 @@ const run = async () => {
     const reloaded = await tasksFromSaved();
     assert.deepEqual(reloaded.filter((entry) => !entry.historyOnly).map((entry) => entry.id).sort(), ['running-1', 'running-2', 'running-3', 'running-4']);
     assert.equal(await page.locator('[data-video-batch-id="ancestor-batch-a"], [data-video-batch-id="ancestor-batch-b"]').count(), 0);
+    assert.equal(await page.locator('[data-video-batch-id="http524-stopped-batch"]').count(), 0, 'hidden stopped HTTP 524 batch cannot revive after reload');
     assert.equal(await page.getByRole('tab', { name: /视频任务/u }).locator('.generation-task-count').innerText(), '4');
     assert.ok(['ancestor-a', 'ancestor-b'].every((id) => reloaded.find((entry) => entry.id === id)?.historyOnly));
+    assert.deepEqual(reloaded.filter((entry) => entry.id.startsWith('http524-stopped-')), stoppedUnknownTasks.map((entry) => ({ ...entry, historyOnly: true })),
+      'complete reload retains all three hidden unknown/post-started HTTP 524 originals without resubmission or false remote cancellation');
+    assert.deepEqual(await page.evaluate(() => ({ posts: window.__cancelQa.posts, cancelledRequests: window.__cancelQa.cancelledRequests })), requestCountsBeforeReload,
+      'reload never submits or cancels a remote request for the hidden stopped tasks');
     const asset = await page.evaluate(() => {
       const saved = window.__cancelQa.saved; const project = saved.project.assets ? saved.project : saved.projects.find((entry) => entry.id === saved.activeProjectId);
       return project.assets.find((entry) => entry.id === 'batch-result-video');

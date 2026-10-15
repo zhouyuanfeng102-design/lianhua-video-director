@@ -2,6 +2,7 @@ import { normalizeStoryReferenceContext, normalizeStoryReferenceAssetSubjects, r
 import { normalizeAppColorMode, normalizeAppColorTheme } from './appTheme';
 import { normalizeProjectVoicePresets } from './videoAudioReferences';
 import { repairLegacyVideoApiConfig } from './videoApiLegacyConfig';
+import { normalizeVideoTransportImage, VIDEO_TRANSPORT_IMAGE_INVALID } from './videoTransportImage';
 ﻿import type {
   AppSettings,
   AppState,
@@ -1835,6 +1836,21 @@ const normalizeImagePromptReverseResult = (incoming: unknown): ImagePromptRevers
   } as ImagePromptReverseResult;
 };
 
+/** Keep new request-only image metadata out of authored assets and prompts.
+ * Invalid records remain visible and are stopped at submission, never dropped
+ * into an implicit request using the original image instead. */
+const normalizeVideoTransportReferences = <T,>(value: T): T => (Array.isArray(value) ? value.map((reference) => {
+  if (!isRecord(reference) || reference.transportImage === undefined) return reference;
+  const image = normalizeVideoTransportImage(reference.transportImage);
+  return image ? { ...reference, transportImage: image } : reference;
+}) : value) as T;
+const normalizeVideoTransportDraft = (value: unknown): unknown => {
+  if (!isRecord(value)) return value;
+  const draft = isRecord(value.draft) ? { ...value.draft, references: normalizeVideoTransportReferences(value.draft.references) } : value.draft;
+  const batch = isRecord(value.batch) && isRecord(value.batch.referenceOverrides)
+    ? { ...value.batch, referenceOverrides: Object.fromEntries(Object.entries(value.batch.referenceOverrides).map(([id, references]) => [id, normalizeVideoTransportReferences(references)])) } : value.batch;
+  return { ...value, ...(draft !== undefined ? { draft } : {}), ...(batch !== undefined ? { batch } : {}) };
+};
 const normalizeGenerationTasks = (incoming: unknown, projectId: string): GenerationTask[] => (
   projectArray<GenerationTask>(incoming, []).map((task) => {
     if (!isRecord(task)) return task;
@@ -1927,6 +1943,21 @@ const normalizeGenerationTasks = (incoming: unknown, projectId: string): Generat
     if (task.kind == null || task.kind === 'video') {
       if (task.historyOnly !== undefined && task.historyOnly !== true) task = { ...task, historyOnly: undefined };
       if (isRecord(task.videoJob)) {
+        const snapshot = task.videoJob.snapshot;
+        if (isRecord(snapshot)) {
+          const references = normalizeVideoTransportReferences(snapshot.draft?.references);
+          const images = normalizeVideoTransportReferences(snapshot.images);
+          task = { ...task, videoJob: { ...task.videoJob, snapshot: { ...snapshot, images,
+            ...(isRecord(snapshot.draft) ? { draft: { ...snapshot.draft, references } } : {}) } } } as Extract<GenerationTask, { kind?: 'video' }> & { videoJob: NonNullable<Extract<GenerationTask, { kind?: 'video' }>['videoJob']> };
+          const declared = [...(Array.isArray(references) ? references : []), ...(Array.isArray(images) ? images : [])];
+          if (declared.some((reference) => isRecord(reference) && reference.transportImage !== undefined
+            && (!normalizeVideoTransportImage(reference.transportImage)
+              || 'freezeState' in reference && reference.freezeState === 'frozen' && (!('checksum' in reference) || reference.checksum !== reference.transportImage.checksum)))) return {
+            ...task, status: task.status === 'succeeded' ? task.status : 'unknown', error: VIDEO_TRANSPORT_IMAGE_INVALID,
+            videoJob: { ...task.videoJob, stage: 'stopped', trackingStopped: true, message: VIDEO_TRANSPORT_IMAGE_INVALID },
+          } as GenerationTask;
+        }
+        if (!task.videoJob) return task;
         // Only literal true is terminal evidence. Imported strings/numbers
         // must never free a remote generation slot.
         if (task.videoJob.remoteGenerationEnded !== undefined && task.videoJob.remoteGenerationEnded !== true) {
@@ -2755,7 +2786,9 @@ const normalizePersistedProject = (
   // Chapter selection/workspaces must never inherit the demo or another
   // project's editor state during a partial import.
   project.activeChapterId = typeof incoming.activeChapterId === 'string' ? incoming.activeChapterId : undefined;
-  project.chapterWorkspaces = isRecord(incoming.chapterWorkspaces) ? incoming.chapterWorkspaces : undefined;
+  project.chapterWorkspaces = isRecord(incoming.chapterWorkspaces) ? Object.fromEntries(Object.entries(incoming.chapterWorkspaces)
+    .map(([id, workspace]) => [id, isRecord(workspace) && workspace.videoDirector !== undefined
+      ? { ...workspace, videoDirector: normalizeVideoTransportDraft(workspace.videoDirector) } : workspace])) : undefined;
   const customImageDraft = normalizeCustomImageDraft(incoming.customImageDraft);
   if (customImageDraft) project.customImageDraft = customImageDraft;
   else delete project.customImageDraft;
@@ -3410,6 +3443,10 @@ type DesktopStateBridge = {
   chooseBackupDirectory?: () => Promise<RecoveryStatus['recovery'] | null>;
   updateRecoveryConfig?: (patch: Partial<RecoveryStatus['recovery']>) => Promise<RecoveryStatus['recovery']>;
   importMedia?: (file: File) => Promise<ManagedMediaResult | null>;
+  readVideoReferenceImage?: (payload: { relativePath: string; expectedChecksum?: string }) => Promise<{
+    dataUrl: string; mimeType: 'image/png' | 'image/jpeg' | 'image/webp'; sizeBytes: number; checksum: string;
+  }>;
+  storeVideoReferenceImage?: (payload: { dataUrl: string; fileName?: string }) => Promise<ManagedMediaResult>;
   storeGeneratedAudio?: (payload: { dataUrl: string; fileName?: string }) => Promise<ManagedMediaResult>;
   readManagedAudioDataUrl?: (payload: { relativePath: string; expectedChecksum?: string }) => Promise<{
     dataUrl: string; mimeType: 'audio/mpeg' | 'audio/wav' | 'audio/flac'; sizeBytes: number; checksum: string;

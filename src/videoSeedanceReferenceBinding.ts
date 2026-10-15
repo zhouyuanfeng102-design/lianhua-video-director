@@ -5,7 +5,7 @@ import { maskVideoPictureReferenceLiterals } from './videoPictureReferences';
 import { sourceContentHash } from './sourceContentHash';
 import { resolvePromptCharacterParticipation } from './characterParticipation';
 import { characterVariantDisplayName } from './characterVariants';
-import { videoReferenceSlotIndex } from './videoReferenceSlots';
+import { videoMiddleFrameOrdinal, videoReferenceSlotIndex } from './videoReferenceSlots';
 import { videoReferenceCharacterBindingWarning, videoReferenceCharacterOwners, type VideoCharacterReferenceState } from './videoReferenceCharacters';
 
 interface SeedanceSourceReference {
@@ -85,7 +85,10 @@ const referenceSection = (prompt: string): ReferenceSection | undefined => {
   return undefined;
 };
 
-const roleResponsibility = (role: ReferenceRole, language: 'zh' | 'en'): string => {
+const roleResponsibility = (role: ReferenceRole, language: 'zh' | 'en', middleFrameOrdinal?: number): string => {
+  if (role === 'middle-frame') return language === 'en'
+    ? `Intermediate frame ${middleFrameOrdinal || 1}: action progression and continuity reference`
+    : `中间帧 ${middleFrameOrdinal || 1}：过程画面与连续性参考`;
   const chinese: Partial<Record<ReferenceRole, string>> = {
     character: '人物身份与外观参考', subject: '主体身份与外观参考', scene: '场景空间与环境参考',
     'first-frame': '开场画面与连续性参考', 'last-frame': '结束画面与连续性参考', prop: '道具外观参考',
@@ -177,10 +180,12 @@ export const prepareVideoSeedanceReferenceDraft = (
     const name = asset?.name || (boundary ? language === 'en' ? 'Continuity reference frame' : '上段衔接参考帧'
       : language === 'en' ? `Selected image ${knownNumber}` : `本次图片 ${knownNumber}`);
     const sourceResponsibility = (binding?.references || []).find((entry) => entry.assetId === reference.assetId)?.responsibility;
+    const usage = roleResponsibility(reference.role, language,
+      reference.role === 'middle-frame' ? videoMiddleFrameOrdinal(draft.references, slotIndex, draft.referenceSlotRoles) : undefined);
     const responsibility = sourceResponsibility?.trim()
-      ? language === 'en' ? `${roleResponsibility(reference.role, language)}; Saved reference details: ${referenceText(sourceResponsibility)}`
-        : `${roleResponsibility(reference.role, language)}；原参考说明：${referenceText(sourceResponsibility)}`
-      : roleResponsibility(reference.role, language);
+      ? language === 'en' ? `${usage}; Saved reference details: ${referenceText(sourceResponsibility)}`
+        : `${usage}；原参考说明：${referenceText(sourceResponsibility)}`
+      : usage;
     const names = owners.map((owner) => referenceLabel(characterVariantDisplayName(owner) || owner.name));
     const identity = names.length ? language === 'en' ? `; Characters: ${names.join(', ')}` : `；对应人物：${names.join('、')}` : '';
     lines.push(language === 'en' ? `${token}: ${referenceLabel(name)}; ${responsibility}${identity}.` : `${token}：${referenceLabel(name)}；${responsibility}${identity}。`);

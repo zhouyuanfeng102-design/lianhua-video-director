@@ -20,6 +20,8 @@ export interface OfficialSeedancePromptInput extends PromptAdapterInput {
   sourceEvidence?: Readonly<Record<string, unknown>>;
   /** Request-only understanding material; excluded from saved source identity. */
   sceneContext?: VideoSceneContext;
+  /** Exact pre-fix identity with automatic image output IDs; never persisted. */
+  legacySourceFingerprint?: string;
 }
 
 export interface Seedance25PromptCompilation {
@@ -269,6 +271,10 @@ export const getOfficialSeedanceSourceFingerprint = (input: OfficialSeedanceProm
   constraints: input.constraints || [],
   sourceEvidence: input.sourceEvidence,
 })));
+
+export const hasMatchingSeedanceSourceFingerprint = (input: OfficialSeedancePromptInput, fingerprint: string): boolean =>
+  fingerprint === getOfficialSeedanceSourceFingerprint(input)
+  || Boolean(input.legacySourceFingerprint && fingerprint === input.legacySourceFingerprint);
 
 export const compileOfficialSeedancePrompt = (
   input: PromptAdapterInput,

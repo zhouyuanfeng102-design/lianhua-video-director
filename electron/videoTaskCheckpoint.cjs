@@ -424,6 +424,15 @@ const collectVideoFrozenAssets = (project) => {
         id: `video-input:${task.id}:${index}`, relativePath: image.relativePath, checksum: image.checksum,
       });
     });
+    // Frozen images normally carry the exact transport copy at top level.
+    // Also retain typed copies in draft/reference metadata, deduplicated by path.
+    for (const [index, reference] of [...(Array.isArray(snapshot.draft?.references) ? snapshot.draft.references : []),
+      ...(Array.isArray(snapshot.images) ? snapshot.images : [])].entries()) {
+      const image = reference?.transportImage;
+      if (!mediaPath(image?.relativePath) || !identityText(image?.checksum) || result.has(image.relativePath)) continue;
+      result.set(image.relativePath, { id: `video-transport-input:${task.id}:${index}`,
+        relativePath: image.relativePath, checksum: image.checksum });
+    }
     (Array.isArray(snapshot.audios) ? snapshot.audios : []).forEach((audio, index) => {
       if (audio.freezeState !== 'frozen' || !mediaPath(audio.relativePath) || !identityText(audio.checksum)) return;
       if (!result.has(audio.relativePath)) result.set(audio.relativePath, {

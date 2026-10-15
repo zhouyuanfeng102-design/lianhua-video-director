@@ -12,6 +12,7 @@ const parameters = Object.keys(fields) as Parameter[];
 const record = (value: unknown): value is JsonRecord => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const scalar = (value: unknown): value is Scalar => typeof value === 'string' && value.length <= 200 || typeof value === 'number' && Number.isFinite(value);
 const finite = (value: unknown): value is number => typeof value === 'number' && Number.isFinite(value);
+const imageCount = (value: unknown): value is number => typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 const unique = (values: Scalar[]): Scalar[] => [...new Map(values.map((value) => [String(value), value])).values()];
 const MAX_VARIANTS = 64;
 const owns = (value: object, name: PropertyKey): boolean => Object.prototype.hasOwnProperty.call(value, name);
@@ -39,8 +40,12 @@ const normalizeModelCapabilities = (source: unknown): VideoApiModelParameterCapa
     controls[parameter] = normalized;
     if (record(source.defaults) && scalar(source.defaults[parameter])) defaults[parameter] = source.defaults[parameter];
   }
-  if (!Object.keys(controls).length) return undefined;
-  return { controls, defaults, ...(Array.isArray(source.aliases) ? { aliases: source.aliases.filter((value): value is string => typeof value === 'string' && value.length <= 200).slice(0, 64) } : {}) };
+  const rawImages = source.imageReferences;
+  const imageReferences = record(rawImages) && imageCount(rawImages.maxCount) && ['openapi', 'models'].includes(String(rawImages.source))
+    && (rawImages.field === undefined || typeof rawImages.field === 'string' && rawImages.field.length <= 200)
+    ? { maxCount: rawImages.maxCount, source: rawImages.source as 'openapi' | 'models', ...(typeof rawImages.field === 'string' ? { field: rawImages.field } : {}) } : undefined;
+  if (!Object.keys(controls).length && !imageReferences) return undefined;
+  return { controls, defaults, ...(imageReferences ? { imageReferences } : {}), ...(Array.isArray(source.aliases) ? { aliases: source.aliases.filter((value): value is string => typeof value === 'string' && value.length <= 200).slice(0, 64) } : {}) };
 };
 
 /** A capability belongs to the complete saved address/protocol, not to a model name alone. */
@@ -217,8 +222,84 @@ const control = (constraint: Constraint, source: 'openapi' | 'models', required:
     ...(constraint.step !== undefined ? { step: constraint.step } : {}), ...(constraint.description ? { description: constraint.description } : {}),
   };
 };
+
+/** Count only an unconditional predicate identifying every image reference.
+ * A predicate for audio, a particular role, or another subset is not an image capacity. */
+const imageContainsPredicate = (source: unknown, document: JsonRecord): boolean => {
+  const safePredicate = (source: unknown, depth = 0): boolean => {
+    if (depth > 12) return false;
+    const schema = resolve(source, document);
+    if (!schema || schema.type !== undefined && schema.type !== 'object') return false;
+    const permitted = new Set(['type', 'properties', 'required', 'allOf', 'oneOf', 'anyOf', 'description', 'title']);
+    if (Object.keys(schema).some((key) => !permitted.has(key))) return false;
+    if (schema.properties !== undefined && (!record(schema.properties) || Object.keys(schema.properties).some((key) => key !== 'type'))) return false;
+    if (schema.required !== undefined && (!Array.isArray(schema.required) || schema.required.some((key) => key !== 'type'))) return false;
+    if (record(schema.properties) && owns(schema.properties, 'type')) {
+      const type = resolve(schema.properties.type, document);
+      if (!type || Object.keys(type).some((key) => !['type', 'const', 'enum', 'description', 'title'].includes(key))) return false;
+    }
+    return ['allOf', 'oneOf', 'anyOf'].every((key) => schema[key] === undefined || Array.isArray(schema[key])
+      && (schema[key] as unknown[]).length <= MAX_VARIANTS && (schema[key] as unknown[]).every((entry) => safePredicate(entry, depth + 1)));
+  };
+  if (!safePredicate(source)) return false;
+  const variants = expand(source, document, '');
+  return Boolean(variants.length) && variants.every((variant) => {
+    if (!variant.required.has('type') || !variant.properties.type) return false;
+    const constraints = variant.properties.type.map((entry) => propertyConstraint(entry, document));
+    if (constraints.some((entry) => !entry)) return false;
+    const constraint = constraints.reduce<Constraint>((merged, entry) => mergeConstraint(merged, entry!), {});
+    return constraint.values?.length === 1 && constraint.values[0] === 'image';
+  });
+};
+
+const imageArrayMaximum = (source: unknown, document: JsonRecord, field: 'images' | 'references', depth = 0): number | undefined => {
+  if (depth > 12) return undefined;
+  const schema = resolve(source, document);
+  if (!schema || schema.type !== undefined && schema.type !== 'array') return undefined;
+  const limits: number[] = [];
+  if (field === 'images' && imageCount(schema.maxItems)) limits.push(schema.maxItems);
+  if (field === 'references' && imageCount(schema.maxContains) && imageContainsPredicate(schema.contains, document)) limits.push(schema.maxContains);
+  if (Array.isArray(schema.allOf)) {
+    if (schema.allOf.length > MAX_VARIANTS) return undefined;
+    for (const entry of schema.allOf) {
+      const maximum = imageArrayMaximum(entry, document, field, depth + 1);
+      if (maximum !== undefined) limits.push(maximum);
+    }
+  }
+  for (const key of ['oneOf', 'anyOf']) if (Array.isArray(schema[key])) {
+    const branches = schema[key] as unknown[];
+    if (!branches.length || branches.length > MAX_VARIANTS) return undefined;
+    const maxima = branches.map((entry) => imageArrayMaximum(entry, document, field, depth + 1));
+    if (maxima.some((maximum) => maximum === undefined)) return undefined;
+    limits.push(Math.max(...(maxima as number[])));
+  }
+  // maxItems on a mixed-media array is a total, never evidence of an image
+  // capacity by itself. It may only tighten an explicit image maxContains.
+  if (field === 'references' && limits.length) {
+    const totalMaximum = imageArrayMaximum(source, document, 'images', depth);
+    if (totalMaximum !== undefined) limits.push(totalMaximum);
+  }
+  return limits.length ? Math.min(...limits) : undefined;
+};
+
+const parseImageReferences = (variants: Variant[], document: JsonRecord, source: 'openapi' | 'models'): VideoApiModelParameterCapabilities['imageReferences'] => {
+  const entries = variants.map((variant) => {
+    const candidates = (['images', 'references'] as const).flatMap((field) => {
+      const limits = (variant.properties[field] || []).map((entry) => imageArrayMaximum(entry, document, field)).filter(imageCount);
+      return limits.length ? [{ field, maxCount: Math.min(...limits) }] : [];
+    });
+    // Two independent image arrays do not declare a combined slot capacity.
+    return candidates.length === 1 ? candidates[0] : undefined;
+  });
+  if (!entries.length || entries.some((entry) => !entry || entry.field !== entries[0]?.field)) return undefined;
+  const known = entries as Array<{ field: 'images' | 'references'; maxCount: number }>;
+  return { maxCount: Math.max(...known.map((entry) => entry.maxCount)), source, field: known[0].field };
+};
+
 const parseVariants = (variants: Variant[], document: JsonRecord, source: 'openapi' | 'models'): VideoApiModelParameterCapabilities => {
   const result: VideoApiModelParameterCapabilities = { controls: {}, defaults: {} };
+  const imageReferences = parseImageReferences(variants, document, source);
+  if (imageReferences) result.imageReferences = imageReferences;
   for (const parameter of parameters) {
     const entries = variants.map((variant) => {
       const name = fields[parameter].find((name) => variant.properties[name]);
@@ -248,7 +329,7 @@ const modelNames = (source: unknown, document: JsonRecord, output = new Set<stri
   if (schema.if) modelNames(schema.if, document, output, depth + 1);
   return output;
 };
-const hasControls = (entry: VideoApiModelParameterCapabilities): boolean => Object.keys(entry.controls).length > 0;
+const hasCapabilities = (entry: VideoApiModelParameterCapabilities): boolean => Object.keys(entry.controls).length > 0 || Boolean(entry.imageReferences);
 
 /** Parse a JSON request schema only; never crawl the historical component definitions. */
 export const parseVideoApiRequestSchemaCapabilities = (schema: unknown, document: JsonRecord, ids: string[] = []): Pick<VideoApiParameterCapabilities, 'models' | 'common'> => {
@@ -256,10 +337,10 @@ export const parseVideoApiRequestSchemaCapabilities = (schema: unknown, document
   const models: Record<string, VideoApiModelParameterCapabilities> = Object.create(null) as Record<string, VideoApiModelParameterCapabilities>;
   for (const id of [...new Set([...ids, ...declared])].slice(0, 512)) {
     const capability = parseVariants(expand(schema, document, id), document, 'openapi');
-    if (hasControls(capability)) models[id] = capability;
+    if (hasCapabilities(capability)) models[id] = capability;
   }
   const common = declared.length ? undefined : parseVariants(expand(schema, document, ''), document, 'openapi');
-  return { models, ...(common && hasControls(common) ? { common } : {}) };
+  return { models, ...(common && hasCapabilities(common) ? { common } : {}) };
 };
 
 export const parseVideoApiOpenApiCapabilities = (document: unknown, ids: string[] = [], submitPath?: string): Pick<VideoApiParameterCapabilities, 'models' | 'common'> => {
@@ -288,6 +369,10 @@ export const parseVideoApiModelMetadata = (body: unknown): Pick<VideoApiParamete
     const containers = [raw, raw.capabilities, raw.parameters, raw.constraints, raw.metadata].filter(record);
     const metadata: JsonRecord = Object.assign({}, ...containers);
     const capability: VideoApiModelParameterCapabilities = { controls: {}, defaults: {} };
+    const arrayImages = parseImageReferences([{ properties: Object.fromEntries(['images', 'references'].filter((field) => owns(metadata, field)).map((field) => [field, [metadata[field]]])), required: new Set() }], metadata, 'models');
+    const explicitCounts = ['max_images', 'max_reference_images'].map((field) => metadata[field]).filter(imageCount);
+    if (arrayImages) capability.imageReferences = { ...arrayImages, maxCount: Math.min(arrayImages.maxCount, ...explicitCounts) };
+    else if (explicitCounts.length) capability.imageReferences = { maxCount: Math.min(...explicitCounts), source: 'models' };
     for (const parameter of parameters) {
       const aliases = fields[parameter];
       let schema = aliases.map((name) => metadata[name]).find(record);
@@ -305,7 +390,7 @@ export const parseVideoApiModelMetadata = (body: unknown): Pick<VideoApiParamete
       if (parsed.default !== undefined) capability.defaults[parameter] = parsed.default;
     }
     if (Array.isArray(raw.aliases)) capability.aliases = raw.aliases.filter((value): value is string => typeof value === 'string').slice(0, 64);
-    if (hasControls(capability)) models[id.trim()] = capability;
+    if (hasCapabilities(capability)) models[id.trim()] = capability;
   }
   return { models };
 };

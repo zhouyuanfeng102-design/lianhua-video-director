@@ -1,7 +1,7 @@
 import type { Character, H3IdentityBindings, Location, Project, ReferenceAsset, ReferenceRole, VideoTaskApiConfig } from './types';
 import type { VideoGenerationDraft, VideoImageReference } from './videoGenerationTypes';
 import type { VideoReferenceUsageContext } from './videoReferenceUsage';
-import { videoReferenceSlotIndex } from './videoReferenceSlots';
+import { videoMiddleFrameOrdinal, videoReferenceSlotIndex } from './videoReferenceSlots';
 import { getH3IdentityBindingIssues, normalizeH3IdentityBindings } from './h3IdentityBindings';
 import { officialH3ContextForStoryboard } from './officialH3Context';
 import { characterParticipationAliases, resolvePromptCharacterParticipation, resolveStoryboardCharacterParticipation } from './characterParticipation';
@@ -303,6 +303,7 @@ const participationReferenceEdit = (
 const videoH3ReferenceUsageEdit = (
   prompt: string, references: readonly VideoImageReference[], numbers: readonly number[],
   language: 'zh' | 'en', authoredPictureNumbers: ReadonlySet<number>,
+  rememberedRoles?: readonly ReferenceRole[],
 ): VideoPictureReferenceEdit | undefined => {
   const masked = maskReferenceLiterals(prompt);
   const uses: Partial<Record<ReferenceRole, readonly [string, string]>> = {
@@ -319,7 +320,10 @@ const videoH3ReferenceUsageEdit = (
   };
   const selectedUses = references.flatMap((reference, index) => {
     const number = numbers[index];
-    const use = uses[reference.role];
+    const ordinal = reference.role === 'middle-frame'
+      ? videoMiddleFrameOrdinal(references, videoReferenceSlotIndex(reference, index), rememberedRoles) : undefined;
+    const use = ordinal ? [`中间帧 ${ordinal} 的过程构图与连续性参考`, `intermediate frame ${ordinal} progression composition and continuity reference`]
+      : uses[reference.role];
     return number && use && !authoredPictureNumbers.has(number)
       ? [`<Picture ${number}> ${use[language === 'zh' ? 0 : 1]}`] : [];
   });
@@ -527,7 +531,7 @@ export const prepareVideoH3ReferenceDraft = (
   // slots are sufficient; an empty historical manifest must not drop uses.
   if (!pictureSourceIssues.length && plan.numbers && language) {
     const authoredPictureNumbers = new Set([...pictureNumbers.values()].flatMap((numbers) => numbers || []));
-    const usage = videoH3ReferenceUsageEdit(prompt, draft.references, plan.numbers, language, authoredPictureNumbers);
+    const usage = videoH3ReferenceUsageEdit(prompt, draft.references, plan.numbers, language, authoredPictureNumbers, draft.referenceSlotRoles);
     if (usage) prompt = prompt.slice(0, usage.start) + usage.text + prompt.slice(usage.end);
   }
   const changedKnownMapping = [...pictureNumbers].some(([number, mapped]) => mapped !== null && (mapped.length !== 1 || mapped[0] !== number));

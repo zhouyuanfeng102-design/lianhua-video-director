@@ -1,9 +1,11 @@
 import { isVideoGenerationTask } from './generationTasks';
+import { videoTaskIsClearedStoppedHistory } from './videoTaskDeletionSafety';
 import { sourceContentHash } from './sourceIntegrity';
 import { resolveConfiguredVideoApi } from './runningHubVideo';
 import { offsetVideoReferenceSlotRoles, videoReferenceUsage, type VideoReferenceUsageContext } from './videoReferenceUsage';
 import { assertVideoReferenceSlots, videoReferenceSlotIndex } from './videoReferenceSlots';
 import { prepareVideoH3ReferenceDraft, type VideoH3ReferenceContext } from './videoH3ReferenceBinding';
+import { normalizeVideoTransportImage, videoTransportReferenceAsset } from './videoTransportImage';
 import type { VideoAudioReference } from './videoAudioTypes';
 import type {
   AppState,
@@ -89,13 +91,14 @@ const projectsInState = (state: Pick<AppState, 'project' | 'projects'>): Project
 ];
 
 const readableManagedImage = async (
-  desktop: Pick<VideoGenerationDesktop, 'readManagedImageDataUrl'>,
-  image: { name?: string; relativePath: string; checksum?: string },
+  desktop: Pick<VideoGenerationDesktop, 'readManagedImageDataUrl' | 'readVideoReferenceImage'>,
+  image: { name?: string; relativePath: string; checksum?: string; transportCopy?: boolean },
   itemIndex: number,
 ): Promise<void> => {
   let loaded: Awaited<ReturnType<VideoGenerationDesktop['readManagedImageDataUrl']>>;
   try {
-    loaded = await desktop.readManagedImageDataUrl({
+    const read = desktop.readVideoReferenceImage || desktop.readManagedImageDataUrl;
+    loaded = await read({
       relativePath: image.relativePath,
       expectedChecksum: image.checksum,
     });
@@ -119,13 +122,13 @@ const readableManagedImage = async (
 export const preflightVideoBatchManagedReferences = async (
   state: Pick<AppState, 'project' | 'projects' | 'settings'>,
   input: Pick<VideoBatchStartInput, 'projectId' | 'items' | 'force'>,
-  desktop?: Pick<VideoGenerationDesktop, 'readManagedImageDataUrl'>,
+  desktop?: Pick<VideoGenerationDesktop, 'readManagedImageDataUrl' | 'readVideoReferenceImage'>,
 ): Promise<void> => {
   if (!desktop?.readManagedImageDataUrl) return;
   const project = projectsInState(state).find((candidate) => candidate.id === input.projectId);
   if (!project) throw new Error('批量视频所属项目已不存在。');
   const reads = new Map<string, {
-    image: { name?: string; relativePath: string; checksum?: string };
+    image: { name?: string; relativePath: string; checksum?: string; transportCopy?: boolean };
     itemIndex: number;
   }>();
   // A dependency batch cannot be classified by any row's standalone hash.
@@ -162,7 +165,9 @@ export const preflightVideoBatchManagedReferences = async (
       // not read stale/missing storyboard selections that will not be sent.
       if (tail && referenceIndex === tail.placement.index) return;
       const frozen = validReuse?.images.find((image) => image.assetId === reference.assetId);
-      const image = frozen || project.assets.find((asset) => asset.id === reference.assetId);
+      const original = frozen || project.assets.find((asset) => asset.id === reference.assetId);
+      const image = original && reference.transportImage !== undefined
+        ? videoTransportReferenceAsset(reference, { ...original, id: reference.assetId, type: 'reference', role: 'composition', tags: [], createdAt: 0, updatedAt: 0 }, Boolean(frozen)) : original;
       if (!image) throw new Error(`批量第 ${itemIndex + 1} 项所选图片已不存在。`);
       if ('missing' in image && image.missing) {
         throw new Error(`批量第 ${itemIndex + 1} 项的图片“${image.name}”文件丢失，请重新关联素材。`);
@@ -175,6 +180,7 @@ export const preflightVideoBatchManagedReferences = async (
             name: image.name,
             relativePath: image.relativePath,
             checksum: image.checksum,
+            transportCopy: reference.transportImage !== undefined,
           },
           itemIndex,
         });
@@ -298,7 +304,9 @@ const referenceManifest = (
   return references.map((reference, index) => ({
     assetId: reference.assetId,
     role: reference.role,
-    content: assetContentIdentity(assetsById.get(reference.assetId), reference.assetId),
+    content: reference.transportImage !== undefined
+      ? normalizeVideoTransportImage(reference.transportImage) ? `checksum:${reference.transportImage.checksum.toLowerCase()}` : `invalid-transport:${reference.assetId}`
+      : assetContentIdentity(assetsById.get(reference.assetId), reference.assetId),
     // Continuous explicit slots are semantically identical to legacy drafts.
     // Only displaced references extend the old fingerprint representation.
     ...(videoReferenceSlotIndex(reference, index) !== index ? { slotIndex: videoReferenceSlotIndex(reference, index) } : {}),
@@ -580,6 +588,7 @@ export const videoBatchTailReferences = (
 };
 
 const inFlightVideoTask = (task: VideoGenerationTask): boolean => {
+  if (videoTaskIsClearedStoppedHistory(task)) return false;
   if (cancelledVideoBatchTaskBeforePost(task) || task.status === 'failed') return false;
   if (task.status === 'succeeded') {
     // Remote success precedes the local save. Until an asset exists, a live

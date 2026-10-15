@@ -20,6 +20,7 @@ const port = await findAvailableTcpPort();
 const origin = `http://127.0.0.1:${port}`;
 const apiPath = '/mock-seedance-sequence/v1/chat/completions';
 const storageKey = 'lianhua_video_director_state_v22';
+const runtimeLogStorageKey = 'lianhua_runtime_error_log_v1';
 const chapterId = 'seedance-sequence-chapter';
 const planId = 'seedance-sequence-plan';
 const projectId = 'seedance-sequence-ui-project';
@@ -84,7 +85,10 @@ const fixture = JSON.parse(builtFixture.stdout);
 const bootstrap = `import {preview} from 'vite'; const server=await preview({preview:{host:'127.0.0.1',port:${port},strictPort:true,open:false}}); console.log('Isolated built Seedance sequence QA ready');`;
 const preview = spawn(process.execPath, ['--input-type=module', '-e', bootstrap], { cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
 const harness = createQaProcessHarness({ electron: preview, qaLabel: 'Seedance sequence entry built UI QA', runTimeoutMs: 180_000, closeTimeoutMs: 10_000 });
-let browser; let context; let page; let failure; let failFirstEnglish = true;
+let browser; let context; let page; let failure; let failFirstEnglish = true; let failChineseWriter = false;
+let deferChineseFailure = false; let deferredChineseResponse; let cancelledDeferredRetry = false;
+const englishFailureReason = 'mock first Seedance English unavailable';
+const chineseFailureReason = '首段中文服务维护中，请稍后重试';
 const errors = []; const blockedRequests = []; const requests = []; const screenshots = [];
 const textOf = (content) => typeof content === 'string' ? content : (content || []).filter((part) => part.type === 'text').map((part) => part.text || '').join('\n');
 const tagged = (text, tag) => {
@@ -114,11 +118,39 @@ const preserved = (state) => state.project.storyboards.map((board) => ({
   targetOutput: board.targetOutput, sequencePromptHandoff: board.sequencePromptHandoff,
 }));
 const readState = () => page.evaluate((key) => JSON.parse(localStorage.getItem(key) || '{}'), storageKey);
+const readRuntimeLog = () => page.evaluate((key) => JSON.parse(localStorage.getItem(key) || '[]'), runtimeLogStorageKey);
 const batchButton = () => page.locator('.director-generate-bar').getByRole('button', { name: '顺序生成未完成的Seedance', exact: true });
 const capture = async (name) => { await page.screenshot({ path: path.join(output, `${name}.png`), fullPage: false }); screenshots.push(`${name}.png`); };
 const enterDirector = async () => {
   await page.locator('.sidebar').getByRole('button', { name: '提示词导演台', exact: true }).click();
   await page.getByRole('group', { name: '目标提示词格式', exact: true }).waitFor();
+};
+const assertFailureLog = async ({ stage, label, status, reason, screenshot }) => {
+  await page.waitForFunction(({ key, stage }) => JSON.parse(localStorage.getItem(key) || '[]').some((entry) => entry.stage === stage),
+    { key: runtimeLogStorageKey, stage });
+  const entries = await readRuntimeLog();
+  assert.equal(entries.length, 1, 'one failed model request records one diagnostic');
+  const entry = entries[0];
+  assert.equal(entry.stage, stage); assert.equal(entry.status, status);
+  assert.ok(entry.message.includes(reason), 'log retains the precise upstream reason');
+  assert.equal(entry.projectId, projectId); assert.equal(entry.model, 'isolated-seedance-sequence');
+  assert.equal(entry.endpoint, `${origin}/mock-seedance-sequence/v1`);
+  assert.equal(await page.locator('.runtime-error-log-count').textContent(), '1');
+  await page.locator('.runtime-error-log-trigger').click();
+  const dialog = page.getByRole('dialog', { name: '报错日志', exact: true });
+  await dialog.waitFor();
+  const displayed = await dialog.innerText();
+  assert.ok(displayed.includes(label), 'dialog displays the actual failure stage');
+  assert.ok(displayed.includes(entry.model));
+  await dialog.locator('.task-error-technical > summary').click();
+  const details = dialog.locator('.task-error-technical > pre');
+  await details.waitFor({ state: 'visible' });
+  assert.ok((await details.textContent()).includes(new URL(entry.endpoint).origin), 'expanded diagnostics identify the redacted service origin');
+  assert.ok((await details.textContent()).includes(reason), 'expanded diagnostics expose the original cause');
+  assert.ok((await details.textContent()).includes(String(status)), 'HTTP status remains inspectable');
+  await capture(screenshot);
+  await dialog.getByRole('button', { name: '关闭', exact: true }).click();
+  return entry;
 };
 const run = async () => {
   await waitForCondition({ label: 'built Seedance sequence preview', timeoutMs: 40_000, intervalMs: 100, check: async () => {
@@ -145,6 +177,23 @@ const run = async () => {
       if (seedance) {
         kind = 'seedance-writer'; index = seedance.sourceEvidence?.sequenceSegmentContext?.segmentIndex;
         assert.ok([1, 2].includes(index), 'writer receives its exact semantic segment');
+        if (failChineseWriter) {
+          requests.push({ kind, segmentIndex: index, failed: true, ...(deferChineseFailure ? { deferred: true } : {}) });
+          if (deferChineseFailure) {
+            const pending = {};
+            pending.gate = new Promise((resolve) => { pending.release = resolve; });
+            pending.handled = new Promise((resolve) => { pending.finish = resolve; });
+            deferredChineseResponse = pending;
+            await pending.gate;
+            try {
+              await route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ error: { message: chineseFailureReason } }) });
+            } catch (error) {
+              if (!cancelledDeferredRetry) throw error;
+            } finally { pending.finish(); }
+            return;
+          }
+          await route.fulfill({ status: 502, contentType: 'application/json', body: JSON.stringify({ error: { message: chineseFailureReason } }) }); return;
+        }
         if (index === 2) {
           assert.equal(handoff?.previousPromptKind, 'seedance');
           assert.equal(handoff.previousFinalPrompt, chinese(1), 'second writer receives the confirmed Seedance predecessor');
@@ -159,7 +208,7 @@ const run = async () => {
         assert.ok([1, 2].includes(index));
         if (index === 1 && failFirstEnglish) {
           failFirstEnglish = false; requests.push({ kind, segmentIndex: index, failed: true });
-          await route.fulfill({ status: 503, contentType: 'application/json', body: '{"error":{"message":"mock first Seedance English unavailable"}}' }); return;
+          await route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: { message: englishFailureReason } }) }); return;
         }
         response = english(index);
       } else throw new Error(`Unexpected planning/H3 request during checkpoint reuse: ${system.slice(0, 90)}`);
@@ -192,6 +241,8 @@ const run = async () => {
   assert.deepEqual(preserved(firstRun), oldH3, 'Seedance first batch retains all public/H3 results and H3 provenance');
   assert.equal(firstRun.project.storyboards[0].seedance25Output.promptZh, chinese(1));
   assert.equal(firstRun.project.storyboards[1].seedance25Output.sequencePromptHandoff.promptFormat, 'seedance');
+  const englishFailureLog = await assertFailureLog({ stage: 'seedance-english-prompt', label: 'Seedance 英文提示词生成', status: 503,
+    reason: englishFailureReason, screenshot: 'english-failure-log' });
   const chineseCheckpoints = firstRun.project.storyboards.map((board) => board.seedance25Output.promptZh);
   const secondStamp = firstRun.project.storyboards[1].seedance25Output.sequencePromptHandoff;
   await capture('two-chinese-saved-first-english-pending');
@@ -208,6 +259,7 @@ const run = async () => {
   assert.deepEqual(final.project.storyboards[1].seedance25Output.sequencePromptHandoff, secondStamp);
   assert.deepEqual(preserved(final), oldH3, 'English-only retry leaves canonical and old H3 drafts intact');
   assert.deepEqual(final.project.generationTasks, []); assert.deepEqual(final.project.assets, []);
+  assert.deepEqual(await readRuntimeLog(), [englishFailureLog], 'successful English retry does not duplicate or erase the failure log');
   await capture('sequence-seedance-complete');
   await page.reload({ waitUntil: 'networkidle' }); await enterDirector();
   const reloaded = await readState();
@@ -215,10 +267,70 @@ const run = async () => {
   assert.deepEqual(reloaded.project.storyboards[1].seedance25Output.sequencePromptHandoff, secondStamp, 'reload preserves Seedance-specific continuity');
   assert.deepEqual(preserved(reloaded), oldH3, 'reload keeps independent H3 output');
   assert.equal(requests.length, 5, 'restoring target and saved outputs does not generate anything');
+  assert.deepEqual(await readRuntimeLog(), [englishFailureLog], 'failure diagnostics survive reload independently of project data');
+
+  // The same trusted checkpoint with empty diagnostics covers a hard Chinese
+  // failure. No English call or later segment may run without a saved Chinese.
+  const chineseFailureStart = requests.length;
+  failChineseWriter = true;
+  await page.evaluate(({ key, fixture }) => { localStorage.clear(); sessionStorage.clear(); localStorage.setItem(key, JSON.stringify(fixture)); }, { key: storageKey, fixture });
+  await page.reload({ waitUntil: 'networkidle' }); await enterDirector();
+  const beforeChineseFailure = preserved(await readState());
+  await page.getByRole('group', { name: '目标提示词格式', exact: true }).getByRole('button', { name: 'Seedance', exact: true }).click();
+  await page.waitForFunction(({ key, planId }) => JSON.parse(localStorage.getItem(key)).project.sequencePlans.find((plan) => plan.id === planId)?.generationPromptFormat === 'seedance', { key: storageKey, planId });
+  await batchButton().click();
+  await page.waitForFunction(({ key, planId }) => JSON.parse(localStorage.getItem(key) || '{}').project?.sequencePlans.find((plan) => plan.id === planId)?.segments[0]?.status === 'failed', { key: storageKey, planId });
+  await page.getByRole('button', { name: '取消顺序生成', exact: true }).waitFor({ state: 'hidden' });
+  const failedChinese = await readState();
+  assert.deepEqual(requests.slice(chineseFailureStart).map((request) => [request.kind, request.segmentIndex]), [['seedance-writer', 1]],
+    'Chinese failure stops before English and the next segment');
+  assert.ok(failedChinese.project.sequencePlans[0].segments[0].failureReason.includes(chineseFailureReason), 'failed segment retains its specific cause');
+  assert.ok(failedChinese.project.sequencePlans[0].segments[0].failureReason.includes('502'));
+  assert.equal(failedChinese.project.sequencePlans[0].segments[1].status, 'ready');
+  assert.ok(failedChinese.project.storyboards.every((board) => !board.seedance25Output?.promptZh));
+  assert.deepEqual(preserved(failedChinese), beforeChineseFailure, 'Chinese failure keeps canonical and old H3 drafts intact');
+  await page.locator('.sequence-segment-error-text').filter({ hasText: chineseFailureReason }).first().waitFor({ state: 'visible' });
+  await capture('chinese-failure-stops-sequence');
+  const chineseFailureLog = await assertFailureLog({ stage: 'seedance-chinese-prompt', label: 'Seedance 中文提示词生成', status: 502,
+    reason: chineseFailureReason, screenshot: 'chinese-failure-log' });
+
+  // Hold the failed segment's batch retry at the local mock so stale failure
+  // text can be inspected before cancellation and the late response arrives.
+  deferChineseFailure = true;
+  const cancelledRetryStart = requests.length;
+  await batchButton().click();
+  await waitForCondition({ label: 'deferred Chinese retry request', timeoutMs: 18_000, intervalMs: 50,
+    check: async () => Boolean(deferredChineseResponse) });
+  await page.waitForFunction(({ key, planId }) => {
+    const segment = JSON.parse(localStorage.getItem(key) || '{}').project?.sequencePlans.find((plan) => plan.id === planId)?.segments[0];
+    return segment?.status === 'ready' && !segment.failureReason;
+  }, { key: storageKey, planId });
+  assert.equal(await page.locator('.sequence-segment-error-text').filter({ hasText: chineseFailureReason }).count(), 0,
+    'retry removes the previous failure text while the new request is pending');
+  assert.equal(await page.locator('.sequence-segment-failure').filter({ hasText: chineseFailureReason }).count(), 0);
+  assert.deepEqual(await readRuntimeLog(), [chineseFailureLog], 'starting a retry preserves existing diagnostics');
+  await capture('chinese-retry-clears-old-failure');
+  const abortedRequest = page.waitForEvent('requestfailed', { predicate: (request) => request.url() === `${origin}${apiPath}` });
+  await page.getByRole('button', { name: '取消顺序生成', exact: true }).click();
+  await page.getByRole('button', { name: '取消顺序生成', exact: true }).waitFor({ state: 'hidden' });
+  cancelledDeferredRetry = true;
+  deferredChineseResponse.release();
+  await Promise.all([abortedRequest, deferredChineseResponse.handled]);
+  await page.waitForLoadState('networkidle');
+  const cancelledChinese = await readState();
+  assert.deepEqual(await readRuntimeLog(), [chineseFailureLog], 'cancelled retry and late HTTP response add no diagnostic');
+  assert.deepEqual(preserved(cancelledChinese), beforeChineseFailure, 'cancelled retry cannot overwrite saved public and H3 results');
+  assert.ok(cancelledChinese.project.storyboards.every((board) => !board.seedance25Output?.promptZh));
+  assert.equal(cancelledChinese.project.sequencePlans[0].segments[0].status, 'ready');
+  assert.ok(!cancelledChinese.project.sequencePlans[0].segments[0].failureReason, 'late response does not restore the cleared failure reason');
+  assert.deepEqual(requests.slice(cancelledRetryStart).map((request) => [request.kind, request.segmentIndex]), [['seedance-writer', 1]],
+    'cancelled retry never translates or starts the next segment');
   assert.deepEqual(errors, []); assert.deepEqual(blockedRequests, []);
   const report = { passed: true, builtApp: true, isolatedBrowserStorage: true, mockedTextApiOnly: true,
     semanticSegments: 2, independentH3AndSeedance: true, exactSeedancePredecessor: true, englishOnlyBatchRetry: true,
-    requests, screenshots, errors, blockedRequests };
+    englishFailureLogged: true, chineseFailureLogged: true, chineseFailureStopsSequence: true, persistentFailureDiagnostics: true,
+    retryClearsStaleFailure: true, cancelledRetryIgnoresLateFailure: true,
+    failureLogs: [englishFailureLog, chineseFailureLog], requests, screenshots, errors, blockedRequests };
   fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(report, null, 2));
   console.log(`Seedance sequence entry built UI QA passed: ${path.join(output, 'report.json')}`);
 };

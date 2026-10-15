@@ -1,6 +1,6 @@
 import { buildOfficialH3CompileInput, buildOfficialH3References, buildOfficialH3SubjectDefinitions } from './officialPrompt';
 import { officialH3ContextForStoryboard } from './officialH3Context';
-import { getOfficialSeedanceSourceFingerprint, type OfficialSeedancePromptInput } from './seedancePrompt';
+import { getOfficialSeedanceSourceFingerprint, hasMatchingSeedanceSourceFingerprint, type OfficialSeedancePromptInput } from './seedancePrompt';
 import { getVideoPromptInstructionLeak } from './videoPromptInstructionLeak';
 import { isSemanticSequencePlan, semanticSegmentSourceContext, semanticSegmentStoryContent } from './semanticSequencePlan';
 import type { Project, Storyboard } from './types';
@@ -22,6 +22,12 @@ const currentSemanticSourceContext = (project: Project, board: Storyboard) => {
 /** Generation, copying and video source selection share this exact evidence snapshot. */
 export const buildOfficialSeedanceInput = (project: Project, board: Storyboard): OfficialSeedancePromptInput => {
   const context = officialH3ContextForStoryboard(project, board);
+  // Generated storyboard images are outputs of this source. Their automatic
+  // shot bindings must not invalidate the video draft that produced them.
+  // Explicitly promoting an image to a global source still changes identity.
+  const automaticImageIds = new Set(context.assets.filter((asset) => asset.source === 'generated'
+    && asset.sourceStoryboardId === board.id && !(board.globalReferenceAssetIds || []).includes(asset.id))
+    .map((asset) => asset.id));
   const sequenceSegmentContext = currentSemanticSourceContext(project, board);
   const references = buildOfficialH3References(board, context.assets, context.characters).map((reference) => {
     // Binary data belongs to the media transport. The writer consumes complete
@@ -29,7 +35,7 @@ export const buildOfficialSeedanceInput = (project: Project, board: Storyboard):
     const evidence = Object.fromEntries(Object.entries(reference).filter(([key]) => !/dataUrl$/iu.test(key)));
     return { ...evidence, tags: reference.tags || [], targetBindings: reference.targetBindings || [] } as typeof reference;
   });
-  return {
+  const input: OfficialSeedancePromptInput = {
     canonicalPrompt: board.promptPlan?.canonicalPrompt || board.finalPrompt,
     durationSec: board.promptPlan?.durationSec || board.durationSec,
     aspectRatio: board.promptPlan?.aspectRatio || board.aspectRatio,
@@ -46,7 +52,8 @@ export const buildOfficialSeedanceInput = (project: Project, board: Storyboard):
       sourceStoryContent: board.sourceStoryContent || context.sceneContent || '',
       ...(sequenceSegmentContext ? { sequenceSegmentContext } : {}),
       sourceSceneSnapshots: (board.sourceSceneSnapshots || []).map((scene) => ({ id: scene.id, title: scene.title, content: scene.content })),
-      shots: board.shots.map((shot) => ({ ...shot, referenceAssetIds: shot.referenceAssetIds || [], prompt: shot.prompt || '' })),
+      shots: board.shots.map((shot) => ({ ...shot,
+        referenceAssetIds: (shot.referenceAssetIds || []).filter((id) => !automaticImageIds.has(id)), prompt: shot.prompt || '' })),
       shotMode: board.shotMode,
       shotCount: board.shotCount,
       confirmedShotCount: board.shots.length,
@@ -56,12 +63,21 @@ export const buildOfficialSeedanceInput = (project: Project, board: Storyboard):
       extraRequirement: board.extraRequirement,
     },
   };
+  if (board.shots.some((shot) => (shot.referenceAssetIds || []).some((id) => automaticImageIds.has(id)))) {
+    // A saved draft made after images already existed can carry the old exact
+    // fingerprint. Accept only that fully reconstructed identity, without
+    // rewriting saved text or relaxing checks on real source changes.
+    input.legacySourceFingerprint = getOfficialSeedanceSourceFingerprint({ ...input,
+      sourceEvidence: { ...input.sourceEvidence,
+        shots: board.shots.map((shot) => ({ ...shot, referenceAssetIds: shot.referenceAssetIds || [], prompt: shot.prompt || '' })) } });
+  }
+  return input;
 };
 
 export const hasCurrentSeedancePrompt = (project: Project, board: Storyboard, language: 'zh' | 'en' = 'zh'): boolean => {
   const output = board.seedance25Output;
   if (board.sourceStale || !output?.promptZh || getVideoPromptInstructionLeak(output.promptZh)
-    || output.sourceFingerprint !== getOfficialSeedanceSourceFingerprint(buildOfficialSeedanceInput(project, board))) return false;
+    || !hasMatchingSeedanceSourceFingerprint(buildOfficialSeedanceInput(project, board), output.sourceFingerprint)) return false;
   return language === 'zh' || Boolean(output.promptEn && output.englishSourceFingerprint === output.sourceFingerprint
     && !getVideoPromptInstructionLeak(output.promptEn));
 };

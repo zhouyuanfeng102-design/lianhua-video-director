@@ -5,7 +5,7 @@ import { buildLaoliVideoApiBody, decodeVideoBinaryBody, fetchGenericVideoModels,
 import { buildVideoApiBody, parseVideoApiResult, videoApiSubmitEndpoint } from '../src/videoGenerationApi';
 import { VideoGenerationEngine } from '../src/videoGeneration';
 import { createInitialState, normalizeState } from '../src/storage';
-import type { AppState, VideoGenerationTask, VideoTaskApiConfig } from '../src/types';
+import type { AppState, ReferenceRole, VideoGenerationTask, VideoTaskApiConfig } from '../src/types';
 import type { GeneratedMediaDownloadRequest, VideoDesktopRequest, VideoGenerationDesktop, VideoGenerationDraft } from '../src/videoGenerationTypes';
 
 const samples = JSON.parse(readFileSync(new URL('./fixtures/generatedImageSamples.json', import.meta.url), 'utf8'));
@@ -80,6 +80,31 @@ assert.throws(() => buildVideoApiBody({ ...config, model: 'H3-KS' }, { ...draft,
 assert.throws(() => buildVideoApiBody(config, { ...draft, audioReferences: [{ bindingId: 'audio', assetId: 'a', slotIndex: 0, target: 'reference', retainMode: 'reference', notes: '' }] }, [], ['audio.wav']), /不支持参考音频/u);
 assert.deepEqual(buildVideoApiBody({ ...config, requestTemplate: '{"text":"{{prompt}}","photos":"{{images}}","params":"{{parameters}}"}' }, referenceDraft, ['one', 'two']).photos, ['one', 'two']);
 assert.equal(buildVideoApiBody(legacy, { ...draft, parameters: { seed: 7 } }, []).seed, 7, 'old custom API JSON remains unchanged');
+
+// Classic images describe reference responsibilities, not a native frame mode.
+// Preserve every picture, literal prompt and the user's role snapshot.
+const classicRoles: ReferenceRole[] = ['first-frame', 'middle-frame', 'middle-frame', 'middle-frame', 'middle-frame', 'last-frame'];
+const classicReferences = classicRoles.map((role, index) => ({ assetId: `classic-frame-${index}`, role, slotIndex: index }));
+const classicSources = classicReferences.map((reference) => `https://assets.invalid/${reference.assetId}.png`);
+const classicFrameDraft: VideoGenerationDraft = { ...draft, name: '首帧、四张中间帧与尾帧',
+  references: classicReferences, referenceSlotRoles: classicRoles,
+  parameters: { duration: 30, resolution: '720p', aspect_ratio: '16:9' } };
+for (const model of ['3.0', '特价2.0', '3.5', '特价2.5-需过人脸技术']) {
+  const duration = /2\.0|^3\.0$/u.test(model) ? 15 : 30;
+  const input = { ...classicFrameDraft, parameters: { ...classicFrameDraft.parameters, duration } };
+  const before = structuredClone(input);
+  assert.deepEqual(buildVideoApiBody({ ...config, model }, input, classicSources), {
+    model, prompt: input.prompt, duration, resolution: '720p', ratio: '16:9', images: classicSources,
+  }, `${model}: first, all four middle pictures and last stay in one ordered images array`);
+  assert.deepEqual(input, before, `${model}: building a request never rewrites prompt or role memory`);
+  assert.deepEqual(buildVideoApiBody({ ...config, model }, { ...input,
+    references: [classicReferences[5]], referenceSlotRoles: ['last-frame'] }, [classicSources[5]]).images, [classicSources[5]],
+  `${model}: last-frame responsibility alone does not invent a required native first frame`);
+  assert.deepEqual(buildVideoApiBody({ ...config, model }, { ...input,
+    references: classicReferences.slice(0, 2).map((reference) => ({ ...reference, role: 'first-frame' as const })),
+    referenceSlotRoles: ['first-frame', 'first-frame'] }, classicSources.slice(0, 2)).images, classicSources.slice(0, 2),
+  `${model}: multiple labelled references do not select a native frame protocol`);
+}
 
 // Resume only missing binary chunks. Cross-origin signed assets stay data, not requests.
 const uploads: Array<Omit<VideoDesktopRequest, 'requestId'>> = [];
@@ -179,6 +204,46 @@ const managed = { fileName: 'generic-result.mp4', relativePath: 'generated/gener
   assert.equal(task(state, id).videoJob?.stage, 'succeeded');
   assert.equal(requests.length, 1);
   engine.dispose();
+}
+
+// The engine preflight and frozen snapshot accept the same six classic inputs.
+// The desktop is a local mock: no upload, fetch or paid API is performed.
+{
+  let state = createInitialState();
+  state.settings.videoTaskApi = { ...config, model: '特价2.5-需过人脸技术' };
+  state.project.assets = classicReferences.map((reference) => ({ id: reference.assetId, name: reference.assetId,
+    type: 'reference', role: 'composition', dataUrl: png, tags: [], createdAt: 1, updatedAt: 1 }));
+  const requests: VideoDesktopRequest[] = [];
+  const desktop = {
+    setVideoTaskCredential: async () => ({ persisted: true }),
+    videoRequest: async (payload: VideoDesktopRequest) => {
+      requests.push(payload);
+      assert.equal(payload.url, 'https://video.laoliimage2.win/v1/videos');
+      assert.equal(payload.method, 'POST');
+      const submitted = JSON.parse(payload.body!);
+      assert.equal(submitted.prompt, classicFrameDraft.prompt);
+      assert.deepEqual(submitted.images, classicReferences.map(() => png));
+      assert.equal(submitted.duration, 30); assert.equal(submitted.resolution, '720p');
+      assert.equal(Object.hasOwn(submitted, 'references'), false);
+      assert.equal(Object.hasOwn(submitted, 'first_frame'), false); assert.equal(Object.hasOwn(submitted, 'last_frame'), false);
+      return response({ id: 'classic-keyframe-mock', status: 'completed', download_url: 'https://cdn.invalid/mock.mp4' });
+    },
+    downloadGeneratedMedia: async () => managed,
+  } as unknown as VideoGenerationDesktop;
+  const engine = new VideoGenerationEngine({ getState: () => state, setState: (update) => { state = update(state); },
+    desktop, onRuntime: () => undefined });
+  try {
+    const id = await engine.start(classicFrameDraft);
+    const snapshot = task(state, id).videoJob!.snapshot;
+    assert.equal(task(state, id).videoJob?.stage, 'succeeded', 'classic role labels never fail preflight');
+    assert.equal(snapshot.draft.prompt, classicFrameDraft.prompt);
+    assert.deepEqual(snapshot.draft.references, classicReferences);
+    assert.deepEqual(snapshot.draft.referenceSlotRoles, classicRoles);
+    assert.deepEqual(snapshot.images.map((image) => ({ assetId: image.assetId, role: image.role, slotIndex: image.slotIndex })), classicReferences);
+    assert.equal(requests.length, 1, 'only the mock submission is called; no upload or polling request is added');
+    assert.deepEqual(classicFrameDraft.references, classicReferences);
+    assert.deepEqual(classicFrameDraft.referenceSlotRoles, classicRoles);
+  } finally { engine.dispose(); }
 }
 
 // An uncertain generation POST is retained across reconciliation, never auto-replayed.

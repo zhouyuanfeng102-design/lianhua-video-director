@@ -21,23 +21,18 @@ const videoRequestOptions = (payload, signal) => {
   const headers = { ...(payload.headers || {}) };
   let body = payload.body;
   if (payload.bodyEncoding === 'base64') {
-    if (body.length > Math.ceil(128 * 1024 * 1024 / 3) * 4) throw new Error('视频接口请求数据超过 128 MB 传输上限');
     if (body.length % 4 !== 0 || !/^[A-Za-z0-9+/]*={0,2}$/u.test(body)) throw new Error('视频上传 Base64 正文无效');
     body = Buffer.from(body, 'base64');
     if (body.toString('base64') !== payload.body) throw new Error('视频上传 Base64 正文无效');
   }
-  if (body && Buffer.byteLength(body, 'utf8') > 128 * 1024 * 1024) throw new Error('视频接口请求数据超过 128 MB 传输上限');
   if (payload.multipart != null) {
     const fields = Array.isArray(payload.multipart.fields) ? payload.multipart.fields : Object.entries(payload.multipart.fields || {}).map(([name, value]) => ({ name, value }));
     const files = payload.multipart.files;
     if (!Array.isArray(files) || !files.length) throw new Error('视频素材上传缺少媒体文件');
     const boundary = `----lianhua-video-${randomBytes(18).toString('hex')}`;
     const chunks = [];
-    let total = 0;
     const append = (value) => {
       const chunk = Buffer.isBuffer(value) ? value : Buffer.from(value, 'utf8');
-      total += chunk.length;
-      if (total > 128 * 1024 * 1024) throw new Error('视频素材上传超过 128 MB 传输上限');
       chunks.push(chunk);
     };
     const fieldName = (name) => {
@@ -49,7 +44,7 @@ const videoRequestOptions = (payload, signal) => {
     }
     for (const [index, file] of files.entries()) {
       const decoded = /^data:audio\//iu.test(String(file.dataUrl || ''))
-        ? decodeReferenceAudioDataUrl(file.dataUrl) : decodeReferenceImageDataUrl(file.dataUrl);
+        ? decodeReferenceAudioDataUrl(file.dataUrl) : decodeReferenceImageDataUrl(file.dataUrl, Number.POSITIVE_INFINITY);
       const requested = path.basename(String(file.fileName || `reference-${index + 1}`)).replace(/[\r\n"\\/]/gu, '_').slice(0, 160);
       const name = `${path.basename(requested, path.extname(requested)) || 'reference'}${decoded.extension}`;
       append(`--${boundary}\r\nContent-Disposition: form-data; name="${fieldName(file.fieldName || file.name)}"; filename="${name}"\r\nContent-Type: ${decoded.mimeType}\r\n\r\n`);
@@ -113,12 +108,18 @@ const createVideoTransport = ({
     request(payload, owner) {
       return run(payload?.requestId, owner, async (signal) => {
         if (typeof payload.url !== 'string') throw new Error('视频接口地址为空');
-        const fetched = await fetchWithLimit(payload.url, videoRequestOptions(payload, signal));
+        // Full video-reference image downloads must not inherit the ordinary
+        // text/JSON response budget. The selected model owns upload limits.
+        const options = videoRequestOptions(payload, signal);
+        const requestBytes = options.body === undefined ? undefined : Buffer.byteLength(options.body);
+        const requestContentType = Object.entries(options.headers).find(([name]) => name.toLowerCase() === 'content-type')?.[1];
+        const fetched = await fetchWithLimit(payload.url, options,
+          payload.responseType === 'base64' ? Number.POSITIVE_INFINITY : undefined);
         const contentType = fetched.response.headers.get('content-type') || '';
         const responseType = payload.responseType === 'auto'
           ? (/^(?:text\/|application\/(?:json|[\w.+-]*\+json))/iu.test(contentType) ? 'text' : 'base64')
           : payload.responseType || 'text';
-        return { status: fetched.response.status, ...encodeResponse(fetched.bytes, responseType, contentType) };
+        return { status: fetched.response.status, ...encodeResponse(fetched.bytes, responseType, contentType), requestBytes, requestContentType };
       });
     },
     cancel(requestId, owner) {

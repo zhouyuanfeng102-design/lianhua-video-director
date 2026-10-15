@@ -1,6 +1,7 @@
 import { isVideoGenerationTask, isVisibleGenerationTask } from './generationTasks';
 import { findProjectVideoTask, preserveVideoProvenanceBeforeTaskRemoval } from './videoProvenance';
 import { videoTaskDeletionBlocked } from './videoTaskDeletionSafety';
+import { videoTaskHasUnresolvedSubmission } from './videoGenerationQueue';
 import type { GenerationTask, ReferenceAsset, VideoGenerationTask } from './types';
 import type { VideoGenerationRuntime } from './videoGenerationTypes';
 
@@ -81,7 +82,7 @@ export const inspectVideoBatchDeletion = (
   )).map((task) => task.id);
   return {
     taskIds, blockedTaskIds, canDelete: !blockedTaskIds.length,
-    ...(blockedTaskIds.length ? { reason: '本批次仍有运行、下载、取消中、结果待确认的任务，或续跑关联尚未建立完整；请处理后再删除。' } : {}),
+    ...(blockedTaskIds.length ? { reason: '本批次仍有运行、下载、取消中、尚未停止追踪的待确认任务，或续跑关联尚未建立完整；请处理后再删除。' } : {}),
   };
 };
 
@@ -100,9 +101,11 @@ export const removeVideoBatchKeepingProvenance = <TProject extends BatchDeletion
   const remaining = { ...preserved, generationTasks: preserved.generationTasks.flatMap((task): GenerationTask[] => {
     if (!ids.has(task.id)) return [task];
     const claim = isVideoGenerationTask(task) ? task.videoJob?.batchContinuation : undefined;
-    // Preserve identities/timestamps/checkpoints during child initialization
-    // as well as after it. Visibility does not change the continuation lock.
-    return claim && !claim.released ? [{ ...task, historyOnly: true } as VideoGenerationTask] : [];
+    // Preserve unresolved POST identities as well as continuation lineage.
+    // Hiding a stopped row must never clear its checkpoint or paid boundary,
+    // release a parent claim, or turn a later resume into a fresh submission.
+    return claim && !claim.released || isVideoGenerationTask(task) && videoTaskHasUnresolvedSubmission(task)
+      ? [{ ...task, historyOnly: true } as VideoGenerationTask] : [];
   }) };
   const timestamp = Date.now();
   const generationTasks = remaining.generationTasks.map((entry) => {

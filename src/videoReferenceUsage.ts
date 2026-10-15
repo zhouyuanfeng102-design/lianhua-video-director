@@ -8,7 +8,7 @@ export interface VideoReferenceUsageContext {
   // Accept readonly role tuples from saved/configured connections as well as
   // mutable arrays from legacy settings.  Usage resolution never mutates the
   // provider mapping.
-  api?: Pick<VideoTaskApiConfig, 'provider'> & { runningHubImageRoles?: readonly ReferenceRole[] };
+  api?: Pick<VideoTaskApiConfig, 'provider'> & Partial<Pick<VideoTaskApiConfig, 'baseUrl' | 'endpoint' | 'statusEndpointTemplate' | 'model' | 'requestTemplate' | 'parameterCapabilities'>> & { runningHubImageRoles?: readonly ReferenceRole[] };
   /**
    * The roles chosen for this particular segment.  This is deliberately
    * separate from the workflow/API mapping: a physical image input can have
@@ -54,13 +54,13 @@ export const videoReferenceUsage = (
       // compatibility fallback; never overwrite a deliberate segment role.
       role: segmentRoles !== undefined
         ? (segmentRole || reference.role)
-        : (mappedRole === 'first-frame' || mappedRole === 'last-frame' ? mappedRole : reference.role),
+        : (mappedRole === 'first-frame' || mappedRole === 'middle-frame' || mappedRole === 'last-frame' ? mappedRole : reference.role),
     };
   });
 };
 
 const slotRoleNames: Record<ReferenceRole, string> = {
-  'first-frame': '首帧', 'last-frame': '尾帧', character: '人物', subject: '主体', scene: '场景',
+  'first-frame': '首帧', 'middle-frame': '中间帧', 'last-frame': '尾帧', character: '人物', subject: '主体', scene: '场景',
   prop: '道具', style: '风格', motion: '动作', composition: '构图', camera: '摄影', audio: '音频',
   dialogue: '对白', 'clay-render': 'Clay Render', creative: '创意', general: '通用参考', unknown: '未指定参考',
 };

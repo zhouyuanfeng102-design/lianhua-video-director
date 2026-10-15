@@ -195,7 +195,7 @@ export type ImageVariant = 'portrait' | 'half-body' | 'full-body' | 'five-view' 
 
 /** Media metadata introduced in schema v4. Optional so v1-v3 projects remain readable. */
 export type ReferenceMediaType = 'image' | 'video' | 'audio' | 'clay-render';
-export type ReferenceRole = 'subject' | 'character' | 'scene' | 'prop' | 'style' | 'motion' | 'composition' | 'camera' | 'first-frame' | 'last-frame' | 'audio' | 'dialogue' | 'clay-render' | 'creative' | 'general' | 'unknown';
+export type ReferenceRole = 'subject' | 'character' | 'scene' | 'prop' | 'style' | 'motion' | 'composition' | 'camera' | 'first-frame' | 'middle-frame' | 'last-frame' | 'audio' | 'dialogue' | 'clay-render' | 'creative' | 'general' | 'unknown';
 
 export interface AudioCue {
   id: string;

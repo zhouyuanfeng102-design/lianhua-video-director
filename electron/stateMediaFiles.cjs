@@ -11,6 +11,14 @@ const mapChanged = (items, transform) => {
   const result = items.map((item) => { const next = transform(item); changed ||= next !== item; return next; });
   return changed ? result : items;
 };
+const mapRecordChanged = (entries, transform) => {
+  if (!isRecord(entries)) return entries;
+  let changed = false;
+  const result = Object.fromEntries(Object.entries(entries).map(([key, item]) => {
+    const next = transform(item); changed ||= next !== item; return [key, next];
+  }));
+  return changed ? result : entries;
+};
 
 const mediaError = (error, label) => {
   const reason = { ENOSPC: '磁盘空间不足', EDQUOT: '磁盘配额已用尽', EACCES: '没有写入权限',
@@ -164,6 +172,19 @@ const writeNewFile = (filePath, bytes, fs) => {
 const mapProjectMedia = (project, transform) => {
   if (!isRecord(project)) return project;
   const replaceProperty = (record, key, next) => next === record[key] ? record : { ...record, [key]: next };
+  // A transport copy belongs to this video selection. The source asset ID,
+  // role, slot and identity bindings remain on the unmodified reference.
+  const mapVideoReference = (reference) => isRecord(reference) && isRecord(reference.transportImage)
+    ? replaceProperty(reference, 'transportImage', transform(reference.transportImage)) : reference;
+  const mapVideoDraft = (draft) => isRecord(draft)
+    ? replaceProperty(draft, 'references', mapChanged(draft.references, mapVideoReference)) : draft;
+  const mapVideoDirector = (director) => {
+    if (!isRecord(director)) return director;
+    let next = replaceProperty(director, 'draft', mapVideoDraft(director.draft));
+    if (isRecord(director.batch)) next = replaceProperty(next, 'batch', replaceProperty(director.batch, 'referenceOverrides',
+      mapRecordChanged(director.batch.referenceOverrides, (references) => mapChanged(references, mapVideoReference))));
+    return next;
+  };
   const mapSnapshot = (snapshot) => isRecord(snapshot)
     ? replaceProperty(snapshot, 'referenceAssetSnapshots', mapChanged(snapshot.referenceAssetSnapshots, transform)) : snapshot;
   const mapTask = (task) => {
@@ -172,7 +193,11 @@ const mapProjectMedia = (project, transform) => {
     const job = task.videoJob;
     if (isRecord(job)) {
       let nextJob = job;
-      if (isRecord(job.snapshot)) nextJob = replaceProperty(nextJob, 'snapshot', replaceProperty(job.snapshot, 'images', mapChanged(job.snapshot.images, transform)));
+      if (isRecord(job.snapshot)) {
+        let snapshot = replaceProperty(job.snapshot, 'images', mapChanged(job.snapshot.images, (image) => transform(mapVideoReference(image))));
+        snapshot = replaceProperty(snapshot, 'draft', mapVideoDraft(snapshot.draft));
+        nextJob = replaceProperty(nextJob, 'snapshot', snapshot);
+      }
       if (isRecord(job.tailPreparation?.selection?.frame)) {
         const selection = job.tailPreparation.selection;
         const nextSelection = replaceProperty(selection, 'frame', transform(selection.frame));
@@ -191,6 +216,8 @@ const mapProjectMedia = (project, transform) => {
   });
   let next = replaceProperty(project, 'assets', assets);
   next = replaceProperty(next, 'generationTasks', mapChanged(project.generationTasks, mapTask));
+  next = replaceProperty(next, 'chapterWorkspaces', mapRecordChanged(project.chapterWorkspaces, (workspace) => isRecord(workspace)
+    ? replaceProperty(workspace, 'videoDirector', mapVideoDirector(workspace.videoDirector)) : workspace));
   return next;
 };
 const mapStateMedia = (state, transform) => {

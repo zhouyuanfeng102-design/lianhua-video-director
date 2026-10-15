@@ -38,7 +38,7 @@ export interface VideoGenerationDesktop {
   rhtvRequest?: VideoGenerationDesktop['videoRequest'];
   rhtvDownload?: VideoGenerationDesktop['downloadGeneratedMedia'];
   rhtvControl?: (request: import('./rhtvBridge').RhTvControlRequest) => Promise<import('./rhtvBridge').RhTvBridgeStatus>;
-  videoRequest: (payload: VideoDesktopRequest) => Promise<{ status: number; body: string; bodyEncoding?: 'text' | 'base64'; contentType?: string }>;
+  videoRequest: (payload: VideoDesktopRequest) => Promise<{ status: number; body: string; bodyEncoding?: 'text' | 'base64'; contentType?: string; requestBytes?: number; requestContentType?: string }>;
   cancelVideoRequest: (requestId: string) => Promise<boolean>;
   watchVideoProgress: (payload: { watchId: string; url: string; headers?: Record<string, string> }) => Promise<void>;
   unwatchVideoProgress: (watchId: string) => Promise<boolean>;
@@ -47,8 +47,10 @@ export interface VideoGenerationDesktop {
   getVideoTaskCredential: (taskId: string) => Promise<string | null>;
   downloadGeneratedMedia: (payload: GeneratedMediaDownloadRequest) => Promise<GeneratedMediaDownloadResult>;
   readManagedImageDataUrl: (payload: { relativePath: string; expectedChecksum?: string }) => Promise<{ dataUrl: string }>;
+  readVideoReferenceImage?: (payload: { relativePath: string; expectedChecksum?: string }) => Promise<{ dataUrl: string; mimeType: 'image/png' | 'image/jpeg' | 'image/webp'; sizeBytes: number; checksum: string }>;
   readManagedAudioDataUrl?: (payload: { relativePath: string; expectedChecksum?: string }) => Promise<{ dataUrl: string }>;
   storeGeneratedImage?: (payload: { dataUrl: string; fileName?: string }) => Promise<ManagedMediaResult>;
+  storeVideoReferenceImage?: (payload: { dataUrl: string; fileName?: string }) => Promise<ManagedMediaResult>;
   storeGeneratedAudio?: (payload: { dataUrl: string; fileName?: string }) => Promise<ManagedMediaResult>;
   saveVideoTaskCheckpoint?: (task: VideoGenerationTask) => Promise<{ persisted: boolean }>;
   getVideoTaskCheckpoint?: (taskId: string) => Promise<VideoGenerationTask | null>;
@@ -78,6 +80,23 @@ export interface VideoPromptSource {
   sourceFingerprint?: string;
   label?: string;
 }
+export interface VideoTransportImage {
+  version: 1;
+  relativePath?: string;
+  dataUrl?: string;
+  url?: string;
+  fileName?: string;
+  checksum: string;
+  sourceChecksum: string;
+  originalSizeBytes: number;
+  sizeBytes: number;
+  originalWidth: number;
+  originalHeight: number;
+  width: number;
+  height: number;
+  mimeType: 'image/png' | 'image/jpeg' | 'image/webp';
+  quality: number;
+}
 export interface VideoImageReference {
   assetId: string;
   role: ReferenceRole;
@@ -86,6 +105,8 @@ export interface VideoImageReference {
   /** Explicit per-selection identities; multiple IDs support a group photo.
    * Empty means intentionally no identity binding, never infer from filename. */
   characterIds?: string[];
+  /** Request-only pixels; the original asset and authored reference identities remain unchanged. */
+  transportImage?: VideoTransportImage;
 }
 export interface VideoGenerationDraft {
   name: string;

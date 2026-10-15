@@ -130,6 +130,48 @@ test('audio conflicts remap frozen task and asset-provenance locators while pres
   assert.deepEqual(JSON.parse(f.read()), after, 'repeat audio import reuses the same verified content and remapping');
 });
 
+test('backup import carries video draft transport copies and remaps only their typed local paths on conflict', (t) => {
+  const copyBytes = Buffer.from('video-only compressed reference pixels');
+  const transportImage = { version: 1, relativePath: 'image/transport.webp', url: 'lianhua-asset://local/image/transport.webp',
+    checksum: digest(copyBytes), sourceChecksum: digest(bytes), originalSizeBytes: bytes.length, sizeBytes: copyBytes.length,
+    originalWidth: 3840, originalHeight: 2160, width: 3840, height: 2160, mimeType: 'image/webp', quality: 0.9 };
+  const reference = { assetId: 'hero-image', role: 'middle-frame', slotIndex: 2, characterIds: ['hero'], transportImage };
+  const director = { draft: { references: [reference] }, batch: { referenceOverrides: { segment: [reference] } } };
+  const f = fixture(t, (state) => ({ ...state,
+    project: { ...state.project, chapterWorkspaces: { chapter: { videoDirector: director } },
+      generationTasks: state.project.generationTasks.map((task) => task.videoJob ? { ...task, videoJob: { ...task.videoJob,
+        snapshot: { projectId: 'active', draft: { prompt: '原视频稿', references: [reference] },
+          images: [{ ...reference, ...transportImage, freezeState: 'frozen', frozenAt: 12 }] },
+      } } : task) },
+    projects: [state.projects[0], { ...state.projects[1], chapterWorkspaces: { chapter: { videoDirector: director } } }],
+  }));
+  const source = path.join(f.source, 'assets', transportImage.relativePath);
+  fs.writeFileSync(source, copyBytes);
+  const local = path.join(f.assetRoot, transportImage.relativePath);
+  fs.mkdirSync(path.dirname(local), { recursive: true });
+  fs.writeFileSync(local, 'existing local copy stays intact');
+  const after = JSON.parse(f.read());
+  const expected = `image/${digest(copyBytes)}.webp`;
+  const expectedTransport = { ...transportImage, relativePath: expected, url: `lianhua-asset://local/${expected}` };
+  const task = after.project.generationTasks[1];
+  for (const ref of [after.project.chapterWorkspaces.chapter.videoDirector.draft.references[0],
+    after.project.chapterWorkspaces.chapter.videoDirector.batch.referenceOverrides.segment[0],
+    after.projects[1].chapterWorkspaces.chapter.videoDirector.draft.references[0],
+    task.videoJob.snapshot.draft.references[0], task.videoJob.snapshot.images[0]]) {
+    assert.deepEqual(ref.transportImage, expectedTransport);
+    assert.equal(ref.assetId, 'hero-image');
+    assert.equal(ref.role, reference.role);
+    assert.equal(ref.slotIndex, reference.slotIndex);
+    assert.deepEqual(ref.characterIds, ['hero']);
+  }
+  assert.equal(task.videoJob.snapshot.images[0].relativePath, expected);
+  assert.deepEqual(task.requestBody, f.state.project.generationTasks[1].requestBody);
+  assert.deepEqual(fs.readFileSync(path.join(f.assetRoot, expected)), copyBytes);
+  assert.equal(fs.readFileSync(local, 'utf8'), 'existing local copy stays intact');
+  assert.deepEqual(fs.readFileSync(f.sourceFile), bytes, 'original asset is not reencoded or replaced');
+  assert.deepEqual(JSON.parse(f.read()), after);
+});
+
 test('legacy JSON/text is returned byte for byte without any media copy', () => {
   for (const raw of ['not json', '{"project": {"id":"old"}, "settings":{}}\n']) {
     assert.equal(readProjectLibraryImport(raw, {}), raw);

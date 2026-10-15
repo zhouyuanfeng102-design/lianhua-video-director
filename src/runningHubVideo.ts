@@ -15,7 +15,7 @@ const own = (value: object, key: string): boolean => Object.prototype.hasOwnProp
 const clone = <T,>(value: T): T => structuredClone(value);
 const makeId = (): string => `runninghub-video-${globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`}`;
 const secretName = /^(?:api[_-]?key|authorization|access[_-]?token|auth[_-]?token|bearer[_-]?token|api[_-]?token|client[_-]?secret|secret|password)$/iu;
-const roles = new Set<ReferenceRole>(['subject', 'character', 'scene', 'prop', 'style', 'motion', 'composition', 'camera', 'first-frame', 'last-frame', 'audio', 'dialogue', 'clay-render', 'creative', 'general', 'unknown']);
+const roles = new Set<ReferenceRole>(['subject', 'character', 'scene', 'prop', 'style', 'motion', 'composition', 'camera', 'first-frame', 'middle-frame', 'last-frame', 'audio', 'dialogue', 'clay-render', 'creative', 'general', 'unknown']);
 const emptyRequest = '{\n  "nodeInfoList": [],\n  "instanceType": "default",\n  "usePersonalQueue": false\n}';
 
 export const defaultRunningHubVideoConfig: RunningHubVideoConfig = {

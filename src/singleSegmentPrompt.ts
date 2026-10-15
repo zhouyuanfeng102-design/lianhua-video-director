@@ -48,7 +48,7 @@ import { CHARACTER_PARTICIPATION_RULE, characterParticipationAliases, resolvePro
 import type { ConverterPreset, H3IdentityBindings, RuleSet, Storyboard } from './types';
 import {
   generateSeedanceBilingualOutput,
-  getOfficialSeedanceSourceFingerprint,
+  hasMatchingSeedanceSourceFingerprint,
   translateSeedancePromptToEnglish,
   type OfficialSeedancePromptInput,
 } from './seedancePrompt';
@@ -646,7 +646,7 @@ export async function generateSingleSegmentPrompt(
     const source = qualifiedSeedanceInput(canonicalBoard);
     const saved = canonicalBoard.seedance25Output;
     if (canonicalBoard.sourceStale || !saved?.promptZh?.trim()
-      || saved.sourceFingerprint !== getOfficialSeedanceSourceFingerprint(source)) {
+      || !hasMatchingSeedanceSourceFingerprint(source, saved.sourceFingerprint)) {
       throw new Error('当前中文 Seedance 尚未生成或来源已变化，请先生成当前中文提示词。');
     }
     try {

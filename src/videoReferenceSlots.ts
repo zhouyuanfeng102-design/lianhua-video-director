@@ -8,6 +8,17 @@ export interface VideoReferenceSelection {
 
 export const videoReferenceSlotIndex = (reference: VideoImageReference, index: number): number => reference.slotIndex ?? index;
 
+/** Number intermediate frames by physical slot, including remembered empty
+ * slots. Removing a picture cannot rename the later frames in the sequence. */
+export const videoMiddleFrameOrdinal = (
+  references: readonly VideoImageReference[], slotIndex: number, rememberedRoles: readonly (ReferenceRole | undefined)[] = [],
+): number => {
+  const roles = new Map<number, ReferenceRole | undefined>();
+  rememberedRoles.forEach((role, slot) => roles.set(slot, role));
+  references.forEach((reference, index) => roles.set(videoReferenceSlotIndex(reference, index), reference.role));
+  return 1 + [...roles].filter(([slot, role]) => Number.isSafeInteger(slot) && slot >= 0 && slot < slotIndex && role === 'middle-frame').length;
+};
+
 export const assertVideoReferenceSlots = (references: readonly VideoImageReference[], capacity?: number): void => {
   const used = new Set<number>();
   references.forEach((reference, index) => {

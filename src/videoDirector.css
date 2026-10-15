@@ -275,6 +275,122 @@ main:has(> .workspace.view-video) > .chapter-toolbar svg { width: 13px; height: 
 .vd-batch-confirm-list strong { overflow-wrap: anywhere; }
 .vd-batch-confirm-list span { color: var(--muted); }
 .vd-batch-image-dialog > .vd-modal-footer, .vd-batch-confirm-dialog > .vd-modal-footer, .vd-prompt-selection-dialog > .vd-modal-footer { flex: 0 0 auto; min-width: 0; }
+/* Keep reference selection focused on the image grid. Scope density and font
+   adaptation to these two pickers; asset-library and comparison views retain
+   their normal sizing. */
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) {
+  container: video-reference-picker / inline-size;
+  --vd-picker-font: clamp(11px, calc(.86cqi * var(--ui-font-scale, 1)), 13px);
+  --vd-picker-small-font: clamp(10px, calc(.75cqi * var(--ui-font-scale, 1)), 12px);
+  padding: 8px 12px; gap: 2px; font-size: var(--vd-picker-font); line-height: 1.25;
+}
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) > .vd-modal-header {
+  display: grid; grid-template-columns: minmax(145px, .24fr) minmax(0, 1fr) auto;
+  align-items: center; gap: 8px; min-width: 0;
+}
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) > .vd-modal-header:not(:has(.vd-segment-character-hint)) {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) > .vd-modal-header h2 {
+  font-size: clamp(13px, calc(1.05cqi * var(--ui-font-scale, 1)), 17px);
+  line-height: 1.3; overflow-wrap: anywhere;
+}
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) .vd-segment-character-hint {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center;
+  gap: 3px 6px; padding: 2px 6px; max-height: min(13dvh, 112px);
+  font-size: var(--vd-picker-small-font); line-height: 1.2;
+}
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) .vd-segment-character-hint-title { grid-column: 1; white-space: normal; }
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) .vd-segment-character-hint-list {
+  grid-column: 1 / -1; grid-row: 2; gap: 3px; align-items: stretch;
+}
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) .vd-segment-character-chip {
+  gap: 0; padding: 2px 4px; line-height: 1.2; border-radius: 4px;
+}
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) .vd-segment-character-hint-note {
+  grid-column: 2; grid-row: 1; margin: 0; font-size: inherit;
+}
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) :is(.vd-segment-character-secondary, .vd-segment-character-hint-empty) {
+  grid-column: 1 / -1;
+}
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) > .vop-model-reader {
+  flex: 0 0 auto; margin: 0; gap: 3px 7px;
+}
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) .vop-model-reader > span {
+  font-size: var(--vd-picker-small-font); line-height: 1.25;
+}
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) :is(.btn, .btn.small) {
+  min-height: 24px; padding: 2px 7px; font-size: var(--vd-picker-font); line-height: 1.25;
+}
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) .vd-reference-usage-hint {
+  margin: 0; padding: 1px 0; font-size: var(--vd-picker-small-font); line-height: 1.25;
+}
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) > .vd-compression-summary {
+  margin: 0; padding: 3px 7px; gap: 3px 9px; border-radius: 6px;
+  font-size: var(--vd-picker-small-font); line-height: 1.25;
+}
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) > .vd-compression-summary > .vd-error {
+  font-size: inherit; line-height: inherit;
+}
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) .vd-reference-picker-tabs { gap: 4px; }
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) .vd-reference-picker-panel { gap: 5px; }
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) :is(.vd-batch-image-toolbar, .vd-reference-picker-search) {
+  display: flex; flex-direction: row; align-items: center; gap: 6px; flex-wrap: nowrap;
+}
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) :is(.vd-batch-image-toolbar, .vd-reference-picker-search) .field {
+  display: flex; flex-direction: row; align-items: center; gap: 5px; min-width: 0; margin: 0;
+}
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) :is(.vd-batch-image-toolbar, .vd-reference-picker-search) .field > span {
+  flex: 0 0 auto; font-size: var(--vd-picker-small-font); line-height: 1.25;
+}
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) :is(.vd-batch-image-toolbar, .vd-reference-picker-search) :is(input, select) {
+  height: 25px; min-height: 25px; min-width: 0; padding: 2px 6px;
+  font-size: var(--vd-picker-font); line-height: 1.25;
+}
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) .vd-grow > input { flex: 1; width: 100%; }
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) > .vd-modal-footer {
+  gap: 6px; padding-top: 5px; font-size: var(--vd-picker-font); line-height: 1.25;
+}
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) .vd-image-choice {
+  container: video-reference-card / inline-size; gap: 2px; padding: 5px;
+}
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) .vd-image-pick {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 3px; padding: 0;
+}
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) .vd-image-pick > :is(img, .reference-image-name) { grid-column: 1 / -1; }
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) .reference-image-name-text {
+  font-size: clamp(10px, calc(300cqi / var(--reference-name-units, 1)), 12px);
+  line-height: 1.2;
+}
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) .vd-image-pick > span:where(:not(.reference-image-name)) {
+  font-size: clamp(9px, 6.3cqi, 11px); line-height: 1.25;
+}
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) .vd-image-pick > .vd-image-slot-badge {
+  grid-column: 2; grid-row: 3; align-self: center; white-space: nowrap;
+}
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) .vd-image-choice-tools {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 3px; margin-top: auto;
+}
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) .vd-compression-card { display: contents; }
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) .vd-compression-card > small {
+  grid-column: 1 / -1; font-size: clamp(9px, 6cqi, 10px); line-height: 1.25;
+}
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) .vd-compression-card > div {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 2px; min-width: 0;
+}
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) .vd-image-choice-tools .btn.small {
+  min-height: 22px; padding: 2px 4px; font-size: clamp(9px, 6.3cqi, 11px); line-height: 1.2;
+}
+:is(.vd-batch-image-dialog, .vd-reference-picker-dialog) .vd-image-choice-tools > .btn { align-self: end; margin: 0; }
+@container video-reference-picker (max-width: 740px) {
+  :is(.vd-batch-image-dialog, .vd-reference-picker-dialog) > .vd-modal-header {
+    grid-template-columns: minmax(115px, .24fr) minmax(0, 1fr) auto; gap: 5px;
+  }
+  :is(.vd-batch-image-dialog, .vd-reference-picker-dialog) .vd-segment-character-hint { max-height: 90px; }
+  :is(.vd-batch-image-dialog, .vd-reference-picker-dialog) .vd-segment-character-hint-title { grid-column: 1 / -1; }
+  :is(.vd-batch-image-dialog, .vd-reference-picker-dialog) .vd-segment-character-hint-note { grid-column: 1 / -1; grid-row: auto; }
+  :is(.vd-batch-image-dialog, .vd-reference-picker-dialog) .vd-reference-picker-search { flex-wrap: wrap; }
+}
 .vd-batch-confirm-dialog .vd-modal-footer .check-row, .vd-prompt-selection-dialog .vd-modal-footer .check-row { flex: 1 1 260px; min-width: 0; white-space: normal; align-items: flex-start; line-height: 1.4; }
 .vd-batch-confirm-dialog .vd-modal-footer .check-row input { flex-shrink: 0; margin-top: 2px; }
 .vd-prompt-selection-dialog .vd-prompt-picker { flex: 1 1 auto; min-height: 0; }

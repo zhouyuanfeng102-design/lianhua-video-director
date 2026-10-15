@@ -8,6 +8,7 @@ import test from 'node:test';
 
 const require = createRequire(import.meta.url);
 const { createStateMediaExternalizer, collectStateMediaFiles } = require('../electron/stateMediaFiles.cjs');
+const { collectVideoFrozenAssets } = require('../electron/videoTaskCheckpoint.cjs');
 const samples = require('./fixtures/generatedImageSamples.json');
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=', 'base64');
 const checksum = (bytes) => createHash('sha256').update(bytes).digest('hex');
@@ -161,6 +162,50 @@ test('backup collection covers media-bearing records and rejects path traversal/
   assert.deepEqual(collectStateMediaFiles(state).map((file) => file.relativePath), ['video/movie.mp4', 'image/frozen.png', 'image/tail.png']);
   assert.throws(() => collectStateMediaFiles(stateOf({ relativePath: '../outside.png' })), /路径无效/u);
   assert.throws(() => collectStateMediaFiles(stateOf(reference, { ...reference, checksum: 'b'.repeat(64) })), /SHA-256 冲突/u);
+});
+
+test('video transport copies survive draft saves and export collection without changing original references or duplicating frozen files', (t) => {
+  const f = fixture(t);
+  const copyBytes = Buffer.from(samples.webp, 'base64');
+  const transportImage = { version: 1, dataUrl: dataUrl(copyBytes, 'image/webp'), checksum: checksum(copyBytes),
+    sourceChecksum: checksum(png), originalSizeBytes: png.length, sizeBytes: copyBytes.length,
+    originalWidth: 1, originalHeight: 1, width: 1, height: 1, mimeType: 'image/webp', quality: 0.9 };
+  const reference = { assetId: 'picture', role: 'middle-frame', slotIndex: 2, characterIds: ['hero'], transportImage };
+  const task = { id: 'video', kind: 'video', requestBody: { image: dataUrl(copyBytes, 'image/webp') }, videoJob: { snapshot: {
+    projectId: 'active', draft: { prompt: '原始视频提示词', references: [reference] },
+    images: [{ ...reference, ...transportImage, freezeState: 'frozen', frozenAt: 55 }],
+  } } };
+  const director = { draft: { references: [reference] }, batch: { referenceOverrides: { segment: [reference] } } };
+  const before = deepFreeze({ project: { id: 'active', assets: [asset()], generationTasks: [task],
+    chapterWorkspaces: { chapter: { videoDirector: director } } },
+    projects: [{ id: 'archive', assets: [], generationTasks: [], chapterWorkspaces: { chapter: { videoDirector: director } } }] });
+  const after = f.externalize(before);
+  const copyPath = `image/${checksum(copyBytes)}.webp`;
+  const refs = [after.project.chapterWorkspaces.chapter.videoDirector.draft.references[0],
+    after.project.chapterWorkspaces.chapter.videoDirector.batch.referenceOverrides.segment[0],
+    after.project.generationTasks[0].videoJob.snapshot.draft.references[0],
+    after.project.generationTasks[0].videoJob.snapshot.images[0],
+    after.projects[0].chapterWorkspaces.chapter.videoDirector.draft.references[0]];
+  for (const ref of refs) {
+    assert.equal(ref.assetId, reference.assetId);
+    assert.equal(ref.role, reference.role);
+    assert.equal(ref.slotIndex, reference.slotIndex);
+    assert.deepEqual(ref.characterIds, reference.characterIds);
+    assert.equal(ref.transportImage.relativePath, copyPath);
+    assert.equal(ref.transportImage.dataUrl, undefined);
+    assert.equal(ref.transportImage.sourceChecksum, checksum(png));
+    assert.equal(ref.transportImage.quality, 0.9);
+  }
+  assert.deepEqual(fs.readFileSync(path.join(f.assetRoot, after.project.assets[0].relativePath)), png, 'source bytes stay exact');
+  assert.deepEqual(fs.readFileSync(path.join(f.assetRoot, copyPath)), copyBytes);
+  assert.equal(after.project.generationTasks[0].videoJob.snapshot.images[0].relativePath, copyPath);
+  assert.equal(after.project.generationTasks[0].videoJob.snapshot.images[0].frozenAt, 55);
+  assert.equal(after.project.generationTasks[0].requestBody, task.requestBody);
+  assert.equal(before.project.chapterWorkspaces.chapter.videoDirector.draft.references[0].transportImage.dataUrl, transportImage.dataUrl);
+  assert.deepEqual(collectStateMediaFiles(after).map((file) => file.relativePath).sort(),
+    [`image/${checksum(png)}.png`, copyPath].sort());
+  assert.deepEqual(collectVideoFrozenAssets(after.project).map((file) => file.relativePath), [copyPath]);
+  assert.equal(f.externalize(after), after, 'saving managed copies again is a no-op');
 });
 
 test('storage migration does not impose the generation API 32 MiB upload quota', (t) => {

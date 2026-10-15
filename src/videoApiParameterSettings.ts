@@ -5,7 +5,7 @@ import { videoApiCapabilityScope } from './videoApiCapabilities';
 /** In-memory request identity only. This value contains a key and must not be persisted. */
 export const videoApiParameterReadIdentity = (config: VideoTaskApiConfig): string => JSON.stringify([
   config.provider || 'generic', config.baseUrl || '', config.endpoint, config.statusEndpointTemplate,
-  config.apiKey, config.authHeader, config.authScheme, config.model || '',
+  config.apiKey, config.authHeader, config.authScheme, config.model || '', config.requestTemplate || '',
 ]);
 
 export const applyVideoApiParameterCapabilities = (

@@ -4,6 +4,7 @@ import { hasCurrentTextApiConversion } from '../src/appEffects';
 import { buildOfficialSeedanceInput, hasCurrentSeedancePrompt } from '../src/seedanceSource';
 import { createInitialState } from '../src/storage';
 import { sourceContentHash } from '../src/sourceIntegrity';
+import { bindStoryboardImageAsset, buildStoryboardImageRequests } from '../src/storyboardImages';
 import { buildSequencePromptHandoff, getSequencePromptHandoffStatus } from '../src/sequencePromptHandoff';
 import type { ConverterPreset, Project, Storyboard, VideoSequencePlan } from '../src/types';
 
@@ -141,6 +142,44 @@ assert.deepEqual(retryStages, ['translate']);
 assert.ok(hasCurrentSeedancePrompt(project, recovered, 'en'));
 assert.deepEqual(recovered.shots, partial.shots);
 assert.equal(recovered.seedance25Output?.promptZh, partial.seedance25Output?.promptZh);
+
+// A pre-fix draft saved after its image was automatically bound can retry
+// only English with its reconstructable old fingerprint and original Chinese.
+const legacyImageRequest = buildStoryboardImageRequests(recovered, 'storyboard-shots')[0];
+const legacyImageAsset = { id: 'legacy-generated-frame', name: legacyImageRequest.name,
+  type: legacyImageRequest.assetType, role: legacyImageRequest.assetRole, referenceRole: legacyImageRequest.referenceRole,
+  source: 'generated' as const, sourceStoryboardId: recovered.id, sourceShotId: legacyImageRequest.shotId,
+  mediaType: 'image' as const, imageVariant: legacyImageRequest.imageVariant,
+  dataUrl: 'data:image/png;base64,AA==', tags: [], createdAt: 101, updatedAt: 101 };
+const legacyImageBoard = bindStoryboardImageAsset(recovered, legacyImageRequest, legacyImageAsset.id);
+const legacyImageProject: Project = { ...project, assets: [...project.assets, legacyImageAsset], storyboards: [legacyImageBoard] };
+const legacyImageFingerprint = buildOfficialSeedanceInput(legacyImageProject, legacyImageBoard).legacySourceFingerprint;
+assert.ok(legacyImageFingerprint);
+legacyImageBoard.seedance25Output = { ...legacyImageBoard.seedance25Output!, sourceFingerprint: legacyImageFingerprint!,
+  promptEn: undefined, englishSourceFingerprint: undefined };
+const legacyEnglishCalls: string[] = [];
+const legacyEnglish = await generateSingleSegmentPrompt({ ...options, board: legacyImageBoard, mode: 'translate-english',
+  buildSeedanceInput: (candidate) => buildOfficialSeedanceInput(legacyImageProject, candidate),
+  onQualifiedCanonical: () => assert.fail('legacy English retry must not reconvert'),
+  onQualifiedChinese: () => assert.fail('legacy English retry must not rewrite Chinese'),
+  request: async (_system, _user, stage) => { legacyEnglishCalls.push(stage); return english; },
+});
+assert.deepEqual(legacyEnglishCalls, ['translate']);
+assert.equal(legacyEnglish.seedance25Output?.sourceFingerprint, legacyImageFingerprint);
+assert.equal(legacyEnglish.seedance25Output?.englishSourceFingerprint, legacyImageFingerprint);
+assert.equal(legacyEnglish.seedance25Output?.promptZh, recovered.seedance25Output?.promptZh);
+assert.equal(legacyEnglish.seedance25Output?.promptEn, english);
+assert.deepEqual(legacyEnglish.shots, legacyImageBoard.shots);
+assert.equal(hasCurrentSeedancePrompt(legacyImageProject, legacyEnglish, 'en'), true);
+for (const changed of [
+  { ...legacyImageBoard, durationSec: 4 },
+  { ...legacyImageBoard, shots: [{ ...legacyImageBoard.shots[0], action: '旅人甲离开大厅' }] },
+]) {
+  await assert.rejects(generateSingleSegmentPrompt({ ...options, board: changed, mode: 'translate-english',
+    buildSeedanceInput: (candidate) => buildOfficialSeedanceInput(legacyImageProject, candidate),
+    request: async () => assert.fail('a real source change must stop legacy English retry before a request'),
+  }), /来源已变化/u);
+}
 
 // Changed workspace at either checkpoint prevents all following requests.
 for (const checkpoint of ['canonical', 'chinese']) {

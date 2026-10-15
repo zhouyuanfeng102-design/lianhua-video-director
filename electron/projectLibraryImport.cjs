@@ -89,9 +89,16 @@ const remapMediaRecords = (state, replacements) => {
   const imageSnapshot = (snapshot) => {
     if (Array.isArray(snapshot?.referenceAssetSnapshots)) snapshot.referenceAssetSnapshots.forEach(media);
   };
+  const videoReferences = (references) => {
+    if (Array.isArray(references)) references.forEach((reference) => media(reference?.transportImage));
+  };
   const task = (value) => {
     if (value?.kind === 'image' || value?.kind === 'image-prompt-reverse') imageSnapshot(value);
-    if (Array.isArray(value?.videoJob?.snapshot?.images)) value.videoJob.snapshot.images.forEach(media);
+    if (Array.isArray(value?.videoJob?.snapshot?.images)) {
+      value.videoJob.snapshot.images.forEach(media);
+      videoReferences(value.videoJob.snapshot.images);
+    }
+    videoReferences(value?.videoJob?.snapshot?.draft?.references);
     if (Array.isArray(value?.videoJob?.snapshot?.audios)) value.videoJob.snapshot.audios.forEach(media);
     media(value?.videoJob?.tailPreparation?.selection?.frame);
     const preparation = value?.videoJob?.tailPreparation;
@@ -104,6 +111,10 @@ const remapMediaRecords = (state, replacements) => {
       media(asset); imageSnapshot(asset?.imageRegenerationSnapshot); task(asset?.videoSourceTask);
     }
     if (Array.isArray(project?.generationTasks)) project.generationTasks.forEach(task);
+    for (const workspace of Object.values(project?.chapterWorkspaces || {})) {
+      videoReferences(workspace?.videoDirector?.draft?.references);
+      for (const references of Object.values(workspace?.videoDirector?.batch?.referenceOverrides || {})) videoReferences(references);
+    }
   }
 };
 

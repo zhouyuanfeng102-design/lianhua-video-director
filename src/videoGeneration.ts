@@ -6,6 +6,9 @@ import { compileRunningHubVideoApi, resolveConfiguredVideoApi } from './runningH
 import { migrateRunningHubVideoApiImageProtocol, resolveRunningHubVideoImageProtocol } from './runningHubImageProtocol';
 import { nestedValue } from './videoTasks';
 import { decodeVideoBinaryBody, genericVideoStatusEndpoint, isLaoliVideoApi, isLaoliVideoBuiltinProtocol, laoliVideoUsesInlineImages, uploadLaoliVideoImage } from './genericVideoApi';
+import { buildV6kVideoApiRequest, isV6kVideoBuiltinProtocol } from './v6kVideoApi';
+import { formatVideoHttpError } from './videoHttpError';
+import { formatVideoImageSize, videoImageDataSize } from './videoReferenceCompression';
 import { hasObsoleteVideoFileMapping, videoApiFileQueryEndpoint } from './videoApiLegacyConfig';
 import { defaultComfyVideoConfig } from './videoGenerationTypes';
 import { defaultRhTvApi, RHTV_ORIGIN } from './rhtvBridge';
@@ -14,10 +17,12 @@ import { createStoryboardImageNameAllocator } from './storyboardImageNames';
 import { cancelledVideoBatchTaskBeforePost, validVideoBatchPreviousTail, videoBatchConnectionIdentity, videoBatchDependencyFingerprint, videoBatchRequestFingerprint, videoBatchTailReferences, videoTaskMatchesRequestFingerprint, videoTaskRequestFingerprint } from './videoBatch';
 import { videoReferenceUsage } from './videoReferenceUsage';
 import { videoReferenceSelection } from './videoReferenceSlots';
+import { assertVideoTransportImageData, assertVideoTransportImageSource, normalizeVideoTransportImage, videoTransportReferenceAsset, VIDEO_TRANSPORT_IMAGE_INVALID } from './videoTransportImage';
 import { prepareVideoH3ReferenceDraft } from './videoH3ReferenceBinding';
 import { sourceContentHash } from './sourceContentHash';
 import { getVideoTailCharacterPlacement, getVideoTailReferencePlacements } from './videoTailReference';
 import { videoBatchContinuationPersistenceIssue } from './videoBatchContinuation';
+import { videoTaskIsClearedStoppedHistory } from './videoTaskDeletionSafety';
 import { runningHubRemoteSucceeded } from './videoResultRecovery';
 import { canRecoverComfyPreviewResult } from './comfyuiVideo';
 import { isUnsubmittedVideoTask, resolveVideoExecutionLimit, videoExecutionScopesMayShareCapacity, videoTaskExecutionScope, videoTaskOccupiesGenerationSlot, videoTaskRemoteGenerationEnded, videoTaskStoppedLocally, videoTasksMayShareExecutionScope, type VideoExecutionScope } from './videoGenerationQueue';
@@ -41,6 +46,7 @@ import type {
   VideoBatchStartResult,
   VideoGenerationDesktop,
   VideoGenerationDraft,
+  VideoImageReference,
   VideoGenerationJob,
   VideoGenerationRuntime,
   VideoGenerationSnapshot,
@@ -265,6 +271,7 @@ const requestFingerprintOwnerKey = (projectId: string, requestFingerprint: strin
 );
 
 const batchTaskStillBlocksDuplicate = (task: VideoGenerationTask): boolean => {
+  if (videoTaskIsClearedStoppedHistory(task)) return false;
   if (cancelledVideoBatchTaskBeforePost(task)) return false;
   // Old progress/checkpoint records can retain a transient stage after the
   // finished video was saved. The explicit terminal result wins over that
@@ -831,8 +838,9 @@ export class VideoGenerationEngine {
           // The selected pixels may be durable in the independent journal even
           // when a crash preceded their binding into the task image/asset list.
           frame = structuredClone(selection.frame);
-          if (!this.options.desktop?.readManagedImageDataUrl) throw new Error('已保存的 AI 选帧无法读取，请检查素材存储。');
-          await this.options.desktop.readManagedImageDataUrl({ relativePath: frame.relativePath!, expectedChecksum: frame.checksum });
+          const readFrame = this.options.desktop?.readVideoReferenceImage || this.options.desktop?.readManagedImageDataUrl;
+          if (!readFrame) throw new Error('已保存的 AI 选帧无法读取，请检查素材存储。');
+          await readFrame({ relativePath: frame.relativePath!, expectedChecksum: frame.checksum });
           live = checkSource();
         } else {
           if (!this.options.desktop?.extractWorkbenchFrames || !this.options.desktop.videoWorkbenchStatus) throw new Error('本地视频抽帧工具不可用，请检查 FFmpeg。');
@@ -1165,18 +1173,29 @@ export class VideoGenerationEngine {
           const fields = payload.multipart.fields || {};
           if (Array.isArray(fields)) fields.forEach((field) => form.append(field.name, field.value));
           else Object.entries(fields).forEach(([name, value]) => form.append(name, value));
-          for (const file of payload.multipart.files) form.append(file.fieldName || file.name || 'file', await (await fetch(file.dataUrl)).blob(), file.fileName);
+          for (const file of payload.multipart.files) {
+            const data = file.dataUrl.match(/^data:([^;,]+);base64,([A-Za-z0-9+/]+={0,2})$/u);
+            if (!data) throw new Error('视频上传素材的 Base64 格式无效，尚未提交。');
+            form.append(file.fieldName || file.name || 'file', new Blob([decodeVideoBinaryBody(data[2])], { type: data[1] }), file.fileName);
+          }
           body = form;
         }
         // Browser development fallback also has no deadline. Desktop release uses the cancellable main-process bridge.
         const result = await fetch(payload.url, { method: payload.method || 'GET', headers: payload.headers, body });
-        response = { status: result.status, body: await result.text() };
+        response = { status: result.status, body: await result.text(),
+          requestBytes: payload.multipart || body === undefined ? undefined : typeof body === 'string' ? new TextEncoder().encode(body).byteLength : (body as Uint8Array).byteLength,
+          requestContentType: payload.multipart ? 'multipart/form-data' : Object.entries(payload.headers || {}).find(([name]) => name.toLowerCase() === 'content-type')?.[1] };
       }
       let result: unknown = response.body;
       if (typeof result === 'string') { try { result = JSON.parse(result); } catch { /* allow explicit non-JSON HTTP error */ } }
       if (response.status < 200 || response.status >= 300) {
-        const detail = record(result) ? String(result.message || nestedValue(result, 'error.message') || nestedValue(result, 'base_resp.status_msg') || '') : '';
-        throw new HttpError(response.status, `HTTP ${response.status}${detail ? `：${detail}` : ''}`);
+        const formatted = formatVideoHttpError(response.status, result, {
+          requestBytes: response.requestBytes,
+          requestContentType: response.requestContentType,
+          knownSecrets: Object.values(payload.headers || {}).flatMap((value) => [value, value.replace(/^Bearer\s+/iu, '')]),
+          sensitiveTexts: [task.videoJob?.snapshot.draft.prompt || ''],
+        });
+        throw new HttpError(response.status, formatted);
       }
       return result;
     } finally { requests.delete(requestId); }
@@ -1211,8 +1230,9 @@ export class VideoGenerationEngine {
 
   private async imageData(task: VideoGenerationTask, asset: ReferenceAsset): Promise<string> {
     if (asset.missing) throw new Error(`图片“${asset.name}”文件丢失，请重新关联素材。`);
-    if (asset.relativePath && this.options.desktop?.readManagedImageDataUrl) {
-      return (await this.options.desktop.readManagedImageDataUrl({ relativePath: asset.relativePath, expectedChecksum: asset.checksum })).dataUrl;
+    const readImage = this.options.desktop?.readVideoReferenceImage || this.options.desktop?.readManagedImageDataUrl;
+    if (asset.relativePath && readImage) {
+      return (await readImage({ relativePath: asset.relativePath, expectedChecksum: asset.checksum })).dataUrl;
     }
     if (asset.dataUrl?.startsWith('data:image/')) return asset.dataUrl;
     if (asset.url && /^https?:\/\//iu.test(asset.url)) {
@@ -1237,21 +1257,33 @@ export class VideoGenerationEngine {
     return { ...image, id: image.assetId, type: 'reference', role: 'composition', referenceRole: image.role, tags: [], createdAt: 0, updatedAt: 0 };
   }
 
+  private async transportReferenceAsset(reference: VideoImageReference, asset: ReferenceAsset, frozen = false): Promise<ReferenceAsset> {
+    if (!frozen) await assertVideoTransportImageSource(reference, asset);
+    return videoTransportReferenceAsset(reference, asset, frozen);
+  }
+
   private async freezeImage(task: VideoGenerationTask, image: VideoGenerationSnapshot['images'][number]): Promise<{ image: VideoGenerationSnapshot['images'][number]; dataUrl: string }> {
     const dataUrl = await this.imageData(task, this.imageAsset(image));
+    if (image.transportImage !== undefined) {
+      const transport = normalizeVideoTransportImage(image.transportImage);
+      if (!transport) throw new Error(VIDEO_TRANSPORT_IMAGE_INVALID);
+      await assertVideoTransportImageData(transport, dataUrl);
+    }
     this.ensureActive(task);
     if (task.videoJob?.snapshot.previousTail?.reservedFrameAssetId === image.assetId) {
       if (image.freezeState !== 'frozen' || !image.relativePath || !image.checksum) throw new Error('上段尾帧没有可信原始文件，后段未提交。');
       return { image, dataUrl };
     }
-    if (this.options.desktop?.storeGeneratedImage) {
-      const managed = await this.options.desktop.storeGeneratedImage({ dataUrl, fileName: image.fileName || `${image.assetId}.png` });
+    const storeImage = this.options.desktop?.storeVideoReferenceImage || this.options.desktop?.storeGeneratedImage;
+    if (storeImage) {
+      const managed = await storeImage({ dataUrl, fileName: image.fileName || `${image.assetId}.png` });
       this.ensureActive(task);
       if (!managed.relativePath || !managed.checksum) throw new Error(`图片“${image.name}”快照保存失败，尚未提交生成。`);
-      return { image: { assetId: image.assetId, role: image.role, ...(image.slotIndex !== undefined ? { slotIndex: image.slotIndex } : {}), name: image.name, fileName: managed.fileName, relativePath: managed.relativePath, checksum: managed.checksum, freezeState: 'frozen', frozenAt: image.frozenAt || Date.now() }, dataUrl };
+      if (image.transportImage && managed.checksum !== image.transportImage.checksum) throw new Error(VIDEO_TRANSPORT_IMAGE_INVALID);
+      return { image: { ...image, fileName: managed.fileName, relativePath: managed.relativePath, checksum: managed.checksum, dataUrl: undefined, url: undefined, freezeState: 'frozen', frozenAt: image.frozenAt || Date.now() }, dataUrl };
     }
     // A browser has no managed-file bridge. Persist the captured bytes, never reread a mutable asset/URL.
-    return { image: { assetId: image.assetId, role: image.role, ...(image.slotIndex !== undefined ? { slotIndex: image.slotIndex } : {}), name: image.name, fileName: image.fileName, dataUrl, freezeState: 'frozen', frozenAt: image.frozenAt || Date.now() }, dataUrl };
+    return { image: { ...image, dataUrl, freezeState: 'frozen', frozenAt: image.frozenAt || Date.now() }, dataUrl };
   }
 
   private audioAssets(project: Project, draft: VideoGenerationDraft, reuse?: VideoGenerationSnapshot): ReferenceAsset[] {
@@ -1396,20 +1428,20 @@ export class VideoGenerationEngine {
     const reuse = reused && reused.projectId === project.id && reused.connection.backend === draft.backend
       && draft.workflowId === reused.draft.workflowId && draft.apiProfileId === reused.draft.apiProfileId
       && draft.runningHubWorkflowId === reused.draft.runningHubWorkflowId ? reused : undefined;
-    const assets = validationDraft.references.map((reference, referenceIndex) => {
+    const assets = await Promise.all(validationDraft.references.map(async (reference, referenceIndex) => {
       if (requestedTail && referenceIndex === requestedTail.placement.index) return undefined;
       const frozen = reuse?.images.find((image) => image.assetId === reference.assetId);
       if (frozen) {
         if (!(frozen.relativePath && frozen.checksum) && !(frozen.freezeState === 'frozen' && frozen.dataUrl?.startsWith('data:image/'))) {
           throw new Error(`批量第 ${index + 1} 项的旧任务图片“${frozen.name}”没有可信原始字节，请重新选择图片。`);
         }
-        return this.imageAsset({ ...structuredClone(frozen), role: reference.role });
+        return this.transportReferenceAsset(reference, this.imageAsset({ ...structuredClone(frozen), role: reference.role }), true);
       }
       const asset = project.assets.find((candidate) => candidate.id === reference.assetId);
       if (!asset || asset.type === 'video' || asset.type === 'audio') throw new Error(`批量第 ${index + 1} 项所选图片已不存在或不是图片资产。`);
       if (asset.missing) throw new Error(`批量第 ${index + 1} 项的图片“${asset.name}”文件丢失，请重新关联素材。`);
-      return structuredClone(asset);
-    });
+      return this.transportReferenceAsset(reference, structuredClone(asset));
+    }));
     const config: VideoTaskApiConfig | undefined = reuse?.connection.api ? migrateRunningHubVideoApiImageProtocol({ ...reuse.connection.api, apiKey: await this.recoverCredential(reusedTask!) })
       : draft.backend === 'api' ? resolveConfiguredVideoApi(state.settings, draft) : undefined;
     const comfy: ComfyVideoConfig = reuse?.connection.comfyui
@@ -1595,13 +1627,17 @@ export class VideoGenerationEngine {
         batchId: continued.task.batchId!, taskId: continued.task.id, requestFingerprint: continued.task.requestFingerprint! } } : {}),
     };
     // Capture inline pixels before any task from the batch can be submitted.
-    if (this.options.desktop?.storeGeneratedImage) for (let imageIndex = 0; imageIndex < snapshot.images.length; imageIndex += 1) {
+    if (this.options.desktop?.storeGeneratedImage || this.options.desktop?.storeVideoReferenceImage) for (let imageIndex = 0; imageIndex < snapshot.images.length; imageIndex += 1) {
       const image = snapshot.images[imageIndex];
       if (!image.dataUrl?.startsWith('data:image/')) continue;
-      const managed = await this.options.desktop.storeGeneratedImage({ dataUrl: image.dataUrl, fileName: image.fileName });
+      if (image.transportImage) await assertVideoTransportImageData(image.transportImage, image.dataUrl);
+      const storeImage = image.transportImage && this.options.desktop?.storeVideoReferenceImage || this.options.desktop?.storeGeneratedImage;
+      if (!storeImage) continue;
+      const managed = await storeImage({ dataUrl: image.dataUrl, fileName: image.fileName });
       if (!managed.relativePath || !managed.checksum) throw new Error(`图片“${image.name}”快照保存失败，批量任务尚未提交。`);
+      if (image.transportImage && managed.checksum !== image.transportImage.checksum) throw new Error(VIDEO_TRANSPORT_IMAGE_INVALID);
       snapshot.images[imageIndex] = {
-        assetId: image.assetId, role: image.role, ...(image.slotIndex !== undefined ? { slotIndex: image.slotIndex } : {}), name: image.name, fileName: managed.fileName,
+        ...image, name: image.name, fileName: managed.fileName, dataUrl: undefined, url: undefined,
         relativePath: managed.relativePath, checksum: managed.checksum, freezeState: 'frozen', frozenAt: Date.now(),
       };
     }
@@ -1722,10 +1758,14 @@ export class VideoGenerationEngine {
     const batchId = continuation?.batchId || id('video_batch');
     const skipped: VideoBatchSkippedItem[] = [];
     const selected: PreparedBatchItem[] = [];
+    // Preflight may await local reads. A removed stopped record can have been
+    // restored/resumed meanwhile, so admission must inspect the latest tasks.
+    const admissionProject = allProjects(this.options.getState()).find((candidate) => candidate.id === projectId);
+    if (!admissionProject) throw new Error('批量视频所属项目已不存在。');
     for (const candidate of orderedPrepared) {
       const ownerKey = requestFingerprintOwnerKey(projectId, candidate.requestFingerprint);
       const ownerMarker = this.requestFingerprintOwners.get(ownerKey);
-      const existingTask = this.fingerprintTask(project, candidate.requestFingerprint);
+      const existingTask = this.fingerprintTask(admissionProject, candidate.requestFingerprint);
       if (ownerMarker?.startsWith('initializing:') || existingTask && batchTaskStillBlocksDuplicate(existingTask)) {
         skipped.push({ itemKey: candidate.item.itemKey, requestFingerprint: candidate.requestFingerprint, reason: 'in-flight', taskId: existingTask?.id });
         continue;
@@ -1885,19 +1925,19 @@ export class VideoGenerationEngine {
     const reuse = reused && reused.projectId === project.id && reused.connection.backend === draft.backend
       && draft.workflowId === reused.draft.workflowId && draft.apiProfileId === reused.draft.apiProfileId
       && draft.runningHubWorkflowId === reused.draft.runningHubWorkflowId ? reused : undefined;
-    const assets = draft.references.map((reference) => {
+    const assets = await Promise.all(draft.references.map(async (reference) => {
       const frozen = reuse?.images.find((image) => image.assetId === reference.assetId);
       if (frozen) {
         // .82 managed bytes were protected by checksums; its inline/remote references were not captured.
         if (!(frozen.relativePath && frozen.checksum) && !(frozen.freezeState === 'frozen' && frozen.dataUrl?.startsWith('data:image/'))) {
           throw new Error(`旧任务的图片“${frozen.name}”没有保存原始字节，无法保证同图重生成。请明确重新选择图片后作为新任务生成；不会悄悄使用已更改的素材。`);
         }
-        return this.imageAsset({ ...structuredClone(frozen), role: reference.role });
+        return this.transportReferenceAsset(reference, this.imageAsset({ ...structuredClone(frozen), role: reference.role }), true);
       }
       const asset = project.assets.find((item) => item.id === reference.assetId);
       if (!asset || asset.type === 'video' || asset.type === 'audio') throw new Error('所选图片已不存在或不是图片资产。');
-      return structuredClone(asset);
-    });
+      return this.transportReferenceAsset(reference, structuredClone(asset));
+    }));
     const config: VideoTaskApiConfig | undefined = reuse?.connection.api ? migrateRunningHubVideoApiImageProtocol({ ...reuse.connection.api, apiKey: await this.recoverCredential(reusedTask!) })
       : draft.backend === 'api' ? resolveConfiguredVideoApi(state.settings, draft) : undefined;
     const comfy = reuse?.connection.comfyui ? { ...reuse.connection.comfyui, apiKey: await this.key(reusedTask!), workflows: reuse.connection.workflow ? [reuse.connection.workflow] : [] } : state.settings.comfyuiVideo || defaultComfyVideoConfig;
@@ -1953,12 +1993,16 @@ export class VideoGenerationEngine {
         videoJob: { snapshot, stage: 'preparing', preparation: { version: 1, phase: 'preparing', uploadedImages: [], ...(snapshot.audios?.length ? { uploadedAudios: [] } : {}) }, message: '正在准备已选择的提示词与素材' }, createdAt: now, updatedAt: now,
       };
       // Inline images are quick local writes. Never put their full pixels in desktop project JSON.
-      if (this.options.desktop?.storeGeneratedImage) for (let index = 0; index < snapshot.images.length; index += 1) {
+      if (this.options.desktop?.storeGeneratedImage || this.options.desktop?.storeVideoReferenceImage) for (let index = 0; index < snapshot.images.length; index += 1) {
         const image = snapshot.images[index];
         if (!image.dataUrl?.startsWith('data:image/')) continue;
-        const managed = await this.options.desktop.storeGeneratedImage({ dataUrl: image.dataUrl, fileName: image.fileName });
+        if (image.transportImage) await assertVideoTransportImageData(image.transportImage, image.dataUrl);
+        const storeImage = image.transportImage && this.options.desktop?.storeVideoReferenceImage || this.options.desktop?.storeGeneratedImage;
+        if (!storeImage) continue;
+        const managed = await storeImage({ dataUrl: image.dataUrl, fileName: image.fileName });
         if (!managed.relativePath || !managed.checksum) throw new Error(`图片“${image.name}”快照保存失败，尚未提交生成。`);
-        snapshot.images[index] = { assetId: image.assetId, role: image.role, ...(image.slotIndex !== undefined ? { slotIndex: image.slotIndex } : {}), name: image.name, fileName: managed.fileName, relativePath: managed.relativePath, checksum: managed.checksum, freezeState: 'frozen', frozenAt: Date.now() };
+        if (image.transportImage && managed.checksum !== image.transportImage.checksum) throw new Error(VIDEO_TRANSPORT_IMAGE_INVALID);
+        snapshot.images[index] = { ...image, fileName: managed.fileName, relativePath: managed.relativePath, checksum: managed.checksum, dataUrl: undefined, url: undefined, freezeState: 'frozen', frozenAt: Date.now() };
       }
       if (this.disposed || this.options.getState().project.id !== project.id) throw new Error('已切换项目，本次视频尚未提交。');
       this.restoredCheckpoints.add(taskId);
@@ -2115,6 +2159,19 @@ export class VideoGenerationEngine {
         // never let that stale or hand-edited H3 text cross the paid boundary.
         assertOfficialH3Submission(body, draft, ownerProject);
       }
+      // Build and validate the actual transport before persisting the paid
+      // submission boundary. v6k receives every selected image exactly once,
+      // as binary files rather than Base64 duplicated in frame fields.
+      const submitHeaders = { ...headers, 'Content-Type': 'application/json',
+        ...(draft.backend === 'api' && isLaoliVideoApi(config!) ? { 'Idempotency-Key': task.id } : {}),
+      };
+      const submitRequest: Omit<RequestInput, 'requestId'> = config && isV6kVideoBuiltinProtocol(config)
+        ? buildV6kVideoApiRequest(config, draft, imageValues, submitHeaders)
+        : { url: draft.backend === 'api' ? videoApiSubmitEndpoint(config!) : join(comfy!.baseUrl, comfy!.promptPath || '/prompt'),
+          method: 'POST', headers: submitHeaders, body: JSON.stringify(body) };
+      const sizeHint = submitRequest.multipart
+        ? ` · 图片文件 ${formatVideoImageSize(submitRequest.multipart.files.reduce((sum, image) => sum + (videoImageDataSize(image.dataUrl) || 0), 0))}`
+        : ` · 请求 ${formatVideoImageSize(new TextEncoder().encode(submitRequest.body || '').byteLength)}`;
       const gated = this.liveTask(taskId);
       if (!gated || !this.tailReady(gated) || !this.chainDependencyReady(gated)) {
         throw new Error('尾帧或上一段成片在提交前失效，后段未提交。');
@@ -2127,15 +2184,11 @@ export class VideoGenerationEngine {
         await this.checkpoint(this.liveTask(taskId)!);
         return taskId;
       }
-      task = await this.checkpoint({ ...task, videoJob: { ...task.videoJob!, preparation: { ...task.videoJob!.preparation!, phase: 'post-started' }, stage: 'submitting', message: '正在提交视频任务；不会自动重复提交' } });
+      task = await this.checkpoint({ ...task, videoJob: { ...task.videoJob!, preparation: { ...task.videoJob!.preparation!, phase: 'post-started' }, stage: 'submitting', message: `正在提交视频任务${sizeHint}；不会自动重复提交` } });
       this.ensureActive(task);
       if (!this.tailReady(task) || !this.chainDependencyReady(task)) throw new Error('保存提交边界期间上一段或尾帧失效；本段没有发送生成请求，请处理依赖后建立新任务。');
       postStarted = true;
-      const result = await this.request(task, { url: draft.backend === 'api' ? videoApiSubmitEndpoint(config!) : join(comfy!.baseUrl, comfy!.promptPath || '/prompt'), method: 'POST', headers: { ...headers, 'Content-Type': 'application/json',
-        // Task identity is durable before the first POST and unique per result.
-        // A missing receipt never triggers a new-key automatic resubmission.
-        ...(draft.backend === 'api' && isLaoliVideoApi(config!) ? { 'Idempotency-Key': task.id } : {}),
-      }, body: JSON.stringify(body) });
+      const result = await this.request(task, submitRequest);
       const mapped = draft.backend === 'api' ? parseVideoApiResult(result, config!) : {
         remoteTaskId: record(result) && result.prompt_id ? String(result.prompt_id) : '', status: 'submitted' as const, stage: 'queued' as const, resultUrl: undefined, message: '已进入 ComfyUI 队列', fileId: undefined, downloadError: undefined,
       };

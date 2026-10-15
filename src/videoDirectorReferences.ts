@@ -3,6 +3,7 @@ import type { VideoGenerationDraft, VideoGenerationSnapshot, VideoImageReference
 import { frozenVideoReferenceAsset } from './videoProvenance';
 import { addVideoDraftAssets, isVideoDirectorImage } from './videoDirectorDraft';
 import { removeVideoReference, videoReferenceSelection } from './videoReferenceSlots';
+import { videoTransportReferenceAsset } from './videoTransportImage';
 
 /** The thumbnail must represent the same frozen bytes the engine will submit. */
 export const videoDraftReferenceAsset = (
@@ -11,7 +12,10 @@ export const videoDraftReferenceAsset = (
   reusedSnapshot?: VideoGenerationSnapshot,
 ): ReferenceAsset | undefined => {
   const frozen = reusedSnapshot?.images.find((image) => image.assetId === reference.assetId);
-  return frozen ? frozenVideoReferenceAsset(frozen) : project.assets.find((asset) => asset.id === reference.assetId && isVideoDirectorImage(asset));
+  const original = frozen ? frozenVideoReferenceAsset(frozen) : project.assets.find((asset) => asset.id === reference.assetId && isVideoDirectorImage(asset));
+  if (!original) return undefined;
+  try { return videoTransportReferenceAsset(reference, original, Boolean(frozen)); }
+  catch { return { ...original, relativePath: undefined, dataUrl: undefined, url: undefined, missing: true }; }
 };
 
 /** Confirming the library picker explicitly switches to today's selected

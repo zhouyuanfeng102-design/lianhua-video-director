@@ -172,7 +172,7 @@ interface NormalizedReference {
 const MEDIA_TYPES: readonly ReferenceMediaType[] = ['image', 'video', 'audio', 'clay-render'];
 const ROLES: readonly ReferenceRole[] = [
   'character', 'scene', 'prop', 'style', 'motion', 'composition', 'camera', 'audio',
-  'dialogue', 'first-frame', 'last-frame', 'clay-render', 'creative', 'general'
+  'dialogue', 'first-frame', 'middle-frame', 'last-frame', 'clay-render', 'creative', 'general'
 ];
 
 const mediaAliases: Record<string, ReferenceMediaType> = {
@@ -193,6 +193,7 @@ const roleAliases: Record<string, ReferenceRole> = {
   audio: 'audio', sound: 'audio', 音频: 'audio', 声音: 'audio',
   dialogue: 'dialogue', voice: 'dialogue', 台词: 'dialogue', 对白: 'dialogue',
   'first-frame': 'first-frame', firstframe: 'first-frame', 首帧: 'first-frame',
+  'middle-frame': 'middle-frame', middleframe: 'middle-frame', 'intermediate-frame': 'middle-frame', 中间帧: 'middle-frame',
   'last-frame': 'last-frame', lastframe: 'last-frame', 尾帧: 'last-frame',
   'clay-render': 'clay-render', clayrender: 'clay-render', 泥模: 'clay-render',
   creative: 'creative', 创意: 'creative', general: 'general', reference: 'general', 参考: 'general'
@@ -247,6 +248,7 @@ function defaultResponsibility(role: ReferenceRole, mediaType: ReferenceMediaTyp
     audio: '参考环境声、音乐或声音质感',
     dialogue: '参考对白、声音表演或口型节奏',
     'first-frame': '作为生成起始画面',
+    'middle-frame': '参考中间过程画面，按所选顺序保持动作与空间连续性',
     'last-frame': '作为生成结束画面',
     'clay-render': '参考三维结构、体块和镜头预演',
     creative: '参考创意方向与视觉语汇',

@@ -47,6 +47,7 @@ export async function installVideoReferenceUsageFixture(page, baseUrl, fixtureOp
   const origin = new URL(baseUrl).origin;
   const blockedRequests = [];
   const textRequests = [];
+  const capabilityRequests = [];
   await page.route((url) => /^https?:$/u.test(url.protocol) && url.origin !== origin, async (route) => {
     blockedRequests.push(route.request().url()); await route.abort('blockedbyclient');
   });
@@ -56,6 +57,35 @@ export async function installVideoReferenceUsageFixture(page, baseUrl, fixtureOp
   await page.route('**/__unused-text-reference-api/**', async (route) => {
     textRequests.push(route.request().url()); blockedRequests.push(route.request().url()); await route.abort('blockedbyclient');
   });
+  if (fixtureOptions.compressionImages) {
+    // Plain Chromium has no Electron asset protocol. This local fixture route
+    // serves the exact bytes that its synthetic immutable file store saved.
+    await page.route('**/__video_compression_asset/**', async (route) => {
+      const relativePath = decodeURIComponent(new URL(route.request().url()).pathname.replace(/^\/__video_compression_asset\//u, ''));
+      const stored = await page.evaluate((relativePath) => window.__videoReferenceUsageQa.compressionStoredImage(relativePath), relativePath);
+      if (!stored?.dataUrl) { await route.fulfill({ status: 404, body: 'Unknown synthetic compression copy' }); return; }
+      await route.fulfill({ status: 200, contentType: stored.mimeType,
+        body: Buffer.from(stored.dataUrl.slice(stored.dataUrl.indexOf(',') + 1), 'base64') });
+    });
+  }
+  if (fixtureOptions.capabilityResponses) {
+    const responses = fixtureOptions.capabilityResponses;
+    const capabilityOrigin = new URL(responses.origin || 'https://video.laoliimage2.win').origin;
+    await page.route((url) => url.origin === capabilityOrigin, async (route) => {
+      const request = route.request(); const url = new URL(request.url());
+      const headers = { 'access-control-allow-origin': origin, 'access-control-allow-methods': 'GET, OPTIONS',
+        'access-control-allow-headers': 'Authorization, Content-Type', 'content-type': 'application/json' };
+      if (request.method() === 'OPTIONS') { await route.fulfill({ status: 204, headers }); return; }
+      if (request.method() !== 'GET') { blockedRequests.push(request.url()); await route.abort('blockedbyclient'); return; }
+      const documentPath = responses.openapiPath || '/docs/video-api/openapi.json';
+      if (!['/v1/models', '/openapi.json', '/v1/openapi.json', documentPath].includes(url.pathname)) {
+        blockedRequests.push(request.url()); await route.abort('blockedbyclient'); return;
+      }
+      capabilityRequests.push({ url: request.url(), method: request.method(), path: url.pathname });
+      const body = url.pathname === '/v1/models' ? responses.models : url.pathname === documentPath ? responses.openapi : undefined;
+      await route.fulfill({ status: body ? 200 : 404, headers, body: JSON.stringify(body || {}) });
+    });
+  }
   await page.route('**/__video_reference_usage_fixture.html', (route) => route.fulfill({ contentType: 'text/html', body: '<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><script type="module">import RefreshRuntime from "/@react-refresh"; RefreshRuntime.injectIntoGlobalHook(window); window.$RefreshReg$=()=>{}; window.$RefreshSig$=()=>type=>type; window.__vite_plugin_react_preamble_installed__=true;</script></head><body><div id="root"></div></body></html>' }));
   await page.goto(`${origin}/__video_reference_usage_fixture.html`, { waitUntil: 'networkidle' });
   await page.evaluate(async (fixtureOptions) => {
@@ -70,6 +100,29 @@ export async function installVideoReferenceUsageFixture(page, baseUrl, fixtureOp
     const qa = window.__videoReferenceUsageQa = { submissions: [], aiCalls: 0, extractionCalls: 0, resetCount: 0 };
     const asset = (id, name, role, entityId) => {
       name = fixtureOptions.assetNames?.[id] || name;
+      if (fixtureOptions.compressionImages) {
+        const canvas = document.createElement('canvas');
+        const smallJpeg = id === 'ruq-a-alt'; const tinyPng = id === 'ruq-tiny-png'; const transparent = id === 'ruq-style';
+        canvas.width = tinyPng ? 1 : smallJpeg ? 16 : 512; canvas.height = tinyPng ? 1 : smallJpeg ? 16 : 288;
+        const paint = canvas.getContext('2d');
+        if (smallJpeg || tinyPng) { paint.fillStyle = '#5980a3'; paint.fillRect(0, 0, canvas.width, canvas.height); }
+        else {
+          const pixels = paint.createImageData(canvas.width, canvas.height);
+          let seed = [...id].reduce((value, character) => ((value * 31 + character.charCodeAt(0)) >>> 0), 17);
+          const random = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; return seed >>> 24; };
+          for (let offset = 0; offset < pixels.data.length; offset += 4) {
+            pixels.data[offset] = random(); pixels.data[offset + 1] = random(); pixels.data[offset + 2] = random();
+            pixels.data[offset + 3] = transparent && (offset / 4) % 7 === 0 ? 127 : 255;
+          }
+          paint.putImageData(pixels, 0, 0);
+        }
+        const mimeType = smallJpeg ? 'image/jpeg' : 'image/png';
+        const dataUrl = canvas.toDataURL(mimeType, smallJpeg ? 0.6 : undefined);
+        return { id, name, type: 'reference', role, referenceRole: role, source: 'upload', mediaType: 'image', mimeType,
+          fileName: `${id}.${smallJpeg ? 'jpg' : 'png'}`, dataUrl, sizeBytes: atob(dataUrl.slice(dataUrl.indexOf(',') + 1)).length,
+          width: canvas.width, height: canvas.height, sourceEntityId: entityId, sourceEntityKind: entityId ? 'character' : undefined,
+          tags: [], createdAt: now, updatedAt: now };
+      }
       const canvas = document.createElement('canvas'); canvas.width = 240; canvas.height = 150;
       const paint = canvas.getContext('2d'); paint.fillStyle = role === 'character' ? '#426386' : '#6b8861'; paint.fillRect(0, 0, 240, 150);
       paint.fillStyle = '#fff'; paint.font = '17px sans-serif'; paint.fillText(name, 10, 78);
@@ -80,7 +133,67 @@ export async function installVideoReferenceUsageFixture(page, baseUrl, fixtureOp
       ...['a', 'b', 'c'].map((key, index) => asset(`ruq-${key}`, `${['甲', '乙', '丙'][index]}人物参考`, 'character', `ruq-person-${key}`)),
       asset('ruq-scene', '普通场景照片', 'scene'), asset('ruq-style', '普通风格照片', 'style'),
       asset('ruq-a-alt', '甲人物另一张参考', 'character', 'ruq-person-a'),
+      ...(fixtureOptions.compressionImages ? [asset('ruq-tiny-png', '极小PNG参考', 'scene')] : []),
     ];
+    if (fixtureOptions.compressionImages) {
+      const digest = async (bytes) => [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((byte) => byte.toString(16).padStart(2, '0')).join('');
+      for (const image of assets) {
+        const bytes = Uint8Array.from(atob(image.dataUrl.slice(image.dataUrl.indexOf(',') + 1)), (character) => character.charCodeAt(0));
+        image.checksum = await digest(bytes); image.relativePath = `image/qa-original-${image.id}.${image.mimeType === 'image/jpeg' ? 'jpg' : 'png'}`;
+      }
+      const stored = new Map();
+      qa.compressionStoredImage = (relativePath) => stored.get(relativePath);
+      const original = (relativePath) => qa.project?.assets.find((entry) => entry.relativePath === relativePath);
+      // Map only the desktop asset protocol in this browser fixture. Product
+      // helpers still construct their real lianhua-asset URL; the mapping does
+      // not substitute data URL metadata or touch the production source.
+      const mapAssetPreview = (image) => {
+        const source = image.getAttribute('src');
+        if (!source?.startsWith('lianhua-asset://local/')) return;
+        const relativePath = new URL(source).pathname.slice(1);
+        image.setAttribute('src', `${location.origin}/__video_compression_asset/${relativePath}`);
+      };
+      const protocolBridge = new MutationObserver((records) => {
+        for (const record of records) {
+          if (record.target instanceof HTMLImageElement) mapAssetPreview(record.target);
+          for (const node of record.addedNodes) if (node instanceof Element) {
+            if (node instanceof HTMLImageElement) mapAssetPreview(node);
+            node.querySelectorAll('img').forEach(mapAssetPreview);
+          }
+        }
+      });
+      protocolBridge.observe(document.documentElement, { childList: true, subtree: true, attributes: true, attributeFilter: ['src'] });
+      window.lianhuaDesktop = {
+        readVideoReferenceImage: async ({ relativePath, expectedChecksum }) => {
+          const image = original(relativePath) || stored.get(relativePath);
+          if (!image?.dataUrl) throw new Error('Unknown synthetic compression original path');
+          qa.compressionReadRequests.push(relativePath); qa.compressionInFlight += 1;
+          try {
+            if (qa.holdCompressionReads) await new Promise((resolve) => qa.compressionReadReleases.push(resolve));
+            const blob = await (await fetch(image.dataUrl)).blob(); const checksum = await digest(await blob.arrayBuffer());
+            if (expectedChecksum && expectedChecksum !== checksum) throw new Error('Synthetic compression original checksum mismatch');
+            return { dataUrl: image.dataUrl, mimeType: blob.type, sizeBytes: blob.size, checksum };
+          } finally { qa.compressionInFlight -= 1; }
+        },
+        storeVideoReferenceImage: async ({ dataUrl, fileName }) => {
+          const blob = await (await fetch(dataUrl)).blob(); const checksum = await digest(await blob.arrayBuffer());
+          const extension = blob.type === 'image/jpeg' ? 'jpg' : blob.type === 'image/webp' ? 'webp' : 'png';
+          const relativePath = `image/${checksum}.${extension}`;
+          qa.compressionStoreRequests.push({ checksum, sizeBytes: blob.size, mimeType: blob.type, relativePath });
+          stored.set(relativePath, { dataUrl, mimeType: blob.type });
+          return { fileName, relativePath: qa.invalidCompressionReceipt ? '../invalid-copy.jpg' : relativePath,
+            checksum, sizeBytes: blob.size, mimeType: blob.type, mediaType: 'image', managed: true,
+            missing: false, url: `lianhua-asset://local/${relativePath}` };
+        },
+        assetStatus: async (relativePath) => {
+          const image = original(relativePath) || stored.get(relativePath);
+          if (!image?.dataUrl) return { exists: false };
+          const blob = await (await fetch(image.dataUrl)).blob();
+          return { exists: true, sizeBytes: blob.size, checksum: await digest(await blob.arrayBuffer()) };
+        },
+        getImageThumbnail: async () => { qa.compressionThumbnailRequests += 1; throw new Error('Compression must not read thumbnail pixels'); },
+      };
+    }
     const refs = ['ruq-composition', 'ruq-a', 'ruq-b', 'ruq-c'];
     const characters = ['a', 'b', 'c'].map((key, index) => ({ id: `ruq-person-${key}`, name: `${['甲', '乙', '丙'][index]}人物`, gender: index === 0 ? '女' : '男', apparentAge: '30', race: '人类', appearance: '固定身份', outfit: '普通外套', signatureProps: '', personality: '', motionHabits: '', anchor: '隔离测试人物', negativeContinuity: '', assetIds: [`ruq-${key}`] }));
     const prompt = (index) => [
@@ -114,18 +227,53 @@ export async function installVideoReferenceUsageFixture(page, baseUrl, fixtureOp
       return { id, name, workflowJson: JSON.stringify(nodes), mapping: { prompt: [{ nodeId: '1', inputName: 'text' }], images: roles.map((role, index) => ({ nodeId: String(index + 2), inputName: 'image', role })) }, createdAt: now, updatedAt: now };
     };
     const makeSettings = (options = {}) => {
+      // Each reset is a separate synthetic session. Never borrow capability
+      // caches or mutable settings from a previous rendered fixture state.
+      const baseSettings = structuredClone(createInitialState().settings);
       const boundary = ['first-frame', 'character', 'character', 'character']; const ordinary = ['general', 'character', 'character', 'character'];
       const ending = ['general', 'character', 'character', 'last-frame'];
       const six = [...boundary, 'general', 'general'];
+      const keyframes = ['first-frame', 'middle-frame', 'middle-frame', 'middle-frame', 'last-frame'];
       const selected = options.workflow || 'boundary'; const source = options.source || 'runninghub';
-      return { ...state.settings, videoBackend: source === 'comfyui' ? 'comfyui' : 'api', videoSource: source, activeVideoApiProfileId: null, videoApiProfiles: [],
-        textApi: { ...state.settings.textApi, enabled: false, apiKey: '', baseUrl: `${location.origin}/__unused-text-reference-api/rewrite` }, textApiProfiles: [], activeTextApiProfileId: null,
-        videoTaskApi: { ...state.settings.videoTaskApi, enabled: true, provider: 'generic', model: 'isolated-video', apiKey: '', endpoint: `${location.origin}/__unused-video-reference-api/generate`, statusEndpointTemplate: `${location.origin}/__unused-video-reference-api/status/{id}`, requestTemplate: '' },
-        runningHubVideo: { enabled: true, baseUrl: `${location.origin}/__unused-video-reference-api/`, apiKey: '', activeWorkflowId: `ruq-cloud-${selected}`, workflows: [makeCloud('ruq-cloud-boundary', '四槽首帧工作流', boundary), makeCloud('ruq-cloud-ordinary', '四槽普通工作流', ordinary), makeCloud('ruq-cloud-last', '四槽尾帧工作流', ending), makeCloud('ruq-cloud-narrow', '两槽工作流', boundary.slice(0, 2)), makeCloud('ruq-cloud-six', '六槽工作流', six)] },
-        comfyuiVideo: { enabled: true, baseUrl: `${location.origin}/__unused-video-reference-api/comfy`, apiKey: '', activeWorkflowId: `ruq-comfy-${selected}`, workflows: [makeComfy('ruq-comfy-boundary', '本地四槽首帧工作流', boundary), makeComfy('ruq-comfy-ordinary', '本地四槽普通工作流', ordinary), makeComfy('ruq-comfy-last', '本地四槽尾帧工作流', ending), makeComfy('ruq-comfy-narrow', '本地两槽工作流', boundary.slice(0, 2)), makeComfy('ruq-comfy-six', '本地六槽工作流', six)] } };
+      return { ...baseSettings, videoBackend: source === 'comfyui' ? 'comfyui' : 'api', videoSource: source, activeVideoApiProfileId: null, videoApiProfiles: [],
+        textApi: { ...baseSettings.textApi, enabled: false, apiKey: '', baseUrl: `${location.origin}/__unused-text-reference-api/rewrite` }, textApiProfiles: [], activeTextApiProfileId: null,
+        videoTaskApi: { ...baseSettings.videoTaskApi, enabled: true, provider: 'generic', model: 'isolated-video', apiKey: '', endpoint: `${location.origin}/__unused-video-reference-api/generate`, statusEndpointTemplate: `${location.origin}/__unused-video-reference-api/status/{id}`, requestTemplate: '' },
+        runningHubVideo: { enabled: true, baseUrl: `${location.origin}/__unused-video-reference-api/`, apiKey: '', activeWorkflowId: `ruq-cloud-${selected}`, workflows: [makeCloud('ruq-cloud-boundary', '四槽首帧工作流', boundary), makeCloud('ruq-cloud-ordinary', '四槽普通工作流', ordinary), makeCloud('ruq-cloud-last', '四槽尾帧工作流', ending), makeCloud('ruq-cloud-narrow', '两槽工作流', boundary.slice(0, 2)), makeCloud('ruq-cloud-six', '六槽工作流', six), makeCloud('ruq-cloud-keyframes', '五槽过程帧工作流', keyframes)] },
+        comfyuiVideo: { enabled: true, baseUrl: `${location.origin}/__unused-video-reference-api/comfy`, apiKey: '', activeWorkflowId: `ruq-comfy-${selected}`, workflows: [makeComfy('ruq-comfy-boundary', '本地四槽首帧工作流', boundary), makeComfy('ruq-comfy-ordinary', '本地四槽普通工作流', ordinary), makeComfy('ruq-comfy-last', '本地四槽尾帧工作流', ending), makeComfy('ruq-comfy-narrow', '本地两槽工作流', boundary.slice(0, 2)), makeComfy('ruq-comfy-six', '本地六槽工作流', six), makeComfy('ruq-comfy-keyframes', '本地五槽过程帧工作流', keyframes)] } };
     };
     const makeState = (options = {}) => {
       const project = makeProject(options); const settings = makeSettings(options);
+      if (options.classicModel) {
+        // Opt-in data for a focused classic images preflight regression. Use
+        // ordinary Chinese text, not this fixture's historical H3 delivery.
+        const classicIds = ['ruq-composition', 'ruq-a', 'ruq-b', 'ruq-c', 'ruq-scene', 'ruq-style'];
+        settings.videoBackend = 'api'; settings.videoSource = 'api';
+        settings.videoTaskApi = { ...settings.videoTaskApi, model: options.classicModel,
+          baseUrl: 'https://video.laoliimage2.win', endpoint: '', statusEndpointTemplate: '',
+          apiKey: 'QA_SYNTHETIC_ONLY', requestTemplate: '' };
+        project.sequencePlans[0].segmentDurationSec = 30; project.sequencePlans[0].totalDurationSec = 90;
+        project.sequencePlans[0].segments.forEach((segment, index) => {
+          segment.durationSec = 30; segment.globalStartSec = index * 30; segment.globalEndSec = (index + 1) * 30;
+        });
+        project.storyboards.forEach((board, index) => {
+          const text = `第${index + 1}段：三人沿山路前行，先走到树下，再经过溪流，抬头看向远处，最后停在山门前。甲人物说：“明天出发。”画面保持人物与衣着连续，脚步与风声自然。`;
+          board.finalPrompt = text; board.officialPromptZh = text; board.officialPromptSource = text;
+          board.targetOutput = { prompt: text }; board.globalReferenceAssetIds = [...classicIds];
+          board.promptTrace.convertedPromptFingerprint = sourceContentHash(text);
+          board.promptTrace.referenceAssetIds = [...classicIds];
+          board.durationSec = 30; board.durationPreset = 'custom'; board.resolution = '720p';
+          board.shots[0].prompt = text; board.shots[0].endSec = 30;
+          board.shots[0].referenceAssetIds = [...classicIds];
+        });
+      }
+      if (fixtureOptions.compressionImages) {
+        const chapterId = 'ruq-compression-chapter';
+        project.sourceDocuments = [{ id: chapterId, name: '第 1 章', content: '三人沿山路前行。', createdAt: now, updatedAt: now }];
+        project.activeChapterId = chapterId;
+        project.scenes.forEach((scene) => { scene.chapterId = chapterId; });
+        project.sequencePlans.forEach((plan) => { plan.chapterId = chapterId; });
+        project.storyboards.forEach((board) => { board.chapterId = chapterId; board.promptTrace.sourceDocumentIds = [chapterId]; });
+      }
       if (options.retryMappings) {
         project.generationTasks = [1, 2].map((index) => {
           const board = project.storyboards[index - 1]; const id = `ruq-retry-${index}`;
@@ -140,8 +288,13 @@ export async function installVideoReferenceUsageFixture(page, baseUrl, fixtureOp
           return { id, kind: 'video', targetId: 'frozen-video', storyboardId: board.id, sequencePlanId: 'ruq-plan', segmentId: board.segmentId, status: 'failed', requestBody: {}, createdAt: now + index, updatedAt: now + index, videoJob: { stage: 'failed', snapshot: { projectId: project.id, clientId: id, draft, connection, images } } };
         });
       }
-      qa.submissions = []; qa.aiCalls = 0; qa.extractionCalls = 0; qa.generatedFrameIds = []; qa.allowTailMock = Boolean(options.withVideo); qa.originalProject = JSON.stringify(project); qa.originalSettings = JSON.stringify(settings);
-      return { project, settings, launchRequest: options.retryMappings ? { id: `ruq-launch-${project.id}`, batchTaskIds: ['ruq-retry-1', 'ruq-retry-2'] } : options.single ? { id: `ruq-launch-${project.id}`, storyboardId: 'ruq-board-1', language: 'zh' } : undefined };
+      qa.submissions = []; qa.aiCalls = 0; qa.extractionCalls = 0; qa.capabilityReads = []; qa.savedVideoDrafts = [];
+      qa.compressionReadRequests = []; qa.compressionStoreRequests = []; qa.compressionThumbnailRequests = 0;
+      qa.holdCompressionReads = false; qa.compressionReadReleases = []; qa.compressionInFlight = 0;
+      qa.invalidCompressionReceipt = false;
+      qa.releaseCompressionReads = () => { qa.holdCompressionReads = false; qa.compressionReadReleases.splice(0).forEach((release) => release()); };
+      qa.generatedFrameIds = []; qa.allowTailMock = Boolean(options.withVideo); qa.originalProject = JSON.stringify(project); qa.originalSettings = JSON.stringify(settings);
+      return { project, settings, launchRequest: options.retryMappings ? { id: `ruq-launch-${project.id}`, batchTaskIds: ['ruq-retry-1', 'ruq-retry-2'] } : options.single ? { id: `ruq-launch-${project.id}`, storyboardId: 'ruq-board-1', language: 'zh', ...(options.classicModel ? { promptFormat: 'ordinary' } : {}) } : undefined };
     };
     const controller = { runtimes: {}, start: async (draft) => { qa.submissions.push({ kind: 'single', draft: structuredClone(draft) }); return 'mock-task'; }, startBatch: async (input) => { qa.submissions.push({ kind: 'batch', input: structuredClone(input) }); return { batchId: 'mock-batch', taskIds: [], skipped: [] }; }, cancel: async () => {}, resume: async () => {}, retryDownload: async () => {} };
     const tailFrameTools = { available: true, busy: false, extract: async (source) => {
@@ -154,13 +307,24 @@ export async function installVideoReferenceUsageFixture(page, baseUrl, fixtureOp
     function Harness() {
       const [value, setValue] = React.useState(makeState); qa.project = value.project; qa.settings = value.settings;
       qa.reset = (options) => setValue(makeState(options));
+      qa.setModel = (model) => setValue((current) => ({ ...current,
+        settings: { ...current.settings, videoTaskApi: { ...current.settings.videoTaskApi, model } } }));
       qa.appendFrame = (frame) => setValue((current) => ({ ...current, project: { ...current.project, assets: [frame, ...current.project.assets] } }));
-      return e('main', { style: { height: '100dvh', padding: 12, boxSizing: 'border-box', '--ui-font-scale': fixtureOptions.fontScale ?? 1.5 } }, e(VideoDirectorView, { key: value.project.id, ...value, controller, tailFrameTools }));
+      const onVideoApiParametersChange = fixtureOptions.capabilityResponses ? (profileId, expected, capabilities) => {
+        if (profileId) throw new Error('Capacity fixture reads only its current synthetic API configuration');
+        qa.capabilityReads = [...(qa.capabilityReads || []), { model: expected.model, capabilities: structuredClone(capabilities) }];
+        setValue((current) => ({ ...current, settings: { ...current.settings,
+          videoTaskApi: { ...current.settings.videoTaskApi, parameterCapabilities: structuredClone(capabilities) } } }));
+      } : undefined;
+      const onChapterDraftChange = fixtureOptions.compressionImages ? (projectId, chapterId, draft) => {
+        qa.savedVideoDrafts.push({ projectId, chapterId, draft: JSON.parse(JSON.stringify(draft)) });
+      } : undefined;
+      return e('main', { style: { height: '100dvh', padding: 12, boxSizing: 'border-box', '--ui-font-scale': fixtureOptions.fontScale ?? 1.5 } }, e(VideoDirectorView, { key: value.project.id, ...value, controller, tailFrameTools, onVideoApiParametersChange, onChapterDraftChange }));
     }
     ReactDOM.createRoot(document.getElementById('root')).render(e(Harness));
   }, fixtureOptions);
   await page.getByRole('tab', { name: '长剧情批量', exact: true }).waitFor();
-  return { blockedRequests, textRequests };
+  return { blockedRequests, textRequests, capabilityRequests };
 }
 
 export async function runVideoReferenceUsageUiAssertions(page, outputDirectory) {

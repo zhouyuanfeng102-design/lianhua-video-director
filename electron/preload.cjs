@@ -32,6 +32,8 @@ contextBridge.exposeInMainWorld('lianhuaDesktop', {
   getVideoThumbnail: (payload) => ipcRenderer.invoke('lianhua:get-video-thumbnail', payload),
   cancelVideoThumbnails: (payload) => ipcRenderer.invoke('lianhua:cancel-video-thumbnails', payload),
   readManagedImageDataUrl: (payload) => ipcRenderer.invoke('lianhua:read-managed-image-data-url', payload),
+  readVideoReferenceImage: (payload) => ipcRenderer.invoke('lianhua:read-video-reference-image', payload),
+  storeVideoReferenceImage: (payload) => ipcRenderer.invoke('lianhua:store-video-reference-image', payload),
   readManagedAudioDataUrl: (payload) => ipcRenderer.invoke('lianhua:read-managed-audio-data-url', payload),
   relinkMedia: (asset) => ipcRenderer.invoke('lianhua:relink-media', asset),
   revealAsset: (relativePath) => ipcRenderer.invoke('lianhua:reveal-asset', relativePath),

@@ -8,7 +8,8 @@ import { buildVideoBatchRows, videoBatchPromptFingerprint, videoBatchRequestFing
 import { sourceContentHash } from '../src/sourceIntegrity';
 import { VideoGenerationEngine } from '../src/videoGeneration';
 import { prepareVideoSeedanceReferenceDraft } from '../src/videoSeedanceReferenceBinding';
-import type { AppState, Storyboard, VideoGenerationTask, VideoSequencePlan, VideoTaskApiConfig } from '../src/types';
+import { bindStoryboardImageAsset, buildStoryboardImageRequests } from '../src/storyboardImages';
+import type { AppState, Project, Storyboard, VideoGenerationTask, VideoSequencePlan, VideoTaskApiConfig } from '../src/types';
 import type { VideoGenerationDesktop, VideoGenerationDraft } from '../src/videoGenerationTypes';
 
 const state = createInitialState();
@@ -103,6 +104,90 @@ const mixed = buildVideoBatchRows(project, plan, state.settings, { promptFormat:
 assert.equal(mixed[0].zh?.draft.prompt, seedanceZh);
 assert.equal(mixed[1].zh?.draft.prompt, canonical);
 assert.equal(mixed[1].zh?.draft.source?.promptFormat, 'ordinary');
+
+// Completing downstream storyboard/boundary images is not a new video source.
+// Use the production binding path: the same fields are updated by real jobs.
+const generatedImageProject: Project = { ...structuredClone(project), assets: [], storyboards: [structuredClone(board)] };
+// Persistence retains plan/result links only for a confirmed complete AI
+// canonical board. The earlier source-picker-only fixture has no such trace.
+generatedImageProject.storyboards[0].promptTrace = { modelRuleSetId: '', converterPresetId: '',
+  sourceDocumentIds: [], referenceAssetIds: [], generatedAt: 3, mode: 'text-api',
+  shotPlanMode: 'ai-complete', convertedPromptFingerprint: sourceContentHash(canonical) };
+const savedSeedanceOutput = structuredClone(board.seedance25Output);
+const imageRequests = [
+  ...buildStoryboardImageRequests(board, 'storyboard-shots'),
+  ...buildStoryboardImageRequests(board, 'boundary-frames'),
+];
+const assertDownstreamImageKeepsDelivery = (label: string) => {
+  const candidate = generatedImageProject.storyboards[0];
+  assert.equal(getOfficialSeedanceSourceFingerprint(buildOfficialSeedanceInput(generatedImageProject, candidate)), seedanceFingerprint, `${label}: saved pre-image source identity stays exact`);
+  assert.equal(hasCurrentSeedancePrompt(generatedImageProject, candidate), true, `${label}: Chinese remains current`);
+  assert.equal(hasCurrentSeedancePrompt(generatedImageProject, candidate, 'en'), true, `${label}: English remains current`);
+  assert.deepEqual(candidate.seedance25Output, savedSeedanceOutput, `${label}: no rewriting/re-stamping saved bilingual text`);
+  assert.equal(candidate.finalPrompt, canonical, `${label}: canonical plot/dialogue/timing stay exact`);
+  assert.deepEqual(videoPromptChoices(generatedImageProject, undefined, 'seedance').map((choice) => choice.prompt), [seedanceZh, seedanceEn], `${label}: both languages remain selectable`);
+  const batchRow = buildVideoBatchRows(generatedImageProject, plan, state.settings, { promptFormat: 'seedance', includeStoryboardReferences: false })[0];
+  assert.equal(batchRow.zh?.draft.prompt, seedanceZh, `${label}: batch Chinese remains usable`);
+  assert.equal(batchRow.en?.draft.prompt, seedanceEn, `${label}: batch English remains usable`);
+};
+for (const [index, request] of imageRequests.entries()) {
+  const image = { id: `generated-seedance-${index}`, name: request.name, type: request.assetType,
+    role: request.assetRole, referenceRole: request.referenceRole, mediaType: 'image' as const,
+    source: 'generated' as const, sourceStoryboardId: board.id, sourceShotId: request.shotId,
+    imageVariant: request.imageVariant, checksum: `downstream-image-${index}`, dataUrl: 'data:image/png;base64,AA==',
+    tags: [], createdAt: index + 10, updatedAt: index + 10 };
+  generatedImageProject.assets.push(image);
+  generatedImageProject.storyboards[0] = bindStoryboardImageAsset(generatedImageProject.storyboards[0], request, image.id);
+  assert.ok(generatedImageProject.storyboards[0].shots[0].referenceAssetIds.includes(image.id), 'completion genuinely binds the generated image to its source shot');
+  assertDownstreamImageKeepsDelivery(request.purpose);
+}
+const repeatedImage = { ...generatedImageProject.assets[0], id: 'regenerated-seedance-frame', checksum: 'new-downstream-pixels' };
+generatedImageProject.assets.push(repeatedImage);
+generatedImageProject.storyboards[0] = bindStoryboardImageAsset(generatedImageProject.storyboards[0], imageRequests[0], repeatedImage.id, ['generated-seedance-0']);
+assert.equal(generatedImageProject.storyboards[0].shots[0].referenceAssetIds.includes('generated-seedance-0'), false, 'regeneration replaces the prior automatic association');
+assertDownstreamImageKeepsDelivery('regenerated storyboard image');
+generatedImageProject.assets.push(referenceAsset);
+generatedImageProject.storyboards[0].imageToImage = { referenceAssetIds: [referenceAsset.id], selectedShotIds: [board.shots[0].id] };
+assertDownstreamImageKeepsDelivery('image-to-image input selection');
+const downstreamReload = normalizeState(JSON.parse(serializeStateForStorage({ ...state, project: generatedImageProject, projects: [generatedImageProject], activeProjectId: generatedImageProject.id }).serialized));
+const downstreamRestoredBoard = downstreamReload.project.storyboards.find((candidate) => candidate.id === board.id)!;
+assert.deepEqual(downstreamRestoredBoard.seedance25Output, savedSeedanceOutput, 'restore preserves the old pre-image bilingual fingerprint and source text without rewriting it');
+assert.equal(hasCurrentSeedancePrompt(downstreamReload.project, downstreamRestoredBoard), true);
+assert.equal(hasCurrentSeedancePrompt(downstreamReload.project, downstreamRestoredBoard, 'en'), true);
+const downstreamRestoredPlan = downstreamReload.project.sequencePlans.find((candidate) => candidate.id === plan.id)!;
+assert.equal(downstreamRestoredPlan.segments[0].storyboardId, downstreamRestoredBoard.id, 'a credible completed canonical fixture retains its real plan/result link');
+const downstreamRestoredRow = buildVideoBatchRows(downstreamReload.project, downstreamRestoredPlan, downstreamReload.settings, { promptFormat: 'seedance', includeStoryboardReferences: false })[0];
+assert.equal(downstreamRestoredRow.zh?.draft.prompt, seedanceZh);
+assert.equal(downstreamRestoredRow.en?.draft.prompt, seedanceEn);
+const legacyImageInput = buildOfficialSeedanceInput(downstreamReload.project, downstreamRestoredBoard);
+assert.ok(legacyImageInput.legacySourceFingerprint, 'a fully reconstructable pre-fix source with automatic images supplies its exact legacy identity');
+assert.notEqual(legacyImageInput.legacySourceFingerprint, seedanceFingerprint);
+assert.equal(legacyImageInput.legacySourceFingerprint, getOfficialSeedanceSourceFingerprint({ ...legacyImageInput,
+  sourceEvidence: { ...legacyImageInput.sourceEvidence, shots: downstreamRestoredBoard.shots.map((shot) => ({ ...shot, referenceAssetIds: shot.referenceAssetIds || [], prompt: shot.prompt || '' })) },
+}), 'compatibility matches the whole old shot evidence, including its automatic image ids');
+const legacyImageBoard = { ...downstreamRestoredBoard, seedance25Output: { ...downstreamRestoredBoard.seedance25Output!,
+  sourceFingerprint: legacyImageInput.legacySourceFingerprint!, englishSourceFingerprint: legacyImageInput.legacySourceFingerprint! } };
+const legacyImageProject = { ...downstreamReload.project, storyboards: [legacyImageBoard] };
+assert.equal(hasCurrentSeedancePrompt(legacyImageProject, legacyImageBoard), true, 'Chinese saved after automatic images already existed remains current');
+assert.equal(hasCurrentSeedancePrompt(legacyImageProject, legacyImageBoard, 'en'), true, 'English shares that exact legacy source');
+assert.deepEqual(videoPromptChoices(legacyImageProject, undefined, 'seedance').map((choice) => choice.prompt), [seedanceZh, seedanceEn]);
+const legacyImageReload = normalizeState(JSON.parse(serializeStateForStorage({ ...state, project: legacyImageProject, projects: [legacyImageProject], activeProjectId: legacyImageProject.id }).serialized));
+assert.deepEqual(legacyImageReload.project.storyboards[0].seedance25Output, legacyImageBoard.seedance25Output, 'legacy compatibility never migrates saved fingerprints or prose');
+assert.equal(hasCurrentSeedancePrompt(legacyImageReload.project, legacyImageReload.project.storyboards[0]), true);
+assert.equal(hasCurrentSeedancePrompt(legacyImageReload.project, legacyImageReload.project.storyboards[0], 'en'), true);
+for (const [label, changed] of [
+  ['confirmed action', { ...downstreamRestoredBoard, shots: [{ ...downstreamRestoredBoard.shots[0], action: '甲转身离开训练场' }] }],
+  ['confirmed duration', { ...downstreamRestoredBoard, durationSec: 14 }],
+  ['external shot reference', { ...downstreamRestoredBoard, shots: [{ ...downstreamRestoredBoard.shots[0], referenceAssetIds: [...downstreamRestoredBoard.shots[0].referenceAssetIds, referenceAsset.id] }] }],
+  ['explicit global promotion', { ...downstreamRestoredBoard, globalReferenceAssetIds: [repeatedImage.id] }],
+] as const) {
+  assert.equal(hasCurrentSeedancePrompt(downstreamReload.project, changed), false, `${label} still invalidates the real saved source`);
+  assert.equal(hasCurrentSeedancePrompt(downstreamReload.project, changed, 'en'), false, `${label} also invalidates the English source`);
+  assert.deepEqual(changed.seedance25Output, savedSeedanceOutput, `${label} retains the original saved text`);
+  const legacyChanged = { ...changed, seedance25Output: legacyImageBoard.seedance25Output };
+  assert.equal(hasCurrentSeedancePrompt(legacyImageReload.project, legacyChanged), false, `${label} cannot use legacy compatibility to bypass a real source change`);
+  assert.equal(hasCurrentSeedancePrompt(legacyImageReload.project, legacyChanged, 'en'), false);
+}
 const legacyIdentity = { key: `${board.id}:zh`, language: 'zh', prompt: h3 };
 assert.equal(videoBatchPromptFingerprint({ storyboardId: board.id, language: 'zh', prompt: h3 }), `video-prompt-v1-${sourceContentHash(JSON.stringify(legacyIdentity)).slice('src-v1-'.length)}`, 'an absent format preserves the existing completed/in-flight prompt identity');
 assert.notEqual(videoBatchPromptFingerprint({ ...seedanceChoice, prompt: h3 }), videoBatchPromptFingerprint(h3Choice), 'an explicit format remains part of the new source identity even when bodies happen to match');

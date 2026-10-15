@@ -63,6 +63,7 @@ const REFERENCE_ROLE_LABELS: Record<ReferenceRole, string> = {
   composition: '构图镜位',
   camera: '摄影机',
   'first-frame': '首帧',
+  'middle-frame': '中间帧',
   'last-frame': '尾帧',
   audio: '声音参考',
   dialogue: '对白参考',

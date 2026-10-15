@@ -15,6 +15,9 @@ import { isRunningHubH3AutoPromptInput } from '../runningHubPromptPictures';
 import { availableVideoParameterKeys, changeVideoParameterText, isVideoOutputParameterKey, readVideoParameterText, videoOutputParameterSummary, videoParameterInputText, videoOutputParameterPresentation } from '../videoOutputParameters';
 import { VideoOutputParameters } from './VideoOutputParameters';
 import { VideoApiParameterReader, type VideoApiParameterReaderProps } from './VideoApiParameterReader';
+import { getVideoApiImageCapacity } from '../videoImageCapacity';
+import { useVideoReferenceCompression } from './VideoReferenceCompression';
+import { videoReferenceByteLimit } from '../videoReferenceCompression';
 import { VideoExecutionControls, type VideoExecutionPreferences } from './VideoExecutionControls';
 import { useVideoTaskRuntime, type VideoRuntimeStore } from '../videoRuntimeStore';
 import type { AppSettings, Project, ReferenceAsset, ReferenceRole, VideoGenerationTask } from '../types';
@@ -44,7 +47,7 @@ import {
 import { prepareVideoTailCharacterDraft } from '../videoTailCharacters';
 import { isVideoH3ReferenceInfo, prepareVideoH3ReferenceDraft, videoH3ReferenceCharacterIds, videoReferenceCharacterBindingWarning, videoReferenceCharacterOwners, type VideoH3CharacterReferenceState } from '../videoH3ReferenceBinding';
 import { offsetVideoReferenceSlotRoles, videoReferenceSlotLabels, videoReferenceUsage } from '../videoReferenceUsage';
-import { addVideoReference, removeVideoReference, videoReferenceSelection, videoReferenceSlotIndex, videoReferenceSlotSpan, type VideoReferenceSelection } from '../videoReferenceSlots';
+import { addVideoReference, removeVideoReference, videoMiddleFrameOrdinal, videoReferenceSelection, videoReferenceSlotIndex, videoReferenceSlotSpan, type VideoReferenceSelection } from '../videoReferenceSlots';
 import { videoSegmentCharacterHints, type VideoSegmentCharacterHintResult } from '../videoSegmentCharacters';
 import { ProjectVoicePresetEditor, VideoAudioReferenceEditor } from './VideoAudioReferences';
 import { audioRetainModes, prepareVideoAudioDraft, renderVideoAudioDraft, validateVideoAudioReferences, videoAudioSlotCount, videoAudioTargetLabel } from '../videoAudioReferences';
@@ -138,11 +141,27 @@ function VideoH3ReferenceNotices({ project, draft, warnings = [], onRepair, onRe
 
 const imageRoles: Array<[ReferenceRole, string]> = [
   ['general', '通用参考'], ['character', '人物参考'], ['subject', '主体参考'], ['scene', '场景参考'],
-  ['composition', '构图参考'], ['first-frame', '首帧'], ['last-frame', '尾帧'], ['style', '风格参考'],
+  ['composition', '构图参考'], ['first-frame', '首帧'], ['middle-frame', '中间帧'], ['last-frame', '尾帧'], ['style', '风格参考'],
   ['prop', '道具参考'], ['camera', '摄影参考'], ['motion', '动作参考'], ['clay-render', 'Clay Render'], ['creative', '创意参考'],
 ];
 const imageRoleLabel = (role: ReferenceRole) => imageRoles.find(([key]) => key === role)?.[1] || role;
 type ReferenceUsageContext = Parameters<typeof videoReferenceUsage>[1];
+
+function VideoImageCapacityNotice({ api, selectedCount }: { api: ReferenceUsageContext['api']; selectedCount: number }) {
+  const capacity = getVideoApiImageCapacity(api);
+  let sourceUrl: string | undefined;
+  try {
+    const url = new URL(capacity?.sourceUrl || '');
+    if (/^https?:$/u.test(url.protocol) && !url.username && !url.password) sourceUrl = url.toString();
+  } catch { /* Missing source remains explicit. */ }
+  return <p className="vd-reference-usage-hint" aria-label="接口图片容量">
+    {capacity ? <>接口已返回 {capacity.maxCount} 个图片槽 · 已选 {selectedCount} 张。
+      {sourceUrl && <a href={sourceUrl} target="_blank" rel="noreferrer">{capacity.source === 'models' ? '模型信息来源' : 'OpenAPI 来源'}</a>}
+      {capacity.fetchedAt && <> · 读取于 {new Date(capacity.fetchedAt).toLocaleString('zh-CN')}</>}
+      {selectedCount > capacity.maxCount && <span className="vd-error"> 已选数量超过接口返回容量，请调整选图。</span>}
+    </> : <>未读取到当前接口、当前模型的图片容量；这里只显示已有选图和用途记录的槽位。</>}
+  </p>;
+}
 /** A library asset's category is provenance, not a submission constraint.  A
  * segment may deliberately use a scene/composition image as a character,
  * first-frame, or other physical slot.  Surface that difference as context
@@ -164,8 +183,8 @@ const mappedBoundaryRole = (context: ReferenceUsageContext, index: number): Refe
 const boundaryUsageSummary = (context: ReferenceUsageContext): string => {
   const roles = context.backend === 'comfyui' ? context.workflow?.mapping.images.map((slot) => slot.role)
     : context.api?.provider === 'runninghub' ? context.api.runningHubImageRoles : undefined;
-  return roles?.flatMap((role, index) => role === 'first-frame' || role === 'last-frame'
-    ? [`图片槽 ${index + 1} 用作${imageRoleLabel(role)}`] : []).join('；') || '';
+  return roles?.flatMap((role, index) => role === 'first-frame' || role === 'middle-frame' || role === 'last-frame'
+    ? [`图片槽 ${index + 1} 用作${imageRoleLabel(role)}${role === 'middle-frame' ? ` ${videoMiddleFrameOrdinal([], index, roles)}` : ''}`] : []).join('；') || '';
 };
 const stageLabels: Record<VideoGenerationStage, string> = {
   preparing: '准备素材', submitting: '正在提交', queued: '排队中', running: '生成中', reconnecting: '连接中断，恢复状态中',
@@ -372,7 +391,7 @@ function VideoReferenceSlotUsageEditor({
   const labels = videoReferenceSlotLabels(selection.references, scopedContext, slotOffset, selection.referenceSlotRoles);
   const oldContext = { ...usageContext, slotRoles: undefined };
   return <div className="vd-slot-usage-editor" aria-label={`${segmentLabel || '本段'}图片槽位用途`}>
-    <p className="field-hint">按物理槽位设置本段用途；空槽也可先设置用途。取消图片只释放该槽，不会重新排列其它槽。</p>
+    <p className="field-hint">可设置首帧、多张中间帧和尾帧；中间帧按槽位顺序编号，数量由当前接口或工作流的图片槽决定。空槽也可先设置用途，取消图片不会重新排列其它槽。定帧效果由接口或工作流决定。</p>
     <ol className="vd-reference-list vd-slot-usage-list">
       {Array.from({ length: slotCount }, (_, physicalSlot) => {
         if (physicalSlot < slotOffset) return <li className="vd-reference-row vd-slot-reserved" key={`reserved-${physicalSlot}`}><span className="vd-reference-order">{physicalSlot + 1}</span><div className="vd-reference-info"><strong>系统衔接槽</strong><small>由本地真实末帧占用，当前选择器不修改</small></div></li>;
@@ -392,7 +411,7 @@ function VideoReferenceSlotUsageEditor({
           <span className="vd-reference-order">{physicalSlot + 1}</span>
           {asset ? <button type="button" className="vd-reference-thumb" onClick={() => onPreview(asset)} aria-label={`预览 ${asset.name}`}><img src={assetPreviewUrl(asset)} alt={asset.name} /></button> : <span className="vd-reference-thumb vd-slot-placeholder">未选图</span>}
           <div className="vd-reference-info"><strong>{reference ? <ReferenceImageName name={asset?.name || reference.assetId} /> : `图片槽 ${physicalSlot + 1}（未选择）`}</strong>{reference && <small className="vd-image-slot-badge">{labels[index]}</small>}
-            <label className="field"><span>本段用途</span><select aria-label={`${segmentLabel || '本段'}图片槽 ${physicalSlot + 1} 用途`} value={role} onChange={(event) => onRoleChange(physicalSlot, event.target.value as ReferenceRole)}>{imageRoles.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
+            <label className="field"><span>本段用途</span><select aria-label={`${segmentLabel || '本段'}图片槽 ${physicalSlot + 1} 用途`} value={role} onChange={(event) => onRoleChange(physicalSlot, event.target.value as ReferenceRole)}>{imageRoles.map(([value, label]) => <option key={value} value={value}>{value === 'middle-frame' ? `${label} ${videoMiddleFrameOrdinal(selection.references, relativeSlot, selection.referenceSlotRoles)}` : label}</option>)}</select></label>
             {characterBindingWarning && <small className="vd-reference-usage-warning">{characterBindingWarning}</small>}
             {reference && asset && project && onCharacterChange && <details className="vd-details"><summary>对应人物／形态：{characterOwners.map((character) => character.name).join('、') || '未绑定（不阻止生成）'}</summary><p className="field-hint">只影响本段图片身份引用；合照可选多人，同一人物可对应多张图。不改台词、不调用 AI。</p>{project.characters.map((character) => {
               return <label className="check-row" key={character.id}><input type="checkbox" checked={characterIds.includes(character.id)} onChange={(event) => onCharacterChange(reference.assetId, event.target.checked ? [...characterIds, character.id] : characterIds.filter((id) => id !== character.id))} />{character.name}</label>;
@@ -485,7 +504,7 @@ function VideoSegmentCharacterHint({ hint, states, promptFormat }: { hint: Video
   </div>;
 }
 
-function VideoBatchImagePicker({ row, draft, references, referenceSlotRoles, images, workflow, usageContext, slotOffset = 0, onApply, onClose, project }: {
+function VideoBatchImagePicker({ row, draft, references, referenceSlotRoles, images, workflow, usageContext, slotOffset = 0, onApply, onClose, project, settings, onVideoApiParametersChange }: {
   row: VideoBatchRow;
   draft: VideoGenerationDraft;
   references: readonly VideoImageReference[];
@@ -497,6 +516,8 @@ function VideoBatchImagePicker({ row, draft, references, referenceSlotRoles, ima
   onApply: (references: VideoImageReference[], referenceSlotRoles?: ReferenceRole[]) => string | void | Promise<string | void>;
   onClose: () => void;
   project: Project;
+  settings: AppSettings;
+  onVideoApiParametersChange?: VideoApiParameterReaderProps['onChange'];
 }) {
   const [selection, setSelection] = useState(() => videoReferenceSelection(references, referenceSlotRoles));
   const selected = selection.references;
@@ -504,13 +525,15 @@ function VideoBatchImagePicker({ row, draft, references, referenceSlotRoles, ima
   const [preview, setPreview] = useState<ReferenceAsset>();
   const [applyIssue, setApplyIssue] = useState('');
   const [applying, setApplying] = useState(false);
+  const compression = useVideoReferenceCompression({ assets: images, selection, onChange: setSelection, active: true, scope: `${project.id}:${row.segmentId}`, byteLimit: videoReferenceByteLimit(project, usageContext.api) });
   const boundarySummary = boundaryUsageSummary(usageContext);
   const runningHubSlots = usageContext.backend === 'api' && usageContext.api?.provider === 'runninghub'
     ? usageContext.api.runningHubImageRoles?.length : undefined;
-  const configuredSlotCount = workflow?.mapping.images.length ?? runningHubSlots ?? 0;
+  const apiImageCapacity = getVideoApiImageCapacity(usageContext.api);
+  const configuredSlotCount = workflow?.mapping.images.length ?? runningHubSlots ?? apiImageCapacity?.maxCount ?? 0;
   const rememberedSlotCount = (selection.referenceSlotRoles || []).length + slotOffset;
   const selectedSlotCount = videoReferenceSlotSpan(selected) + slotOffset;
-  const slotCount = Math.max(configuredSlotCount, rememberedSlotCount, selectedSlotCount);
+  const slotCount = Math.max(configuredSlotCount, apiImageCapacity ? 0 : rememberedSlotCount, selectedSlotCount);
   const pickerUsageContext = { ...usageContext, slotRoles: offsetVideoReferenceSlotRoles(selection.referenceSlotRoles, slotOffset) };
   const effectiveReferences = videoReferenceUsage(selected, pickerUsageContext, slotOffset);
   const slotLabels = videoReferenceSlotLabels(selected, pickerUsageContext, slotOffset, selection.referenceSlotRoles);
@@ -550,6 +573,11 @@ function VideoBatchImagePicker({ row, draft, references, referenceSlotRoles, ima
   const visible = images.filter((asset) => `${asset.name} ${asset.fileName || ''} ${asset.tags.join(' ')}`.toLocaleLowerCase('zh-CN').includes(query.trim().toLocaleLowerCase('zh-CN')));
   return <>
     <VideoPickerDialog title={`第 ${row.segmentIndex} 段 · 选择参考图`} className="vd-batch-image-dialog" onClose={onClose} headerContent={<VideoSegmentCharacterHint hint={characterHints} states={characterStates} promptFormat={draft.source?.promptFormat} />}>
+      {usageContext.backend === 'api' && (!usageContext.api?.provider || usageContext.api.provider === 'generic') && <>
+        <VideoApiParameterReader settings={settings} profileId={draft.apiProfileId} frozen={Boolean(draft.reuseTaskId)} autoRead onChange={onVideoApiParametersChange} />
+        <VideoImageCapacityNotice api={usageContext.api} selectedCount={selected.length + slotOffset} />
+      </>}
+      {compression.summary}
       <VideoReferencePickerPanels images={<>
       <div className="vd-batch-image-toolbar">
         <label className="field vd-grow"><span>搜索图片资产</span><input aria-label="批量参考图搜索" type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="名称、文件名、标签" /></label>
@@ -563,11 +591,13 @@ function VideoBatchImagePicker({ row, draft, references, referenceSlotRoles, ima
             const index = selected.findIndex((reference) => reference.assetId === asset.id);
             return <div key={asset.id} className={`vd-image-choice ${index >= 0 ? 'selected' : ''}`}>
               <button type="button" className="vd-image-pick" aria-pressed={index >= 0} aria-label={`${index >= 0 ? '取消选择' : '选择'}图片 ${asset.name}`} disabled={Boolean(asset.missing && index < 0)} onClick={() => setSelection((current) => index >= 0 ? removeVideoReference(current, asset.id, effectiveReferences[index]?.role) : addVideoReference(current, { assetId: asset.id, role: videoImageRole(asset) }))}>
-                {assetPreviewUrl(asset) ? <img src={assetPreviewUrl(asset)} alt={asset.name} loading="lazy" /> : <span>无预览</span>}
+                {assetPreviewUrl(compression.displayAsset(asset)) ? <img src={assetPreviewUrl(compression.displayAsset(asset))} alt={asset.name} loading="lazy" /> : <span>无预览</span>}
                 <ReferenceImageName name={asset.name} /><span>{index >= 0 ? `已选 · 图片槽 ${videoReferenceSlotIndex(selected[index], index) + slotOffset + 1}` : asset.missing ? '原文件缺失' : `${asset.width || '?'} × ${asset.height || '?'}`}</span>
                 {index >= 0 && <span className="vd-image-slot-badge" aria-label={`图片 ${asset.name} 占用槽位`}>{slotLabels[index]}</span>}
               </button>
-              <button type="button" className="btn small ghost" onClick={() => setPreview(asset)}>放大预览</button>
+              <div className="vd-image-choice-tools">{compression.cardControls(asset)}
+              <button type="button" className="btn small ghost" onClick={() => setPreview(compression.displayAsset(asset))}>放大预览</button>
+              </div>
             </div>;
           })}
           {!visible.length && <div className="vd-empty">没有匹配的图片，可先在图片资产库导入。</div>}
@@ -577,8 +607,9 @@ function VideoBatchImagePicker({ row, draft, references, referenceSlotRoles, ima
         <VideoReferenceSlotUsageEditor selection={selection} images={images} slotCount={slotCount} slotOffset={slotOffset} usageContext={usageContext} workflow={workflow} segmentLabel={`第 ${row.segmentIndex} 段`} project={project} onCharacterChange={(assetId, characterIds) => setSelection((current) => ({ ...current, references: current.references.map((reference) => reference.assetId === assetId ? { ...reference, characterIds } : reference) }))} onRoleChange={changeSlotRole} onRemove={(assetId, role) => setSelection((current) => removeVideoReference(current, assetId, role))} onPreview={setPreview} />
       </div>} />
       {applyIssue && <p className="vd-error vd-reference-usage-hint" role="alert">{applyIssue}</p>}
-      <div className="vd-modal-footer"><span>仅修改第 {row.segmentIndex} 段 · 已选 {selected.length} 张{slotOffset ? '参考图＋1张本地末帧' : ''}{workflow ? ` / ${workflow.mapping.images.length} 个工作流槽` : runningHubSlots !== undefined ? ` / 最多 ${runningHubSlots} 个云端槽` : ''}</span><button type="button" className="btn primary" disabled={applying} onClick={async () => { setApplying(true); setApplyIssue(''); try { const issue = await onApply(cloneVideoReferences(selected), selection.referenceSlotRoles); if (issue) setApplyIssue(issue); else onClose(); } catch (cause) { setApplyIssue(cause instanceof Error ? cause.message : String(cause)); } finally { setApplying(false); } }}>{applying ? '应用选图中…' : '使用本段图片'}</button></div>
+      <div className="vd-modal-footer"><span>仅修改第 {row.segmentIndex} 段 · 已选 {selected.length} 张{slotOffset ? '参考图＋1张本地末帧' : ''}{workflow ? ` / ${workflow.mapping.images.length} 个工作流槽` : runningHubSlots !== undefined ? ` / 最多 ${runningHubSlots} 个云端槽` : ''}</span><button type="button" className="btn primary" disabled={applying || compression.busy} onClick={async () => { setApplying(true); setApplyIssue(''); try { const issue = await onApply(cloneVideoReferences(selected), selection.referenceSlotRoles); if (issue) setApplyIssue(issue); else onClose(); } catch (cause) { setApplyIssue(cause instanceof Error ? cause.message : String(cause)); } finally { setApplying(false); } }}>{applying ? '应用选图中…' : '使用本段图片'}</button></div>
     </VideoPickerDialog>
+    {compression.review && <VideoPickerDialog title={compression.review.title} className="vd-compression-dialog" onClose={compression.review.onClose}>{compression.review.content}</VideoPickerDialog>}
     {preview && <VideoPickerDialog title={`图片预览 · ${preview.name}`} onClose={() => setPreview(undefined)}><img className="vd-full-image" src={assetPreviewUrl(preview)} alt={preview.name} /></VideoPickerDialog>}
   </>;
 }
@@ -1477,7 +1508,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
       <div className="vd-batch-submit-actions">{configurationIssue && onOpenSettings && <button className="btn small" disabled={interactionLocked} onClick={onOpenSettings}>连接设置</button>}{!regenerateSucceeded && completedSelectionCount > 0 && <button type="button" className="btn small" disabled={interactionLocked} onClick={() => setRegeneration(true)}>允许重新生成已完成项</button>}<button type="button" className="btn primary" disabled={interactionLocked || !pending.length || Boolean(configurationIssue || selectedIssue)} onClick={prepareConfirmation}>{submitting ? '正在建立批次…' : `检查并生成 ${hasAutomaticSelection ? selected.length : pending.length} 段视频`}</button></div>
     </div>
     {tailSelecting && <div className="vd-tail-inline-progress" role="status"><span>{tailFrameTools?.progress?.message || '正在本地提取上一段真实最后一帧…'}</span><button type="button" className="btn small" onClick={() => { void manualTail.cancel(); }}>取消末帧提取</button></div>}
-    {imageRow && imageChoice && <VideoBatchImagePicker key={imageRow.segmentId} project={project} row={imageRow} draft={imageChoice.draft} references={tailCharacterModes[imageRow.segmentId] && !characterDrafts.get(imageChoice.key)?.issue ? characterDrafts.get(imageChoice.key)!.draft.references : imageChoice.draft.references} referenceSlotRoles={tailCharacterModes[imageRow.segmentId] ? characterDrafts.get(imageChoice.key)?.draft.referenceSlotRoles : imageChoice.draft.referenceSlotRoles} images={referenceAssets(imageChoice)} workflow={backend === "comfyui" ? usageContextForDraft(imageChoice.draft).workflow : undefined} usageContext={usageContextForDraft(imageChoice.draft)} slotOffset={tailCharacterModes[imageRow.segmentId] ? 1 : 0} onApply={(references, roles) => applyBatchReferenceSelection(imageRow, imageChoice, references, roles)} onClose={() => setImageSegmentId("")} />}
+    {imageRow && imageChoice && <VideoBatchImagePicker key={imageRow.segmentId} project={project} settings={settings} onVideoApiParametersChange={onVideoApiParametersChange} row={imageRow} draft={imageChoice.draft} references={tailCharacterModes[imageRow.segmentId] && !characterDrafts.get(imageChoice.key)?.issue ? characterDrafts.get(imageChoice.key)!.draft.references : imageChoice.draft.references} referenceSlotRoles={tailCharacterModes[imageRow.segmentId] ? characterDrafts.get(imageChoice.key)?.draft.referenceSlotRoles : imageChoice.draft.referenceSlotRoles} images={referenceAssets(imageChoice)} workflow={backend === "comfyui" ? usageContextForDraft(imageChoice.draft).workflow : undefined} usageContext={usageContextForDraft(imageChoice.draft)} slotOffset={tailCharacterModes[imageRow.segmentId] ? 1 : 0} onApply={(references, roles) => applyBatchReferenceSelection(imageRow, imageChoice, references, roles)} onClose={() => setImageSegmentId("")} />}
     {confirmation && <VideoPickerDialog title="确认批量生成视频" className="vd-batch-confirm-dialog" closeDisabled={submitting} onClose={() => { if (!submittingRef.current) setConfirmation(undefined); }}>
       <div className="vd-batch-dialog-body"><p>{confirmation.connectionLabel} · 计划：{plan?.title || plan?.sourceStoryTitle}</p><p className="field-hint">逐段建立独立任务；自动衔接段必须等待上一段生成并落盘、准备好衔接帧后才提交。其他选图、用途及提示词保持下表快照。{hasAutomaticSelection ? '启动前会核对整条依赖链：未授权重生成的完全重复批次不再提交；只有部分任务重复时整批停止并提示。有进行中或待确认任务时也须整链核对，不会跳过该段直接衔接，不擅自套用历史成片或重复收费。' : '相同任务会跳过；进行中或结果待确认的任务不会重复提交。'}</p>{confirmation.input.items.some((item) => item.previousTail?.selectionMode === 'ai-assisted') && <p className="vd-notice">本批次包含 AI 辅助选帧：由 AI 分析末尾候选帧，遇到可恢复错误最多自动重试3次，含首次最多4次视觉API调用，每次均可能收费。仍失败或遇到不可重试错误时显示原因并暂停，不改用原尾帧；不做人物语义硬拦截。允许选择较早帧，可能动作回退，原视频不自动裁剪；不能保证人物一致。</p>}<div className="vd-batch-confirm-list">{confirmation.candidates.map((candidate) => {
         const inputItem = confirmation.input.items.find((item) => item.itemKey === candidate.key);
@@ -1583,6 +1614,7 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
   const referenceSlotLabels = videoReferenceSlotLabels(draft.references, referenceUsageContext, 0, draft.referenceSlotRoles);
   const pickedImageDraft = useMemo(() => ({ ...draft, ...pickedSelection, reuseTaskId: undefined }), [draft, pickedSelection]);
   const pickedImageApi = videoConfiguredApiState(settings, { ...pickedImageDraft, parameters: {} }).api;
+  const pickedCompression = useVideoReferenceCompression({ assets: images, selection: pickedSelection, onChange: setPickedSelection, active: picker === 'images', scope: `${project.id}:${chapterId || ''}`, byteLimit: videoReferenceByteLimit(project, pickedImageApi) });
   // The per-segment reference picker must not borrow a ComfyUI workflow while
   // the draft is using another backend (RunningHub / generic API).  Doing so
   // makes the picker show the wrong number of physical slots and can produce
@@ -1599,13 +1631,15 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
   // offending slot and its per-segment purpose; capacity checks remain a
   // separate warning/preflight concern and never silently hide a selected
   // image or compact the other slots.
+  const pickedApiImageCapacity = getVideoApiImageCapacity(pickedImageApi);
   const pickedConfiguredSlotCount = pickedImageWorkflow?.mapping.images.length
     ?? (pickedImageApi?.provider === 'runninghub' ? pickedImageApi.runningHubImageRoles?.length : undefined)
+    ?? pickedApiImageCapacity?.maxCount
     ?? 0;
   const pickedSlotCount = Math.max(
     pickedConfiguredSlotCount,
     videoReferenceSlotSpan(pickedSelection.references),
-    pickedSelection.referenceSlotRoles?.length || 0,
+    pickedApiImageCapacity ? 0 : pickedSelection.referenceSlotRoles?.length || 0,
   );
   const pickedSlotLabels = videoReferenceSlotLabels(pickedImageDraft.references, pickedUsageContext, 0, pickedSelection.referenceSlotRoles);
   const pickedCharacterHint = useMemo(() => {
@@ -1809,17 +1843,23 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
       <div className="vd-modal-footer"><label className="check-row"><input type="checkbox" checked={includeReferences} onChange={(event) => setIncludeReferences(event.target.checked)} />一并带入该提示词已有的图片参考（保留当前选图）</label><button className="btn primary" type="button" disabled={!pickedChoice || Boolean(savedPickedPreview)} onClick={() => { if (pickedChoice && !savedPickedPreview) { setDraft((current) => applyVideoPromptChoice(includeReferences ? { ...current, reuseTaskId: undefined } : current, pickedChoice, project, includeReferences)); setNotice('已复制所选单段提示词；一并带入的图片使用当前资产。原稿和对白未改动，也没有提交生成。'); setPicker(undefined); } }}>使用这段提示词</button></div>
     </VideoPickerDialog>}
     {picker === 'images' && <VideoPickerDialog title="从图片资产库选择生成参考图" className="vd-reference-picker-dialog" onClose={() => setPicker(undefined)} headerContent={pickedCharacterHint && <VideoSegmentCharacterHint hint={pickedCharacterHint} states={pickedCharacterStates} promptFormat={pickedImageDraft.source?.promptFormat} />}>
+      {draft.backend === 'api' && (!pickedImageApi?.provider || pickedImageApi.provider === 'generic') && <>
+        <VideoApiParameterReader settings={settings} profileId={pickedImageDraft.apiProfileId} autoRead onChange={onVideoApiParametersChange} />
+        <VideoImageCapacityNotice api={pickedImageApi} selectedCount={pickedSelection.references.length} />
+      </>}
+      {pickedCompression.summary}
       <VideoReferencePickerPanels images={<>
       <div className="vd-toolbar vd-reference-picker-search"><label className="field vd-grow"><span>搜索图片资产</span><input type="search" value={imageQuery} onChange={(event) => setImageQuery(event.target.value)} placeholder="名称、文件名、标签" /></label><label className="field"><span>图片分类</span><select value={imageFilter} onChange={(event) => setImageFilter(event.target.value)}><option value="all">全部图片</option><option value="character">人物</option><option value="location">场景</option><option value="prop">道具</option><option value="reference">普通参考图</option><option value="grid">九宫格</option><option value="first-frame">首帧</option><option value="last-frame">尾帧</option><option value="clay-render">Clay Render</option></select></label></div>
       <div className="vd-batch-dialog-body">
       {reusedSnapshot && <p className="vd-notice">这里预览当前资产库图片。点击“使用所选图片”将解除原任务快照并使用当前连接，提示词和种子不变；关闭窗口则仍保留原图。</p>}
       <VideoReferenceVacancies selection={pickedSelection} usageContext={pickedUsageContext} />
-      <div className="vd-image-picker-grid">{visibleImages.length ? visibleImages.map((asset) => { const selected = pickedAssetIds.includes(asset.id); const slotIndex = pickedImageDraft.references.findIndex((reference) => reference.assetId === asset.id); return <div className={`vd-image-choice ${selected ? 'selected' : ''}`} key={asset.id}><button className="vd-image-pick" type="button" aria-pressed={selected} aria-label={`${selected ? '取消选择' : '选择'}图片 ${asset.name}`} disabled={asset.missing && !selected} onClick={() => setPickedSelection((current) => selected ? removeVideoReference(current, asset.id, videoReferenceUsage(current.references, pickedUsageContext)[slotIndex]?.role) : addVideoReference(current, { assetId: asset.id, role: videoImageRole(asset) }))}>{assetPreviewUrl(asset) ? <img src={assetPreviewUrl(asset)} alt={asset.name} loading="lazy" /> : <span>无预览</span>}<ReferenceImageName name={asset.name} /><span>{selected ? `已选 · 图片槽 ${videoReferenceSlotIndex(pickedImageDraft.references[slotIndex], slotIndex) + 1}` : asset.missing ? '原文件缺失' : `${asset.width || '?'} × ${asset.height || '?'}`}</span>{selected && slotIndex >= 0 && <span className="vd-image-slot-badge" aria-label={`图片 ${asset.name} 占用槽位`}>{pickedSlotLabels[slotIndex]}</span>}</button><button type="button" className="btn small ghost" onClick={() => setPreviewAsset(asset)}>放大预览</button></div>; }) : <div className="vd-empty">没有符合条件的图片，可先到图片资产库导入。</div>}</div>
+      <div className="vd-image-picker-grid">{visibleImages.length ? visibleImages.map((asset) => { const selected = pickedAssetIds.includes(asset.id); const slotIndex = pickedImageDraft.references.findIndex((reference) => reference.assetId === asset.id); const displayAsset = pickedCompression.displayAsset(asset); return <div className={`vd-image-choice ${selected ? 'selected' : ''}`} key={asset.id}><button className="vd-image-pick" type="button" aria-pressed={selected} aria-label={`${selected ? '取消选择' : '选择'}图片 ${asset.name}`} disabled={asset.missing && !selected} onClick={() => setPickedSelection((current) => selected ? removeVideoReference(current, asset.id, videoReferenceUsage(current.references, pickedUsageContext)[slotIndex]?.role) : addVideoReference(current, { assetId: asset.id, role: videoImageRole(asset) }))}>{assetPreviewUrl(displayAsset) ? <img src={assetPreviewUrl(displayAsset)} alt={asset.name} loading="lazy" /> : <span>无预览</span>}<ReferenceImageName name={asset.name} /><span>{selected ? `已选 · 图片槽 ${videoReferenceSlotIndex(pickedImageDraft.references[slotIndex], slotIndex) + 1}` : asset.missing ? '原文件缺失' : `${asset.width || '?'} × ${asset.height || '?'}`}</span>{selected && slotIndex >= 0 && <span className="vd-image-slot-badge" aria-label={`图片 ${asset.name} 占用槽位`}>{pickedSlotLabels[slotIndex]}</span>}</button><div className="vd-image-choice-tools">{pickedCompression.cardControls(asset)}<button type="button" className="btn small ghost" onClick={() => setPreviewAsset(displayAsset)}>放大预览</button></div></div>; }) : <div className="vd-empty">没有符合条件的图片，可先到图片资产库导入。</div>}</div>
       </div>
       </>} slots={<div className="vd-batch-dialog-body">
         <VideoReferenceSlotUsageEditor selection={pickedSelection} images={images} slotCount={pickedSlotCount} slotOffset={0} usageContext={pickedUsageContext} workflow={pickedImageWorkflow} segmentLabel="本段" project={project} onCharacterChange={(assetId, characterIds) => setPickedSelection((current) => ({ ...current, references: current.references.map((reference) => reference.assetId === assetId ? { ...reference, characterIds } : reference) }))} onRoleChange={(physicalSlot, role) => setPickedSelection((current) => { const next = videoReferenceSelection(current.references, current.referenceSlotRoles); const roles = [...(next.referenceSlotRoles || [])]; roles[physicalSlot] = role; const references = next.references.map((reference, index) => videoReferenceSlotIndex(reference, index) === physicalSlot ? { ...reference, role } : reference); return { references, referenceSlotRoles: roles }; })} onRemove={(assetId, role) => setPickedSelection((current) => removeVideoReference(current, assetId, role))} onPreview={setPreviewAsset} />
       </div>} />
-      <div className="vd-modal-footer"><span>已选 {pickedAssetIds.length} 张 · 图片和槽位用途一起保存，仅用于本段</span><button className="btn primary" type="button" onClick={() => { setDraft((current) => ({ ...current, ...pickedSelection, reuseTaskId: undefined })); setNotice('已使用本段选图与用途并同步本次参考说明；剧情、对白、镜头时间和参数保留，不调用文本或视觉 AI。'); setPicker(undefined); }}>使用所选图片</button></div></VideoPickerDialog>}
+      <div className="vd-modal-footer"><span>已选 {pickedAssetIds.length} 张 · 图片和槽位用途一起保存，仅用于本段</span><button className="btn primary" type="button" disabled={pickedCompression.busy} onClick={() => { setDraft((current) => ({ ...current, ...pickedSelection, reuseTaskId: undefined })); setNotice('已使用本段选图与用途并同步本次参考说明；剧情、对白、镜头时间和参数保留，不调用文本或视觉 AI。'); setPicker(undefined); }}>使用所选图片</button></div></VideoPickerDialog>}
+    {picker === 'images' && pickedCompression.review && <VideoPickerDialog title={pickedCompression.review.title} className="vd-compression-dialog" onClose={pickedCompression.review.onClose}>{pickedCompression.review.content}</VideoPickerDialog>}
     {previewAsset && <VideoPickerDialog title={`图片预览 · ${previewAsset.name}`} onClose={() => setPreviewAsset(undefined)}><img className="vd-full-image" src={assetPreviewUrl(previewAsset)} alt={previewAsset.name} /><p className="field-hint">{previewAsset.width || '?'} × {previewAsset.height || '?'} · {previewAsset.fileName || previewAsset.name}</p></VideoPickerDialog>}
   </div>;
 }

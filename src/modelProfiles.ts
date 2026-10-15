@@ -20,6 +20,7 @@ export type ReferenceRole =
   | 'audio'
   | 'dialogue'
   | 'first-frame'
+  | 'middle-frame'
   | 'last-frame'
   | 'clay-render'
   | 'creative'
@@ -96,7 +97,7 @@ export type TargetCapabilities = ModelCapabilities;
 
 const allRoles: readonly ReferenceRole[] = [
   'character', 'scene', 'prop', 'style', 'motion', 'composition', 'camera',
-  'audio', 'dialogue', 'first-frame', 'last-frame', 'clay-render', 'creative', 'general'
+  'audio', 'dialogue', 'first-frame', 'middle-frame', 'last-frame', 'clay-render', 'creative', 'general'
 ];
 
 const imageVideoAudio: Record<ReferenceMediaType, CapabilityStatus> = {

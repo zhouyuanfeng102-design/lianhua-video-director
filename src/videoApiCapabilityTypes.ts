@@ -14,6 +14,8 @@ export interface VideoApiModelParameterCapabilities {
   controls: Partial<Record<VideoApiParameterKey, VideoApiParameterControl>>;
   /** Display-only service defaults; no implicit request overrides. */
   defaults: Partial<Record<VideoApiParameterKey, string | number>>;
+  /** Explicit upstream image capacity; missing means unknown, including cached legacy metadata. */
+  imageReferences?: { maxCount: number; source: 'openapi' | 'models'; field?: string };
   aliases?: string[];
 }
 

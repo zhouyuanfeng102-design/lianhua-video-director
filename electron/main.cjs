@@ -13,6 +13,7 @@ const {
   readManagedImageDataUrl,
 } = require('./imageReferenceTransport.cjs');
 const { decodeReferenceAudioDataUrl, readManagedAudioDataUrl } = require('./audioReferenceTransport.cjs');
+const { readVideoReferenceImage, storeVideoReferenceImage } = require(path.join(__dirname, 'videoReferenceImage.cjs'));
 const { resolveSystemProxy, createProxyTunnelAgent, MODEL_CONNECT_TIMEOUT_MS } = require('./systemProxyTransport.cjs');
 const { createVideoTransport } = require(path.join(__dirname, 'videoTransport.cjs'));
 const { createRhTvManager } = require(path.join(__dirname, 'rhtvBridge/manager.cjs'));
@@ -20,6 +21,7 @@ const { importVideoArchive, hasZipSignature, isZipContentType } = require(path.j
 const { createVideoTaskCredentialVault } = require(path.join(__dirname, 'videoTaskCredentialVault.cjs'));
 const { createVideoTaskCheckpointJournal, collectVideoFrozenAssets } = require(path.join(__dirname, 'videoTaskCheckpoint.cjs'));
 const { collectImageReferenceSnapshotsForExport } = require(path.join(__dirname, 'imageReferenceSnapshots.cjs'));
+const { collectStateMediaFiles } = require(path.join(__dirname, 'stateMediaFiles.cjs'));
 const { isCompleteWebP } = require(path.join(__dirname, 'webpValidation.cjs'));
 const { createVideoWorkbench } = require(path.join(__dirname, 'videoWorkbench.cjs'));
 const { createVideoThumbnailService } = require(path.join(__dirname, 'videoThumbnail.cjs'));
@@ -1974,6 +1976,12 @@ app.whenReady().then(() => {
   handleTrustedIpc('lianhua:read-managed-image-data-url', async (_event, payload) => (
     readManagedImageDataUrlForRenderer(payload)
   ));
+  handleTrustedIpc('lianhua:read-video-reference-image', async (_event, payload) => (
+    readVideoReferenceImage({ assetRoot, relativePath: payload?.relativePath, expectedChecksum: payload?.expectedChecksum })
+  ));
+  handleTrustedIpc('lianhua:store-video-reference-image', async (_event, payload) => (
+    storeVideoReferenceImage({ assetRoot, dataUrl: payload?.dataUrl, fileName: payload?.fileName })
+  ));
   handleTrustedIpc('lianhua:read-managed-audio-data-url', async (_event, payload) => (
     readManagedAudioDataUrlForRenderer(payload)
   ));
@@ -2011,7 +2019,7 @@ app.whenReady().then(() => {
       const manifest = [];
       const frozenImageAssets = collectImageReferenceSnapshotsForExport(state);
       const frozenImageChecksums = new Map(frozenImageAssets.map((asset) => [asset.relativePath, asset.checksum]));
-      const exportedFiles = [...stateAssets(state), ...collectVideoFrozenAssets(state.project), ...frozenImageAssets];
+      const exportedFiles = [...stateAssets(state), ...collectVideoFrozenAssets(state.project), ...frozenImageAssets, ...collectStateMediaFiles(state)];
       const copiedPaths = new Set();
       for (const asset of exportedFiles) {
         if (!asset?.relativePath) continue;

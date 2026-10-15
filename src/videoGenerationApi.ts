@@ -6,6 +6,8 @@ import { bindRunningHubVideoRequest } from './runningHubVideo';
 import { videoReferenceUsage } from './videoReferenceUsage';
 import { assertVideoReferenceSlots, videoReferenceSlotIndex, videoReferenceSlotSpan } from './videoReferenceSlots';
 import { buildLaoliVideoApiBody, genericVideoSubmitEndpoint, isLaoliVideoBuiltinProtocol, parseGenericVideoApiResult } from './genericVideoApi';
+import { getVideoApiImageCapacity } from './videoImageCapacity';
+import { buildV6kVideoApiBody, isV6kVideoBuiltinProtocol } from './v6kVideoApi';
 
 export const defaultMiniMaxVideoApi: VideoTaskApiConfig = {
   enabled: true, provider: 'minimax', model: 'MiniMax-Hailuo-2.3',
@@ -108,6 +110,8 @@ const clearUnusedRunningHubTemplateImages = (value: unknown, occupiedSlots: Read
 };
 
 export const buildVideoApiBody = (config: Omit<VideoTaskApiConfig, 'apiKey'>, draft: VideoGenerationDraft, images: string[], audios: string[] = []): Record<string, unknown> => {
+  const imageCapacity = getVideoApiImageCapacity(config);
+  if (imageCapacity && images.length > imageCapacity.maxCount) throw new Error(`当前接口返回的模型图片容量为 ${imageCapacity.maxCount} 张，本次选了 ${images.length} 张；不会丢弃图片，尚未提交视频。`);
   if ((draft.audioReferences?.length || audios.length) && config.provider !== 'runninghub') {
     throw new Error('当前连接不支持参考音频，请选择 RunningHub 音频工作流。');
   }
@@ -193,6 +197,7 @@ export const buildVideoApiBody = (config: Omit<VideoTaskApiConfig, 'apiKey'>, dr
     for (const audio of audios) if (!JSON.stringify(result).includes(JSON.stringify(audio).slice(1, -1))) throw new Error('视频 API 模板没有包含所有已选音频，请检查参考音频节点映射。');
     return result;
   }
+  if (isV6kVideoBuiltinProtocol(config)) return buildV6kVideoApiBody(config, draft, images);
   if (isLaoliVideoBuiltinProtocol(config)) return buildLaoliVideoApiBody(config, draft, images);
   return { ...(config.model ? { model: config.model } : {}), ...draft.parameters, prompt: draft.prompt,
     ...(images.length ? { images } : {}),

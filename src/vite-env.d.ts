@@ -42,6 +42,7 @@ interface Window {
       fileName?: string;
     }) => Promise<import('./storage').ManagedMediaResult>;
     storeGeneratedAudio: (payload: { dataUrl: string; fileName?: string }) => Promise<import('./storage').ManagedMediaResult>;
+    storeVideoReferenceImage?: (payload: { dataUrl: string; fileName?: string }) => Promise<import('./storage').ManagedMediaResult>;
     readManagedAudioDataUrl: (payload: { relativePath: string; expectedChecksum?: string }) => Promise<{
       dataUrl: string; mimeType: 'audio/mpeg' | 'audio/wav' | 'audio/flac'; sizeBytes: number; checksum: string;
     }>;
@@ -79,6 +80,9 @@ interface Window {
       sizeBytes: number;
       checksum: string;
     }>;
+    readVideoReferenceImage?: (payload: { relativePath: string; expectedChecksum?: string }) => Promise<{
+      dataUrl: string; mimeType: 'image/png' | 'image/jpeg' | 'image/webp'; sizeBytes: number; checksum: string;
+    }>;
     relinkMedia: (asset: import('./types').ReferenceAsset) => Promise<import('./storage').ManagedMediaResult | null>;
     revealAsset: (relativePath: string) => Promise<boolean>;
     exportProjectPackage: (payload: { content: string; fileName: string }) => Promise<{ path: string; assetCount: number; missingCount: number } | null>;
@@ -96,7 +100,7 @@ interface Window {
         files: Array<{ fieldName?: string; name?: string; fileName: string; dataUrl: string }>;
       };
       responseType?: 'text' | 'base64' | 'auto';
-    }) => Promise<{ status: number; body: string; bodyEncoding?: 'text' | 'base64'; contentType?: string }>;
+    }) => Promise<{ status: number; body: string; bodyEncoding?: 'text' | 'base64'; contentType?: string; requestBytes?: number; requestContentType?: string }>;
     cancelVideoRequest: (requestId: string) => Promise<boolean>;
     watchVideoProgress: (payload: { watchId: string; url: string; headers?: Record<string, string> }) => Promise<void>;
     unwatchVideoProgress: (watchId: string) => Promise<boolean>;

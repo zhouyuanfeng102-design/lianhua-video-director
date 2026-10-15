@@ -1,6 +1,6 @@
 import type { VideoTaskApiConfig } from './types';
 import type { VideoDesktopRequest, VideoGenerationDraft } from './videoGenerationTypes';
-import { normalizeReferenceImageDataUrl } from './imageReferenceData';
+import { normalizeGeneratedImageData } from './generatedImageData';
 import { nestedValue, normalizeVideoTaskStatus } from './videoTasks';
 
 type AddressConfig = Pick<VideoTaskApiConfig, 'baseUrl' | 'endpoint'>;
@@ -154,12 +154,13 @@ export const buildLaoliVideoApiBody = (
   const kind = laoliVideoModelKind(config.model);
   const classic = kind === 'classic20' || kind === 'classic25';
   if (draft.references.length !== images.length) throw new Error('视频参考图与上传结果数量不一致，尚未提交视频。');
-  const limits = { classic20: 9, classic25: 30, h3: 6, native20: 9, native25: 30, wan: 10, other: Infinity };
-  if (images.length > limits[kind]) throw new Error(`当前模型最多支持 ${limits[kind]} 张参考图，本次选了 ${images.length} 张；不会丢弃图片。`);
   const first = draft.references.filter((reference) => reference.role === 'first-frame');
   const last = draft.references.filter((reference) => reference.role === 'last-frame');
-  if ((first.length || last.length) && (classic || kind === 'h3' || kind === 'native25')) throw new Error('所选模型只支持普通参考图，不支持首尾帧模式。请调整图片用途，或改用支持首尾帧的模型。');
-  if (first.length > 1 || last.length > 1 || last.length && !first.length) throw new Error('首尾帧模式需要一张首帧，最多一张尾帧；请核对已选图片用途。');
+  // Classic requests use an ordered `images` array. The user's first/middle/
+  // last labels describe reference responsibilities in the prompt; they do
+  // not select a native first_frame/last_frame protocol or justify a refusal.
+  if ((first.length || last.length) && (kind === 'h3' || kind === 'native25')) throw new Error('所选模型只支持普通参考图，不支持首尾帧模式。请调整图片用途，或改用支持首尾帧的模型。');
+  if (!classic && (first.length > 1 || last.length > 1 || last.length && !first.length)) throw new Error('首尾帧模式需要一张首帧，最多一张尾帧；请核对已选图片用途。');
   const allowed = new Set(['duration', 'seconds', 'resolution', 'aspect_ratio', 'ratio', 'task_mode', 'n', 'response_format', 'metadata', 'face_direct', 'native_face']);
   const unsupported = Object.keys(draft.parameters).filter((key) => !allowed.has(key));
   if (unsupported.length) throw new Error(`老李视频接口不支持这些通用参数：${unsupported.join('、')}。请移除，或使用明确的高级请求模板。`);
@@ -189,14 +190,16 @@ export const buildLaoliVideoApiBody = (
   if (parameters.face_direct === true || parameters.native_face === true) throw new Error('特价模型的人脸处理功能已关闭，请移除对应开关。');
   return {
     ...parameters, ...(config.model ? { model: config.model } : {}), prompt: draft.prompt,
-    ...(images.length ? classic ? { images: images.map((image) => image.startsWith('data:') ? normalizeReferenceImageDataUrl(image) : image) } : { references: images.map((source, index) => ({ type: 'image', role: draft.references[index].role === 'first-frame' ? 'first_frame' : draft.references[index].role === 'last-frame' ? 'last_frame' : 'reference', source })) } : {}),
+    ...(images.length ? classic ? { images: images.map((image) => image.startsWith('data:') ? normalizeGeneratedImageData(image) : image) } : { references: images.map((source, index) => ({ type: 'image', role: draft.references[index].role === 'first-frame' ? 'first_frame' : draft.references[index].role === 'last-frame' ? 'last_frame' : 'reference', source })) } : {}),
   };
 };
 
 type UploadRequest = Omit<VideoDesktopRequest, 'requestId'>;
 export const decodeVideoBinaryBody = (base64: string): Uint8Array<ArrayBuffer> => {
   const binary = globalThis.atob(base64);
-  return Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  return bytes;
 };
 const encodeBytes = (bytes: Uint8Array): string => {
   let binary = '';
@@ -211,13 +214,11 @@ export async function uploadLaoliVideoImage(
   headers: Record<string, string>,
   request: (payload: UploadRequest) => Promise<unknown>,
 ): Promise<string> {
-  const normalized = normalizeReferenceImageDataUrl(dataUrl);
+  const normalized = normalizeGeneratedImageData(dataUrl);
   const match = normalized.match(/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/]+={0,2})$/u);
   if (!match) throw new Error('老李视频参考图必须是 PNG、JPEG 或 WebP 原图。');
   const bytes = decodeVideoBinaryBody(match[2]);
-  const kind = laoliVideoModelKind(config.model);
-  const limit = kind === 'h3' ? 5 * 1024 * 1024 : kind === 'wan' ? 30_000_000 - 1 : 30 * 1024 * 1024;
-  if (!bytes.length || bytes.length > limit) throw new Error(`参考图大小超出所选模型限制（每张最多约 ${Math.floor(limit / 1024 / 1024)} MiB），尚未提交视频。`);
+  if (!bytes.length) throw new Error('参考图内容为空，尚未提交视频。');
   const sha256 = [...new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))].map((value) => value.toString(16).padStart(2, '0')).join('');
   const submit = validHttpUrl(genericVideoSubmitEndpoint(config), '视频 API 地址');
   const uploadBase = `${submit.origin}/v1/media/uploads`;
@@ -239,7 +240,7 @@ export async function uploadLaoliVideoImage(
   };
   if (receipt.status === 'complete') return completeSource(receipt);
   const chunkSize = Number(receipt.chunk_size), chunkCount = Number(receipt.chunk_count);
-  if (!Number.isSafeInteger(chunkSize) || chunkSize <= 0 || chunkSize > 8 * 1024 * 1024 || chunkCount !== Math.ceil(bytes.length / chunkSize)) throw new Error('素材上传分片规格无效，尚未提交视频。');
+  if (!Number.isSafeInteger(chunkSize) || chunkSize <= 0 || chunkCount !== Math.ceil(bytes.length / chunkSize)) throw new Error('素材上传分片规格无效，尚未提交视频。');
   const received = receipt.received ?? [];
   if (!Array.isArray(received) || received.some((index) => !Number.isInteger(index) || index < 0 || index >= chunkCount)) throw new Error('素材上传分片回执无效，尚未提交视频。');
   const known = new Set(received);

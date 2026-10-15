@@ -193,6 +193,7 @@ import { compileTargetPrompt } from "./promptAdapters";
 import {
   generateSeedanceBilingualOutput,
   getOfficialSeedanceSourceFingerprint,
+  hasMatchingSeedanceSourceFingerprint,
   isSeedanceOutputSaveRequestCurrent,
   translateSeedancePromptToEnglish,
   type SeedanceOutputSaveIdentity,
@@ -7991,20 +7992,25 @@ export default function App() {
           hasImageInputs: conversionReferenceImages.length > 0,
           isCurrent: isGenerationRequestCurrent,
           onStage: (stage) => {
-            runtimeFailureStage = stage === "translate" ? "storyboard-translate" : "storyboard-convert";
+            runtimeFailureStage = requestPromptFormat === 'seedance' && stage !== 'convert'
+              ? stage === 'translate' ? 'seedance-english-prompt' : 'seedance-chinese-prompt'
+              : stage === "translate" ? "storyboard-translate" : "storyboard-convert";
             if (stage === "review" && isGenerationRequestCurrent()) notify(requestPromptFormat === 'seedance' ? "公共分镜已保存，正在编写 Seedance 中文提示词。" : "正在调用同一 API 校验并修复中文提示词的说话人、口型、逐镜方位与连续性。");
           },
-          request: (systemPrompt, userPrompt, stage, transport) => requestTextModel(
-            transport ? { ...state.settings.textApi, maxTokens: transport.maxTokens } : state.settings.textApi,
-            systemPrompt,
-            userPrompt,
-            undefined,
-            {
-              disableThinking: true,
-              ...(stage !== "translate" && conversionReferenceImages.length
-                ? { referenceImages: conversionReferenceImages } : {}),
-            },
-          ),
+          request: async (systemPrompt, userPrompt, stage, transport) => {
+            runtimeFailureDetail = undefined;
+            try {
+              return await requestTextModel(
+                transport ? { ...state.settings.textApi, maxTokens: transport.maxTokens } : state.settings.textApi,
+                systemPrompt, userPrompt, undefined,
+                { disableThinking: true, ...(stage !== "translate" && conversionReferenceImages.length
+                  ? { referenceImages: conversionReferenceImages } : {}) },
+              );
+            } catch (error) {
+              runtimeFailureDetail = error;
+              throw error;
+            }
+          },
           clean: cleanVideoPrompt,
         });
       } catch (error) {
@@ -8036,7 +8042,7 @@ export default function App() {
       }
       const targetEnglishError = requestPromptFormat === 'seedance' ? complete.seedance25Output?.englishError : complete.officialPromptEnError;
       if (targetEnglishError) {
-        reportRuntimeError("storyboard-translate", targetEnglishError);
+        reportRuntimeError(requestPromptFormat === 'seedance' ? 'seedance-english-prompt' : 'storyboard-translate', runtimeFailureDetail || targetEnglishError);
         notify(`中文已完成并保存；英文待重试：${targetEnglishError}。可点击“仅重试英文”继续。`, "error");
       } else notify(
         segmentForGeneration && override
@@ -8369,6 +8375,12 @@ export default function App() {
     const batchIdentity = sequenceBatchIdentityRef.current;
     const requestFormat = generationPromptFormatRef.current;
     const label = format === 'seedance' ? 'Seedance' : 'H3';
+    let runtimeFailureStage = mode === 'translate-english'
+      ? format === 'seedance' ? 'seedance-english-prompt' : 'sequence-english-prompt'
+      : format === 'seedance' ? 'seedance-chinese-prompt' : 'sequence-official-prompt-refresh';
+    let runtimeFailureDetail: unknown;
+    const errorContext = { projectId, projectName: snapshot.project.name, provider: snapshot.settings.textApi.provider,
+      model: snapshot.settings.textApi.model, endpoint: snapshot.settings.textApi.baseUrl };
     const evidenceFingerprint = (project: Project, board: Storyboard) => format === 'seedance'
       ? getOfficialSeedanceSourceFingerprint(buildOfficialSeedanceInput(project, board))
       : buildOfficialH3SourceFingerprint(board, officialH3ContextForStoryboard(project, board));
@@ -8433,8 +8445,20 @@ export default function App() {
               status: 'ready' as const, failureReason: undefined } : item) } : entry), updatedAt: now } };
       });
       if (!accepted) throw new Error("结果未能保存至当前分镜，请重试。");
-      await saveStateAsync(stateRef.current);
+      try {
+        await saveStateAsync(stateRef.current);
+      } catch (error) {
+        runtimeFailureStage = 'sequence-prompt-save';
+        runtimeFailureDetail = error;
+        throw error;
+      }
     };
+    // A saved public storyboard is still usable while its target draft is
+    // being refreshed. Clear the last attempt's failure before the request.
+    if (plan && segment) setState((current) => ({ ...current, project: { ...current.project,
+      sequencePlans: current.project.sequencePlans.map((entry) => entry.id === plan.id ? { ...entry,
+        segments: entry.segments.map((item) => item.id === segment.id ? { ...item,
+          status: 'ready' as const, failureReason: undefined } : item) } : entry) } }));
     setBusy(true);
     try {
       const result = await generateSingleSegmentPrompt({
@@ -8452,20 +8476,35 @@ export default function App() {
         reviewWithAi: true, clean: cleanVideoPrompt, isCurrent,
         maxOutputTokens: snapshot.settings.textApi.maxTokens,
         onQualifiedCanonical: commit, onQualifiedChinese: commit,
-        onStage: (stage) => { if (isCurrent()) notify(stage === 'translate' ? `${label}中文已保存，正在生成英文。`
-          : stage === 'convert' ? '正在修复当前段公共分镜衔接。' : `正在编写${label}中文提示词。`); },
-        request: (system, user, _stage, transport) => requestTextModel(transport
-          ? { ...snapshot.settings.textApi, maxTokens: transport.maxTokens } : snapshot.settings.textApi,
-        system, user, operation.controller.signal, { disableThinking: true }),
+        onStage: (stage) => {
+          runtimeFailureStage = stage === 'translate'
+            ? format === 'seedance' ? 'seedance-english-prompt' : 'sequence-english-prompt'
+            : format === 'seedance' ? 'seedance-chinese-prompt' : 'sequence-official-prompt-refresh';
+          if (isCurrent()) notify(stage === 'translate' ? `${label}中文已保存，正在生成英文。`
+            : stage === 'convert' ? '正在修复当前段公共分镜衔接。' : `正在编写${label}中文提示词。`);
+        },
+        request: async (system, user, _stage, transport) => {
+          runtimeFailureDetail = undefined;
+          try {
+            return await requestTextModel(transport
+              ? { ...snapshot.settings.textApi, maxTokens: transport.maxTokens } : snapshot.settings.textApi,
+            system, user, operation.controller.signal, { disableThinking: true });
+          } catch (error) {
+            runtimeFailureDetail = error;
+            throw error;
+          }
+        },
       });
       if (!isCurrent()) return undefined;
       await commit(result);
       const saved = stateRef.current.project.storyboards.find((entry) => entry.id === result.id);
       const englishError = format === 'seedance' ? result.seedance25Output?.englishError : result.officialPromptEnError;
+      if (englishError) reportRuntimeError(runtimeFailureStage, runtimeFailureDetail || englishError, errorContext);
       notify(englishError ? `${label}中文已保存，英文待单独重试。` : `${label}中英文提示词已保存。`, englishError ? 'error' : 'normal');
       return saved;
     } catch (error) {
       if (!isCurrent()) return undefined;
+      reportRuntimeError(runtimeFailureStage, runtimeFailureDetail || error, errorContext);
       const reason = formatUserFacingError(error);
       if (plan && segment) setState((current) => ({ ...current, project: { ...current.project,
         sequencePlans: current.project.sequencePlans.map((entry) => entry.id === plan.id ? { ...entry,
@@ -13575,8 +13614,9 @@ function DirectorView(ctx: AppContext) {
   const isSeedanceSaveCurrent = (identity: SeedanceOutputSaveIdentity, sourceFingerprint: string): boolean => {
     const liveState = getCurrentState();
     const board = liveState.project.storyboards.find((item) => item.id === identity.storyboardId);
-    return Boolean(board && !board.sourceStale && isSeedanceOutputSaveRequestCurrent(identity, seedanceLiveSaveIdentity(board),
-      sourceFingerprint, getOfficialSeedanceSourceFingerprint(buildOfficialSeedanceInput(liveState.project, board))));
+    return Boolean(board && !board.sourceStale
+      && hasMatchingSeedanceSourceFingerprint(buildOfficialSeedanceInput(liveState.project, board), sourceFingerprint)
+      && isSeedanceOutputSaveRequestCurrent(identity, seedanceLiveSaveIdentity(board), sourceFingerprint, sourceFingerprint));
   };
   const saveSeedanceOutput = (
     identity: SeedanceOutputSaveIdentity,
@@ -13588,8 +13628,9 @@ function DirectorView(ctx: AppContext) {
     setState((current) => {
       const liveBoard = current.project.storyboards.find((board) => board.id === identity.storyboardId);
       if (!liveBoard) return current;
-      if (!isSeedanceOutputSaveRequestCurrent(identity, seedanceLiveSaveIdentity(liveBoard), output.sourceFingerprint,
-        getOfficialSeedanceSourceFingerprint(buildOfficialSeedanceInput(current.project, liveBoard)))) return current;
+      if (!hasMatchingSeedanceSourceFingerprint(buildOfficialSeedanceInput(current.project, liveBoard), output.sourceFingerprint)
+        || !isSeedanceOutputSaveRequestCurrent(identity, seedanceLiveSaveIdentity(liveBoard), output.sourceFingerprint,
+          output.sourceFingerprint)) return current;
       const now = Date.now();
       let updatedBoard = { ...liveBoard, seedance25Output: output, updatedAt: now };
       if (preservePrevious && liveBoard.seedance25Output) {
@@ -13616,23 +13657,42 @@ function DirectorView(ctx: AppContext) {
     const requestFingerprint = getOfficialSeedanceSourceFingerprint(requestInput);
     const isCurrent = () => isSeedanceSaveCurrent(requestIdentity, requestFingerprint);
     const textApi = state.settings.textApi;
+    let requestFailure: unknown;
+    const errorContext = { projectId: requestIdentity.projectId, projectName: state.project.name,
+      provider: textApi.provider, model: textApi.model, endpoint: textApi.baseUrl };
     setSeedancePromptBusy(true);
     setSeedancePromptError("");
     try {
       const output = await generateSeedanceBilingualOutput({
         input: requestInput, isCurrent,
-        request: (system, user) => requestTextModel(textApi, system, user, undefined, { disableThinking: true }),
+        request: async (system, user) => {
+          requestFailure = undefined;
+          try {
+            return await requestTextModel(textApi, system, user, undefined, { disableThinking: true });
+          } catch (error) {
+            requestFailure = error;
+            throw error;
+          }
+        },
         onChinese: (chinese) => {
           const checkpointIdentity = saveSeedanceOutput(requestIdentity, chinese, true);
           if (!checkpointIdentity) return false;
           requestIdentity = checkpointIdentity;
           return true;
         },
-        onEnglish: (complete) => Boolean(saveSeedanceOutput(requestIdentity, complete)),
+        onEnglish: (complete) => {
+          const savedIdentity = saveSeedanceOutput(requestIdentity, complete);
+          if (!savedIdentity) return false;
+          requestIdentity = savedIdentity;
+          return true;
+        },
       });
+      if (output.englishError) reportRuntimeError('seedance-english-prompt', requestFailure || output.englishError, errorContext);
       setSeedancePromptError(output.englishError || "");
       notify(output.englishError ? "Seedance 中文稿已保存，英文版待重试。" : "Seedance 2.5 中英文官方提示词已生成。", output.englishError ? "error" : undefined);
     } catch (error) {
+      if (!isCurrent() || isAbortError(error)) return;
+      reportRuntimeError('seedance-chinese-prompt', requestFailure || error, errorContext);
       const message = error instanceof Error ? error.message : "Seedance 2.5 官方提示词生成失败。";
       setSeedancePromptError(message);
       notify(message, "error");
@@ -13667,6 +13727,11 @@ function DirectorView(ctx: AppContext) {
       }
       notify("Seedance 英文提示词已生成。" );
     } catch (error) {
+      if (!isSeedanceSaveCurrent(requestIdentity, seedanceOutput.sourceFingerprint) || isAbortError(error)) return;
+      reportRuntimeError('seedance-english-prompt', error, {
+        projectId: requestIdentity.projectId, projectName: state.project.name,
+        provider: state.settings.textApi.provider, model: state.settings.textApi.model, endpoint: state.settings.textApi.baseUrl,
+      });
       const message = error instanceof Error ? error.message : "Seedance 英文提示词生成失败。";
       setSeedancePromptError(message);
       notify(message, "error");
@@ -21963,6 +22028,7 @@ function AssetsView(ctx: AppContext) {
                   <option value="motion">动作运动</option>
                   <option value="composition">构图镜位</option>
                   <option value="first-frame">首帧</option>
+                  <option value="middle-frame">中间帧</option>
                   <option value="last-frame">尾帧</option>
                   <option value="audio">声音</option>
                 </select>
@@ -24340,7 +24406,7 @@ function GenerationTasksView(ctx: AppContext) {
       return next;
     });
     setVideoBatchContinueNotice((current) => current?.batchId === batchId ? undefined : current);
-    notify(`已删除本批次的 ${removedCount} 条任务记录，已生成的视频和素材保留。`);
+    notify(`已从列表移除本批次的 ${removedCount} 条任务，已生成的视频和素材保留。`);
   };
   const videoTaskGroups = (() => {
     const result: Array<{ key: string; batchId?: string; tasks: VideoGenerationTask[] }> = [];
@@ -24513,6 +24579,7 @@ function GenerationTasksView(ctx: AppContext) {
       getRuntime: (taskId) => runtimeById[taskId],
     });
     const deleteDisabledReason = partialBatchReason || videoBatchDeletionBusyReason(group.batchId) || deletion.reason;
+    const stoppedUnconfirmedCount = deletion.canDelete ? group.tasks.filter(videoTaskHasUnresolvedSubmission).length : 0;
     const stoppable = group.tasks.filter(videoTaskCanStopBeforeSubmit).length;
     const chainBatch = group.tasks.some((task) => task.videoJob?.snapshot.batchCompletionOrder);
     const retryableFailures = group.tasks.filter((task) => {
@@ -24638,9 +24705,12 @@ function GenerationTasksView(ctx: AppContext) {
         {deleteDisabledReason && <span className="field-hint video-task-batch-delete-reason" role="note" data-video-batch-delete-reason>
           {deleteDisabledReason}
         </span>}
+        {!deleteDisabledReason && stoppedUnconfirmedCount > 0 && <span className="field-hint" role="note">
+          仅清理本地列表，不会取消远端任务；原提交记录保留，可通过顶部撤销找回。
+        </span>}
         <Button small variant="danger" icon={<Trash2 size={13} />} ariaLabel="删除批次"
           disabled={!deletion.canDelete || Boolean(deleteDisabledReason)}
-          title={deleteDisabledReason || "删除本批次全部任务记录，保留已生成的视频和素材；可通过顶部撤销恢复记录"}
+          title={deleteDisabledReason || "清理本批次任务列表，保留已生成的视频和素材；不会取消远端任务，可通过顶部撤销恢复记录"}
           onClick={() => removeVideoBatch(group.batchId!)}>
           删除批次
         </Button>

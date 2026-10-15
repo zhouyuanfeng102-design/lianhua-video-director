@@ -393,6 +393,33 @@ assert.deepEqual(
   'a cancelled-looking record that crossed POST must still block duplicate billing',
 );
 
+const clearedStoppedSubmission: VideoGenerationTask = {
+  ...cancelledAfterPostTask, historyOnly: true,
+  videoJob: { ...cancelledAfterPostTask.videoJob!, stage: 'stopped', trackingStopped: true },
+};
+assert.equal(findVideoBatchDuplicate({ generationTasks: [clearedStoppedSubmission] }, cancelledCandidate.requestFingerprint), undefined,
+  'a deleted 2.3.2 stopped unknown record no longer makes a new selection show already queued');
+const clearedRows = buildVideoBatchRows({ ...project, generationTasks: [clearedStoppedSubmission] }, plan, settings);
+assert.equal(clearedRows[6].zh?.duplicate, undefined, 'the real batch row model agrees with explicit retry eligibility');
+assert.equal(ungeneratedVideoBatchChoiceKeys(clearedRows, 'zh').has(cancelledCandidate.key), true,
+  'select ungenerated includes the same original prompt after its stopped batch was deleted');
+const protectedHistoryCases: Array<[string, VideoGenerationTask]> = [
+  ['stopped but not deleted', { ...clearedStoppedSubmission, historyOnly: undefined }],
+  ['hidden marker on an active task', { ...clearedStoppedSubmission, videoJob: { ...clearedStoppedSubmission.videoJob!, stage: 'running', trackingStopped: false } }],
+  ['pending cancellation', { ...clearedStoppedSubmission, videoJob: { ...clearedStoppedSubmission.videoJob!, cancellationPending: true } }],
+  ['unsaved result', { ...clearedStoppedSubmission, resultUrl: 'https://fixture.invalid/recovery.mp4' }],
+  ['result choice pending', { ...clearedStoppedSubmission, videoJob: { ...clearedStoppedSubmission.videoJob!, resultSelectionRequired: true } }],
+  ['download recovery', { ...clearedStoppedSubmission, videoJob: { ...clearedStoppedSubmission.videoJob!, downloadError: 'synthetic download failure' } }],
+  ['unreleased continuation', { ...clearedStoppedSubmission, videoJob: { ...clearedStoppedSubmission.videoJob!, batchContinuation: {
+    version: 1, planId: 'pending-child-plan', batchId: 'pending-child-batch', taskId: 'pending-child', revision: 1,
+  } } }],
+];
+for (const [label, protectedTask] of protectedHistoryCases) {
+  assert.equal(findVideoBatchDuplicate({ generationTasks: [protectedTask] }, cancelledCandidate.requestFingerprint)?.kind, 'in-flight', label);
+}
+assert.equal(findVideoBatchDuplicate({ generationTasks: [clearedStoppedSubmission, cancelledAfterPostTask] }, cancelledCandidate.requestFingerprint)?.taskId,
+  cancelledAfterPostTask.id, 'a cleared original cannot mask another active task with the same fingerprint');
+
 const one = allVideoBatchChoiceKeys(duplicateRows, 'zh');
 const toggledOff = toggleVideoBatchChoice(one, duplicateRows[0].zh!.key);
 assert.equal(toggledOff.size, 14);
