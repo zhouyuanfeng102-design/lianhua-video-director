@@ -7,6 +7,7 @@ import { hasCurrentOfficialH3EnglishPrompt, hasCurrentOfficialH3Prompt, isOffici
 import { officialH3ContextForStoryboard } from './officialH3Context';
 import { videoH3BindingForPrompt } from './videoH3ReferenceBinding';
 import { chapterBoards, chapterIdForPlan, chapterIdForStoryboard } from './chapters';
+import { addDefaultVideoCharacterReferences } from './videoDefaultCharacterReferences';
 import type { AutomaticVideoTailConfiguration } from './videoTailReference';
 import {
   canUseNsfwPrivateProfileAssetForStoryboardShot,
@@ -141,7 +142,8 @@ const isVideoDirectorVisualAsset = (asset: ReferenceAsset): boolean => (
 export const isVideoDirectorImage = (asset: ReferenceAsset): boolean => isVideoDirectorVisualAsset(asset);
 
 export const videoImageRole = (asset: ReferenceAsset): ReferenceRole => {
-  if (typeof asset.characterReferenceId === 'string' && asset.characterReferenceId.trim()) return 'character';
+  if (asset.referenceEntityBinding) return asset.referenceEntityBinding.kind === 'location' ? 'scene' : asset.referenceEntityBinding.kind;
+  if (asset.referenceEntityBinding === undefined && typeof asset.characterReferenceId === 'string' && asset.characterReferenceId.trim()) return 'character';
   if (asset.referenceRole && !['unknown', 'audio', 'dialogue'].includes(asset.referenceRole)) return asset.referenceRole;
   if (asset.role === 'grid') return 'composition';
   if (asset.role !== 'audio') return asset.role;
@@ -376,7 +378,7 @@ export const applyVideoPromptChoice = (
     withReferences.references,
     withReferences.referenceSlotRoles,
   ).referenceSlotRoles;
-  return withReferences;
+  return choice.promptFormat === 'seedance' ? withReferences : addDefaultVideoCharacterReferences(project, withReferences);
 };
 
 export const reorderVideoReference = (references: VideoImageReference[], index: number, delta: number): VideoImageReference[] => {

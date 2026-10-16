@@ -1,7 +1,9 @@
 import type { Project, ReferenceAsset, VideoTaskApiConfig } from './types';
 import type { VideoGenerationDraft } from './videoGenerationTypes';
-import type { AudioRetainMode, FrozenVideoAudioReference, ProjectVoicePresets, VideoAudioReference, VideoAudioTarget } from './videoAudioTypes';
+import type { AudioRetainMode, FrozenVideoAudioReference, ProjectVoicePresets, VideoAudioReference, VideoAudioTarget, VideoVoicePreset } from './videoAudioTypes';
 import { sourceContentHash } from './sourceIntegrity';
+import { videoAudioCapability } from './videoAudioCapabilities';
+import { maskVideoPictureReferenceLiterals } from './videoPictureReferences';
 
 export const audioRetainModes: ReadonlyArray<{ id: AudioRetainMode; label: string }> = [
   { id: 'reference', label: '参考音色，使用本段台词' },
@@ -14,7 +16,9 @@ type AudioApi = VideoTaskApiConfig | Omit<VideoTaskApiConfig, 'apiKey'> | undefi
 export const isVideoDirectorAudio = (asset: ReferenceAsset): boolean => asset.mediaType === 'audio'
   || asset.type === 'audio' || Boolean(asset.mimeType?.startsWith('audio/'));
 export const videoAudioMappedFields = (api: AudioApi) => api?.provider === 'runninghub'
-  ? (api.runningHubMappedFields || []).filter((field) => field.kind === 'audio').sort((a, b) => (a.audioIndex || 0) - (b.audioIndex || 0)) : [];
+  ? (Array.isArray(api.runningHubMappedFields) ? api.runningHubMappedFields : []).filter((field) => field?.kind === 'audio'
+    && typeof field.nodeId === 'string' && field.nodeId.trim() && typeof field.fieldName === 'string' && field.fieldName.trim()
+    && Number.isSafeInteger(field.audioIndex) && field.audioIndex! >= 0).sort((a, b) => a.audioIndex! - b.audioIndex!) : [];
 export const videoAudioSlotCount = (api: AudioApi): number => videoAudioMappedFields(api)
   .reduce((count, field) => Math.max(count, (field.audioIndex || 0) + 1), 0);
 export const videoAudioBindingId = (api: AudioApi, slotIndex: number): string => {
@@ -42,6 +46,16 @@ export const normalizeProjectVoicePresets = (value: unknown): ProjectVoicePreset
 
 /** Remove only the exact generated insertion, even when the surrounding authored text was edited. */
 export const stripVideoAudioPromptBinding = (prompt: string, binding: VideoGenerationDraft['audioReferenceBinding']): string => {
+  if (binding?.insertions?.length) {
+    if (prompt === binding.renderedPrompt) return binding.basePrompt;
+    let result = prompt;
+    // A changed instruction is authored text now. Never remove a partial match or a duplicate occurrence.
+    for (const insertion of [...binding.insertions].reverse()) {
+      const at = result.indexOf(insertion.text);
+      if (at >= 0 && at === result.lastIndexOf(insertion.text)) result = result.slice(0, at) + (insertion.replacedText || '') + result.slice(at + insertion.text.length);
+    }
+    return result;
+  }
   if (!binding || binding.renderedPrompt.length <= binding.basePrompt.length) return prompt;
   const { basePrompt, renderedPrompt } = binding;
   let prefix = 0;
@@ -63,6 +77,26 @@ const authoredPrompt = (draft: VideoGenerationDraft): string => {
   return draft.h3ReferenceBinding && prompt === draft.h3ReferenceBinding.renderedPrompt ? draft.h3ReferenceBinding.basePrompt : prompt;
 };
 const escaped = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const audibleDialogue = (text?: string): boolean => {
+  const content = text?.replace(/^\s*\[[^\]\r\n]+\]\s*/u, '').trim();
+  return Boolean(content) && !/^(?:[（(]?\s*)?(?:无(?:台词|对白|发话)|全员无(?:台词|对白)|沉默|静默|闭口(?:倾听)?|不说话|silence|silent|no\s+(?:dialogue|speech)|N\/A)(?:\s*[）)]?[。.!！]?\s*)$/iu.test(content!);
+};
+
+const labelledDialogue = (prompt: string, labels: string[]): boolean => labels.some((label) => {
+  const name = escaped(label);
+  const clock = '(?:\\d{1,2}:\\d{2}(?:\\.\\d+)?|\\d+(?:\\.\\d+)?\\s*s)';
+  const timing = `(?:(?:At\\s+)?${clock}(?:\\s*[-–—~至]\\s*${clock})?\\s*(?:[（(][^\\n）)]*[）)]\\s*)?)?`;
+  const qualifiers = '(?:\\s*[（(][^\\n）)]*[）)])*';
+  const cue = '(?:说道|说|问|答|回答|喊|低语|says?|asks?|replies?|answers?|whispers?)';
+  const line = new RegExp(`(?:^|[\\n。.!?；;])\\s*(?:[-*•]\\s*)?${timing}${name}${qualifiers}\\s*(?:${cue}\\s*)?[:：]\\s*(?:[“"「『]([^”"」』\\n]+)[”"」』]|<d>([^<]+)</d>)`, 'gimu');
+  for (const match of prompt.matchAll(line)) if (audibleDialogue(match[1] || match[2])) return true;
+  // H3 speaker tokens count only beside a nonempty dialogue, never in a subject definition or silent cast list.
+  const tag = new RegExp(`<s>\\s*${name}\\s*</s>\\s*(?:[:：]\\s*)?<d>([^<]+)</d>`, 'gimu');
+  for (const match of prompt.matchAll(tag)) if (audibleDialogue(match[1])) return true;
+  const h3 = new RegExp(`${name}${qualifiers}\\s*(?:${cue}\\s*)?[:：]?\\s*<d>([^<]+)</d>`, 'gimu');
+  for (const match of prompt.matchAll(h3)) if (audibleDialogue(match[1])) return true;
+  return false;
+});
 
 /** Only actual dialogue evidence can bring in a preset. Visible cast is insufficient. */
 export const videoAudioSpeakingCharacterIds = (project: Project, draft: VideoGenerationDraft): string[] => {
@@ -70,13 +104,14 @@ export const videoAudioSpeakingCharacterIds = (project: Project, draft: VideoGen
   const board = project.storyboards.find((entry) => entry.id === draft.source?.storyboardId);
   const paired = board && [board.finalPrompt, board.englishPrompt, board.officialPromptZh, board.officialPromptEn, board.seedance25Output?.promptZh, board.seedance25Output?.promptEn].includes(prompt);
   const ids = new Set<string>();
+  const directIds = new Set<string>();
   const uniqueSpeaker = (speaker?: string) => {
     if (!speaker) return undefined;
     const matches = project.characters.filter((character) => [character.name, ...(character.aliases || [])].some((name) => name === speaker.trim()));
     return matches.length === 1 ? matches[0].id : undefined;
   };
   if (paired) {
-    for (const cue of board.audioLedger || []) if (cue.kind === 'dialogue' && cue.text?.trim()) {
+    for (const cue of board.audioLedger || []) if (cue.kind === 'dialogue' && audibleDialogue(cue.text)) {
       const id = cue.speakerId || uniqueSpeaker(cue.speaker);
       if (id && project.characters.some((character) => character.id === id)) ids.add(id);
     }
@@ -92,11 +127,10 @@ export const videoAudioSpeakingCharacterIds = (project: Project, draft: VideoGen
     const uniqueToken = identity?.speakerToken && identities.filter((entry) => entry.speakerToken === identity.speakerToken).length === 1;
     const labels = [...[character.name, ...(character.aliases || [])].filter((label) => uniqueSpeaker(label) === character.id),
       ...(uniqueToken ? [identity!.speakerToken!] : [])];
-    // Exact speaker labels around dialogue tags or explicit said/说 cues; never a filename or cast order.
-    if (labels.some((label) => new RegExp(`(?:^|[\\n。.!?；;])\\s*${escaped(label)}\\s*(?:(?:说道|说|问|答|喊|低语|says?|asks?|replies?)\\s*[:：]\\s*\\S|[:：]\\s*(?:[“"「『]\\s*[^\\s”"」』]|<d>\\s*[^\\s<]))`, 'imu').test(prompt)
-      || new RegExp(`<s>\\s*${escaped(label)}\\s*</s>`, 'iu').test(prompt))) ids.add(character.id);
+    if (labelledDialogue(prompt, labels)) directIds.add(character.id);
   }
-  return project.characters.filter((character) => ids.has(character.id)).map((character) => character.id);
+  // The current explicit dialogue outranks a paired board's older ledger.
+  return project.characters.filter((character) => (directIds.size ? directIds : ids).has(character.id)).map((character) => character.id);
 };
 
 export const resolveVideoAudioReferences = (project: Project, draft: VideoGenerationDraft, api: AudioApi): VideoAudioReference[] => {
@@ -104,31 +138,42 @@ export const resolveVideoAudioReferences = (project: Project, draft: VideoGenera
   if (draft.reuseTaskId || draft.audioSelectionMode === 'override' || !draft.audioSelectionMode && draft.audioReferences?.length) return structuredClone(draft.audioReferences || []);
   if (!videoAudioSlotCount(api)) return [];
   const presets = project.voicePresets;
-  if (!presets) return [];
   const references: VideoAudioReference[] = [];
   const add = (assetId: string, target: VideoAudioTarget, retainMode: AudioRetainMode = 'reference', notes?: string) => {
     const slotIndex = references.length;
     references.push({ bindingId: videoAudioBindingId(api, slotIndex), slotIndex, assetId, target, retainMode, ...(notes ? { notes } : {}) });
   };
   for (const id of videoAudioSpeakingCharacterIds(project, draft)) {
-    const preset = presets.characters[id];
+    const preset = videoAudioCharacterPreset(project, id);
     if (preset) add(preset.assetId, { kind: 'character', characterId: id }, preset.retainMode, preset.notes);
   }
   const board = project.storyboards.find((entry) => entry.id === draft.source?.storyboardId);
   const prompt = authoredPrompt(draft);
   const paired = board && [board.finalPrompt, board.englishPrompt, board.officialPromptZh, board.officialPromptEn, board.seedance25Output?.promptZh, board.seedance25Output?.promptEn].includes(prompt);
-  if (presets.narrator && (paired && board.audioLedger?.some((cue) => cue.kind === 'voiceover' && Boolean(cue.text?.trim()))
+  if (presets?.narrator && (paired && board.audioLedger?.some((cue) => cue.kind === 'voiceover' && audibleDialogue(cue.text))
     || /(?:^|\n)\s*(?:旁白|画外旁白|narrator|voiceover)\s*[:：]/imu.test(prompt))) {
     add(presets.narrator.assetId, { kind: 'voiceover' }, presets.narrator.retainMode, presets.narrator.notes);
   }
   return references;
 };
 
+/** A separately chosen legacy preset wins; a character's confirmed sample is the inheritance fallback. */
+export const videoAudioCharacterPreset = (project: Project, characterId: string): VideoVoicePreset | undefined => {
+  const explicit = project.voicePresets?.characters[characterId];
+  if (explicit) return explicit;
+  const character = project.characters.find((entry) => entry.id === characterId);
+  const profile = (character as typeof character & { voiceProfile?: { referenceAssetId?: string; notes?: string } })?.voiceProfile;
+  return profile?.referenceAssetId ? { assetId: profile.referenceAssetId, retainMode: 'reference', ...(profile.notes ? { notes: profile.notes } : {}) } : undefined;
+};
+
 export const validateVideoAudioReferences = (project: Project, draft: VideoGenerationDraft, api: AudioApi, frozenAudios?: readonly FrozenVideoAudioReference[]): string[] => {
   const references = draft.audioReferences || [];
   if (!references.length) return [];
   const issues: string[] = [];
-  if (draft.backend !== 'api' || api?.provider !== 'runninghub') return ['参考音频需要选择已配置音频槽的 RunningHub 工作流。'];
+  const capability = videoAudioCapability(api, draft.backend);
+  if (capability.status !== 'supported') return [capability.reason];
+  const authored = stripVideoAudioPromptBinding(draft.prompt, draft.audioReferenceBinding);
+  if (isSeedanceAudioDraft(draft, authored) && !seedanceAudioSection(authored)) issues.push('当前 Seedance 稿无法唯一定位“参考素材与职责”章节，请先确认原稿；参考音频用途尚未写入。');
   const capacity = videoAudioSlotCount(api);
   const occupied = new Set<number>();
   for (const reference of references) {
@@ -151,6 +196,25 @@ export const validateVideoAudioReferences = (project: Project, draft: VideoGener
   return issues;
 };
 
+const isSeedanceAudioDraft = (draft: VideoGenerationDraft, prompt: string): boolean => draft.source?.promptFormat === 'seedance'
+  || Boolean(draft.seedanceReferenceBinding) || /^\s*(?:#{1,6}\s+)?(?:参考素材与职责|(?:References?|Reference materials?|Reference assets?) and responsibilities)\s*[:：]?\s*$/imu.test(prompt);
+const seedanceAudioSection = (prompt: string): { start: number; end: number } | undefined => {
+  const masked = maskVideoPictureReferenceLiterals(prompt);
+  const headings = [...masked.matchAll(/^[ \t]*(?:#{1,6}[ \t]+)?(?:参考素材与职责|(?:References?|Reference materials?|Reference assets?) and responsibilities)[ \t]*(?:[:：][ \t]*|(?=\r?$))/gimu)];
+  if (headings.length !== 1) return undefined;
+  const start = headings[0].index! + headings[0][0].length;
+  const following = /^[ \t]*(?:#{1,6}[ \t]+)?(?:主体连续性|(?:Subject|Character) continuity)[ \t]*(?:[:：][ \t]*|(?=\r?$))/imu.exec(masked.slice(start));
+  return following ? { start, end: start + following.index } : undefined;
+};
+
+const audioUse = (mode: AudioRetainMode, english: boolean): string => mode === 'reference'
+  ? english ? 'Use the voice timbre with this segment’s existing dialogue and speaker timing.' : '参考音色，使用本段已有台词和原说话时序。'
+  : mode === 'fully_copy' ? english ? 'Use the original sound according to the workflow’s audio retention behavior.' : '按工作流留存方式使用原声音。'
+    : mode === 'partially_copy' ? english ? 'Partially use the original audio as specified.' : '按使用说明部分使用原音频。'
+      : english ? 'Reference only the musical style or ambience.' : '参考曲风或声音氛围。';
+const audioLiteral = (text: string): string => text.replace(/[\r\n\t]+/gu, ' ').replace(/@(?=Audio\s+\d+)/gu, '＠')
+  .replace(/<(\/?(?:Audio|Subject|Picture|Video)\s*\d*)>/gu, '〈$1〉').trim();
+
 /** Image serialization runs first; this renderer changes only the submitted draft. */
 export const prepareVideoAudioDraft = (project: Project, draft: VideoGenerationDraft, api: AudioApi): VideoGenerationDraft => {
   if (draft.reuseTaskId) return draft;
@@ -169,23 +233,62 @@ export const renderVideoAudioDraft = (project: Project, draft: VideoGenerationDr
     : draft.audioReferences?.length || draft.audioSelectionMode === 'none' ? { ...draft, audioReferences: [] } : draft;
   const english = draft.source?.language === 'en';
   const identities = draft.h3ReferenceBinding?.identities.characters || [];
-  const lines = references.map((reference) => {
+  const entries = references.map((reference) => {
     const targetCharacterId = reference.target.kind === 'character' ? reference.target.characterId : undefined;
     const identity = targetCharacterId ? identities.find((entry) => entry.characterId === targetCharacterId) : undefined;
-    const target = videoAudioTargetLabel(project, reference.target).replace(/[\r\n]/gu, ' ');
+    const target = audioLiteral(videoAudioTargetLabel(project, reference.target));
     const speaker = identity?.speakerToken ? ` (${identity.speakerToken})` : '';
     const mode = reference.retainMode;
-    const use = mode === 'reference' ? english ? 'Use the voice timbre with this segment’s existing dialogue and speaker timing.' : '参考音色，使用本段已有台词和原说话时序。'
-      : mode === 'fully_copy' ? english ? 'Use the original sound according to the workflow’s audio retention behavior.' : '按工作流留存方式使用原声音。'
-        : mode === 'partially_copy' ? english ? 'Partially use the original audio as specified.' : '按使用说明部分使用原音频。'
-          : english ? 'Reference only the musical style or ambience.' : '参考曲风或声音氛围。';
-    return `${english ? 'Audio' : '音频'} ${reference.slotIndex + 1} <Audio ${reference.slotIndex + 1}> → ${target}${speaker}; ${mode}: ${use}${reference.notes?.trim() ? ` ${reference.notes.trim().replace(/[\r\n]/gu, ' ')}` : ''}`;
+    const use = `${audioUse(mode, english)}${reference.notes?.trim() ? ` ${audioLiteral(reference.notes)}` : ''}`;
+    return { reference, target, speaker, use, character: targetCharacterId ? project.characters.find((entry) => entry.id === targetCharacterId) : undefined, identity };
   });
-  const instruction = lines.join(' ');
-  const h3 = /(^|\n)([ \t]*integrated_multimodal_description[ \t]*:[ \t]*)([^\n]*)/u;
-  const renderedPrompt = h3.test(basePrompt) ? basePrompt.replace(h3, (_whole, prefix: string, header: string, body: string) => `${prefix}${header}${body}${body ? ' ' : ''}${instruction}`)
-    : `${basePrompt}\n\n${instruction}`;
+  const newline = basePrompt.includes('\r\n') ? '\r\n' : '\n';
+  const insertions: NonNullable<NonNullable<VideoGenerationDraft['audioReferenceBinding']>['insertions']> = [];
+  const structural = maskVideoPictureReferenceLiterals(basePrompt);
+  const definition = /^subject_definitions:[ \t]*/mu.exec(structural);
+  const detailed = /^detailed_description:[ \t]*/mu.exec(structural);
+  if (definition && detailed) {
+    const subjectEnd = /^summary:/mu.exec(structural.slice(definition.index + definition[0].length));
+    const subjects = basePrompt.slice(definition.index + definition[0].length, subjectEnd ? definition.index + definition[0].length + subjectEnd.index : detailed.index);
+    const lines = entries.filter(({ reference }) => !subjects.includes(`<Audio ${reference.slotIndex + 1}>`))
+      .map(({ reference, target, speaker, use }) => `<Audio ${reference.slotIndex + 1}> → ${target}${speaker}; ${reference.retainMode}: ${use}`);
+    if (lines.length) insertions.push({ at: definition.index + definition[0].length, text: `${newline}${lines.join(newline)}${newline}` });
+    const descriptionStart = detailed.index + detailed[0].length;
+    const end = /^overall_soundscape:/mu.exec(structural.slice(descriptionStart));
+    const description = basePrompt.slice(descriptionStart, end ? descriptionStart + end.index : undefined);
+    const shots = [...structural.slice(descriptionStart, descriptionStart + description.length).matchAll(/\[Shot\s+(\d+)\]/gu)];
+    for (const [index, shot] of shots.entries()) {
+      const shotBodyStart = descriptionStart + shot.index! + shot[0].length;
+      const body = basePrompt.slice(shotBodyStart, index + 1 < shots.length ? descriptionStart + shots[index + 1].index! : descriptionStart + description.length);
+      const applicable = entries.filter(({ reference }) => !body.includes(`<Audio ${reference.slotIndex + 1}>`)).filter(({ reference, character, identity }) => reference.target.kind === 'character'
+        ? labelledDialogue(body, [...(character ? [character.name, ...(character.aliases || [])] : []), ...(identity?.speakerToken ? [identity.speakerToken] : [])])
+        : reference.target.kind === 'voiceover' ? /(?:旁白|画外旁白|narrator|voiceover)\s*(?:[:：]|(?:says?|说)\s*<d>)/iu.test(body)
+          : /<sound>|音效|环境声|风声|水声|声响|\b(?:ambience|ambient|sound|wind|music)\b/iu.test(body));
+      const cutHeader = /^\s*At \d{2}:[0-5]\d\.\d{3}\b[,，.:：]?/u.exec(body);
+      if (applicable.length) insertions.push({ at: shotBodyStart + (cutHeader?.[0].length || 0),
+        text: ` ${english ? `Shot ${shot[1]} audio use` : `镜头 ${shot[1]} 音频用途`}：${applicable.map(({ reference, target }) => `${target} <Audio ${reference.slotIndex + 1}>`).join(english ? '; ' : '；')}${english ? '. Keep the existing dialogue and sound timing.' : '；沿用本镜原有对白与声音时序。'}` });
+    }
+  } else if (/^integrated_multimodal_description:/mu.test(basePrompt)) {
+    // Keep the authored three-field prompt usable with the selected audio.
+    // Never manufacture a mixed three/six-field document from an authored H3 prompt.
+  } else if (isSeedanceAudioDraft(draft, basePrompt)) {
+    const section = seedanceAudioSection(basePrompt);
+    if (section) {
+      const lines = entries.map(({ reference, target, use }) => `@Audio ${reference.slotIndex + 1}${english ? ': ' : '：'}${target}; ${reference.retainMode}: ${use}`);
+      const sectionBody = basePrompt.slice(section.start, section.end);
+      const empty = /^[ \t]*(?:-[ \t]*)?(?:本段未绑定外部图像、视频或音频媒体素材。[^\r\n]*|No (?:external )?(?:images?,?\s*videos?[^\r\n]*|reference (?:media|materials)[^\r\n]*))[ \t]*$/imu.exec(sectionBody);
+      insertions.push(empty ? { at: section.start + empty.index, replacedText: empty[0], text: lines.join(newline) }
+        : { at: section.start, text: `${newline}${lines.join(newline)}${newline}` });
+    }
+  } else {
+    // Unstructured, non-H3 drafts keep the legacy single audio-note convention.
+    const lines = entries.map(({ reference, target, speaker, use }) => `${english ? 'Audio' : '音频'} ${reference.slotIndex + 1} <Audio ${reference.slotIndex + 1}> → ${target}${speaker}; ${reference.retainMode}: ${use}`);
+    insertions.push({ at: basePrompt.length, text: `${newline}${newline}${lines.join(' ')}` });
+  }
+  let renderedPrompt = basePrompt;
+  for (const insertion of [...insertions].sort((left, right) => right.at - left.at)) renderedPrompt = renderedPrompt.slice(0, insertion.at) + insertion.text
+    + renderedPrompt.slice(insertion.at + (insertion.replacedText?.length || 0));
   return { ...draft, prompt: renderedPrompt, audioReferences: references,
-    audioReferenceBinding: { version: 1, basePrompt, renderedPrompt },
+    audioReferenceBinding: insertions.length ? { version: 1, basePrompt, renderedPrompt, insertions } : undefined,
     ...(draft.source ? { source: { ...draft.source, promptFingerprint: sourceContentHash(renderedPrompt) } } : {}) };
 };

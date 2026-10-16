@@ -88,6 +88,9 @@ export interface PromptAdapterInput {
   /** Semantic subjects visible in the canonical timeline. Multiple subjects may
    * intentionally point at the same composite reference picture. */
   subjectDefinitions?: readonly PromptSubjectDefinitionInput[];
+  /** Text-model source identity only, never a serialized target section. */
+  voiceIdentityFacts?: readonly import('./characterVoiceFacts').CharacterVoiceIdentityFacts[];
+  currentCharacterVoiceFacts?: import('./characterVoiceFacts').CurrentCharacterVoiceFacts;
   /** AI-selected visible appearance facts, scoped to one exact shot only. */
   shotPrivateDetails?: readonly { shotIndex: number; subjectName: string; description: string }[];
   targetId: string;

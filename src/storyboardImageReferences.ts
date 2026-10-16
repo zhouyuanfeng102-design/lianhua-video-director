@@ -50,6 +50,9 @@ export const storyboardReferenceCharacters = (
     const matches = characters.filter((character) => character.id === id && !character.dossier?.archivedIntoCharacterId);
     return matches.length === 1 ? matches : [];
   };
+  if (asset.referenceEntityBinding !== undefined) {
+    return asset.referenceEntityBinding?.kind === 'character' ? exact(asset.referenceEntityBinding.entityId) : [];
+  }
   if (asset.characterReferenceId !== undefined) {
     return typeof asset.characterReferenceId === 'string' ? exact(asset.characterReferenceId) : [];
   }
@@ -67,6 +70,17 @@ export const storyboardImageReferenceRole = (
 ): string => {
   const characters = storyboardReferenceCharacters(asset, context);
   if (characters.length) return `人物 ${characters.map((character) => JSON.stringify(character.name)).join('、')} 的身份、外貌与服装设计参考`;
+  if (asset.referenceEntityBinding !== undefined) {
+    const binding = asset.referenceEntityBinding;
+    if (binding?.kind === 'location' || binding?.kind === 'prop') {
+      const entities = binding.kind === 'location' ? context.locations : context.props;
+      const matches = entities?.filter((entity) => entity.id === binding.entityId) || [];
+      if (matches.length === 1) return binding.kind === 'location'
+        ? `场景 ${JSON.stringify(matches[0].name)} 的环境外观参考`
+        : `道具 ${JSON.stringify(matches[0].name)} 的外形参考`;
+    }
+    return '未绑定当前实体的普通画面参考，由本镜画面决定用途';
+  }
   if (asset.characterReferenceId !== undefined) return '未绑定当前人物的普通画面参考，由本镜画面决定用途';
   const role = asset.referenceRole || asset.role;
   if (role === 'character' || asset.sourceEntityKind === 'character') return '人物身份与外貌参考，具体对应以本镜描述为准';

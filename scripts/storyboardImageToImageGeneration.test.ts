@@ -12,7 +12,7 @@ import { resolveImageAssetRegenerationTask, resolveImageRegenerationSource } fro
 import { resolveImagePromptSelection, sanitizeFinalImagePrompt } from '../src/imagePromptRules';
 import { generateDirectStoryboardImages, updateStoryboardImageToImageSettings, type DirectStoryboardImageErrorDetail, type DirectStoryboardImageGenerationContext, type DirectStoryboardImageGenerationOptions } from '../src/storyboardImageToImageGeneration';
 import { TextModelResponseError, type ImageGenerationOptions } from '../src/services/llm';
-import type { AppState, ImageApiConfig, ImageGenerationTask, ReferenceAsset, Storyboard, TextApiConfig, VideoShot } from '../src/types';
+import type { AppState, Character, ImageApiConfig, ImageGenerationTask, ReferenceAsset, Storyboard, TextApiConfig, VideoShot } from '../src/types';
 
 const pngA = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAIAAAACCAIAAAD91JpzAAAAEklEQVR4nGN0aDjAwMDAxAAGABGqAYSDRjw3AAAAAElFTkSuQmCC';
 const pngB = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+a2ioAAAAASUVORK5CYII=';
@@ -172,6 +172,21 @@ const prepareCustomPlanner = (instance: ReturnType<typeof fixture>, count: numbe
   };
   return { started, calls, frames };
 };
+const addCharacterReferences = (instance: ReturnType<typeof fixture>) => {
+  const character = (id: string, name: string, assetId: string): Character => ({
+    id, name, gender: '', apparentAge: '', race: '', appearance: '', outfit: '', signatureProps: '',
+    personality: '', motionHabits: '', anchor: '', negativeContinuity: '', assetIds: [assetId],
+  });
+  instance.mutate((state) => ({ ...state, project: {
+    ...state.project,
+    characters: [character('lead', '阿莲', 'a'), character('red-armor', '夏提雅', 'summer-reference'),
+      character('elf', '亚乌菈', 'elf-reference'), character('offscreen', '守卫长', 'offscreen-reference')],
+    assets: [...state.project.assets.map((asset) => asset.id === 'a' ? { ...asset, characterReferenceId: 'lead' } : asset),
+      { ...makeImage('summer-reference', pngB), characterReferenceId: 'red-armor' },
+      { ...makeImage('elf-reference'), characterReferenceId: 'elf' },
+      { ...makeImage('offscreen-reference'), characterReferenceId: 'offscreen' }],
+  } }));
+};
 
 const originalFetch = globalThis.fetch;
 let unexpectedNetworkCalls = 0;
@@ -230,6 +245,74 @@ try {
     imageApi: { ...success.getState().settings.imageApi, model: 'later-selected-model' },
   }, recoveredResult.imageApiSnapshot);
   assert.equal(recoveredApi.model, 'fixture-image-model', 'a real controller result restores its original model after task and original-card deletion');
+
+  const namedCharacters = fixture();
+  addCharacterReferences(namedCharacters);
+  const characterBody = '阿莲站在洞窟左侧，夏提雅穿着红甲在中央握持长枪，亚乌菈站在右侧抬手示意，三人保持各自外貌和服装，平视中景定格。';
+  let namedConversions = 0;
+  namedCharacters.ctx.convertPrompt = async () => { namedConversions += 1; return characterBody; };
+  await bounded(namedCharacters.run({ mode: 'selected-shots', shotIds: ['shot-2'] }));
+  const namedTask = namedCharacters.imageTasks()[0];
+  assert.equal(namedConversions, 1, 'reference completion does not request another text conversion');
+  assert.deepEqual(namedTask.referenceAssetIds, ['b', 'a', 'summer-reference', 'elf-reference'],
+    'characters appearing only in the final converted body receive identity references after the public originals');
+  assert.deepEqual(namedTask.primaryReferenceAssetIds, ['b', 'a'], 'automatic character references do not become public selections');
+  assert.deepEqual(namedTask.referenceAssetSnapshots?.map((snapshot) => snapshot.id), namedTask.referenceAssetIds);
+  assert.deepEqual(namedCharacters.calls[0].input.referenceImages, [pngB, pngA, pngB, pngA], 'distinct character slots remain present even when some pixels are equal');
+  assert.ok(namedCharacters.calls[0].input.prompt.startsWith(`${characterBody}\n\n`), 'reference completion preserves the complete AI-authored body');
+  assert.match(namedCharacters.calls[0].input.prompt, /3\. 人物 "夏提雅"[\s\S]*4\. 人物 "亚乌菈"/u);
+  assert.doesNotMatch(namedCharacters.calls[0].input.prompt, /守卫长/u);
+  assert.match(namedTask.bindingWarning || '', /补充 2 张角色参考图，共 4 张/u);
+  const namedAsset = namedCharacters.getState().project.assets.find((asset) => asset.source === 'generated')!;
+  assert.deepEqual(namedAsset.imageRegenerationSnapshot?.referenceAssetSnapshots.map((snapshot) => snapshot.id), namedTask.referenceAssetIds,
+    'the generated result saves every automatically attached identity image for exact retry');
+  const namedResultOnly = { ...namedCharacters.getState().project, assets: [namedAsset], generationTasks: [], storyboards: [] };
+  assert.deepEqual(resolveImageAssetRegenerationTask(namedAsset, namedResultOnly, namedCharacters.getState().settings.imageApi)?.referenceAssetIds,
+    namedTask.referenceAssetIds, 'asset-only retry recovers supplemented references after original cards are deleted');
+  await bounded(namedCharacters.run({ mode: 'selected-shots', shotIds: ['shot-2'] }));
+  assert.equal(namedConversions, 1, 'adding character images does not invalidate the public-reference converter cache');
+  assert.deepEqual(namedCharacters.calls[1].input.referenceImages, namedCharacters.calls[0].input.referenceImages);
+  assert.equal((namedCharacters.calls[1].input.prompt.match(/本次实际上传图片（严格按此顺序）/gu) || []).length, 1,
+    'cached final prompts refresh the one application attachment table without duplicating it');
+
+  for (const mode of ['boundary-frames', 'custom-count'] as const) {
+    const perFrameCharacters = fixture();
+    addCharacterReferences(perFrameCharacters);
+    const planning = mode === 'custom-count' ? prepareCustomPlanner(perFrameCharacters, 3) : undefined;
+    let conversions = 0;
+    perFrameCharacters.ctx.convertPrompt = async () => ++conversions % 2
+      ? '夏提雅在洞窟入口举起长枪，红甲与披风在冷光中清晰可见，中景静帧。'
+      : '亚乌菈站在洞窟深处转头观察，金发和服装纹理清晰可见，中景静帧。';
+    await bounded(perFrameCharacters.run(mode === 'custom-count' ? { mode: 'storyboard-shots', count: 3 } : { mode: 'boundary-frames' }));
+    const expectedCount = mode === 'custom-count' ? 3 : 2;
+    assert.equal(conversions, expectedCount, `${mode} adds no conversion calls while completing identity references`);
+    assert.equal(perFrameCharacters.calls.length, expectedCount);
+    assert.deepEqual(perFrameCharacters.imageTasks().map((task) => task.referenceAssetIds),
+      Array.from({ length: expectedCount }, (_, index) => ['b', 'a', index % 2 ? 'elf-reference' : 'summer-reference']),
+      `${mode} attaches only the named characters in each final still`);
+    assert.ok(perFrameCharacters.imageTasks().every((task) => task.status === 'succeeded'
+      && task.referenceAssetSnapshots?.length === 3 && /补充 1 张角色参考图，共 3 张/u.test(task.bindingWarning || '')));
+    assert.equal(perFrameCharacters.stores.filter((entry) => entry.fileName?.includes('图生图参考')).length, 4,
+      'public and repeated character references are frozen only once within a batch');
+    if (planning) assert.equal(planning.calls.length, 1);
+  }
+
+  const unreadableCharacter = fixture();
+  addCharacterReferences(unreadableCharacter);
+  unreadableCharacter.mutate((state) => ({ ...state, project: { ...state.project,
+    assets: state.project.assets.map((asset) => asset.id === 'summer-reference'
+      ? { ...asset, dataUrl: undefined, managed: true, relativePath: 'images/unreadable-character.png', checksum: 'f'.repeat(64) } : asset),
+  } }));
+  let unreadableConversions = 0;
+  unreadableCharacter.ctx.convertPrompt = async () => {
+    unreadableConversions += 1;
+    return '夏提雅身穿红甲站在洞窟入口，手持长枪，冷光中呈现清晰的单帧中景。';
+  };
+  await bounded(unreadableCharacter.run({ mode: 'selected-shots', shotIds: ['shot-2'] }));
+  assert.equal(unreadableConversions, 1);
+  assert.equal(unreadableCharacter.calls.length, 0, 'a named identity reference read failure cannot silently submit fewer images');
+  assert.equal(unreadableCharacter.imageTasks()[0].status, 'failed');
+  assert.equal(unreadableCharacter.reportDetails[0]?.stage, 'image-reference-load');
 
   const micro = fixture();
   const converterCalls: Array<{ api: TextApiConfig; kind: string; source: string; format: string; rules: string; identityContext: string }> = [];

@@ -22,6 +22,7 @@ import type {
   Workflow,
 } from './types';
 import { sourceContentHash } from './sourceIntegrity';
+import { characterVoiceIdentityFacts, type CurrentCharacterVoiceFacts } from './characterVoiceFacts';
 import { replaceChapterSourceDocument } from './chapters';
 import { reconcileChapterEntities, type ChapterEntityConflict } from './chapterEntities';
 import { isDossierFieldConfirmed, preserveConfirmedCharacterFields, CHARACTER_DOSSIER_FIELDS } from './characterDossierPolicy';
@@ -349,6 +350,7 @@ export interface StoryboardDraftConversionInput {
   sequenceHandoff?: SequencePromptHandoffContext;
   /** Saved identity facts; AI interprets these alongside source dialogue and audio cues. */
   characters?: readonly Character[];
+  currentCharacterVoiceFacts?: CurrentCharacterVoiceFacts;
   request: (systemPrompt: string, userPrompt: string) => Promise<string>;
   signal?: AbortSignal;
   /** Kept for caller compatibility; AI body text is not passed through the
@@ -493,6 +495,7 @@ export const convertStoryboardDraftToFinal = async (
     };
   });
   const characterIdentityFacts = (input.characters || []).map((character) => ({
+    ...characterVoiceIdentityFacts(character),
     id: character.id,
     name: character.name,
     ...(character.aliases?.length ? { aliases: character.aliases } : {}),
@@ -607,6 +610,7 @@ export const convertStoryboardDraftToFinal = async (
       || '[原始剧情未单独保存，请结合完整原始计划理解内容]',
     shotEvidence,
     characterIdentityFacts,
+    currentCharacterVoiceFacts: input.currentCharacterVoiceFacts,
     audioLedgerFacts,
     creativeDirection,
     continuityContext,
@@ -677,6 +681,8 @@ export const convertStoryboardDraftToFinal = async (
       '</video_conversion_structural_repair_hard_contract>',
     ].join('\n'), 'format-only');
     const structuralRepairData = serializeUntrustedConversionData({
+      voiceFactScope: 'preserve-confirmed-source',
+      sourcePrompt: convertedPrompt,
       validationFailure: initialStructureFailure,
       repairAttempt: repairAttempt + 1,
       invalidCandidate: convertedPrompt,

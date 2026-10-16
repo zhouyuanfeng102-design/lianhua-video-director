@@ -128,7 +128,9 @@ export interface VideoGenerationDraft {
   /** Explicit 'none' prevents project presets being restored after clearing. */
   audioSelectionMode?: 'project' | 'override' | 'none';
   /** Idempotent task-only audio rendering; authored storyboard text is untouched. */
-  audioReferenceBinding?: { version: 1; basePrompt: string; renderedPrompt: string };
+  audioReferenceBinding?: { version: 1; basePrompt: string; renderedPrompt: string;
+    /** Exact renderer insertions, used to remove only intact generated audio prose after user edits. */
+    insertions?: Array<{ at: number; text: string; replacedText?: string }> };
   /** Remembers empty slots' uses for replacement; never sent as image inputs. */
   referenceSlotRoles?: ReferenceRole[];
   /** Only explicitly entered values. Empty means preserve workflow/provider defaults. */

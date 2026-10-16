@@ -56,7 +56,8 @@ const bindings: H3IdentityBindings = { version: 1, characters: [{ characterId: h
 const participation: PromptCharacterParticipation = { version: 1, characters: [{ characterId: hero.id, name: hero.name,
   presence: 'visible', shotIndex: 2, evidence: '夏提雅站在石台上。', speaking: false }] };
 assert.equal(h3IdentityAnchorIssue(zh, anchor), undefined, 'first appearance in a later shot is a legal anchor');
-assert.ok(h3IdentityAnchorIssue(`integrated_multimodal_description: ${anchor}\n[Shot 1] 空旷石台。`, anchor));
+assert.equal(h3IdentityAnchorIssue(`integrated_multimodal_description: ${anchor}\n[Shot 1] 空旷石台。`, anchor), undefined,
+  'a unique explicit identity location does not depend on whether it precedes a shot marker');
 assert.deepEqual(characterParticipationIssues(zh, participation, people, bindings), []);
 assert.match(characterParticipationIssues(zh, participation, people, { version: 1, characters: [] }).join(' '), /缺少唯一identityBindings/u);
 assert.ok(characterParticipationIssues(zh, { ...participation, characters: [{ ...participation.characters[0], shotIndex: 1 }] }, people, bindings).length);

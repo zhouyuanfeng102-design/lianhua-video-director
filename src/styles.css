@@ -2047,7 +2047,6 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
 .storyboard-image-count-control { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 5px; font-size: calc(11px * var(--ui-font-scale, 1)); color: var(--muted); }
 .storyboard-image-count-control input { width: 82px; min-width: 0; min-height: 28px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
 .storyboard-image-count-control input[aria-invalid="true"] { border-color: #c43e52; }
-.storyboard-image-count-help { flex-basis: 100%; text-align: right; line-height: 1.5; }
 .result-language-tools { flex: 0 1 auto; min-width: 0; align-items: center; gap: 5px; }
 .result-language-switch { display: grid; grid-template-columns: repeat(2, minmax(58px, 1fr)); gap: 5px; min-width: 0; }
 .result-language-card {
@@ -2122,7 +2121,7 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
   overflow-wrap: anywhere; font-size: calc(clamp(10px, 2cqi, 12px) * var(--ui-font-scale, 1));
 }
 .director-result-pane .director-result-actions {
-  display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.15fr) minmax(0, 1.4fr) minmax(0, .7fr);
+  display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1.15fr) minmax(0, 1.4fr);
   gap: 3px clamp(2px, .6cqi, 5px);
   align-items: stretch; padding-top: 4px;
 }
@@ -2137,10 +2136,6 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
   white-space: nowrap; font-size: clamp(7px, 1.85cqi, calc(11px * var(--ui-font-scale, 1)));
 }
 .director-result-actions .storyboard-image-count-control input { width: 100%; height: 25px; min-height: 25px; padding: 2px 3px; }
-.director-result-actions .storyboard-image-count-help {
-  grid-column: 1 / -1; text-align: left; line-height: 1.35; overflow-wrap: anywhere;
-  font-size: calc(clamp(9px, 1.8cqi, 10px) * var(--ui-font-scale, 1));
-}
 
 /* Once a result exists, keep source/options compact without shrinking the text. */
 .director-view:has(.director-result-copy) .director-source-card {

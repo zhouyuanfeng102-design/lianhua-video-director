@@ -1,5 +1,6 @@
 import type { Project, Storyboard } from './types';
 import { detachDeletedStoryReferenceAsset } from './storyReferences';
+import { updateCharacterVoiceProfile } from './characterVoiceProfile';
 
 /**
  * Locate current video references and saved delivery provenance. A match is
@@ -114,7 +115,15 @@ export const deleteAssetFromProject = (
   const next = detachDeletedStoryReferenceAsset({
     ...project,
     assets: project.assets.filter((asset) => asset.id !== assetId),
-    characters: unbindEntities(project.characters),
+    characters: unbindEntities(project.characters).map((character) => {
+      if (character.voiceProfile?.referenceAssetId !== assetId) return character;
+      const next = { ...character };
+      const voiceProfile = updateCharacterVoiceProfile(character.voiceProfile,
+        { ...character.voiceProfile, referenceAssetId: undefined });
+      if (voiceProfile) next.voiceProfile = voiceProfile;
+      else delete next.voiceProfile;
+      return next;
+    }),
     locations: unbindEntities(project.locations),
     props: unbindEntities(project.props),
     storyboards: storyboards.some((board, index) => board !== project.storyboards[index])

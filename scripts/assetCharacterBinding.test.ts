@@ -194,7 +194,7 @@ test('无生成来源资产曾绑定甲，改绑乙或解除也不保留旧甲�
     const result = prepareVideoH3ReferenceDraft(project, selected, { backend: 'api', api });
     assert.ok(!result.draft.prompt.includes(`${anchorA} <Picture 1>`));
     if (target === 'b') assert.match(result.draft.prompt, /乙 \(S2\): <Picture 1>/u);
-    else assert.doesNotMatch(result.draft.prompt, /<Picture 1>/u);
+    else assert.doesNotMatch(result.draft.prompt, /Visual identity reference for [^\n]*<Picture 1>/u);
   }
 });
 

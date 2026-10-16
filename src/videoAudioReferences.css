@@ -39,6 +39,7 @@
 .var-preset-row { display: grid; grid-template-columns: minmax(65px,.55fr) minmax(0,1fr) minmax(0,1fr); gap: 7px; align-items: center; min-width: 0; padding: 8px; background: var(--panel-2, #f7f7fa); border: 1px solid var(--line, #dcdde5); border-radius: 8px; }
 .var-preset-row > strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .85em; }
 .var-preset-row > .var-audio-preview,
+.var-preset-row > .var-help,
 .var-preset-row > .var-warning { grid-column: 2 / -1; }
 @container (max-width: 620px) {
   .var-slot-grid { grid-template-columns: minmax(0,1fr); }

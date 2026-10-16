@@ -140,6 +140,7 @@ const quotedSectionNames = (names: readonly string[]): string => names.map((name
 const readH3PromptProtocolWithIssue = (
   prompt: string,
   referenceSectionsForIssue?: readonly string[],
+  allowMissingExistingCuts = false,
 ): H3PromptProtocolReadResult => {
   const text = prompt.trim();
   const protectedRanges = findProtectedRanges(text);
@@ -191,7 +192,13 @@ const readH3PromptProtocolWithIssue = (
     const body = description.slice(match.index! + match[0].length, matches[index + 1]?.index ?? description.length).trim();
     const cut = body.match(/^At (\d{2}):([0-5]\d)\.(\d{3})\b/u);
     if (!body) return { issue: `H3第${index + 1}镜缺少镜头正文。` };
-    if (index > 0 && !cut) {
+    // Saved AI-authored prose may have no cut header. Preservation operations
+    // can retain that absence; an explicit malformed numeric At is never
+    // treated as untimed prose, and no action interval supplies a missing cut.
+    if (allowMissingExistingCuts && !cut && /^At[\s:：]*[+-]?\d/iu.test(body)) {
+      return { issue: `H3第${index + 1}镜的At切点格式无效，要求“At MM:SS.mmm”。` };
+    }
+    if (index > 0 && !cut && !allowMissingExistingCuts) {
       return { issue: `H3第${index + 1}镜缺少有效切点，要求“[Shot ${index + 1}] At MM:SS.mmm”。` };
     }
     if (index === 0 && cut) return { issue: 'H3首镜不应带切点；“[Shot 1]”之后应直接书写镜头正文。' };
@@ -213,6 +220,12 @@ const readH3PromptProtocolWithIssue = (
 
 export const readH3PromptProtocol = (prompt: string): H3PromptProtocol | undefined => readH3PromptProtocolWithIssue(prompt).protocol;
 
+/** Read only an already-saved body's structure for a preservation operation.
+ * Missing later cut headers remain null; this does not validate a new H3
+ * delivery or infer a schedule from prose, action intervals or old shots. */
+export const readExistingH3PromptProtocol = (prompt: string): H3PromptProtocol | undefined =>
+  readH3PromptProtocolWithIssue(prompt, undefined, true).protocol;
+
 /** Selected reference inputs may be newly attached to a valid text-only H3
  * draft. They extend the transport ID set, not the baseline's shot prose.
  * Never interpolate labels/names into a synthetic format-reference prompt. */
@@ -221,11 +234,12 @@ const withAdditionalReferenceTags = (protocol: H3PromptProtocol, tags: readonly 
   references: [...new Set([...protocol.references, ...tags.filter((tag) => /^<(?:Subject|Picture|Video|Audio) [1-9]\d*>$/u.test(tag))])].sort(),
 });
 
-export const getH3PromptProtocolIssue = (
-  prompt: string, formatReferencePrompt?: string, additionalReferenceTags: readonly string[] = [],
+const getPromptProtocolIssue = (
+  prompt: string, formatReferencePrompt: string | undefined, additionalReferenceTags: readonly string[],
+  preserveExisting = false,
 ): string | undefined => {
-  const expectedResult = formatReferencePrompt ? readH3PromptProtocolWithIssue(formatReferencePrompt) : undefined;
-  const actualResult = readH3PromptProtocolWithIssue(prompt, expectedResult?.protocol?.sections);
+  const expectedResult = formatReferencePrompt ? readH3PromptProtocolWithIssue(formatReferencePrompt, undefined, preserveExisting) : undefined;
+  const actualResult = readH3PromptProtocolWithIssue(prompt, expectedResult?.protocol?.sections, preserveExisting);
   if (!actualResult.protocol) return actualResult.issue;
   const actual = actualResult.protocol;
   if (!expectedResult) return undefined;
@@ -237,11 +251,25 @@ export const getH3PromptProtocolIssue = (
   if (actual.shots.length !== expected.shots.length) {
     return `H3镜头数量与格式基准不一致（应为${expected.shots.length}镜，实际${actual.shots.length}镜）。`;
   }
+  if (preserveExisting) {
+    const differentMarker = actual.shots.findIndex((shot, index) => shot.marker !== expected.shots[index].marker);
+    if (differentMarker >= 0) return `H3第${differentMarker + 1}镜的镜头标记与原稿不一致；请逐字保留原有镜头标记。`;
+  }
   const differentCut = actual.shots.findIndex((shot, index) => shot.cut !== expected.shots[index].cut);
   if (differentCut >= 0) return `H3第${differentCut + 1}镜的切点与格式基准不一致；请保留该镜原定切点。`;
   if (!same(actual.references, expected.references)) return 'H3的参考标签集合与格式基准不一致；请保持原有主体、图片、视频与音频标签。';
   return undefined;
 };
+
+export const getH3PromptProtocolIssue = (
+  prompt: string, formatReferencePrompt?: string, additionalReferenceTags: readonly string[] = [],
+): string | undefined => getPromptProtocolIssue(prompt, formatReferencePrompt, additionalReferenceTags);
+
+/** Existing-prompt edits preserve exact markers and cut headers, including
+ * their absence. Keep strict new-delivery validation on the function above. */
+export const getExistingH3PromptProtocolIssue = (
+  prompt: string, sourcePrompt?: string,
+): string | undefined => getPromptProtocolIssue(prompt, sourcePrompt, [], true);
 
 export interface RepairH3PromptProtocolOptions {
   /** Accept the AI's completed text without local content/protocol vetoes. */

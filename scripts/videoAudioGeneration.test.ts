@@ -171,7 +171,7 @@ if (run('h3')) {
   cloud.requestTemplate = JSON.stringify(body); cloud.mapping.images = ['10', '11'].map((nodeId) => ({ nodeId, inputName: 'image', role: 'general' }));
   const png = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
   f.holder.state.project.assets.push({ id: 'image-a', name: '合成场景', fileName: 'scene.png', type: 'reference', role: 'general', dataUrl: png, tags: [], createdAt: 1, updatedAt: 1 });
-  const authored = 'integrated_multimodal_description: A quiet cabin.\n[Shot 1] The cabin follows <Picture 8>.\noverall_soundscape: Quiet.';
+  const authored = 'subject_definitions: The cabin follows <Picture 8>.\nsummary: A quiet cabin.\nretention_analysis: Preserve the cabin.\ndetailed_description: [Shot 1] A quiet cabin. Narrator: <d>[English] Stay here.</d>\noverall_soundscape: Quiet.\nnon_diegetic_music: N/A';
   const imageBase = authored.replace('<Picture 8>', '<Picture 1>');
   const input = renderVideoAudioDraft(f.holder.state.project, { ...draft(1), prompt: imageBase,
     source: { language: 'en', promptFormat: 'h3' }, references: [{ assetId: 'image-a', role: 'general', slotIndex: 1 }],
@@ -186,8 +186,9 @@ if (run('h3')) {
       f.holder.posts++; const nodes = JSON.parse(request.body!).nodeInfoList;
       const prompt = nodes.find((node: { nodeId: string }) => node.nodeId === '1').fieldValue as string; prompts.push(prompt);
       assert.ok(prompt.includes('<Picture 2>') && !prompt.includes('<Picture 8>'));
-      assert.equal(prompt.match(/<Audio 1>/gu)?.length, 1, 'H3 rebinding retains exactly one audio instruction');
-      assert.ok(prompt.split('\n')[0].includes('<Audio 1>'), 'H3 audio stays in the integrated line');
+      assert.equal(prompt.match(/<Audio 1>/gu)?.length, 2, 'H3 rebinding retains one audio definition and one speaking-shot citation');
+      assert.match(prompt, /^subject_definitions:\s*<Audio 1>/u, 'H3 audio is defined in the full-reference subject section');
+      assert.doesNotMatch(prompt, /integrated_multimodal_description:/u);
       assert.equal(nodes.find((node: { nodeId: string }) => node.nodeId === '11').fieldValue, 'openapi/scene.png');
       assert.equal(nodes.find((node: { nodeId: string }) => node.nodeId === '144').fieldValue, 'openapi/frozen-0.wav');
       return response({ taskId: `mock-h3-${f.holder.posts}`, status: 'QUEUED' });

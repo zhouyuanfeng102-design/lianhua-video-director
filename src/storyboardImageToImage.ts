@@ -13,7 +13,7 @@ import { assertComfyUIWorkflowCanBindReferenceImages } from './comfyui';
 import { validateRunningHubImageConfig } from './runningHubImage';
 import { canUseNsfwPrivateProfileAssetForStoryboardShot } from './nsfwPrivateAssets';
 import { parseStoryboardImageFramePlan, validateStoryboardImagePlanCount, type StoryboardImageFramePlan } from './storyboardImagePlan';
-import { buildStoryboardImagePromptWithReferences, stripStoryboardImageReferenceMetadata, storyboardImageFramingInstruction, type StoryboardImageReferenceContext } from './storyboardImageReferences';
+import { buildStoryboardImagePromptWithReferences, stripStoryboardImageReferenceMetadata, storyboardImageFramingInstruction, storyboardImageReferenceRole, type StoryboardImageReferenceContext } from './storyboardImageReferences';
 
 const ids = (value: unknown): string[] => Array.isArray(value)
   ? [...new Set(value.filter((id): id is string => typeof id === 'string').map((id) => id.trim()).filter(Boolean))]
@@ -159,7 +159,8 @@ export const buildDirectStoryboardImagePromptWithReferences = (
   ...directPromptReferenceLines(),
   '本次实际上传图片（严格按此顺序）：',
   ...assets.map((asset, index) => `${index + 1}. ${JSON.stringify(asset.name)} — ${
-    asset.sourceEntityKind === 'character' || (asset.referenceRole || asset.role) === 'character' ? '人物身份与外貌'
+    asset.referenceEntityBinding !== undefined ? storyboardImageReferenceRole(asset, context)
+      : asset.sourceEntityKind === 'character' || (asset.referenceRole || asset.role) === 'character' ? '人物身份与外貌'
       : asset.sourceEntityKind === 'location' || (asset.referenceRole || asset.role) === 'scene' ? '场景环境'
         : asset.sourceEntityKind === 'prop' || (asset.referenceRole || asset.role) === 'prop' ? '道具外观' : '画面参考'
   }`),
@@ -197,6 +198,7 @@ export const directStoryboardImageSourceFingerprint = (
         id, name: asset.name, role: asset.referenceRole || asset.role,
         sourceEntityKind: asset.sourceEntityKind, sourceEntityId: asset.sourceEntityId,
         characterReferenceId: asset.characterReferenceId,
+        referenceEntityBinding: asset.referenceEntityBinding,
         checksum: asset.checksum, relativePath: asset.relativePath, url: asset.url,
         // Inline-only imports do not necessarily have a checksum.
         inlineFingerprint: asset.dataUrl ? fnv1a(asset.dataUrl) : undefined,

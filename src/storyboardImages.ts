@@ -26,6 +26,7 @@ import {
   resolveExplicitImageCharacterMorphology,
 } from './imageGeneration';
 import { publicVideoContinuityLock } from './videoPrivateScope';
+import { resolveCharacterAlias } from './characterParticipation';
 import { readStoryboardImageH3Source } from './storyboardImageH3Source';
 export { readStoryboardImageH3Source } from './storyboardImageH3Source';
 import { storyboardImageReferenceRole, storyboardReferenceCharacters } from './storyboardImageReferences';
@@ -811,7 +812,10 @@ const visibleCharactersForShot = (
 ): Character[] => {
   const aiResolvedNames = context.visibleCharacterNamesByShotId?.[shot.id];
   if (aiResolvedNames) {
-    const visibleNames = new Set(aiResolvedNames.map(normalizedCharacterName).filter(Boolean));
+    const visibleNames = new Set(aiResolvedNames.map((value) => {
+      const name = normalizedCharacterName(value);
+      return normalizedCharacterName(resolveCharacterAlias(name, context.characters)?.name || name);
+    }).filter(Boolean));
     return context.characters.filter((character) => visibleNames.has(normalizedCharacterName(character.name)));
   }
   return context.characters.filter((character) => (
@@ -881,7 +885,8 @@ export const planStoryboardImageIdentityEnrichment = (
   const orderedNames: string[] = [];
   const shotIdsByName = new Map<string, string[]>();
   const addVisible = (rawName: string, shotId: string) => {
-    const name = normalizedCharacterName(rawName);
+    const normalizedName = normalizedCharacterName(rawName);
+    const name = normalizedCharacterName(resolveCharacterAlias(normalizedName, context.characters)?.name || normalizedName);
     if (!name) return;
     if (!shotIdsByName.has(name)) {
       orderedNames.push(name);

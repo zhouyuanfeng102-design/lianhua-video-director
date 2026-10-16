@@ -1,4 +1,5 @@
 import { normalizeStoryReferenceContext } from './storyReferences';
+import { normalizeCharacterVoiceProfile } from './characterVoiceProfile';
 import { normalizeStoryVisualActionPlan, normalizeStoryVisualParagraphs } from './storyVisualAction';
 import { normalizeBattleSceneStagingList } from './battleScenePlanning';
 import { MAX_PLANNED_SEQUENCE_SEGMENT_DURATION_SEC, requestedSegmentDurationWindows } from './sequenceDurationContract';
@@ -131,7 +132,8 @@ const copyStrings = <Key extends string>(value: Record<string, unknown>, fields:
 };
 const copyCharacters = (characters: readonly SemanticSequenceCharacter[] = []): SemanticSequenceCharacter[] => (
   characters.map((character) => ({ name: character.name, ...copyStrings(character, CHARACTER_FIELDS),
-    ...(Array.isArray(character.aliases) ? { aliases: [...character.aliases] } : {}) }))
+    ...(Array.isArray(character.aliases) ? { aliases: [...character.aliases] } : {}),
+    ...(normalizeCharacterVoiceProfile(character.voiceProfile) ? { voiceProfile: normalizeCharacterVoiceProfile(character.voiceProfile) } : {}) }))
 );
 const copyPacing = (pacing: StoryPacingContext | undefined): StoryPacingContext | undefined => (
   pacing ? { pace: pacing.pace, ...copyStrings({ ...pacing }, PACING_FIELDS) } : undefined
@@ -564,6 +566,7 @@ export const semanticSequenceCharacters = (
       signatureProps: '', personality: '', motionHabits: '', anchor: '', negativeContinuity: '',
       ...copyStrings(saved, CHARACTER_FIELDS),
       ...(Array.isArray(saved.aliases) ? { aliases: [...saved.aliases] } : {}),
+      ...(normalizeCharacterVoiceProfile(saved.voiceProfile) ? { voiceProfile: normalizeCharacterVoiceProfile(saved.voiceProfile) } : {}),
       id: savedId ?? `semantic-character-${sourceContentHash(JSON.stringify([plan.id, index, saved.name]))}`,
       name: typeof saved.name === 'string' ? saved.name : '',
       assetIds: live ? [...live.assetIds] : [],

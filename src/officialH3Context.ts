@@ -1,6 +1,7 @@
 import type { OfficialH3ProjectContext } from './officialPrompt';
 import { isSemanticSequencePlan, semanticSequenceCharacters } from './semanticSequencePlan';
 import type { Project, Storyboard } from './types';
+import { currentCharacterVoiceFacts } from './characterVoiceFacts';
 
 /** Generation, display, selection and submission must validate the same source.
  * Semantic sequences own frozen public character facts and segment-local text;
@@ -12,9 +13,11 @@ export const officialH3ContextForStoryboard = (
 ): OfficialH3ProjectContext => {
   const plan = storyboard?.sequencePlanId
     ? project.sequencePlans?.find((candidate) => candidate.id === storyboard.sequencePlanId) : undefined;
+  const characters = semanticSequenceCharacters(plan, project.characters.filter((character) => !character.dossier?.archivedIntoCharacterId));
   return {
     assets: project.assets,
-    characters: semanticSequenceCharacters(plan, project.characters.filter((character) => !character.dossier?.archivedIntoCharacterId)),
+    characters,
+    currentCharacterVoiceFacts: currentCharacterVoiceFacts(characters, project.characters),
     locations: project.locations,
     props: project.props,
     sceneContent: isSemanticSequencePlan(plan) ? storyboard?.sourceStoryContent : storyboard

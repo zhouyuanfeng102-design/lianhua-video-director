@@ -30,6 +30,7 @@ import { normalizeVideoTransportImage, VIDEO_TRANSPORT_IMAGE_INVALID } from './v
 } from './types';
 import { repairSequencePlanResults } from './appEffects';
 import { normalizeCharacterDossier } from './characterDossierPolicy';
+import { normalizeCharacterVoiceProfile } from './characterVoiceProfile';
 import { normalizeComfyUIImageConfig } from './comfyui';
 import { normalizeRunningHubImageConfig } from './runningHubImage';
 import { defaultImageOutputSize, normalizeImageOutputSizes } from './imageOutputSize';
@@ -42,6 +43,7 @@ import { imagePreparationStageLabel, normalizeImageTaskPreparationStage } from '
 import { normalizeImageAssetRegenerationSnapshot } from './imageAssetRegenerationSnapshot';
 import { normalizeCustomImageDraft, normalizeCustomImageInput } from './customImageMetadata';
 import { normalizeImageReferenceAssetSnapshots, normalizeStoryboardImageToImageSettings } from './imageGeneration';
+import { normalizeAssetReferenceEntityBinding } from './assetCharacterBinding';
 import { defaultComfyVideoConfig } from './videoGenerationTypes';
 import { defaultRunningHubVideoConfig, normalizeRunningHubVideoConfig } from './runningHubVideo';
 import { AUDIO_PROMPT_RULE, DIALOGUE_DELIVERY_RULE } from './audioPromptPolicy';
@@ -2863,6 +2865,7 @@ const normalizePersistedProject = (
       customImageInput: rawCustomImageInput,
       imageRequestSize: rawImageRequestSize,
       characterReferenceId: rawCharacterReferenceId,
+      referenceEntityBinding: rawReferenceEntityBinding,
       ...asset
     } = item;
     return {
@@ -2870,6 +2873,8 @@ const normalizePersistedProject = (
       ...(item.storyReferenceSubjects !== undefined ? { storyReferenceSubjects: normalizeStoryReferenceAssetSubjects(item.storyReferenceSubjects) } : {}),
       ...(rawCharacterReferenceId !== undefined ? { characterReferenceId:
         typeof rawCharacterReferenceId === 'string' && rawCharacterReferenceId.trim() ? rawCharacterReferenceId : null } : {}),
+      ...(rawReferenceEntityBinding !== undefined
+        ? { referenceEntityBinding: normalizeAssetReferenceEntityBinding(rawReferenceEntityBinding) } : {}),
       ...normalizeStoryboardImageFrameMetadata(item),
       ...(rawImageGenerationMode === 'image-to-image' || rawImageGenerationMode === 'text-to-image'
         ? { imageGenerationMode: rawImageGenerationMode } : {}),
@@ -2891,10 +2896,12 @@ const normalizePersistedProject = (
       nsfwBodyAnchors: rawNsfwBodyAnchors,
       nsfwProfile: rawNsfwProfile,
       dossier: rawDossier,
+      voiceProfile: rawVoiceProfile,
       ...character
     } = item;
     const nsfwBodyAnchors = normalizeNsfwBodyAnchors(rawNsfwBodyAnchors);
     const nsfwProfile = normalizeCharacterNsfwProfile(rawNsfwProfile);
+    const voiceProfile = normalizeCharacterVoiceProfile(rawVoiceProfile);
     return {
       ...character,
       ...(rawDossier !== undefined ? { dossier: normalizeCharacterDossier(rawDossier) } : {}),
@@ -2910,6 +2917,7 @@ const normalizePersistedProject = (
       assetIds: Array.isArray(item.assetIds) ? [...item.assetIds] : [],
       ...(nsfwBodyAnchors ? { nsfwBodyAnchors } : {}),
       ...(nsfwProfile ? { nsfwProfile } : {}),
+      ...(voiceProfile ? { voiceProfile } : {}),
     };
   });
   const locations = projectArray(

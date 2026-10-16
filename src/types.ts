@@ -21,6 +21,8 @@ import type { SequenceDurationEstimateSnapshot } from './storyPacingEstimate';
 import type { VideoCreativeDirection } from './videoCreativeDirection';
 import type { DirectorLookDraft } from './directorLookDraft';
 import type { StoryPacingContext } from './storyPacing';
+import type { CharacterVoiceProfile } from './characterVoiceProfile';
+export type { CharacterVoiceProfile } from './characterVoiceProfile';
 
 // Re-export the shared morphology contracts so callers that already import
 // project entities from `types.ts` do not need a second type-only import.
@@ -140,6 +142,8 @@ export interface Character {
   gender: string;
   apparentAge: string;
   actualAge?: string;
+  /** Explicit voice identity; never inferred from apparent or actual age. */
+  voiceProfile?: CharacterVoiceProfile;
   height?: string;
   race: string;
   /** Optional visual body-plan category; absent on legacy projects. */
@@ -389,6 +393,12 @@ export interface Seedance25Output {
   sequencePromptHandoff?: SequencePromptHandoffStamp;
 }
 
+/** Optional current-use association, independent of generation provenance. */
+export interface AssetReferenceEntityBinding {
+  kind: 'character' | 'location' | 'prop';
+  entityId: string;
+}
+
 export interface ReferenceAsset extends StoryboardImageFrameMetadata {
   /** Explicit per-subject links discovered in chapter reference images. */
   storyReferenceSubjects?: Array<{ chapterId: string; referenceId: string; subjectId: string; kind: StoryReferenceEntityKind; entityId: string; label: string; analysisRevision?: number }>;
@@ -419,6 +429,8 @@ export interface ReferenceAsset extends StoryboardImageFrameMetadata {
   /** Entity in the project bible that this image was generated from or uploaded for. */
   sourceEntityId?: string;
   sourceEntityKind?: 'character' | 'location' | 'prop';
+  /** undefined retains legacy ownership; null explicitly clears every kind. */
+  referenceEntityBinding?: AssetReferenceEntityBinding | null;
   /** Optional user association for future video references, separate from
    * immutable generation provenance. undefined keeps legacy ownership;
    * null explicitly clears it; a string names one current project character. */
@@ -672,7 +684,7 @@ export type SemanticSequenceCharacter = Pick<Character, 'name'> & Partial<Pick<C
   'id' | 'aliases' | 'baseName' | 'formLabel' | 'variantOf' | 'transformationType'
   | 'gender' | 'apparentAge' | 'actualAge' | 'height' | 'race' | 'morphology' | 'bodyPlan'
   | 'appearance' | 'outfit' | 'signatureProps' | 'personality' | 'motionHabits' | 'anchor'
-  | 'negativeContinuity'
+  | 'negativeContinuity' | 'voiceProfile'
 >>;
 
 /** Model-authored story causality, not a local actor guess or a visibility list. */
@@ -1250,6 +1262,8 @@ export interface ImageReferenceAssetSnapshot {
   height?: number;
   sourceEntityId?: string;
   sourceEntityKind?: 'character' | 'location' | 'prop';
+  referenceEntityBinding?: AssetReferenceEntityBinding | null;
+  characterReferenceId?: string | null;
   referenceScope?: 'general' | 'nsfw-private-profile';
   nsfwPrivatePart?: NsfwPrivatePart;
 }

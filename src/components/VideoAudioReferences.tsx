@@ -2,7 +2,10 @@ import { useState } from 'react';
 import type { Project, ReferenceAsset, VideoTaskApiConfig } from '../types';
 import type { VideoGenerationDraft } from '../videoGenerationTypes';
 import type { AudioRetainMode, FrozenVideoAudioReference, ProjectVoicePresets, VideoAudioReference, VideoAudioTarget, VideoVoicePreset } from '../videoAudioTypes';
-import { audioRetainModes, isVideoDirectorAudio, resolveVideoAudioReferences, validateVideoAudioReferences, videoAudioBindingId, videoAudioSlotCount, videoAudioTargetLabel } from '../videoAudioReferences';
+import { audioRetainModes, isVideoDirectorAudio, resolveVideoAudioReferences, validateVideoAudioReferences, videoAudioBindingId, videoAudioCharacterPreset, videoAudioSpeakingCharacterIds, videoAudioTargetLabel } from '../videoAudioReferences';
+import { videoAudioCapability, videoAudioTextConstraintState } from '../videoAudioCapabilities';
+import type { CharacterVoiceProfile } from '../characterVoiceProfile';
+import { CharacterVoiceProfileEditor } from './CharacterVoiceProfileEditor';
 import '../videoAudioReferences.css';
 
 type AudioApi = VideoTaskApiConfig | Omit<VideoTaskApiConfig, 'apiKey'>;
@@ -62,11 +65,14 @@ export interface VideoAudioReferenceEditorProps {
 /** Viewing the collapsed editor never changes project inheritance or task provenance. */
 export function VideoAudioReferenceEditor({ project, draft, api, scope, disabled = false, frozenAudios, onChange, onImportAudio }: VideoAudioReferenceEditorProps) {
   const selectedApi = draft.backend === 'api' ? api : undefined;
-  const capacity = videoAudioSlotCount(selectedApi);
+  const capability = videoAudioCapability(selectedApi, draft.backend);
+  const capacity = capability.capacity;
   const references = resolveVideoAudioReferences(project, draft, selectedApi);
   const assets = project.assets.filter(isVideoDirectorAudio);
   const mode = draft.audioSelectionMode || (draft.audioReferences?.length || draft.reuseTaskId ? 'override' : 'project');
   const activeFrozen = draft.reuseTaskId ? frozenAudios : undefined;
+  const textConstraints = videoAudioTextConstraintState(draft.prompt);
+  const inheritedSamples = videoAudioSpeakingCharacterIds(project, draft).filter((id) => Boolean(videoAudioCharacterPreset(project, id))).length;
   const issues = validateVideoAudioReferences(project, { ...draft, audioReferences: references }, selectedApi, activeFrozen);
   const { importing, importError, importAudio } = useAudioImport(onImportAudio);
   const patchReferences = (next: VideoAudioReference[]) => onChange({ audioSelectionMode: 'override', audioReferences: next, reuseTaskId: undefined });
@@ -92,8 +98,12 @@ export function VideoAudioReferenceEditor({ project, draft, api, scope, disabled
   const extraSlots = [...new Set(references.map((reference) => reference.slotIndex).filter((slot) => Number.isSafeInteger(slot) && slot >= capacity))];
   const slots = [...Array.from({ length: capacity }, (_, index) => index), ...extraSlots].sort((a, b) => a - b);
   return <details className="video-audio-reference-editor" aria-label={`${scope}参考音频`}>
-    <summary>选择参考音频 <span>· 声音参考 {references.length}/{capacity}</span></summary>
+    <summary>选择参考音频 <span>· 本次 {references.length} 条 · 文字声线{textConstraints === 'present' ? '已描述' : '待明确'}</span></summary>
     <div className="var-editor-body">
+      <p className="var-help" data-audio-capability={capability.status}>{capability.reason}</p>
+      <p className="var-help">{textConstraints === 'present' ? '当前稿含声音特征文字；这是生成描述，不能锁定音色。' : '当前稿尚未明确声音特征，可在人物声音档案中设置后生成新稿。'} 本次选择 {references.length} 条参考音频，选择状态不表示已经上传。</p>
+      {!capacity && mode === 'project' && inheritedSamples > 0 && <p className="var-help">当前说话人有 {inheritedSamples} 份项目样音；当前连接未将这些样音加入请求。</p>}
+      {references.length > 0 && <p className="var-help">本次用途：{references.map((reference) => `${videoAudioTargetLabel(project, reference.target)}（${audioRetainModes.find((entry) => entry.id === reference.retainMode)?.label || reference.retainMode}）`).join('；')}</p>}
       <div className="var-editor-toolbar"><label className="field"><span>音频选择方式</span>
         <select aria-label={`${scope}音频选择方式`} value={mode} disabled={disabled} onChange={(event) => changeMode(event.target.value as 'project' | 'override' | 'none')}>
           <option value="project">使用项目声音预设</option><option value="override">本段单独设置</option><option value="none">不使用参考音频</option>
@@ -101,7 +111,7 @@ export function VideoAudioReferenceEditor({ project, draft, api, scope, disabled
       </label>{onImportAudio && capacity > 0 && <button type="button" className="btn small" aria-label={`${scope}导入音频`} disabled={disabled || importing} onClick={() => { void importAudio(); }}>{importing ? '导入中…' : '导入音频'}</button>}</div>
       {draft.reuseTaskId && <p className="var-help">当前显示原任务保存的声音；更改选择后使用新的设置。</p>}
       {mode === 'project' && <p className="var-help">按本段实际说话人物继承项目预设；没有对白的段落不会自动加入人物声音。</p>}
-      {!capacity && <p className="var-help">当前连接没有可用的参考音频槽。请先在 RunningHub 工作流的“输入映射”中配置音频文件输入。</p>}
+      {!capacity && selectedApi?.provider === 'runninghub' && <p className="var-help">请先在 RunningHub 工作流的“输入映射”中配置音频文件输入。</p>}
       {(issues.length > 0 || importError) && <p className="var-warning" role="alert">{[...issues, importError].filter(Boolean).join('；')}</p>}
       {!capacity && references.length > 0 && <ul className="var-unavailable-list">{references.map((reference, index) => <li key={`${reference.bindingId}-${index}`}>
         音频槽 {reference.slotIndex + 1}：{assets.find((asset) => asset.id === reference.assetId)?.name || activeFrozen?.find((entry) => entry.assetId === reference.assetId)?.name || '原音频已不存在'} · {videoAudioTargetLabel(project, reference.target)}
@@ -144,10 +154,11 @@ export interface ProjectVoicePresetEditorProps {
   disabled?: boolean;
   onChange: (presets: ProjectVoicePresets) => void;
   onImportAudio?: () => Promise<void> | void;
+  onCharacterVoiceProfileChange?: (characterId: string, profile: CharacterVoiceProfile | undefined) => void;
 }
 
 /** Presets store asset IDs. They are resolved per speaking segment, never broadcast to the visible cast. */
-export function ProjectVoicePresetEditor({ project, disabled = false, onChange, onImportAudio }: ProjectVoicePresetEditorProps) {
+export function ProjectVoicePresetEditor({ project, disabled = false, onChange, onImportAudio, onCharacterVoiceProfileChange }: ProjectVoicePresetEditorProps) {
   const assets = project.assets.filter(isVideoDirectorAudio);
   const presets: ProjectVoicePresets = project.voicePresets || { characters: {} };
   const { importing, importError, importAudio } = useAudioImport(onImportAudio);
@@ -173,14 +184,21 @@ export function ProjectVoicePresetEditor({ project, disabled = false, onChange, 
       {importError && <p className="var-warning" role="alert">{importError}</p>}
       <div className="var-preset-list">{rows.map(({ id, name, target, preset }) => {
         const asset = assets.find((item) => item.id === preset?.assetId);
-        return <div className="var-preset-row" key={`${target.kind}-${id}`} role="group" aria-label={`${name}声音预设`}>
+        const person = target.kind === 'character' ? project.characters.find((character) => character.id === target.characterId) : undefined;
+        const inherited = person && !preset ? videoAudioCharacterPreset(project, person.id) : undefined;
+        return <div key={`${target.kind}-${id}`}>
+        <div className="var-preset-row" role="group" aria-label={`${name}声音预设`}>
           <strong title={videoAudioTargetLabel(project, target)}>{name}</strong>
           <label className="field"><span>默认音频</span><AudioAssetSelect assets={assets} assetId={preset?.assetId || ''} label={`${name}声音预设音频`} disabled={disabled} onChange={(assetId) => setPreset(target, assetId ? { ...preset, assetId, retainMode: preset?.retainMode || 'reference' } : undefined)} /></label>
           <label className="field"><span>参考方式</span><select aria-label={`${name}声音预设保留方式`} value={preset?.retainMode || 'reference'} disabled={disabled || !preset} onChange={(event) => preset && setPreset(target, { ...preset, retainMode: event.target.value as AudioRetainMode })}>
             {audioRetainModes.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
           </select></label>
           <AudioPreview media={asset} label={`${name}声音预设试听`} />
+          {inherited && <p className="var-help">未单独设置默认音频时，继承人物声音档案中的样音：{assets.find((item) => item.id === inherited.assetId)?.name || '样音不可用'}。每段仍可选择“不使用参考音频”。</p>}
           {preset && (!asset || asset.missing) && <p className="var-warning">预设音频不可用，请重新选择。</p>}
+        </div>
+        {person && onCharacterVoiceProfileChange && <CharacterVoiceProfileEditor character={person} assets={project.assets} disabled={disabled}
+          onChange={(profile) => onCharacterVoiceProfileChange(person.id, profile)} />}
         </div>;
       })}</div>
     </div>

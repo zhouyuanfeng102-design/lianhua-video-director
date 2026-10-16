@@ -113,13 +113,13 @@ test('服务会规范化的Image尖括号与裸Picture编号也按已证明图�
   assert.deepEqual(collectVideoPictureReferenceNumbers('前缀Picture7 UnicodeImage8 wordPicture9 Picture7后缀'), [], 'bare aliases need real Unicode word boundaries');
 });
 
-test('部分manifest缺项保留未知标签，仍同步已知项并明确混合编号问题', () => {
+test('部分manifest缺项沿用当前提示词，仅提示且不阻止生成', () => {
   const { project, board, draft } = fixture();
   board.targetOutput!.referenceManifest = board.targetOutput!.referenceManifest.slice(0, 1);
   const result = prepareVideoH3ReferenceDraft(project, draft, context);
-  assert.deepEqual(collectVideoPictureReferenceNumbers(result.draft.prompt), [2, 8, 7]);
-  assert.match(result.issue || '', /混合编号.*恢复原图片清单/u);
-  assert.match(result.issue || '', /<Picture 8>.*<Picture 7>/u);
+  assert.equal(result.draft.prompt, draft.prompt);
+  assert.equal(result.issue, undefined);
+  assert.ok(result.warnings.some((warning) => /保留当前提示词，可直接生成/u.test(warning)));
   assert.ok(result.warnings.some((warning) => /保留该原始标签/u.test(warning)));
 });
 
@@ -165,7 +165,9 @@ test('尾帧先插入真实槽，再按最终映射同步旧Picture，未预猜d
     ...tail.draft.references.map((reference) => ({ ...reference, slotIndex: undefined })),
   ] };
   assert.equal(tail.draft.prompt, prompt, 'tail preparation keeps the immutable source before final slot placement');
-  assert.deepEqual(collectVideoPictureReferenceNumbers(prepareVideoH3ReferenceDraft(project, finalDraft, context).draft.prompt), [2, 3, 4]);
+  const prepared = prepareVideoH3ReferenceDraft(project, finalDraft, context);
+  assert.deepEqual(collectVideoPictureReferenceNumbers(prepared.draft.prompt), [2, 3, 4, 1]);
+  assert.match(prepared.draft.prompt, /<Picture 1> 开场构图参考/u);
 });
 
 test('显式增加新图片解除冻结快照，重复选择和源任务本身不改写', () => {

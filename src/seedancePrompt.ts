@@ -16,6 +16,8 @@ import { MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE } from './nsfwPromptRules';
 import { hasNsfwDetailSignal } from './promptConstraints';
 
 export interface OfficialSeedancePromptInput extends PromptAdapterInput {
+  /** Request authority only; not an authored section or a source-fingerprint input. */
+  voiceFactScope?: 'source-grounded-new-draft' | 'preserve-confirmed-source';
   /** Complete read-only story/shot evidence used by this exact generation. */
   sourceEvidence?: Readonly<Record<string, unknown>>;
   /** Request-only understanding material; excluded from saved source identity. */
@@ -358,6 +360,7 @@ export const generateOfficialSeedancePrompt = async ({ input, request, isCurrent
   assertSeedanceRequestCurrent(isCurrent);
   const metadata = compileOfficialSeedancePrompt(input);
   const evidence = {
+    voiceFactScope: input.voiceFactScope || 'source-grounded-new-draft',
     canonicalPrompt: input.canonicalPrompt,
     sourceEvidence: input.sourceEvidence,
     ...(input.sceneContext ? { sceneContext: structuredClone(input.sceneContext) } : {}),

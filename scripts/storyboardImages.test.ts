@@ -3091,4 +3091,23 @@ assert.match(directedActionSource, /运动终点是夏提雅/u);
 assert.ok(directedActionSource.includes(directedActionBoard.shots[0].space));
 assert.ok(directedActionSource.includes(directedActionBoard.shots[0].camera));
 
+const knownAliasCharacter: Character = { ...contextCharacter, aliases: ['青衣阿莲'], dossier: { aliases: ['莲姑娘'] } };
+const aliasShot = makeShot(1, { subject: '青衣阿莲站立', prompt: '青衣阿莲身穿青衣站在石门前。' });
+const aliasBoard = { ...storyboard, shots: [aliasShot], shotCount: 1 };
+let unexpectedAliasEnrichmentCalls = 0;
+const knownAliasContext = await storyboardImageHelpers.prepareStoryboardImageIdentityContext({
+  storyboard: aliasBoard,
+  context: { characters: [knownAliasCharacter], locations: [], props: [], scenes: [], assets: [characterReference] },
+  requestVisibleCharacters: async () => ({ visibleCharacterNamesByShotId: { [aliasShot.id]: ['青衣阿莲', '@莲姑娘'] } }),
+  requestIdentityDetails: async () => { unexpectedAliasEnrichmentCalls += 1; return []; },
+  createCharacterId: () => { throw new Error('an existing character alias must not create another character'); },
+});
+assert.equal(unexpectedAliasEnrichmentCalls, 0, 'unique AI-returned aliases reuse existing identity facts without enrichment');
+assert.equal(knownAliasContext.enriched, false);
+assert.equal(knownAliasContext.context.characters.length, 1);
+assert.deepEqual(knownAliasContext.plan.targets, []);
+const knownAliasImageRequest = buildStoryboardImageRequests(aliasBoard, 'storyboard-shots', knownAliasContext.context)[0];
+assert.deepEqual(knownAliasImageRequest.referenceAssetIds, [characterReference.id], 'AI aliases must retain the canonical character reference image');
+assert.match(knownAliasImageRequest.conversionSource, /人物“阿莲”连续性事实/u);
+
 console.log('storyboard image prompt and binding regression checks passed');

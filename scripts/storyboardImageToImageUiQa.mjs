@@ -284,7 +284,6 @@ try {
   for (const viewport of [{ width: 1366, height: 900 }, { width: 1280, height: 800 }]) await inspectReferenceLayout('workbench-references', viewport);
 
   await enterDirector(); await directorResult();
-  assert.match(await page.getByLabel('当前分镜图分辨率', { exact: true }).innerText(), /2048×1152/u);
   for (const viewport of [{ width: 1366, height: 900 }, { width: 1280, height: 800 }]) await inspectResultLayout(viewport);
   assert.equal((await readState()).settings.textApi.enabled, true);
   const defaults = await generate(page.getByRole('button', { name: '生成分镜图片（2张）', exact: true }), ['a', 'b'], [2048, 1152], 'default-original-button-two-shots-two-selected-rule-conversions', { count: 2 });

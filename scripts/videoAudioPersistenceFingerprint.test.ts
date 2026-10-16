@@ -5,6 +5,7 @@ import { videoBatchReferenceFingerprint, videoBatchRequestFingerprint, videoTask
 import type { AppState, ReferenceAsset, VideoGenerationTask } from '../src/types';
 import type { VideoGenerationDraft, VideoGenerationSnapshot } from '../src/videoGenerationTypes';
 import type { FrozenVideoAudioReference, VideoAudioReference } from '../src/videoAudioTypes';
+import { renderVideoAudioDraft, stripVideoAudioPromptBinding } from '../src/videoAudioReferences';
 
 const state = createInitialState();
 const base: VideoGenerationDraft = { name: '音频保存测试', prompt: '甲人物说：出发。', backend: 'api', references: [], parameters: {} };
@@ -79,4 +80,25 @@ changedFrozen.videoJob!.snapshot.audios![0].checksum = 'c'.repeat(64);
 assert.notEqual(videoTaskRequestFingerprint(changedFrozen), selectedHash, 'frozen bytes change snapshot identity');
 const durable = { ...changedFrozen, requestFingerprint: 'historical-durable-hash' };
 assert.equal(videoTaskRequestFingerprint(durable), 'historical-durable-hash', 'stored historical task identity is never rewritten');
+
+// New multi-location bindings and replacement prose must remain reversible after a real save/reload.
+const h3Original = 'subject_definitions: A narrator.\nsummary: A short announcement.\nretention_analysis: Preserve the source.\ndetailed_description: [Shot 1] Narrator: <d>[English] Begin.</d>\n[Shot 2] At 00:02.000 Narrator: <d>[English] Continue.</d>\noverall_soundscape: N/A\nnon_diegetic_music: N/A';
+const h3Draft = renderVideoAudioDraft(state.project, { ...base, prompt: h3Original, source: { promptFormat: 'h3', language: 'en' },
+  audioSelectionMode: 'override', audioReferences: [{ ...refs[0], target: { kind: 'voiceover' } }] });
+assert.equal(h3Draft.audioReferenceBinding?.insertions?.length, 3, 'one definition and two shot insertions');
+const seedanceOriginal = '### 视频规格\n5秒。\n### 参考素材与职责\n- 本段未绑定外部图像、视频或音频媒体素材。依照已有设定。\n### 主体连续性\n旁白。\n### 一句话概述\n宣布。\n### 连续时间轴\n旁白：“开始。”\n### 全局约束\n保留对白。';
+const seedanceDraft = renderVideoAudioDraft(state.project, { ...h3Draft, prompt: seedanceOriginal, source: { promptFormat: 'seedance', language: 'zh' }, audioReferenceBinding: undefined });
+assert.ok(seedanceDraft.audioReferenceBinding?.insertions?.[0].replacedText);
+const roundtripState = structuredClone(state);
+roundtripState.project.generationTasks = [h3Draft, seedanceDraft].map((value, index) => ({ ...task, id: `binding-task-${index}`,
+  videoJob: { ...task.videoJob!, snapshot: { ...snapshot, draft: value } } }));
+roundtripState.projects = [roundtripState.project];
+const boundReloaded = normalizeState(JSON.parse(serializeStateForStorage(roundtripState).serialized));
+for (const [index, original] of [h3Original, seedanceOriginal].entries()) {
+  const saved = boundReloaded.project.generationTasks[index].videoJob!.snapshot.draft;
+  assert.deepEqual(saved.audioReferenceBinding, [h3Draft, seedanceDraft][index].audioReferenceBinding, 'insertions and replacedText survive a frozen task save/reload');
+  assert.equal(stripVideoAudioPromptBinding(saved.prompt, saved.audioReferenceBinding), original, 'clearing reloaded binding restores exact original format');
+  const edited = saved.prompt.replace('A short announcement.', 'A revised announcement.').replace('5秒。', '5秒，暖光。');
+  assert.equal(stripVideoAudioPromptBinding(edited, saved.audioReferenceBinding), original.replace('A short announcement.', 'A revised announcement.').replace('5秒。', '5秒，暖光。'), 'unrelated authored edits survive removing persisted audio prose');
+}
 console.log('videoAudioPersistenceFingerprint: focused persistence/identity assertions passed');

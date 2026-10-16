@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { getH3IdentityBindingIssues } from '../src/h3IdentityBindings';
-import { getH3PromptProtocolIssue } from '../src/h3PromptProtocol';
+import { getExistingH3PromptProtocolIssue, getH3PromptProtocolIssue, readH3PromptProtocol } from '../src/h3PromptProtocol';
 import {
   H3IdentityRepairCancelledError, H3IdentityRepairError, repairH3IdentityBindings,
   type H3IdentityRepairResult, type RepairH3IdentityBindingsInput,
@@ -62,6 +62,41 @@ await group(async () => {
 });
 
 await group(async () => {
+  const saved = prompt.replace('At 00:03.000 ', 'Continue from the previous shot. From 12.20 to 12.90 seconds, ');
+  assert.equal(readH3PromptProtocol(saved), undefined, 'the compatibility read does not relax new-delivery validation');
+  const result = await repairH3IdentityBindings(input({ prompt: saved }));
+  assert.equal(result.prompt, saved, 'untimed saved H3 metadata repair preserves every source character');
+  assert.equal(result.promptChanged, false);
+  assert.equal(result.attempts, 1);
+  assert.equal(getExistingH3PromptProtocolIssue(result.prompt, saved), undefined);
+});
+
+await group(async () => {
+  for (const header of ['[Shot 2] ', '[Shot 2]\r\nAt 00:03.000 ']) {
+    const evidence = "Tifa's dark hair frames her face as she walks into the corridor.";
+    const source = `integrated_multimodal_description: [Shot 1] An empty corridor.\r\n${header}${evidence} From 12.20 to 12.90 seconds she pauses.\r\n[Shot 3] Continue from the pause. Tifa watches the door.\r\noverall_soundscape: N/A\r\nnon_diegetic_music: N/A`;
+    const declaration = 'Identity: 蒂法.';
+    const result = await repairH3IdentityBindings(input({ prompt: source, characters: [{ id: 'tifa', name: '蒂法' }],
+      bindings: { version: 1, characters: [{ characterId: 'tifa', name: '蒂法', referenceAnchor: 'Old portrait.' }] },
+      request: async () => reply([{ characterId: 'tifa', name: '蒂法', referenceAnchor: declaration,
+        insertIdentitySentence: declaration, inPromptEvidence: evidence }]),
+    }));
+    assert.equal(undoEdits(result), source, 'late-shot insertion preserves all prose, dialogue, timing text, cuts and CRLF bytes');
+    assert.equal(getExistingH3PromptProtocolIssue(result.prompt, source), undefined);
+    assert.ok(result.prompt.indexOf(declaration) > result.prompt.indexOf('[Shot 2]'));
+    if (header.includes('At')) assert.match(result.prompt, /\[Shot 2\]\r\nAt 00:03.000\r\nIdentity: 蒂法\./u,
+      'identity insertion stays after an actual cut header even when its whitespace includes a newline');
+  }
+  let calls = 0;
+  const saved = prompt.replace('At 00:03.000', 'At 00:03.0');
+  const result = await repairH3IdentityBindings(input({ prompt: saved,
+    request: async () => { calls++; return reply([repairedAlice]); },
+  }));
+  assert.equal(result.prompt, saved, 'metadata repair does not audit or rewrite a saved cut format');
+  assert.equal(calls, 1);
+});
+
+await group(async () => {
   const source = `\r\nintegrated_multimodal_description: [Shot 1]  Tifa's dark hair frames her face as she walks into the corridor.\r\n[Shot 2] At 00:03.000 Tifa stops by the door.\r\noverall_soundscape: N/A\r\nnon_diegetic_music: N/A\r\n`;
   const declaration = 'Identity: 蒂法.';
   const result = await repairH3IdentityBindings(input({ prompt: source, characters: [{ id: 'tifa', name: '蒂法' }],
@@ -78,12 +113,13 @@ await group(async () => {
 
 await group(async () => {
   const source = 'subject_definitions: <Subject 1> Alice.\nsummary: A quiet doorway.\nretention_analysis: N/A\ndetailed_description: [Shot 1] Alice (S1), with black hair, opens the door. Alice (S1) says <d>[Chinese] 等等。</d>\noverall_soundscape: N/A\nnon_diegetic_music: N/A';
-  const declaration = '身份：爱丽丝 <Subject 1> (S1)。';
+  const declaration = '身份：爱丽丝 <Subject 1>。';
   const result = await repairH3IdentityBindings(input({ prompt: source, language: '中文', bindings: { version: 1, characters: [{
     ...stale.characters[0], subjectToken: '<Subject 1>',
   }] }, request: async () => reply([{ characterId: 'alice', name: '爱丽丝', referenceAnchor: declaration,
     insertIdentitySentence: declaration, inPromptEvidence: 'Alice (S1), with black hair, opens the door.' }]) }));
-  assert.match(result.prompt, /^subject_definitions:\n身份：爱丽丝 <Subject 1> \(S1\)。\n/u);
+  assert.match(result.prompt, /^subject_definitions:\n身份：爱丽丝 <Subject 1>。\n/u);
+  assert.equal(result.identityBindings.characters[0].speakerToken, '(S1)', 'voice metadata stays separate from the visual declaration');
   assert.equal(undoEdits(result), source);
   assert.equal(getH3PromptProtocolIssue(result.prompt, source), undefined);
 });
@@ -110,26 +146,31 @@ await group(async () => {
 await group(async () => {
   for (const invalid of [
     { ...repairedAlice, characterId: 'bob' },
-    { ...repairedAlice, name: '鲍勃' },
-    { ...repairedAlice, speakerToken: '(S2)' },
-    { ...repairedAlice, subjectToken: '<Subject 1>' },
     { ...repairedAlice, referenceAnchor: 'Identity: Alice (S2), a woman with short black hair.' },
   ]) {
     let requests = 0;
     await assert.rejects(repairH3IdentityBindings(input({ request: async () => { requests += 1; return reply([invalid]); } })),
-      (error: unknown) => error instanceof H3IdentityRepairError && error.attempts === 3);
-    assert.equal(requests, 3, 'ID/name/token mismatch consumes the one bounded budget');
+      (error: unknown) => error instanceof H3IdentityRepairError && error.attempts === 1);
+    assert.equal(requests, 1, 'an unknown target or unreadable location ends the explicit request without retry');
   }
+  const result = await repairH3IdentityBindings(input({ request: async () => reply([
+    { ...repairedAlice, name: '返回的别名', speakerToken: '(S2)', subjectToken: '<Subject 9>' },
+  ]) }));
+  assert.equal(result.identityBindings.characters[0].name, '爱丽丝', 'the supplied ID resolves the known name without reviewing prose');
+  assert.equal(result.identityBindings.characters[0].speakerToken, '(S1)', 'response voice fields cannot replace the saved mapping');
+  assert.equal(result.identityBindings.characters[0].subjectToken, undefined);
 });
 
 await group(async () => {
-  const responses = [reply([]), 'invalid JSON', reply([repairedAlice])];
-  const result = await repairH3IdentityBindings(input({ request: async (_system, user) => {
-    if (responses.length < 3) assert.match(user, /previousResponse/u);
-    return responses.shift()!;
-  } }));
-  assert.equal(result.attempts, 3);
-  assert.equal(result.identityBindings.characters.length, 2);
+  for (const response of [reply([]), 'invalid JSON', '']) {
+    let requests = 0;
+    await assert.rejects(repairH3IdentityBindings(input({ request: async (_system, user) => {
+      requests++;
+      assert.doesNotMatch(user, /previousResponse|validationIssue/u);
+      return response;
+    } })), (error: unknown) => error instanceof H3IdentityRepairError && error.attempts === 1);
+    assert.equal(requests, 1, 'unreadable data never causes another model request');
+  }
 });
 
 await group(async () => {
@@ -143,18 +184,26 @@ await group(async () => {
 });
 
 await group(async () => {
-  const declaration = 'Identity: 爱丽丝 (S1).';
-  for (const [sentence, evidence] of [
-    ['Identity: 爱丽丝 (S1), who suddenly closes the door.', 'Alice (S1) opens the door from 0 to 2 seconds.'],
-    [declaration, 'A fabricated scene of Alice.'],
-    [declaration, '等等，别走。'],
-    [declaration, 'N/A'],
-  ]) {
+  const declaration = '爱丽丝保持原稿中的人物外观。';
+  const accepted = await repairH3IdentityBindings(input({ request: async () => reply([{
+    characterId: 'alice', referenceAnchor: declaration, insertIdentitySentence: declaration,
+    inPromptEvidence: 'Alice (S1) opens the door from 0 to 2 seconds.',
+  }]) }));
+  assert.equal(undoEdits(accepted), prompt, 'AI-authored identity prose is applied without a fixed local sentence template');
+  assert.equal(accepted.identityBindings.characters[0].speakerToken, '(S1)');
+  for (const evidence of ['A fabricated scene of Alice.', 'N/A']) {
     await assert.rejects(repairH3IdentityBindings(input({ maxAttempts: 1, request: async () => reply([{
-      characterId: 'alice', name: '爱丽丝', referenceAnchor: sentence,
-      insertIdentitySentence: sentence, inPromptEvidence: evidence,
+      characterId: 'alice', name: '爱丽丝', referenceAnchor: declaration,
+      insertIdentitySentence: declaration, inPromptEvidence: evidence,
     }]) })), H3IdentityRepairError);
   }
+  const source = '已有稿：爱丽丝位于走廊里，摄影机保持原位。';
+  const inserted = await repairH3IdentityBindings(input({ prompt: source, targetCharacterIds: ['alice'],
+    request: async () => reply([{ characterId: 'alice', referenceAnchor: declaration,
+      insertIdentitySentence: declaration, inPromptEvidence: '爱丽丝位于走廊里' }]),
+  }));
+  assert.equal(undoEdits(inserted), source, 'unique source evidence supplies an insertion offset without an H3 protocol gate');
+  assert.equal(inserted.edits[0].start, source.indexOf('爱丽丝位于走廊里'));
 });
 
 await group(async () => {
@@ -186,15 +235,17 @@ await group(async () => {
   })), (error: unknown) => error instanceof H3IdentityRepairError && error.attempts === 0);
   assert.equal(calls, 0);
   await assert.rejects(repairH3IdentityBindings(input({ maxAttempts: 99, request: async () => { calls += 1; return ''; } })), H3IdentityRepairError);
-  assert.equal(calls, 3);
+  assert.equal(calls, 1, 'even a legacy large retry budget permits only one model request');
 });
 
 await group(async () => {
   const bindings: H3IdentityBindings = { version: 1, characters: [stale.characters[0], {
     ...stale.characters[1], speakerToken: '(S1)',
   }] };
-  await assert.rejects(repairH3IdentityBindings(input({ bindings, targetCharacterIds: ['alice'], maxAttempts: 1 })), H3IdentityRepairError);
-  assert.equal(bindings.characters[1].speakerToken, '(S1)', 'cannot fix token conflicts by deleting unrelated metadata');
+  const result = await repairH3IdentityBindings(input({ bindings, targetCharacterIds: ['alice'], maxAttempts: 1 }));
+  assert.deepEqual(result.identityBindings.characters.map((binding) => binding.speakerToken), ['(S1)', '(S1)'],
+    'repair preserves existing voice metadata instead of auditing or reallocating speakers');
+  assert.equal(bindings.characters[1].speakerToken, '(S1)');
 });
 
 await group(async () => {
@@ -218,21 +269,57 @@ await group(async () => {
     request: async (_system, user) => {
       const payload = JSON.parse(user.slice(user.indexOf('\n') + 1, user.lastIndexOf('\n')));
       assert.equal(payload.identityBindings.characters[0].speakerToken, '(S1)', 'original metadata remains visible as evidence');
-      assert.equal(payload.retainedIdentityBindings[0].speakerToken, undefined, 'tokens never declared in this body are dangling fields');
+      assert.equal(payload.retainedIdentityBindings[0].speakerToken, '(S1)', 'voice metadata is not deleted based on a local body scan');
+      assert.doesNotMatch(payload.insertionIdentityDeclarations[0].sentence, /\(S1\)/u);
       return reply([{ characterId: 'tifa', name: '蒂法', referenceAnchor: declaration, insertIdentitySentence: declaration,
-        inPromptEvidence: 'Tifa walks into the corridor, her black hair framing her face.' }]);
+        speakerToken: '(S9)', inPromptEvidence: 'Tifa walks into the corridor, her black hair framing her face.' }]);
     },
   }));
   assert.equal(result.identityBindings.characters.length, 1, 'the identity record is never dropped');
-  assert.equal(result.identityBindings.characters[0].speakerToken, undefined);
-  assert.equal(result.identityBindings.characters[0].subjectToken, undefined);
+  assert.equal(result.identityBindings.characters[0].speakerToken, '(S1)');
+  assert.equal(result.identityBindings.characters[0].subjectToken, '<Subject 2>');
   assert.equal(undoEdits(result), source);
-  assert.doesNotMatch(result.prompt, /\(S1\)|<Subject/u, 'dangling metadata never introduces a new speaker or subject');
+  assert.doesNotMatch(result.prompt, /\(S1\)|<Subject/u, 'retaining metadata does not insert its tokens into authored visual prose');
   assert.equal(bindings.characters[0].speakerToken, '(S1)', 'original metadata is retained for before-history');
-  await assert.rejects(repairH3IdentityBindings(input({ prompt: source, bindings, characters: [{ id: 'tifa', name: '蒂法' }],
-    maxAttempts: 1, request: async () => reply([{ characterId: 'tifa', name: '蒂法', referenceAnchor: declaration,
-      speakerToken: '(S1)', insertIdentitySentence: declaration, inPromptEvidence: 'Tifa walks into the corridor, her black hair framing her face.' }]),
-  })), H3IdentityRepairError, 'a model still cannot reintroduce the absent old token');
+});
+
+await group(async () => {
+  const visual = '亚当通体苍白，头部保持原有形态。';
+  const source = `integrated_multimodal_description: [Shot 1] ${visual}\n[Shot 2] At 00:03.0 亚当停在原处。\n[Shot 3] (S1)发出非语言悲鸣。<sound>短促悲鸣</sound>\noverall_soundscape: N/A\nnon_diegetic_music: N/A`;
+  const bindings: H3IdentityBindings = { version: 1, characters: [{ characterId: 'adam', name: '亚当',
+    referenceAnchor: visual, speakerToken: '(S1)' }] };
+  const result = await repairH3IdentityBindings(input({ prompt: source, bindings, characters: [{ id: 'adam', name: '亚当' }],
+    request: async () => { throw new Error('Exact visual anchor and matching ID require no model call.'); },
+  }));
+  assert.equal(result.attempts, 0);
+  assert.equal(result.changed, false);
+  assert.equal(result.prompt, source);
+  assert.deepEqual(result.identityBindings, bindings, 'nonverbal voice metadata stays at its original mapping without entering the visual anchor');
+});
+
+await group(async () => {
+  for (const language of ['中文', '英文'] as const) {
+    const identities = language === '中文'
+      ? ['身份定义：新奥特曼为银红相间光之巨人。', '身份定义：二号机为猩红色仿生重装机甲。']
+      : ['Identity: Shin Ultraman is a silver-and-red Giant of Light.', 'Identity: No. 2 Unit is a crimson bionic mecha.'];
+    const source = `integrated_multimodal_description:\n[Shot 1] ${identities.join('\n')}\noverall_soundscape: N/A\nnon_diegetic_music: N/A`;
+    const bindings: H3IdentityBindings = { version: 1, characters: identities.map((referenceAnchor, index) => ({
+      characterId: characters[index].id, name: `已保存的人物展示名${index}`, referenceAnchor,
+      subjectToken: `<Subject ${index + 1}>`, speakerToken: '(S1)',
+    })) };
+    assert.deepEqual(getH3IdentityBindingIssues(source, bindings, characters), [],
+      'saved IDs and literal locations do not depend on display name or absent Subject/S prose');
+    const result = await repairH3IdentityBindings(input({ prompt: source, bindings, language,
+      targetCharacterIds: characters.slice(0, 2).map(({ id }) => id),
+      request: async () => { throw new Error('Usable saved locations must not call the model.'); },
+    }));
+    assert.equal(result.attempts, 0);
+    assert.equal(result.changed, false);
+    assert.equal(result.prompt, source);
+    assert.deepEqual(result.identityBindings, bindings);
+    assert.deepEqual(getH3IdentityBindingIssues(result.prompt, result.identityBindings, characters), [],
+      'a no-op repair and image preparation agree for both languages');
+  }
 });
 
 console.log(`h3IdentityRepair: ${groups} groups passed`);

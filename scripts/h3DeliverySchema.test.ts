@@ -39,15 +39,29 @@ test('bad required IDs, records, tokens, and versions still fail with exact path
   assert.equal(normalizeH3IdentityBindings({ version: 1, characters: new Array(257).fill(bindings.characters[0]) }), undefined);
 });
 
-test('optional empty values cannot clear an already declared speaker or a voice present in its anchor', () => {
+test('visual anchor voice text does not require metadata, while a confirmed metadata mapping stays retained', () => {
   const voicedAnchor = '身份：成年工作人员 (S1)，蓝色外套。';
   const voiced = { version: 1 as const, characters: [{ ...bindings.characters[0], referenceAnchor: voicedAnchor, speakerToken: '(S1)' }] };
   const source = { h3Prompt: h3.replace(anchor, voicedAnchor), identityBindings: voiced };
   const emptySpeaker = { ...source, identityBindings: { ...voiced, characters: [{ ...voiced.characters[0], speakerToken: null }] } };
-  assert.throws(() => readH3DeliveryEnvelope(JSON.stringify(emptySpeaker)), /speaker-token-mismatch/u);
+  assert.deepEqual(readH3DeliveryEnvelope(JSON.stringify(emptySpeaker)).identityBindings, {
+    version: 1, characters: [{ ...bindings.characters[0], referenceAnchor: voicedAnchor }],
+  });
   const read = createH3IdentityDeliveryReader(voiced);
   assert.throws(() => read(JSON.stringify({ h3Prompt: h3, identityBindings: { ...voiced, characters: [{ ...bindings.characters[0], speakerToken: '' }] } })), /已确认映射/u);
   assert.throws(() => read(JSON.stringify({ h3Prompt: h3, identityBindings: { version: 1, characters: [] } })), /不能清空/u);
+});
+
+test('readable historical Subject and voice metadata is retained even when the body has no matching labels', () => {
+  const historical = { version: 1, characters: [{ ...bindings.characters[0], name: '旧展示名',
+    subjectToken: '<Subject 2>', speakerToken: '(S1)' }] };
+  const input = { h3Prompt: h3, identityBindings: historical };
+  const before = structuredClone(input);
+  const read = createH3IdentityDeliveryReader(historical, [{ id: 'worker', name: '当前展示名' }]);
+  const result = read(JSON.stringify(input));
+  assert.equal(result.h3Prompt, h3);
+  assert.deepEqual(result.identityBindings, historical);
+  assert.deepEqual(input, before);
 });
 
 test('collect identity and per-shot schema errors together instead of hiding later failures', () => {

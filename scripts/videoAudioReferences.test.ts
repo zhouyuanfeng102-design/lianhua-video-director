@@ -6,6 +6,8 @@ import { prepareVideoAudioDraft, renderVideoAudioDraft, resolveVideoAudioReferen
 import type { Character, Project, ReferenceAsset, Storyboard, VideoGenerationTask, VideoTaskApiConfig } from '../src/types';
 import type { VideoGenerationDraft } from '../src/videoGenerationTypes';
 import type { FrozenVideoAudioReference, VideoAudioReference } from '../src/videoAudioTypes';
+import { videoAudioCapability, videoAudioTextConstraintState } from '../src/videoAudioCapabilities';
+import { readH3PromptProtocol } from '../src/h3PromptProtocol';
 
 // Pure data fixtures only: no upload, model, desktop bridge or media decoding.
 const character = (id: string, name: string, aliases: string[] = []): Character => ({ id, name, aliases, assetIds: [],
@@ -143,7 +145,7 @@ test('no mapped capacity preserves explicit choices while default presets remain
   assert.deepEqual(resolveVideoAudioReferences(p, draft('甲人物说：“出发。”'), none), []);
   const input = draft('甲人物说：“出发。”', { audioSelectionMode: 'override', audioReferences: [reference()] });
   assert.equal(resolveVideoAudioReferences(p, input, none).length, 1);
-  assert.ok(validateVideoAudioReferences(p, input, none).some((issue) => issue.includes('超出')));
+  assert.ok(validateVideoAudioReferences(p, input, none).some((issue) => issue.includes('音频输入映射')));
 });
 
 test('sparse slot validation keeps independent indexes and catches changed bindings and duplicates', () => {
@@ -165,24 +167,44 @@ test('plain rendering is idempotent and preserves authored dialogue and timing',
   assert.equal(JSON.stringify({ p, input }), before);
 });
 
-test('H3 rendering changes only integrated description and keeps shot dialogue soundscape and music', () => {
-  const original = 'integrated_multimodal_description: 真实材质。\n\n[Shot 1] 00:03 <s>VoiceA</s><d>出发。</d>\n[Shot 2] 00:05 无对白。\n\noverall_soundscape: 风声。\nnon_diegetic_music: N/A';
+test('H3 full-reference defines audio and cites only speaking shots without changing cuts or soundscape', () => {
+  const original = 'subject_definitions: 真实材质。\nsummary: 两人交谈。\nretention_analysis: 保持原稿。\ndetailed_description:\n[Shot 1] <s>VoiceA</s><d>出发。</d>\n[Shot 2] At 00:05.000 甲人物静默。\n[Shot 3] At 00:08.000 <s>VoiceA</s><d>等等。</d>\noverall_soundscape: 风声。\nnon_diegetic_music: N/A';
   const p = project([board(original)]);
   const input = draft(original, { audioSelectionMode: 'override', audioReferences: [reference(2)], h3ReferenceBinding: {
     version: 1, projectId: p.id, basePrompt: original, renderedPrompt: original, identities: { version: 1, characters: [identity()] },
   } });
   const first = prepareVideoAudioDraft(p, input, api); const second = prepareVideoAudioDraft(p, first, api);
-  assert.equal(first.prompt, second.prompt); assert.equal(first.prompt.slice(first.prompt.indexOf('\n')), original.slice(original.indexOf('\n')));
+  assert.equal(first.prompt, second.prompt);
+  assert.deepEqual(readH3PromptProtocol(first.prompt)?.shots, readH3PromptProtocol(original)?.shots);
+  assert.ok(readH3PromptProtocol(first.prompt));
+  assert.equal(first.prompt.match(/<Audio 3>/gu)?.length, 3, 'one definition and two actual speaking shots');
+  assert.match(first.prompt, /subject_definitions:\s*<Audio 3>/u);
+  assert.match(first.prompt, /\[Shot 3\] At 00:08\.000 镜头 3 音频用途/u);
+  assert.equal(first.prompt.match(/\[Shot 2\][\s\S]*?(?=\[Shot 3\])/u)?.[0].includes('<Audio'), false);
+  assert.equal(first.prompt.slice(first.prompt.indexOf('overall_soundscape:')), original.slice(original.indexOf('overall_soundscape:')));
   assert.ok(first.prompt.includes('甲人物 (VoiceA)')); assert.strictEqual(p.storyboards[0].finalPrompt, original);
   const changed = renderVideoAudioDraft(p, { ...first, audioReferences: [reference(2, { retainMode: 'weak_reference', notes: '只参考氛围' })] }, api);
-  assert.equal((changed.prompt.match(/<Audio 3>/gu) || []).length, 1); assert.ok(changed.prompt.includes('weak_reference'));
+  assert.equal((changed.prompt.match(/<Audio 3>/gu) || []).length, 3); assert.ok(changed.prompt.includes('weak_reference'));
+  assert.equal(stripVideoAudioPromptBinding(changed.prompt, changed.audioReferenceBinding), original);
+});
+
+test('H3 three-field prompts remain usable with audio without manufacturing mixed fields', () => {
+  const original = 'integrated_multimodal_description: [Shot 1] 甲人物说 <d>出发。</d>\noverall_soundscape: N/A\nnon_diegetic_music: N/A';
+  const p = project(); const input = draft(original, { audioSelectionMode: 'override', audioReferences: [reference()] });
+  const rendered = renderVideoAudioDraft(p, input, api);
+  assert.equal(rendered.prompt, original); assert.equal(rendered.audioReferenceBinding, undefined);
+  assert.deepEqual(validateVideoAudioReferences(p, rendered, api), []);
+  assert.deepEqual(rendered.audioReferences, input.audioReferences);
+  assert.doesNotMatch(rendered.prompt, /^(?:subject_definitions|summary|retention_analysis|detailed_description):/mu);
+  assert.deepEqual(validateVideoAudioReferences(p, { ...input, audioReferences: [] }, api), []);
+  assert.equal(renderVideoAudioDraft(p, { ...input, audioReferences: [] }, api).prompt, original);
 });
 
 test('English audio notes preserve original spoken text and frozen rendering ignores current presets', () => {
-  const original = 'integrated_multimodal_description: Neutral light.\n[Shot 1] At 3s <s>VoiceA</s><d>[Chinese] 出发。</d>';
+  const original = 'subject_definitions: Neutral light.\nsummary: A departure.\nretention_analysis: Keep the dialogue.\ndetailed_description: [Shot 1] <s>VoiceA</s><d>[Chinese] 出发。</d>\noverall_soundscape: N/A\nnon_diegetic_music: N/A';
   const p = project(); const input = draft(original, { source: { storyboardId: 'board', language: 'en' }, audioSelectionMode: 'override', audioReferences: [reference()] });
   const rendered = renderVideoAudioDraft(p, input, api);
-  assert.ok(rendered.prompt.includes('Audio 1 <Audio 1>')); assert.ok(rendered.prompt.includes('<d>[Chinese] 出发。</d>'));
+  assert.ok(rendered.prompt.includes('<Audio 1>')); assert.ok(rendered.prompt.includes('<d>[Chinese] 出发。</d>'));
   const changed = { ...p, voicePresets: { characters: { a: { assetId: 'voice-alt' } } } };
   assert.equal(renderVideoAudioDraft(changed, rendered, api).audioReferences?.[0].assetId, 'voice-a');
 });
@@ -191,7 +213,7 @@ test('edited rendered prompts keep user changes and only one intact audio instru
   const p = project();
   const originals = [
     '甲人物说：“00:03 出发。”\n镜头缓慢推进。',
-    'integrated_multimodal_description: 真实材质。\n[Shot 1] 00:03 <s>VoiceA</s><d>出发。</d>\noverall_soundscape: 风声。',
+    'subject_definitions: 真实材质。\nsummary: 出发。\nretention_analysis: 保持原文。\ndetailed_description: [Shot 1] <s>VoiceA</s><d>出发。</d>\noverall_soundscape: 风声。\nnon_diegetic_music: N/A',
   ];
   for (const original of originals) {
     const input = draft(original, { h3ReferenceBinding: { version: 1, projectId: p.id, basePrompt: original,
@@ -205,13 +227,13 @@ test('edited rendered prompts keep user changes and only one intact audio instru
     const next = prepareVideoAudioDraft(p, edited, api);
     assert.equal(next.audioReferences?.length, 1); // Editing visual prose must not silently disable the voice.
     assert.equal(next.audioReferenceBinding?.basePrompt, editedBase);
-    assert.equal((next.prompt.match(/<Audio 1>/gu) || []).length, 1);
+    assert.equal((next.prompt.match(/<Audio 1>/gu) || []).length, original.startsWith('subject_definitions:') ? 2 : 1);
     assert.ok(next.prompt.includes('现在出发。')); assert.ok(next.prompt.includes('用户补充：摄像机停在门口。'));
     assert.equal(prepareVideoAudioDraft(p, next, api).prompt, next.prompt);
     const cleared = prepareVideoAudioDraft(p, { ...edited, audioSelectionMode: 'none' }, api);
     assert.equal(cleared.prompt, editedBase); assert.deepEqual(cleared.audioReferences, []);
     const changedInstruction = editedPrompt.replace('参考音色，使用本段已有台词和原说话时序。', '用户改写的声音要求。');
-    assert.equal(stripVideoAudioPromptBinding(changedInstruction, prepared.audioReferenceBinding), changedInstruction);
+    assert.ok(stripVideoAudioPromptBinding(changedInstruction, prepared.audioReferenceBinding).includes('用户改写的声音要求。'));
   }
   const replacement = { version: 1 as const, basePrompt: '用户正文。', renderedPrompt: '被替换的内容。附注' };
   assert.equal(stripVideoAudioPromptBinding(replacement.renderedPrompt, replacement), replacement.renderedPrompt);
@@ -240,4 +262,75 @@ test('deleting unrelated media keeps project voice preset identity', () => {
   const p = project(); p.assets.push({ ...asset('picture'), type: 'reference', mediaType: 'image', role: 'composition' });
   assert.strictEqual(deleteAssetFromProject(p, 'picture', 10).voicePresets, p.voicePresets);
   assert.strictEqual(deleteAssetFromProject(p, 'absent', 10), p);
+});
+
+test('actual Seedance timed dialogue and English aliases outrank an older paired ledger', () => {
+  const prompt = '- 0.60s - 8.50s 甲人物（年轻女性，清亮声线，画内）：“出发。”\n- 8.70s - 11.20s 乙人物（轻盈女声）：“马上来。”\n丙人物：穿着长袍，闭口倾听。';
+  const p = project([board(prompt, { seedance25Output: { promptZh: prompt } as Storyboard['seedance25Output'], audioLedger: [
+    { id: 'obsolete', kind: 'dialogue', label: '旧说话人', speakerId: 'c', text: '旧稿的话。' },
+  ] })]);
+  assert.deepEqual(videoAudioSpeakingCharacterIds(p, draft(prompt, { source: { storyboardId: 'board', promptFormat: 'seedance', language: 'zh' } })), ['a', 'b']);
+  p.characters[0].aliases = ['Alice']; p.characters[1].aliases = ['Bob'];
+  const english = '0.5s - 2.5s Alice (young female, bright timbre): "Come here."\n- 2.7s - 4.0s Bob (light voice): “Coming.”';
+  assert.deepEqual(videoAudioSpeakingCharacterIds(p, draft(english, { source: { language: 'en', promptFormat: 'seedance' } })), ['a', 'b']);
+  const silent = 'subject_definitions: <s>VoiceA</s> is a woman.\ndetailed_description: [Shot 1] <s>VoiceA</s><d>[English] Silence.</d>';
+  assert.deepEqual(videoAudioSpeakingCharacterIds(p, draft(silent, { h3ReferenceBinding: { version: 1, projectId: p.id,
+    basePrompt: silent, renderedPrompt: silent, identities: { version: 1, characters: [identity()] } } })), []);
+});
+
+test('Seedance audio uses @Audio inside the existing reference chapter with reversible replacement and sparse slots', () => {
+  const original = '### 视频规格\n30秒。\n### 参考素材与职责\n- 本段未绑定外部图像、视频或音频媒体素材。所有人物沿用原设定。\n### 主体连续性\n甲人物与乙人物。\n### 一句话概述\n交谈。\n### 连续时间轴\n- 0.60s - 8.50s 甲人物（年轻女声）：“出发。”\n- 8.70s - 11.20s 乙人物（清亮女声）：“好。”\n### 全局约束\n保留对白。';
+  const p = project(); const input = draft(original, { source: { promptFormat: 'seedance', language: 'zh' }, audioSelectionMode: 'override',
+    audioReferences: [reference(), reference(2, { assetId: 'voice-b', target: { kind: 'character', characterId: 'b' } })] });
+  const first = renderVideoAudioDraft(p, input, api);
+  assert.equal(renderVideoAudioDraft(p, first, api).prompt, first.prompt);
+  assert.equal(first.prompt.match(/@Audio 1/gu)?.length, 1); assert.equal(first.prompt.match(/@Audio 3/gu)?.length, 1);
+  assert.doesNotMatch(first.prompt, /<Audio /u); assert.doesNotMatch(first.prompt, /未绑定外部/u);
+  assert.deepEqual(first.prompt.match(/^### .+$/gmu), original.match(/^### .+$/gmu));
+  assert.equal(first.prompt.split('### 主体连续性')[1], original.split('### 主体连续性')[1]);
+  assert.match(first.prompt.split('### 主体连续性')[0], /@Audio 1[\s\S]*@Audio 3/u);
+  assert.equal(stripVideoAudioPromptBinding(first.prompt, first.audioReferenceBinding), original);
+  const edited = { ...first, prompt: first.prompt.replace('30秒。', '30秒，暖光。') };
+  assert.equal(stripVideoAudioPromptBinding(edited.prompt, edited.audioReferenceBinding), original.replace('30秒。', '30秒，暖光。'));
+  const cleared = prepareVideoAudioDraft(p, { ...edited, audioSelectionMode: 'none' }, api);
+  assert.equal(cleared.prompt, original.replace('30秒。', '30秒，暖光。')); assert.deepEqual(cleared.audioReferences, []);
+  assert.strictEqual(prepareVideoAudioDraft(p, { ...first, reuseTaskId: 'old-task' }, api).prompt, first.prompt);
+  const existing = original.replace('- 本段未绑定外部图像、视频或音频媒体素材。所有人物沿用原设定。', '@Image 1: a room.');
+  const inserted = renderVideoAudioDraft(p, { ...input, prompt: existing }, api);
+  assert.ok(inserted.prompt.includes('@Image 1: a room.')); assert.equal(stripVideoAudioPromptBinding(inserted.prompt, inserted.audioReferenceBinding), existing);
+});
+
+test('AI-updated H3 audio definitions and shot citations are reused without duplicate declarations', () => {
+  const original = 'subject_definitions: <Audio 1> is the voice timbre for 甲人物.\nsummary: One word.\nretention_analysis: Keep the dialogue.\ndetailed_description: [Shot 1] 甲人物 says <d>出发。</d> using <Audio 1>.\noverall_soundscape: N/A\nnon_diegetic_music: N/A';
+  const rendered = renderVideoAudioDraft(project(), draft(original, { audioSelectionMode: 'override', audioReferences: [reference()] }), api);
+  assert.equal(rendered.prompt, original); assert.equal(rendered.prompt.match(/<Audio 1>/gu)?.length, 2);
+});
+
+test('confirmed character samples inherit only for actual speakers and preserve explicit preset, none and frozen authority', () => {
+  const p = project(); p.voicePresets = undefined;
+  p.characters[0].voiceProfile = { version: 1, perceivedAge: '年轻成年女声', timbre: '轻盈清亮', referenceAssetId: 'voice-a', source: 'manual' };
+  p.characters[1].voiceProfile = { version: 1, referenceAssetId: 'voice-b' };
+  const input = draft('- 0.50s - 2.00s 甲人物（轻声）：“出发。”');
+  assert.deepEqual(resolveVideoAudioReferences(p, input, api).map((entry) => entry.assetId), ['voice-a']);
+  p.voicePresets = { characters: { a: { assetId: 'voice-alt', retainMode: 'fully_copy' } } };
+  assert.equal(resolveVideoAudioReferences(p, input, api)[0].assetId, 'voice-alt');
+  assert.deepEqual(resolveVideoAudioReferences(p, { ...input, audioSelectionMode: 'none' }, api), []);
+  assert.deepEqual(resolveVideoAudioReferences(p, { ...input, audioSelectionMode: 'override', audioReferences: [] }, api), []);
+  const frozen = { ...input, reuseTaskId: 'old-task', audioReferences: [reference(2, { assetId: 'voice-b' })] };
+  assert.equal(resolveVideoAudioReferences(p, frozen, api)[0].assetId, 'voice-b');
+});
+
+test('capability status follows implemented input mapping and never blocks a text-only request', () => {
+  assert.equal(videoAudioCapability(undefined).status, 'unknown'); assert.equal(videoAudioCapability(api).status, 'supported');
+  assert.equal(videoAudioCapability({ ...api, runningHubMappedFields: [] }).status, 'unsupported');
+  assert.equal(videoAudioCapability({ ...api, runningHubMappedFields: [{ nodeId: '', fieldName: 'audio', kind: 'audio', audioIndex: 0 }] }).status, 'unsupported');
+  const malformed = { ...api, runningHubMappedFields: [null, { nodeId: 2, fieldName: null, kind: 'audio', audioIndex: 0 }] } as unknown as VideoTaskApiConfig;
+  assert.equal(videoAudioCapability(malformed).status, 'unsupported');
+  assert.deepEqual(resolveVideoAudioReferences(project(), draft('甲人物说：“出发。”'), malformed), []);
+  const classic = { ...api, provider: 'generic' as const, model: '特价2.5需要过人脸技术-可参考过人脸素材库', endpoint: 'https://video.laoliimage2.win/v1/videos' };
+  assert.equal(videoAudioCapability(classic).status, 'unsupported');
+  assert.deepEqual(validateVideoAudioReferences(project(), draft('甲人物说：“出发。”'), classic), []);
+  assert.equal(videoAudioTextConstraintState('年轻女性声线，轻盈清亮。'), 'present');
+  assert.equal(videoAudioTextConstraintState('A young adult voice timbre.'), 'present');
+  assert.equal(videoAudioTextConstraintState('外表18岁，金发，身穿红铠。'), 'missing');
 });

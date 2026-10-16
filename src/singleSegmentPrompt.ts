@@ -1,4 +1,5 @@
 import { convertStoryboardDraftToFinal, hasCurrentTextApiConversion } from './appEffects';
+import { characterVoiceIdentityFacts } from './characterVoiceFacts';
 import { applyConvertedPromptToShots } from './masterTimeline';
 import {
   applyOfficialH3Prompt,
@@ -71,6 +72,9 @@ export interface GenerateSingleSegmentPromptInput {
   ruleSet?: RuleSet;
   sourceStoryContent?: string;
   purpose?: 'initial' | 'reference-refresh' | 'continuity-repair' | 'dialogue-repair' | 'character-dossier-refresh';
+  /** Explicit new/active regeneration may re-cast voices while reusing a
+   * confirmed shot plan. Reference, continuity and translation remain scoped. */
+  voiceFactScope?: 'source-grounded-new-draft' | 'preserve-confirmed-source';
   /** Exact previous final text. No video result or extracted frame is required. */
   sequenceHandoff?: SequencePromptHandoffContext;
   /** Current-segment assignment plus read-only story-understanding context. */
@@ -183,6 +187,11 @@ export async function generateSingleSegmentPrompt(
   const reviewWithAi = input.reviewWithAi === true || Boolean(input.sequenceHandoff)
     || input.purpose === 'continuity-repair' || input.purpose === 'dialogue-repair' || dossierRefresh || regeneratesDossier;
   const initialDelivery = (!input.purpose || input.purpose === 'initial') && !input.skipConversion && !input.masterSource;
+  const voiceFactScope = input.mode === 'translate-english' || input.purpose === 'reference-refresh'
+    || input.purpose === 'continuity-repair' || dossierRefresh
+    ? 'preserve-confirmed-source'
+    : input.voiceFactScope || (initialDelivery || input.purpose === 'dialogue-repair'
+      ? 'source-grounded-new-draft' : 'preserve-confirmed-source');
   // Ordinary generation serializes the source shot plan. Only the explicit
   // dialogue repair entry owns a new schedule; H3 delivery cannot re-direct it.
   const canReplanStaging = input.purpose === 'dialogue-repair';
@@ -375,8 +384,10 @@ export async function generateSingleSegmentPrompt(
       candidateTimeCoordinate: input.purpose === 'continuity-repair' || input.purpose === 'reference-refresh' || dossierRefresh
         ? 'preserve-confirmed-source-expression' : 'draft-may-contain-shot-relative-details',
       shotMode: official.shotMode, shotCount: official.shotCount || official.shots.length,
-      voiceFactScope: initialDelivery || canReplanStaging ? 'source-grounded-new-draft' : 'preserve-confirmed-source',
+      voiceFactScope,
+      currentCharacterVoiceFacts: input.context.currentCharacterVoiceFacts,
       characterIdentityFacts: identityCharacters.map((character) => ({
+        ...characterVoiceIdentityFacts(character),
         id: character.id, name: character.name, gender: character.gender, apparentAge: character.apparentAge,
         aliases: characterParticipationAliases(character, identityCharacters),
         race: character.race, appearance: character.appearance, outfit: character.outfit,
@@ -611,6 +622,7 @@ export async function generateSingleSegmentPrompt(
   const qualifiedSeedanceInput = (canonicalBoard: Storyboard): OfficialSeedancePromptInput => {
     if (!input.buildSeedanceInput) throw new Error('当前 Seedance 编写器缺少来源资料，请重新选择当前分镜。');
     const source = structuredClone(input.buildSeedanceInput(structuredClone(canonicalBoard)));
+    source.voiceFactScope = voiceFactScope;
     if (source.canonicalPrompt !== (canonicalBoard.promptPlan?.canonicalPrompt || canonicalBoard.finalPrompt)
       || Number(source.durationSec) !== canonicalBoard.durationSec) {
       throw new Error('Seedance 来源与当前公共分镜或固定时长不一致，原提示词保持不变。');
@@ -778,7 +790,8 @@ export async function generateSingleSegmentPrompt(
       converter: input.converter, ruleSet: input.ruleSet,
       sourceStoryContent: conversionSource,
       sequenceHandoff: input.sequenceHandoff,
-      characters: input.context.characters, clean: input.clean, now: input.now,
+      characters: input.context.characters, currentCharacterVoiceFacts: input.context.currentCharacterVoiceFacts,
+      clean: input.clean, now: input.now,
       request: (system, user) => checkedRequest(
         [system, referenceNotice].join('\n\n'),
         `${user}\n\n<current_reference_data>\n${referenceData}\n</current_reference_data>`,

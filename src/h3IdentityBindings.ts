@@ -8,9 +8,7 @@ const record = (value: unknown): value is Record<string, unknown> => value !== n
   && (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);
 
 export type H3IdentityBindingIssueCode = 'invalid-bindings' | 'anchor-empty' | 'anchor-missing' | 'anchor-ambiguous'
-  | 'anchor-protocol-content' | 'anchor-payload' | 'anchor-section' | 'anchor-shot' | 'anchor-boundary'
-  | 'duplicate-character' | 'duplicate-anchor' | 'duplicate-subject' | 'duplicate-speaker'
-  | 'unknown-character' | 'character-name-mismatch' | 'subject-token-mismatch' | 'speaker-token-mismatch';
+  | 'duplicate-character' | 'unknown-character';
 export interface H3IdentityBindingIssue {
   code: H3IdentityBindingIssueCode;
   characterId: string;
@@ -19,46 +17,18 @@ export interface H3IdentityBindingIssue {
 }
 export type H3IdentityCharacter = Readonly<{ id: string; name: string }>;
 
-const identitySectionPattern = (): RegExp => /^(subject_definitions|summary|retention_analysis|detailed_description|integrated_multimodal_description|overall_soundscape|non_diegetic_music):/gmu;
 const anchorIssue = (prompt: string, anchor: string): Pick<H3IdentityBindingIssue, 'code' | 'message'> | undefined => {
   if (!anchor.trim()) return { code: 'anchor-empty', message: '身份定位句为空。' };
   const first = prompt.indexOf(anchor);
   if (first < 0) return { code: 'anchor-missing', message: '身份定位句不在当前语言的正文中。' };
   if (prompt.indexOf(anchor, first + 1) >= 0) return { code: 'anchor-ambiguous', message: '身份定位句在正文中重复，无法唯一定位。' };
-  if (/[\r\n]|<\/?(?:d|sound|Picture|Video|Audio)\b|\[Shot[ \t]*\d|\bAt\s+\d{2}:|\d+(?:\.\d+)?\s*(?:秒|seconds?\b|s\b)|\b\d{1,2}:\d{2}(?:\.\d+)?\b/iu.test(anchor)) {
-    return { code: 'anchor-protocol-content', message: '身份定位句包含图片、镜头、时间或声音协议内容，不能作为纯身份定位。' };
-  }
-  for (const match of prompt.matchAll(/<(d|sound)>[\s\S]*?(?:<\/\1>|$)/giu)) {
-    if (first < match.index! + match[0].length && first + anchor.length > match.index!) return { code: 'anchor-payload', message: '身份定位句位于对白或声音内容中。' };
-  }
-  const sections = [...prompt.matchAll(identitySectionPattern())];
-  const sectionIndex = sections.filter((section) => section.index! <= first).length - 1;
-  const section = sections[sectionIndex];
-  if (!section || !['subject_definitions', 'integrated_multimodal_description'].includes(section[1])
-    || first + anchor.length > (sections[sectionIndex + 1]?.index ?? prompt.length)) {
-    return { code: 'anchor-section', message: '身份定位句不在 subject_definitions 或逐镜视觉正文中。' };
-  }
-  if (section[1] === 'integrated_multimodal_description') {
-    const shots = [...prompt.slice(section.index! + section[0].length, first).matchAll(/\[Shot[ \t]*(\d+)\]/gu)];
-    if (!shots.length) return { code: 'anchor-shot', message: '三字段正文的身份定位句必须位于一个实际 [Shot N] 内。' };
-    if (/\[Shot[ \t]*\d+\]/u.test(prompt.slice(first, first + anchor.length))) return { code: 'anchor-shot', message: '身份定位句不能跨越镜头边界。' };
-  }
-  // Only check literal sentence boundaries; do not infer whether prose is a
-  // name, an action or a visual description from word lists.
-  const before = prompt.slice(0, first).trimEnd();
-  const after = prompt.slice(first + anchor.length);
-  if (before && !/[\n。.!?！？:：;；]$/u.test(before) && !/\[Shot[ \t]*[1-9]\d*\](?:\s+At\s+\d{2}:\d{2}(?:\.\d+)?\s*[,，:]?)?$/u.test(before)
-    && !/\r?\n[ \t]*$/u.test(prompt.slice(0, first))) return { code: 'anchor-boundary', message: '身份定位句的开头不是独立句边界。' };
-  if (!/[。.!?！？;；]$/u.test(anchor.trimEnd()) && !/^(?:[ \t]*\r?\n|$)/u.test(after)) {
-    return { code: 'anchor-boundary', message: '身份定位句的结尾不是独立句边界。' };
-  }
   return undefined;
 };
 
-/** Exact offsets and protocol syntax only. No identity or story inference. */
+/** One exact location for explicit identity metadata. No prose or token audit. */
 export const h3IdentityAnchorIssue = (prompt: string, anchor: string): string | undefined => anchorIssue(prompt, anchor)?.message;
 
-/** Validate the paired delivery, optionally against the request's frozen IDs. */
+/** Check readable metadata and explicit IDs against their exact text locations. */
 export const getH3IdentityBindingIssues = (
   prompt: string, bindings: H3IdentityBindings | undefined, characters?: readonly H3IdentityCharacter[],
 ): H3IdentityBindingIssue[] => {
@@ -70,28 +40,16 @@ export const getH3IdentityBindingIssues = (
     const add = (code: H3IdentityBindingIssueCode, message: string): void => { issues.push({ code, characterId: entry.characterId, name: entry.name, message }); };
     const issue = anchorIssue(prompt, entry.referenceAnchor);
     if (issue) add(issue.code, issue.message);
-    for (const [field, code, label] of [
-      ['characterId', 'duplicate-character', '人物编号'], ['referenceAnchor', 'duplicate-anchor', '身份定位句'],
-      ['subjectToken', 'duplicate-subject', 'Subject 编号'], ['speakerToken', 'duplicate-speaker', '声源编号'],
-    ] as const) {
-      if (entry[field] && normalized.characters.filter((other) => other[field] === entry[field]).length > 1) add(code, `${label}被多个绑定记录共用。`);
+    if (normalized.characters.filter((other) => other.characterId === entry.characterId).length > 1) {
+      add('duplicate-character', '人物编号被多个绑定记录共用。');
     }
     if (characters) {
       const matches = characters.filter((character) => character.id === entry.characterId);
       if (matches.length !== 1) add('unknown-character', '人物编号不在本次源人物资料中，或来源编号不唯一。');
-      else if (matches[0].name !== entry.name) add('character-name-mismatch', '绑定记录的原名与该人物编号的源资料不一致。');
     }
-    const first = prompt.indexOf(entry.referenceAnchor);
-    const linePrefix = first >= 0 ? prompt.slice(prompt.lastIndexOf('\n', first) + 1, first) : '';
-    const localSubjects = [...new Set((entry.referenceAnchor.match(/<Subject [1-9]\d*>/gu) || []))];
-    const definitionSubjects = [...new Set((linePrefix.match(/<Subject [1-9]\d*>/gu) || []))];
-    const subjects = localSubjects.length ? localSubjects : definitionSubjects;
-    if (entry.subjectToken && (subjects.length !== 1 || subjects[0] !== entry.subjectToken)
-      || !entry.subjectToken && localSubjects.length > 0) add('subject-token-mismatch', 'Subject 编号与定位句及其定义行的声明不一致。');
-    const speakers = [...new Set(entry.referenceAnchor.match(/\(S[1-9]\d*\)/gu) || [])];
-    if (entry.speakerToken ? speakers.length !== 1 || speakers[0] !== entry.speakerToken : speakers.length > 0) {
-      add('speaker-token-mismatch', '声源编号与身份定位句的声明不一致。');
-    }
+    // Explicit IDs and a unique offset establish the association. Display
+    // names, Subject/S metadata and authored wording remain unchanged; they do
+    // not impose additional conditions on a known character's picture anchor.
   }
   return issues;
 };

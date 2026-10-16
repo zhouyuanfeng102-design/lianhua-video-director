@@ -18,6 +18,7 @@ import {
 import { resolveModelProfile } from './modelProfiles';
 import { orderReferencedAssets, usesNsfwDetailMode } from './promptEngine';
 import { sourceContentHash } from './sourceContentHash';
+import { characterVoiceIdentityFacts, type CurrentCharacterVoiceFacts } from './characterVoiceFacts';
 import {
   OFFICIAL_H3_SOURCE_VERSION,
   OFFICIAL_H3_PRIVATE_SCOPE_REVISION,
@@ -48,6 +49,7 @@ export const OFFICIAL_H3_TARGET_ID = 'minimax-h3';
 export interface OfficialH3ProjectContext {
   assets: readonly ReferenceAsset[];
   characters?: readonly Character[];
+  currentCharacterVoiceFacts?: CurrentCharacterVoiceFacts;
   locations?: readonly Location[];
   props?: readonly Prop[];
   sceneContent?: string;
@@ -430,6 +432,7 @@ export const buildOfficialH3CompileInput = (
   const sourceReferences = buildOfficialH3References(board, context.assets, context.characters);
   const subjectDefinitions = buildOfficialH3SubjectDefinitions(board, context, sourceReferences);
   const references = buildBudgetedOfficialH3References(sourceReferences, subjectDefinitions);
+  const voiceIdentityFacts = (context.characters || []).map(characterVoiceIdentityFacts).filter((fact) => fact.voiceProfile);
   const dynamicClothing = officialH3HasDynamicClothing(board);
   const sourceText = [
     board.sourceStoryContent,
@@ -449,6 +452,9 @@ export const buildOfficialH3CompileInput = (
     audioMode: board.promptPlan?.audioMode || board.audioMode,
     references,
     subjectDefinitions,
+    ...(voiceIdentityFacts.length ? { voiceIdentityFacts } : {}),
+    ...(voiceIdentityFacts.length || context.currentCharacterVoiceFacts?.some((fact) => fact.voiceProfile)
+      ? { currentCharacterVoiceFacts: context.currentCharacterVoiceFacts } : {}),
     shotPrivateDetails: board.shots.flatMap((shot, index) => selectedVideoPrivateFacts(
       context.characters || [], shot.visiblePrivatePartsByCharacter,
     ).map((fact) => ({
@@ -504,6 +510,8 @@ const officialH3FingerprintPayload = (input: PromptAdapterInput, referenceContex
     imageVariant: reference.imageVariant,
   })),
   subjectDefinitions: input.subjectDefinitions || [],
+  ...(input.voiceIdentityFacts?.length ? { voiceIdentityFacts: input.voiceIdentityFacts } : {}),
+  ...(input.currentCharacterVoiceFacts?.length ? { currentCharacterVoiceFacts: input.currentCharacterVoiceFacts } : {}),
   ...(input.shotPrivateDetails?.length ? { shotPrivateDetails: input.shotPrivateDetails } : {}),
   constraints: input.constraints || [],
   nsfwDetail: input.nsfwDetail || false,

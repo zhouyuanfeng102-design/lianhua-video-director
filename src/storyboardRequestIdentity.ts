@@ -12,6 +12,7 @@ const referenceInput = (asset: ReferenceAsset) => ({
   dataUrl: asset.dataUrl, url: asset.url, relativePath: asset.relativePath,
   checksum: asset.checksum, missing: asset.missing, mimeType: asset.mimeType,
   sourceEntityId: asset.sourceEntityId, sourceEntityKind: asset.sourceEntityKind,
+  referenceEntityBinding: asset.referenceEntityBinding,
   prompt: asset.prompt, visualAnchor: asset.visualAnchor, negativePrompt: asset.negativePrompt,
   gridStates: asset.gridStates, mediaType: asset.mediaType, referenceRole: asset.referenceRole,
   referenceScope: asset.referenceScope, nsfwPrivatePart: asset.nsfwPrivatePart,
@@ -41,7 +42,10 @@ export const storyboardRequestSourceIdentity = (input: {
   });
   const entityIds = new Set([
     ...scenes.flatMap((scene) => [...scene.characterIds, ...(scene.locationIds || []), scene.locationId || '', ...scene.propIds]),
-    ...input.selectedAssetIds.map((id) => assetsById.get(id)?.sourceEntityId || ''),
+    ...input.selectedAssetIds.map((id) => {
+      const asset = assetsById.get(id);
+      return asset?.referenceEntityBinding !== undefined ? asset.referenceEntityBinding?.entityId || '' : asset?.sourceEntityId || '';
+    }),
   ]);
   const entities = <T extends { id: string; name: string; assetIds: string[] }>(items: T[]) => items
     .filter((item) => entityIds.has(item.id) || Boolean(item.name.trim() && text.includes(item.name.trim())))

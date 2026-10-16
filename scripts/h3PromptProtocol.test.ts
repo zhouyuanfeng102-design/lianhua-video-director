@@ -6,7 +6,9 @@ import {
   H3_FINAL_BODY_FORMAT_RULE,
   h3DescriptionLanguageRule,
   getH3PromptProtocolIssue,
+  getExistingH3PromptProtocolIssue,
   readH3PromptProtocol,
+  readExistingH3PromptProtocol,
   repairH3PromptProtocolWithAi,
 } from '../src/h3PromptProtocol';
 
@@ -96,6 +98,35 @@ assert.equal(readH3PromptProtocol(firstShotTimestamp), undefined,
   'the first shot must not have an At timestamp');
 assert.equal(readH3PromptProtocol(nonIncreasingCuts), undefined,
   'later At timestamps must be strictly increasing');
+
+const savedWithoutCuts = integratedSingleLine.replace('At 00:05.000, ', '')
+  .replace('overall_soundscape:', '[Shot 3] From 12.20 to 12.90 seconds, the baker lowers a tray.\noverall_soundscape:');
+const savedMixedCuts = savedWithoutCuts.replace('[Shot 3] From', '[Shot 3] At 00:12.000 From');
+assert.equal(readH3PromptProtocol(savedWithoutCuts), undefined, 'new-delivery validation still requires later cuts');
+assert.match(getH3PromptProtocolIssue(savedWithoutCuts)!, /缺少有效切点/u);
+assert.deepEqual(readExistingH3PromptProtocol(savedWithoutCuts)?.shots, [
+  { marker: '[Shot 1]', cut: null }, { marker: '[Shot2]', cut: null }, { marker: '[Shot 3]', cut: null },
+], 'saved prose can retain missing cut headers without deriving cuts from action intervals');
+assert.equal(getExistingH3PromptProtocolIssue(savedWithoutCuts, savedWithoutCuts), undefined);
+assert.deepEqual(readExistingH3PromptProtocol(savedMixedCuts)?.shots.map((shot) => shot.cut), [null, null, 'At 00:12.000']);
+for (const malformedAt of ['At 00:05.0', 'At 00:60.000', 'At\t00:05.000', 'at 00:05.000', 'At 00:05.000x']) {
+  const malformed = integratedSingleLine.replace('At 00:05.000', malformedAt);
+  assert.equal(readExistingH3PromptProtocol(malformed), undefined, 'invalid explicit numeric cuts remain invalid for saved prose');
+  assert.match(getExistingH3PromptProtocolIssue(malformed)!, /At切点格式无效/u);
+}
+for (const invalid of [firstShotTimestamp, nonIncreasingCuts,
+  savedWithoutCuts.replace('[Shot 3]', '[Shot2]'),
+  savedWithoutCuts.replace('[Shot 3]', '[Shot 4]'),
+  savedWithoutCuts.replace('non_diegetic_music:', 'background_music:'),
+  savedMixedCuts.replace('overall_soundscape:', '[Shot 4] At 00:11.000 The tray rests.\noverall_soundscape:'),
+]) assert.equal(readExistingH3PromptProtocol(invalid), undefined, 'existing prose retains section, numbering, first-cut and cut-order guards');
+for (const [source, changed] of [
+  [savedWithoutCuts, savedWithoutCuts.replace('[Shot2]', '[Shot 2]')],
+  [savedWithoutCuts, savedWithoutCuts.replace('[Shot2] ', '[Shot2] At 00:05.000, ')],
+  [savedMixedCuts, savedMixedCuts.replace('At 00:12.000 ', '')],
+  [savedMixedCuts, savedMixedCuts.replace('At 00:12.000', 'At 00:13.000')],
+]) assert.ok(getExistingH3PromptProtocolIssue(changed, source),
+  'preservation operations cannot change literal markers or add, remove or alter actual cuts');
 
 const longMaster = [
   'integrated_multimodal_description:',

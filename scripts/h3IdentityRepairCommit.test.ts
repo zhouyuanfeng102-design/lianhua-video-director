@@ -123,6 +123,28 @@ const run = (): void => {
   group(() => {
     const project = makeIdentityRepairProject();
     const source = project.storyboards[1];
+    source.h3IdentityBindingsEn!.characters[0].speakerToken = '(S1)';
+    const result = identityRepairResultFor(source, 'en');
+    const sentence = '阿沐保持当前稿中已经描述的外观。';
+    result.insertedSentences = [sentence];
+    result.edits[0].text = `\n${sentence}\n`;
+    result.prompt = source.officialPromptEn!.slice(0, result.edits[0].start) + result.edits[0].text
+      + source.officialPromptEn!.slice(result.edits[0].start);
+    result.identityBindings.characters[0] = { ...result.identityBindings.characters[0], referenceAnchor: sentence, speakerToken: '(S1)' };
+    const next = commitH3IdentityRepair(project, source.id, { en: result });
+    assert.equal(next.storyboards[1].officialPromptEn, result.prompt, 'persistence applies AI-authored insertion text without a fixed sentence template or language review');
+    assert.equal(next.storyboards[1].h3IdentityBindingsEn!.characters[0].speakerToken, '(S1)', 'voice metadata is retained without requiring it in visual prose');
+    assert.equal(next.storyboards[1].officialPromptZh, source.officialPromptZh);
+    assert.deepEqual(next.generationTasks, project.generationTasks);
+    for (const start of [Number.NaN, source.officialPromptEn!.length + 1]) {
+      assert.throws(() => commitH3IdentityRepair(project, source.id, { en: { ...result, edits: [{ ...result.edits[0], start }] } }), /位置/u);
+    }
+    assert.throws(() => commitH3IdentityRepair(project, source.id, { en: { ...result, edits: [...result.edits, ...result.edits] } }), /位置/u,
+      'two edits cannot claim the same source offset');
+  });
+  group(() => {
+    const project = makeIdentityRepairProject();
+    const source = project.storyboards[1];
     source.officialPromptEn = identityRepairResultFor(source, 'en').prompt;
     source.englishPrompt = source.officialPromptEn;
     const result = identityRepairResultFor(source, 'en', false);

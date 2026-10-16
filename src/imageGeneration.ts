@@ -12,6 +12,7 @@ import {
 import { characterVariantDisplayName } from './characterVariants';
 import { normalizeFemaleCharacterVocabularyRecord } from './characterVocabulary';
 import { IMAGE_STORY_SPATIAL_STATE_RULE } from './spatialContinuityRules';
+import { normalizeAssetReferenceEntityBinding } from './assetCharacterBinding';
 
 export type ImageAssetKind = 'character' | 'location' | 'prop' | 'grid';
 export type ImageEntityKind = Exclude<ImageAssetKind, 'grid'>;
@@ -79,6 +80,10 @@ export const normalizeImageReferenceAssetSnapshots = (value: unknown): ImageRefe
       ...optionalNumber('sizeBytes'), ...optionalNumber('width'), ...optionalNumber('height'),
       ...(item.sourceEntityKind === 'character' || item.sourceEntityKind === 'location' || item.sourceEntityKind === 'prop'
         ? { sourceEntityKind: item.sourceEntityKind } : {}),
+      ...(item.characterReferenceId === null || typeof item.characterReferenceId === 'string'
+        ? { characterReferenceId: item.characterReferenceId } : {}),
+      ...(item.referenceEntityBinding !== undefined
+        ? { referenceEntityBinding: normalizeAssetReferenceEntityBinding(item.referenceEntityBinding) } : {}),
       ...(item.referenceScope === 'general' || item.referenceScope === 'nsfw-private-profile' ? { referenceScope: item.referenceScope } : {}),
       ...(imageSnapshotPrivateParts.has(item.nsfwPrivatePart as NsfwPrivatePart) ? { nsfwPrivatePart: item.nsfwPrivatePart as NsfwPrivatePart } : {}),
     }];

@@ -5,6 +5,7 @@ import { getVideoPromptInstructionLeak } from './videoPromptInstructionLeak';
 import { isSemanticSequencePlan, semanticSegmentSourceContext, semanticSegmentStoryContent } from './semanticSequencePlan';
 import type { Project, Storyboard } from './types';
 import { buildVideoSceneContext } from './videoSceneContext';
+import { characterVoiceIdentityFacts, currentCharacterVoiceFacts } from './characterVoiceFacts';
 
 /** Only the exact board/segment binding may contribute assigned action facts.
  * Older boards retain their own saved source when a plan has since been edited. */
@@ -41,6 +42,7 @@ export const buildOfficialSeedanceInput = (project: Project, board: Storyboard):
     aspectRatio: board.promptPlan?.aspectRatio || board.aspectRatio,
     resolution: board.promptPlan?.resolution || board.resolution,
     audioMode: board.promptPlan?.audioMode || board.audioMode,
+    voiceFactScope: 'source-grounded-new-draft',
     references,
     sceneContext: buildVideoSceneContext({ board, locations: context.locations, scenes: project.scenes,
       assets: context.assets, references, chapterId: board.chapterId }),
@@ -49,6 +51,9 @@ export const buildOfficialSeedanceInput = (project: Project, board: Storyboard):
     detailMode: 'director', targetId: 'seedance-2.5',
     constraints: board.promptPlan?.constraints || [board.globalLock, board.extraRequirement ? `制作要求：${board.extraRequirement}` : ''].filter(Boolean),
     sourceEvidence: {
+      characterIdentityFacts: (context.characters || []).map(characterVoiceIdentityFacts),
+      currentCharacterVoiceFacts: currentCharacterVoiceFacts(context.characters || [], project.characters),
+      audioLedgerFacts: structuredClone(board.audioLedger || []),
       sourceStoryContent: board.sourceStoryContent || context.sceneContent || '',
       ...(sequenceSegmentContext ? { sequenceSegmentContext } : {}),
       sourceSceneSnapshots: (board.sourceSceneSnapshots || []).map((scene) => ({ id: scene.id, title: scene.title, content: scene.content })),

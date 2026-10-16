@@ -46,10 +46,22 @@ export const buildVideoSceneContext = (input: BuildVideoSceneContextInput): Vide
   for (const reference of input.references ?? []) if (reference.id) assetIds.add(reference.id);
   const assets = (input.assets ?? []).filter((asset) => assetIds.has(asset.id));
   const linkedLocationIds = new Set(scenes.flatMap((scene) => [...(scene.locationIds ?? []), ...(scene.locationId ? [scene.locationId] : [])]));
-  for (const asset of assets) if (asset.sourceEntityKind === 'location' && asset.sourceEntityId) linkedLocationIds.add(asset.sourceEntityId);
   const knownLocations = input.locations ?? [];
+  const locationIdForAsset = (asset: ReferenceAsset): string | undefined => {
+    if (asset.referenceEntityBinding !== undefined) {
+      const binding = asset.referenceEntityBinding;
+      return binding?.kind === 'location' && knownLocations.filter((location) => location.id === binding.entityId).length === 1
+        ? binding.entityId : undefined;
+    }
+    return asset.sourceEntityKind === 'location' ? asset.sourceEntityId : undefined;
+  };
+  for (const asset of assets) {
+    const locationId = locationIdForAsset(asset);
+    if (locationId) linkedLocationIds.add(locationId);
+  }
+  const legacyAssetIds = new Set([...assetIds].filter((id) => assets.find((asset) => asset.id === id)?.referenceEntityBinding === undefined));
   const linkedLocations = knownLocations.filter((location) => linkedLocationIds.has(location.id)
-    || location.assetIds.some((id) => assetIds.has(id)));
+    || location.assetIds.some((id) => legacyAssetIds.has(id)));
   const chapterLocations = input.chapterId
     ? knownLocations.filter((location) => !location.sourceChapterIds?.length || location.sourceChapterIds.includes(input.chapterId!)) : [];
   const selectedLocations = linkedLocations.length ? linkedLocations : input.chapterId ? chapterLocations : knownLocations;
@@ -68,12 +80,15 @@ export const buildVideoSceneContext = (input: BuildVideoSceneContextInput): Vide
     references: allReferenceIds.map((id) => {
       const asset = assets.find((item) => item.id === id);
       const reference = referenceById.get(id);
+      const locationId = asset && locationIdForAsset(asset);
+      const binding = asset?.referenceEntityBinding;
       return {
         id, name: reference?.name || asset?.name || id,
         mediaType: reference?.mediaType || asset?.mediaType,
-        role: reference?.referenceRole || reference?.role || asset?.referenceRole || asset?.role,
+        role: binding ? binding.kind === 'location' ? 'scene' : binding.kind
+          : reference?.referenceRole || reference?.role || asset?.referenceRole || asset?.role,
         responsibility: reference?.responsibility || reference?.description || asset?.visualAnchor || '',
-        ...(asset?.sourceEntityKind === 'location' && asset.sourceEntityId ? { locationId: asset.sourceEntityId } : {}),
+        ...(locationId ? { locationId } : {}),
         ...(id === board?.firstFrameAssetId ? { boundary: 'first-frame' as const }
           : id === board?.lastFrameAssetId ? { boundary: 'last-frame' as const } : {}),
         ...(asset?.sourceStoryboardId ? { sourceStoryboardId: asset.sourceStoryboardId } : {}),

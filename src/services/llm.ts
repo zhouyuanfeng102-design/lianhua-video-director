@@ -33,6 +33,7 @@ import {
   type StoryBeat,
 } from '../storySegmentation';
 import { sourceContentHash } from '../sourceIntegrity';
+import { characterVoiceIdentityFacts, type CurrentCharacterVoiceFacts } from '../characterVoiceFacts';
 import { resolveChapterAnalysisEntities, splitChapterAnalysisSource, type ChapterEntityCatalog } from '../chapterEntities';
 import {
   assertMasterSegmentDurationContract,
@@ -64,7 +65,7 @@ import {
   type StoryVisualParagraph,
 } from '../storyVisualAction';
 import { STORY_CAUSALITY_RULE, STORY_UNDERSTANDING_CONTEXT_RULE } from '../storyCausalityRules';
-import { AUDIO_PROMPT_RULE, DIALOGUE_DELIVERY_RULE, DIALOGUE_LANGUAGE_RULE } from '../audioPromptPolicy';
+import { AUDIO_PROMPT_RULE, DIALOGUE_DELIVERY_RULE, DIALOGUE_LANGUAGE_RULE, DIALOGUE_VOICE_IDENTITY_RULE } from '../audioPromptPolicy';
 import {
   MOSE_JIANGHU_PRIVATE_IMAGE_PROMPT_RULE,
   MOSE_JIANGHU_PRIVATE_PROFILE_RULES,
@@ -1469,6 +1470,7 @@ const STORY_VISUAL_ACTION_CONTRACT = [
 
 const storyVisualContinuity = (context?: StoryPreparationContext) => ({
   characters: context?.characters?.map((character) => ({
+    ...characterVoiceIdentityFacts(character),
     id: character.id, name: character.name, aliases: character.aliases || [],
     baseName: character.baseName, formLabel: character.formLabel, variantOf: character.variantOf,
     race: character.race, gender: character.gender, apparentAge: character.apparentAge, actualAge: character.actualAge, height: character.height,
@@ -1841,6 +1843,7 @@ export const requestStoryPreparationWithReview = async (
     ...(referenceContext ? { referenceContext } : {}),
     dialogueMode: 'ai-read-full-source',
     ...(context?.characters?.length ? { characterContinuity: context.characters.map((character) => ({
+      ...characterVoiceIdentityFacts(character),
       id: character.id, name: character.name, aliases: character.aliases || [],
       baseName: character.baseName, formLabel: character.formLabel, variantOf: character.variantOf,
       race: character.race, appearance: character.appearance, outfit: character.outfit,
@@ -3214,6 +3217,7 @@ type StoryboardPlanValidationContext = VideoCreativeDirectionInput & {
   /** Last complete AI estimate; never inferred from a shot or local formula. */
   acceptedDurationEstimate?: StoryDurationEstimate;
   characterContinuity?: readonly StoryboardCharacterContinuity[];
+  currentCharacterVoiceFacts?: CurrentCharacterVoiceFacts;
 };
 
 const storyboardDurationAdjustmentPolicy = (
@@ -3267,7 +3271,7 @@ type StoryboardCharacterContinuity = Pick<
   Character,
   'name' | 'aliases' | 'baseName' | 'formLabel' | 'variantOf' | 'transformationType'
   | 'gender' | 'race' | 'morphology' | 'bodyPlan' | 'appearance' | 'outfit' | 'anchor'
-> & Partial<Pick<Character, 'id' | 'nsfwProfile'>> & {
+> & Partial<Pick<Character, 'id' | 'nsfwProfile' | 'apparentAge' | 'actualAge' | 'voiceProfile'>> & {
   /** Pre-projected availability metadata from UI callers; values stay local. */
   availablePrivateParts?: readonly NsfwPrivatePart[];
 };
@@ -3276,6 +3280,7 @@ type StoryboardCharacterContinuity = Pick<
  * identity/wardrobe facts belong in shot planning; a saved private dossier
  * must not become an implicit instruction to show it in every scene. */
 const storyboardCharacterContinuityFacts = (characters: readonly StoryboardCharacterContinuity[] | undefined) => characters?.map((character) => ({
+  ...characterVoiceIdentityFacts(character),
   id: character.id,
   name: character.name,
   ...(character.aliases?.length ? { aliases: character.aliases } : {}),
@@ -3879,6 +3884,8 @@ const storyboardRepairPrompt = (
     internalHardBoundariesSec: storyboardPlanningBoundaries(params, reviewedByAi),
     unnamedFirstPersonAlias: DEFAULT_FIRST_PERSON_SUBJECT,
     characterContinuity: storyboardCharacterContinuityFacts(params.characterContinuity),
+    currentCharacterVoiceFacts: params.currentCharacterVoiceFacts,
+    voiceFactScope: 'source-grounded-new-draft',
     sourceStory: params.story,
     originalStoryboardResponse: result,
   }),
@@ -3957,6 +3964,7 @@ export const requestShotRecommendation = async (
     localMax?: number;
     /** Existing project-bible facts that the AI storyboard must not contradict. */
     characterContinuity?: readonly StoryboardCharacterContinuity[];
+    currentCharacterVoiceFacts?: CurrentCharacterVoiceFacts;
   },
   options: {
     signal?: AbortSignal;
@@ -4013,6 +4021,7 @@ export const requestShotRecommendation = async (
       '只返回一个严格 JSON 对象，不要 Markdown、解释、代码围栏或额外对象。',
       STORYBOARD_SOURCE_PLANNING_AUTHORITY_RULE,
       STORYBOARD_SPEECH_FIRST_PLANNING_RULE,
+      DIALOGUE_VOICE_IDENTITY_RULE,
       'shots 必须按时间先后排列：第一镜 startSec=0，相邻镜首尾连续，最后一镜 endSec=总时长；每镜 endSec 必须大于 startSec。',
       ...fixedMasterTimelineGridInstructions(initialParams, options.reviewWithAi),
       ...(initialParams.requiredSegmentDurationSec ? [VIDEO_SEQUENCE_TEXT_HANDOFF_PLANNING_RULE] : []),
@@ -4074,6 +4083,8 @@ export const requestShotRecommendation = async (
         internalHardBoundariesSec,
         unnamedFirstPersonAlias: DEFAULT_FIRST_PERSON_SUBJECT,
         characterContinuity: storyboardCharacterContinuityFacts(params.characterContinuity),
+        currentCharacterVoiceFacts: params.currentCharacterVoiceFacts,
+        voiceFactScope: 'source-grounded-new-draft',
         planningCreativeDirection: buildVideoCreativeDirection(params),
         ...(initialParams.referenceContext ? { referenceContext: storyReferencePromptContext(initialParams.referenceContext) } : {}),
         ...(params.sequenceSegmentContext ? { sequenceSegmentContext: params.sequenceSegmentContext } : {}),
@@ -4112,6 +4123,7 @@ export const requestShotRecommendation = async (
           STORY_PACING_RULE,
           STORYBOARD_SOURCE_PLANNING_AUTHORITY_RULE,
           STORYBOARD_SPEECH_FIRST_PLANNING_RULE,
+          DIALOGUE_VOICE_IDENTITY_RULE,
           VIDEO_CREATIVE_DIRECTION_DATA_RULE,
           ...(activeParams.referenceContext ? [STORY_REFERENCE_CONTEXT_RULE] : []),
           VIDEO_ACTING_CAMERA_RULES,
@@ -4159,6 +4171,8 @@ export const requestShotRecommendation = async (
           internalHardBoundariesSec: storyboardPlanningBoundaries(activeParams, options.reviewWithAi),
           unnamedFirstPersonAlias: DEFAULT_FIRST_PERSON_SUBJECT,
           characterContinuity: storyboardCharacterContinuityFacts(activeParams.characterContinuity),
+          currentCharacterVoiceFacts: activeParams.currentCharacterVoiceFacts,
+          voiceFactScope: 'source-grounded-new-draft',
           planningCreativeDirection: buildVideoCreativeDirection(activeParams),
           ...(activeParams.referenceContext ? { referenceContext: storyReferencePromptContext(activeParams.referenceContext) } : {}),
           ...(activeParams.sequenceSegmentContext ? { sequenceSegmentContext: activeParams.sequenceSegmentContext } : {}),
@@ -4245,6 +4259,7 @@ export const requestShotRecommendation = async (
           STORY_PACING_RULE,
           STORYBOARD_SOURCE_PLANNING_AUTHORITY_RULE,
           STORYBOARD_SPEECH_FIRST_PLANNING_RULE,
+          DIALOGUE_VOICE_IDENTITY_RULE,
           VIDEO_CREATIVE_DIRECTION_DATA_RULE,
           ...(activeParams.referenceContext ? [STORY_REFERENCE_CONTEXT_RULE] : []),
           VIDEO_ACTING_CAMERA_RULES,
@@ -4283,6 +4298,8 @@ export const requestShotRecommendation = async (
         fieldRepair ? `<storyboard_field_repair_data>\n${serializeUntrustedPromptData({
           lockedDelivery: fieldRepair.delivery, issues: fieldRepair.issues,
           sourceStory: activeParams.story, characterContinuity: storyboardCharacterContinuityFacts(activeParams.characterContinuity),
+          currentCharacterVoiceFacts: activeParams.currentCharacterVoiceFacts,
+          voiceFactScope: 'source-grounded-new-draft',
           planningCreativeDirection: buildVideoCreativeDirection(activeParams),
           ...(activeParams.referenceContext ? { referenceContext: storyReferencePromptContext(activeParams.referenceContext) } : {}),
           pacing: videoPacingWithoutCreativeRequirement(activeParams.pacing),

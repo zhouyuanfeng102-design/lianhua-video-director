@@ -2329,7 +2329,7 @@ const runSequenceReferenceRegenerationRegression = async (sourceState, planId) =
     const unlimitedDelivery = await assertCompleteCopyAndProjectExport(unlimitedSavedBoard);
     const unlimitedScreenshot = 'sequence-no-character-limit-bilingual-1280x800.png';
     await regressionPage.screenshot({ path: path.join(outputDirectory, unlimitedScreenshot), fullPage: false });
-    await regressionPage.getByRole('button', { name: '编辑分镜', exact: true }).click();
+    await regressionPage.locator('.sidebar').getByRole('button', { name: '分镜时间线', exact: true }).click();
     const deliveryCard = regressionPage.locator('.h3-delivery-card');
     await deliveryCard.waitFor();
     const deliveryLabel = await deliveryCard.textContent();
@@ -2362,7 +2362,7 @@ const runSequenceReferenceRegenerationRegression = async (sourceState, planId) =
           'English-only recovery must prevent duplicate submission');
         if (change === 'shot-edit') {
           await regressionPage.getByRole('button', { name: '结果', exact: true }).click();
-          await regressionPage.getByRole('button', { name: '编辑分镜', exact: true }).click();
+          await regressionPage.locator('.sidebar').getByRole('button', { name: '分镜时间线', exact: true }).click();
           const firstShot = regressionPage.locator('.shot-card').first();
           await firstShot.getByRole('button', { name: '展开编辑', exact: true }).click();
           const lighting = firstShot.getByLabel('光影', { exact: true });

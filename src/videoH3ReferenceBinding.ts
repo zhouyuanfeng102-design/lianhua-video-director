@@ -10,6 +10,7 @@ import { maskVideoPictureReferenceLiterals as maskReferenceLiterals, videoPictur
 import { prepareVideoSeedanceReferenceDraft } from './videoSeedanceReferenceBinding';
 import { videoSeedanceReferencePlan } from './videoSeedanceReferencePlan';
 import { videoH3MediaModeContract, videoH3MediaModeIssue } from './videoH3MediaMode';
+import { assetReferenceLocationOwners } from './assetCharacterBinding';
 export { collectVideoPictureReferenceNumbers } from './videoPictureReferences';
 export { videoReferenceCharacterOwners, videoReferenceCharacterBindingWarning } from './videoReferenceCharacters';
 
@@ -75,19 +76,7 @@ const imageAsset = (asset: ReferenceAsset): boolean => !['video', 'audio'].inclu
 /** Scene replacement needs the same explicit provenance as an identity photo.
  * A scene-looking filename, asset category or selected use is not location ID. */
 export const videoReferenceLocationOwners = (project: Project, asset: ReferenceAsset): Location[] => {
-  if (!imageAsset(asset) || project.assets.filter((entry) => entry.id === asset.id).length !== 1) return [];
-  if (typeof asset.characterReferenceId === 'string' && asset.characterReferenceId.trim()) return [];
-  const exactLocations = (ids: readonly string[]): Location[] => unique(ids).flatMap((id) => {
-    const matches = project.locations.filter((location) => location.id === id);
-    return matches.length === 1 ? matches : [];
-  });
-  if (asset.sourceEntityId || asset.sourceEntityKind) {
-    if (!asset.sourceEntityId || asset.sourceEntityKind && asset.sourceEntityKind !== 'location' || ['character', 'prop'].includes(asset.type)) return [];
-    if (project.characters.some((entity) => entity.id === asset.sourceEntityId) || project.props.some((entity) => entity.id === asset.sourceEntityId)) return [];
-    const owners = exactLocations([asset.sourceEntityId]);
-    return asset.sourceEntityKind === 'location' ? owners : owners.filter((owner) => owner.assetIds.includes(asset.id));
-  }
-  return exactLocations(project.locations.filter((location) => location.assetIds.includes(asset.id)).map((location) => location.id));
+  return assetReferenceLocationOwners(project, asset);
 };
 
 /** Only a unique same-location selection replaces an old scene binding. If
@@ -98,8 +87,9 @@ export const videoReferenceSceneReplacement = (
 ): { scene: boolean; referenceIndex?: number; preventTailFallback: boolean } => {
   const owners = videoReferenceLocationOwners(project, original);
   const scene = original.type !== 'last-frame' && original.referenceRole !== 'last-frame'
-    && (owners.length > 0 || ['location', 'first-frame'].includes(original.type)
-      || ['scene', 'composition', 'first-frame', 'grid'].includes(original.referenceRole || original.role));
+    && (original.referenceEntityBinding !== undefined ? original.referenceEntityBinding?.kind === 'location'
+      : owners.length > 0 || ['location', 'first-frame'].includes(original.type)
+        || ['scene', 'composition', 'first-frame', 'grid'].includes(original.referenceRole || original.role));
   if (!scene) return { scene: false, preventTailFallback: false };
   const selections = references.map((reference, referenceIndex) => {
     const assets = project.assets.filter((asset) => asset.id === reference.assetId && !asset.missing && imageAsset(asset));
@@ -110,7 +100,8 @@ export const videoReferenceSceneReplacement = (
   return {
     scene: true,
     ...(matches.length === 1 ? { referenceIndex: matches[0].referenceIndex } : {}),
-    preventTailFallback: selections.some(({ reference, locationOwners }) => locationOwners.length > 0
+    preventTailFallback: original.referenceEntityBinding !== undefined && owners.length !== 1
+      || selections.some(({ reference, locationOwners }) => locationOwners.length > 0
       || !['character', 'subject', 'first-frame', 'last-frame'].includes(reference.role)),
   };
 };
@@ -442,7 +433,6 @@ const prepareVideoH3ReferenceDraftInternal = (
   // shot prose. All such tokens must have an unambiguous saved manifest; do
   // not append a second contradictory mapping and leave the old ones behind.
   const pictureSourceIssues: string[] = [];
-  const unresolvedPictureNumbers = new Set<number>();
   const pictureTokens = [...maskReferenceLiterals(binding.basePrompt).matchAll(pictureReferencePattern())];
   for (const token of pictureTokens) {
     const originalNumber = Number(token[1] ?? token[2] ?? token[3]);
@@ -452,7 +442,10 @@ const prepareVideoH3ReferenceDraftInternal = (
     const selected = assetId ? draft.references.flatMap((reference, index) => reference.assetId === assetId ? [index] : []) : [];
     const sourceAssets = assetId ? project.assets.filter((asset) => asset.id === assetId) : [];
     const sourceAsset = sourceAssets.length === 1 ? sourceAssets[0] : undefined;
-    if (sourceAsset && sourceAsset.characterReferenceId !== undefined) {
+    if (sourceAsset && (sourceAsset.referenceEntityBinding === undefined
+      ? sourceAsset.characterReferenceId !== undefined
+      : sourceAsset.referenceEntityBinding === null || sourceAsset.referenceEntityBinding.kind === 'character'
+        || sourceAsset.sourceEntityKind === 'character')) {
       // Generation provenance cannot prove who an older prompt associated with
       // this image. Rebuild only this request's picture syntax from the current
       // explicit binding and valid identity anchors, even if the old source ID
@@ -496,7 +489,6 @@ const prepareVideoH3ReferenceDraftInternal = (
       }
       const sourceIssue = `原 H3 的 ${token[0]} 缺少可证明的原资产与本次图片对应，已保留该原始标签；未附加冲突引用。请恢复该图的原图片清单，或明确重新选择参考图并更新本段引用。`;
       pictureSourceIssues.push(sourceIssue);
-      unresolvedPictureNumbers.add(originalNumber);
       warnings.push(sourceIssue);
       continue;
     }
@@ -517,7 +509,7 @@ const prepareVideoH3ReferenceDraftInternal = (
     }
     const end = binding.basePrompt.indexOf(identity.referenceAnchor) + identity.referenceAnchor.length;
     edits.push({ start: end, end,
-      text: ` Visual identity reference for ${identity.name}${identity.subjectToken ? ` ${identity.subjectToken}` : ''}${identity.speakerToken ? ` ${identity.speakerToken}` : ''}: ${numbers.map((number) => `<Picture ${number}>`).join(', ')}.` });
+      text: ` Visual identity reference for ${identity.name}: ${numbers.map((number) => `<Picture ${number}>`).join(', ')}.` });
     markBound(identity.characterId, numbers);
   }
   for (const id of pictureSourceIssues.length ? [] : characterPictures.keys()) if (!identities.some((identity) => identity.characterId === id)) {
@@ -543,16 +535,17 @@ const prepareVideoH3ReferenceDraftInternal = (
     if (usage) prompt = prompt.slice(0, usage.start) + usage.text + prompt.slice(usage.end);
   }
   const changedKnownMapping = [...pictureNumbers].some(([number, mapped]) => mapped !== null && (mapped.length !== 1 || mapped[0] !== number));
-  const issue = pictureSourceIssues.length && changedKnownMapping
-    ? `旧 H3 图片清单仅能证明部分引用，本次已同步已知图片编号，但剩余 ${[...unresolvedPictureNumbers].map((number) => `<Picture ${number}>`).join('、')} 的来源尚未证明；不能将这份混合编号稿提交。请恢复原图片清单或明确更新本段参考图引用后重试。`
-    : undefined;
+  if (pictureSourceIssues.length && changedKnownMapping) return unchanged([
+    ...pictureSourceIssues,
+    '旧 H3 图片清单只能对应部分引用，本次保留当前提示词，可直接生成，也可主动更新本段参考说明。',
+  ]);
   return { draft: { ...draft, prompt,
     ...(!draft.reuseTaskId && !draft.h3ReferenceBinding && draft.source && draft.source.language === undefined
       && binding.sourceLanguage === 'en' && sourceBoard.length === 1
       && binding.basePrompt === sourceBoard[0].officialPromptEn
       && sourceBoard[0].officialPromptEnSource === sourceBoard[0].officialPromptZh
       ? { source: { ...draft.source, language: 'en' as const } } : {}),
-    h3ReferenceBinding: { ...binding, renderedPrompt: prompt, characterStates: structuredClone(characterStates) }, h3ReferenceWarnings: unique(warnings) }, warnings: unique(warnings), characterStates, ...(issue ? { issue } : {}) };
+    h3ReferenceBinding: { ...binding, renderedPrompt: prompt, characterStates: structuredClone(characterStates) }, h3ReferenceWarnings: unique(warnings) }, warnings: unique(warnings), characterStates };
 };
 
 /** The mode is determined after the final selected slots have been resolved.
@@ -565,10 +558,8 @@ export const prepareVideoH3ReferenceDraft = (
     || !isH3(prepared.draft.prompt)) return prepared;
   const h3MediaMode = videoH3MediaModeContract(prepared.draft, context);
   const mismatch = videoH3MediaModeIssue(h3MediaMode);
-  // Explicit H3 deliveries use the current contract. Legacy untyped pasted
-  // text remains readable and usable without upgrading historical behavior.
-  const issue = draft.source?.promptFormat === 'h3' || draft.h3MediaModeUpdate ? mismatch : undefined;
-  const warnings = unique([...prepared.warnings, ...(issue ? [issue] : [])]);
-  return { ...prepared, draft: { ...prepared.draft, h3MediaMode, h3ReferenceWarnings: warnings }, warnings,
-    ...(prepared.issue || issue ? { issue: prepared.issue || issue } : {}) };
+  // Reference mode is guidance, never a local content gate for submission.
+  const notice = draft.source?.promptFormat === 'h3' || draft.h3MediaModeUpdate ? mismatch : undefined;
+  const warnings = unique([...prepared.warnings, ...(notice ? [notice] : [])]);
+  return { ...prepared, draft: { ...prepared.draft, h3MediaMode, h3ReferenceWarnings: warnings }, warnings };
 };

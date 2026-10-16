@@ -16,6 +16,7 @@ import { defaultStoryboardImageOutputSize, resolveStoryboardImageOutputSize } fr
 import { runStoryboardImageBatch, type StoryboardImageBatchLifecycle, type StoryboardReferenceImageLoader } from './storyboardImages';
 import { assertDirectStoryboardImageApiSupport, buildDirectStoryboardImageBatchRequests, directStoryboardImageSourceFingerprint, normalizeStoryboardImageToImageSettings, resolveDirectStoryboardReferenceImages, type DirectStoryboardImagePromptConversion } from './storyboardImageToImage';
 import { buildStoryboardImagePromptWithReferences } from './storyboardImageReferences';
+import { supplementStoryboardImageCharacterReferences } from './storyboardImageCharacterReferences';
 import { requestStoryboardImageFramePlan, validateStoryboardImagePlanCount, type StoryboardImageFramePlan } from './storyboardImagePlan';
 import { withDirectImageRegenerationSnapshot } from './imageAssetRegenerationSnapshot';
 import { imagePromptOutputSpecificationRule } from './imageGeneration';
@@ -307,26 +308,33 @@ export const generateDirectStoryboardImages = async (
     });
     if (!committed) throw new GenerationTaskCancelledError('原剧情或 H3 分镜已变化，本次未提交生图请求。');
     announce(`已加入 ${tasks.length} 个分镜图生图任务，正在准备参考图；可在“生成任务”查看进度或取消排队。`);
-    announce(`正在固定本段 ${settings.referenceAssetIds.length} 张公共参考图，全部生成图片使用同一组原图。`);
+    announce(`正在固定本段 ${settings.referenceAssetIds.length} 张公共参考图；保留公共图顺序，并按每张最终画面中的人物补充角色参考图。`);
     const apiSnapshot = await captureImageApiSnapshot(api, selection.profileId);
     assertSourceCurrent();
     const cache = new Map<string, Promise<string>>();
     const snapshots = new Map<string, ImageReferenceAssetSnapshot>();
-    // Resolve and freeze all originals before queueing. A reference used by
-    // many shots is stored once, not copied as base64 into every task record.
-    failureDetail = { stage: 'image-reference-load', context: imageErrorContext };
-    for (const id of settings.referenceAssetIds) {
-      assertSourceCurrent();
+    // Public originals are frozen before queueing. Character references found
+    // in a converted still use the same cache and are frozen only once per batch.
+    const freezeReference = async (id: string, assertCurrent: () => void): Promise<ImageReferenceAssetSnapshot> => {
+      assertCurrent();
+      const existing = snapshots.get(id);
+      if (existing) return existing;
       const asset = projectContext.assets.find((item) => item.id === id);
       const [dataUrl] = await resolveDirectStoryboardReferenceImages([id], projectContext.assets, ctx.loader, cache);
+      assertCurrent();
       if (!asset) throw new Error(`参考图已不存在：${id}`);
       let managed: ManagedMediaResult | undefined;
       if (asset.dataUrl || !asset.managed || !asset.relativePath || !/^[a-f0-9]{64}$/iu.test(asset.checksum || '')) {
         if (!ctx.storeImage) throw new Error(`当前环境无法保存参考图快照：${asset.name}，请在桌面版使用图生图。`);
         managed = await ctx.storeImage({ dataUrl, fileName: `${safeFileName(asset.name)}-图生图参考.png` });
+        assertCurrent();
       }
-      snapshots.set(id, createImageReferenceAssetSnapshot(asset, managed));
-    }
+      const snapshot = createImageReferenceAssetSnapshot(asset, managed);
+      snapshots.set(id, snapshot);
+      return snapshot;
+    };
+    failureDetail = { stage: 'image-reference-load', context: imageErrorContext };
+    for (const id of settings.referenceAssetIds) await freezeReference(id, assertSourceCurrent);
     assertSourceCurrent();
     let frames: StoryboardImageFramePlan[] | undefined;
     if (requested.count !== undefined) {
@@ -383,11 +391,15 @@ export const generateDirectStoryboardImages = async (
       let taskFailureStage: DirectStoryboardImageErrorDetail['stage'] = 'image-reference-load';
       try {
         assertActive();
+        task = { ...task, status: 'running', error: undefined };
+        tasks[index] = task;
         ctx.updateBackground((state) => applyOwnedProjectUpdate(state, projectId, (project) => ({
           ...project, generationTasks: patchImageGenerationTask(project.generationTasks, task.id, { status: 'running', error: undefined }),
         })));
-        const referenceImages = await resolveDirectStoryboardReferenceImages(task.referenceAssetIds!, imageReferenceSnapshotAssets(task.referenceAssetSnapshots), ctx.loader);
+        const referenceImageCache = new Map<string, Promise<string>>();
+        await resolveDirectStoryboardReferenceImages(task.referenceAssetIds!, imageReferenceSnapshotAssets(task.referenceAssetSnapshots), ctx.loader, referenceImageCache);
         assertActive();
+        let finalPrompt = task.prompt;
         if (directPromptConversion && request.directPromptSource !== 'current-image-prompt') {
           taskFailureStage = 'image-prompt-convert';
           ctx.updateBackground((state) => applyOwnedProjectUpdate(state, projectId, (project) => ({
@@ -399,17 +411,31 @@ export const generateDirectStoryboardImages = async (
             imagePromptConverterRules, conversionIdentityContext,
           );
           assertActive();
-          const sanitized = assertValidFinalImagePrompt(converted, selectedPromptFormat!, request.conversionSource);
-          const orderedAssets = request.referenceAssetIds.map((id) => projectContext.assets.find((asset) => asset.id === id)!);
-          task = { ...task, prompt: projectContext.includeReferenceMetadata
-            ? buildStoryboardImagePromptWithReferences(sanitized, orderedAssets, projectContext)
-            : sanitized };
-          tasks[index] = task;
-          ctx.updateBackground((state) => applyOwnedProjectUpdate(state, projectId, (project) => ({
-            ...project, generationTasks: updateImagePreparationTasks(project.generationTasks, [task],
-              (current) => ({ ...current, prompt: task.prompt, preparationStage: undefined })),
-          })));
+          finalPrompt = assertValidFinalImagePrompt(converted, selectedPromptFormat!, request.conversionSource);
         }
+        taskFailureStage = 'image-reference-load';
+        const referenceAssetIds = supplementStoryboardImageCharacterReferences(finalPrompt, request.referenceAssetIds, projectContext);
+        assertDirectStoryboardImageApiSupport(api, referenceAssetIds.length);
+        const referenceAssetSnapshots: ImageReferenceAssetSnapshot[] = [];
+        for (const id of referenceAssetIds) referenceAssetSnapshots.push(await freezeReference(id, assertActive));
+        assertActive();
+        const orderedAssets = referenceAssetIds.map((id) => projectContext.assets.find((asset) => asset.id === id)!);
+        const addedReferenceCount = referenceAssetIds.length - request.referenceAssetIds.length;
+        task = {
+          ...task,
+          prompt: projectContext.includeReferenceMetadata
+            ? buildStoryboardImagePromptWithReferences(finalPrompt, orderedAssets, projectContext) : finalPrompt,
+          referenceAssetIds, referenceAssetSnapshots,
+          preparationStage: undefined,
+          ...(addedReferenceCount ? { bindingWarning: `已按本张人物补充 ${addedReferenceCount} 张角色参考图，共 ${referenceAssetIds.length} 张；公共参考图顺序保持不变。` } : {}),
+        };
+        tasks[index] = task;
+        ctx.updateBackground((state) => applyOwnedProjectUpdate(state, projectId, (project) => ({
+          ...project, generationTasks: updateImagePreparationTasks(project.generationTasks, [task],
+            (current) => ({ ...current, ...task })),
+        })));
+        const referenceImages = await resolveDirectStoryboardReferenceImages(referenceAssetIds, imageReferenceSnapshotAssets(referenceAssetSnapshots), ctx.loader, referenceImageCache);
+        assertActive();
         taskFailureStage = 'image-generation';
         const generated = await (ctx.generateImage || requestImageModel)(api, {
           prompt: task.prompt, negativePrompt: task.negativePrompt, width: task.width, height: task.height, sizeOverride: task.sizeOverride, resolutionPlan: task.resolutionPlan,
@@ -446,7 +472,7 @@ export const generateDirectStoryboardImages = async (
           // confirmed H3 fingerprints, first/last-frame or video slot bindings.
           generationTasks: settleImageGenerationTask(project.generationTasks, task, {
             status: 'succeeded', resultAssetId: asset.id, resultUrl: url, error: undefined,
-            bindingWarning: imageReturnedSizeWarning(task, actual) || undefined,
+            bindingWarning: [task.bindingWarning, imageReturnedSizeWarning(task, actual)].filter(Boolean).join('；') || undefined,
           }, timestamp, projectId),
         })));
         return asset.id;
