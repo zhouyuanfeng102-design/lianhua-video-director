@@ -167,6 +167,8 @@ import { matchesVideoSelection, selectVideoAsset, type VideoAssetSelection } fro
 import { findVideoAssetSourceTask, frozenVideoReferenceAsset, relatedVideoAssets, removeVideoTaskKeepingProvenance } from "./videoProvenance";
 import { inspectVideoBatchDeletion, removeVideoBatchKeepingProvenance } from "./videoBatchDeletion";
 import { applyVideoApiParameterCapabilities } from "./videoApiParameterSettings";
+import { resolveConfiguredVideoApi } from "./runningHubVideo";
+import { refreshVideoH3MediaModeDraft, videoH3MediaModeContract } from "./videoH3MediaMode";
 import { resolveVideoPromptNavigation } from "./videoPromptNavigation";
 import type { VideoBatchContinuationPlan, VideoPromptFormat, VideoPromptSource } from "./videoGenerationTypes";
 import { videoTaskBatchStatus, type VideoTaskBatchStatus } from "./videoTaskBatchStatus";
@@ -3856,7 +3858,12 @@ export default function App() {
     setDurationPreset(durationPresetForSeconds(segment.durationSec));
   };
 
-  const restoreSequencePlanTiming = (plan: VideoSequencePlan) => {
+  const restoreSequencePlanState = (plan: VideoSequencePlan) => {
+    // Review markers belong to the selected plan, just like its timing. Restore
+    // saved markers instead of confirming here so edited drafts remain gated.
+    setConfirmedSequencePlanFingerprint(plan.reviewConfirmedFingerprint || "");
+    setAcceptedSequencePlanMismatchFingerprint("");
+    setAcknowledgedCompressedPlanFingerprint(plan.compressedRiskAcknowledgedFingerprint || "");
     setGenerationPromptFormatState(plan.generationPromptFormat === 'seedance' ? 'seedance' : 'h3');
     // A saved segment can be 6s in a legacy plan whose selected duration was
     // 15s. Restore the user's plan-level choice, never the viewed clip length.
@@ -3881,7 +3888,7 @@ export default function App() {
     if (!plan || !segment) return;
     if (plan.id !== activePlanIdRef.current) {
       cancelSequenceGeneration(false);
-      restoreSequencePlanTiming(plan);
+      restoreSequencePlanState(plan);
       if (isSemanticSequencePlan(plan)) {
         restoreSequenceDirectorSettings(plan.semanticPlanningSnapshot?.directorSettingsFingerprint);
       }
@@ -5851,7 +5858,7 @@ export default function App() {
       setProductionMode(fallback ? "sequence" : "single");
       setSequenceMasterGenerationIssue("");
       if (fallback) {
-        restoreSequencePlanTiming(fallback);
+        restoreSequencePlanState(fallback);
         if (isSemanticSequencePlan(fallback)) restoreSequenceDirectorSettings(fallback.semanticPlanningSnapshot?.directorSettingsFingerprint);
         if (segment) setDirectorDurationForSegment(segment);
       }
@@ -9727,7 +9734,7 @@ export default function App() {
       if (destination.planId !== activePlanIdRef.current) {
         const destinationPlan = stateRef.current.project.sequencePlans.find((plan) => plan.id === destination.planId);
         if (destinationPlan) {
-          restoreSequencePlanTiming(destinationPlan);
+          restoreSequencePlanState(destinationPlan);
           if (isSemanticSequencePlan(destinationPlan)) {
             restoreSequenceDirectorSettings(destinationPlan.semanticPlanningSnapshot?.directorSettingsFingerprint);
           }
@@ -10074,6 +10081,34 @@ export default function App() {
           onOpenSettings={() => { setOpenVideoSettings(true); setView("settings"); }}
           onOpenPrompt={openPromptSource}
           onRepairIdentityBindings={repairStoryboardIdentityBindings}
+          onRefreshH3References={async (draft) => {
+            const snapshot = getCurrentState();
+            const epoch = workspaceEpochRef.current;
+            const contextFor = (settings: typeof snapshot.settings) => ({
+              backend: draft.backend,
+              api: draft.backend === "api" ? resolveConfiguredVideoApi(settings, draft) : undefined,
+              workflow: draft.backend === "comfyui" ? settings.comfyuiVideo?.workflows.find((workflow) =>
+                workflow.id === (draft.workflowId || settings.comfyuiVideo?.activeWorkflowId)) : undefined,
+            });
+            const context = contextFor(snapshot.settings);
+            const referenceIdentity = (current: AppState) => sourceContentHash(JSON.stringify([
+              current.settings.textApi, videoH3MediaModeContract(draft, contextFor(current.settings)).inputIdentity,
+              current.project.characters.map(({ id, name, gender, race, appearance, outfit }) => ({ id, name, gender, race, appearance, outfit })),
+              draft.references.map((reference) => {
+                const asset = current.project.assets.find((item) => item.id === reference.assetId);
+                return asset && [asset.id, asset.name, asset.visualAnchor, asset.checksum, asset.updatedAt, asset.missing];
+              }),
+            ]));
+            const expectedIdentity = referenceIdentity(snapshot);
+            const isCurrent = () => {
+              const current = getCurrentState();
+              try { return workspaceEpochRef.current === epoch && current.project.id === snapshot.project.id
+                && referenceIdentity(current) === expectedIdentity; } catch { return false; }
+            };
+            return refreshVideoH3MediaModeDraft({ project: snapshot.project, draft, context, isCurrent,
+              request: (system, user) => requestTextModel(snapshot.settings.textApi, system, user, undefined, { disableThinking: true }),
+            });
+          }}
           onVoicePresetsChange={handleVideoVoicePresetsChange}
           onImportAudioFiles={handleVideoAudioFilesImport}
           onOpenVideoAssets={() => { setVideoAssetStoryboardFilter(""); setAssetLibrarySection("video"); setView("assets"); }}

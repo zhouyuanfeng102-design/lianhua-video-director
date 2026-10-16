@@ -4,13 +4,13 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的 Windows 桌面工作台。
 
-当前版本：**2.3.6** · 2026-10-15 · Windows 64 位 · 便携运行
+当前版本：**2.3.9** · 2026-10-16 · Windows 64 位 · 便携运行
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows 便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-2.3.6.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-2.3.9.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
 1. 下载上面的 EXE，放在可写入的文件夹里，双击运行，无需安装 Node.js。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
@@ -127,6 +127,8 @@
 2.3.2 修复 HTTP 524 等提交结果待确认的任务停止本地追踪后，对应批次仍无法删除的问题。删除仅清理生成任务列表，保留原提交边界、断点和凭据，撤销可恢复；不重新提交或取消远端任务。运行、下载、取消中、尚未停止追踪、待取回结果与续跑关联的保护继续保留。上游无记录时仍为结果待确认，实际验证与交付状态见[本版更新说明](docs/releases/发布说明-2.3.2.md)。
 
 2.3.3 修正 2.3.2 删除批次后列表为 0、重新生成仍显示“待提交 0、跳过 3”的遗留问题：已删除且安全停止的历史未知任务退出新批次去重，旧记录自动兼容，无需重新删除。原提示词、参考图、参数与提交证据保留，删除或重启不自动提交；手动生成经过原费用确认并创建新任务 ID。运行、下载、取消中、待取回结果与未释放续跑占位继续保护。验证与交付状态见[本版更新说明](docs/releases/发布说明-2.3.3.md)。
+
+2.3.7 修复切换段落方案后生成按钮被误禁用的问题：切换时恢复目标方案已保存的方案确认及节奏偏紧风险确认，并清除上一方案的来源差异接受记录；分镜时间线选方案和从视频来源跳转也采用相同处理。未确认、已修改或来源不匹配的方案仍需先处理确认，没有数据迁移。验证与交付状态见[本版更新说明](docs/releases/发布说明-2.3.7.md)。
 
 2.3.6 优化大项目库启动：先读取项目目录及当前项目，其他项目按需加载；有未完成任务的项目保留后台恢复。启动恢复检查改读摘要，无修改时跳过自动保存；保存复用未变项目块，并缓存界面大型计算。首次打开旧库会在后台建立目录索引，实际性能与存档验证见[本版更新说明](docs/releases/发布说明-2.3.6.md)。
 

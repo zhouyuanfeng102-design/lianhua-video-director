@@ -38,11 +38,18 @@ export const VIDEO_CONTINUOUS_SCENE_RULE = [
   '身份资料是辨认与连续性依据，不是需要演出的事件；在格式允许的位置简短定义必要稳定特征一次，后续保留姓名及当镜实际状态，不把整份档案、动作习惯或设定真值写成当镜行动。普通迈步、抬手、移开视线和细微停顿按自然先后或并行表达；数字时刻用于镜界、完整发话区间与确需同步的关键事件，不为每个微动作编造小数秒排程。',
 ].join('\n\n');
 
-export const VIDEO_AI_SHOT_COVERAGE_RULE = [
+export const LEGACY_VIDEO_AI_SHOT_COVERAGE_RULE_V2_3_7 = [
   '先排本段各事件的实际起止、完整对白与必要反应，再决定摄影覆盖。auto从能清楚表现全部因果的最少必要视角开始，选择少而充分的镜头与简单连贯的摄影；一个连续镜头已能看清接触、轨迹与回应时，优先在镜内调整关注，用稳定取景、自然跟随或必要重构图承载连续场面。',
   '切镜由观看任务改变产生：当前取景与自然镜内调整无法清楚表达下一项关键叙事信息时，才切向所需的新画面。真实换场跳时、关键揭示、叙事立场转移或决定性反应可以成立；普通目光移动、换人说话、迈步、碰撞和换一件道具本身不够。不是硬性一镜到底，也不靠在同镜堆叠推拉、环绕、摇移和反复变焦来躲避必要切镜。',
   '不预设三镜或其他镜数，不按15秒等分，不为每个动作阶段、每次碰撞、每句对白或每张正脸各切一镜。用户exact镜数严格保持，在指定镜数内完整表达原文；auto镜数来自实际观看需要，不以题材、风格术语或段长预填。世界行动关系先于摄影，关键接触及下一招从同一事件当前阶段和速度继续，不能为换景别重置起手或让受力人物等待下一镜。短促事件完成后可继续覆盖剧情已有的反应，镜头时长不等于事件持续时长，原定慢节奏与有依据的停顿保留。',
   '规划JSON沿用reason（保存后对应shotCountReason）以及purpose/transition：purpose说明本镜让观众理解的具体关系、行动或信息；transition说明剧情何处触发观看重点交接、前镜不能提供什么必要信息及如何从真实末态继续。一个镜头可以承载相互因果的多个事件、动作与话轮；不以“电影感”“节奏变化”或器物与脸部展示替代叙事职责。转换、H3转写、参考更新和翻译保留既定镜数、顺序和切点，不重切已确认稿或裁掉对白；只有用户明确请求的源头重新导演才重新选择摄影。',
+].join('\n\n');
+
+export const VIDEO_AI_SHOT_COVERAGE_RULE = [
+  '先排本段各事件的实际起止、完整对白与必要反应，再决定摄影覆盖。先按自然发话速度容纳完整原话，同时留出必要行动与结果辨认，不能让长句挤进余秒或让持续交战只剩一次挥击。auto从能清楚表现全部因果的最少必要视角开始，选择少而充分的镜头与简单连贯的摄影；一个连续镜头已能看清接触、轨迹与回应时，优先在镜内调整关注，用稳定取景、自然跟随或必要重构图承载连续场面。',
+  '切镜由观看任务改变产生：当前取景与自然镜内调整无法清楚表达下一项关键叙事信息时，才切向所需的新画面。真实换场跳时、关键揭示、叙事立场转移或决定性反应可以成立。群战按已成立的战场关系覆盖前景可读交点、中景队列/梯队推进与远景既有军势规模；它们可以同镜分层或按必要信息切换，不强制逐层各一镜，不把所有人同时推到同一交点，也不以远景人多替代真实攻防。普通目光移动、换人说话、迈步或碰撞本身不够；不是硬性一镜到底，也不靠在同镜堆叠推拉、环绕、摇移和反复变焦来躲避必要切镜。',
+  '不预设三镜或其他镜数，不按15秒等分，不为每个动作阶段、每次碰撞、每句对白或每张正脸各切一镜。用户exact镜数严格保持，在指定镜数内完整表达原文；auto镜数来自实际观看需要，不以题材、风格术语、人数或段长预填。世界行动关系先于摄影，关键接触及下一招从同一事件当前阶段和速度继续，不能为换景别重置起手或让受力人物等待下一镜。持续交战、压倒性持续清剿、瞬杀、追逐与阵列推进按真实过程覆盖，持续迎击不缩为一挥后静止，瞬杀不拖成多回合。短促事件完成后可继续覆盖剧情已有的反应，镜头时长不等于事件持续时长，原定慢节奏与有依据的停顿保留。',
+  '规划JSON沿用reason（保存后对应shotCountReason）以及purpose/transition：purpose说明本镜让观众理解的具体关系、行动或信息；transition说明剧情何处触发观看重点交接、前镜不能提供什么必要信息及如何从真实末态继续。一个镜头可以承载相互因果的多个事件、动作与话轮，真实在场人物可画外继续说完整原话并与既有行动并行，不新增旁白、不转交声源、不提前事件，也不强迫每句露正脸。不以“电影感”“节奏变化”或器物与脸部展示替代叙事职责。转换、H3转写、参考更新和翻译保留既定镜数、顺序和切点，不重切已确认稿或裁掉对白；只有用户明确请求的源头重新导演才重新选择摄影。',
 ].join('\n\n');
 
 /** Exact former camera text is retained for request-only preset compatibility. */
@@ -92,6 +99,10 @@ export const VIDEO_ACTING_CAMERA_RULES = [
   VIDEO_ACTING_CAMERA_FIELD_RULE,
   VIDEO_ACTING_CAMERA_REVIEW_RULE,
 ].join('\n\n');
+
+/** Exact previous live bundle; compatibility only, never an extra rule. */
+export const LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_3_7 = VIDEO_ACTING_CAMERA_RULES
+  .split(VIDEO_AI_SHOT_COVERAGE_RULE).join(LEGACY_VIDEO_AI_SHOT_COVERAGE_RULE_V2_3_7);
 
 /** Exact previous live bundle retained only for request-time recognition. */
 export const LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_1_0 = [
@@ -174,6 +185,8 @@ export const stripLegacyVideoActingCameraRules = (value: string): string => {
     SPATIAL_CONTINUITY_REVIEW_RULE, SPATIAL_TRANSLATION_RULE, SPATIAL_COORDINATE_RULE,
   ];
   const legacyRules = [
+    LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_3_7,
+    LEGACY_VIDEO_AI_SHOT_COVERAGE_RULE_V2_3_7,
     LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_1_0,
     LEGACY_VIDEO_AI_SHOT_COVERAGE_RULE_V2_1_0, LEGACY_VIDEO_CAMERA_SELECTION_RULE_V2_1_0,
     LEGACY_VIDEO_ACTING_CAMERA_FIELD_RULE_V2_1_0,

@@ -59,10 +59,13 @@ assert.deepEqual(requests.map((item) => item.referenceAssetIds), [['a'], ['b', '
 assert.deepEqual(requests.map((item) => item.primaryReferenceAssetIds), [['a'], ['b', 'a']]);
 assert.equal(requests[0].directPromptSource, 'shot-visual');
 assert.match(requests[0].directPrompt, /第2镜原动作/u);
-assert.match(requests[0].conversionSource, /静帧取景/u);
+assert.doesNotMatch(requests[0].conversionSource, /静帧取景|人物之间的关系|取景高于身份展示/u,
+  'converted input carries visual facts without the unconverted fallback framing rules');
+assert.match(requests[0].directPrompt, /静帧取景/u,
+  'the direct fallback still carries the framing needed without a text conversion');
 assert.match(requests[0].conversionSource, /第2镜原动作/u);
 assert.doesNotMatch(requests[0].conversionSource, /data:image|本次实际上传图片|完整参考图名称/u,
-  'conversion receives authored visual text and framing, not pixels or image-upload metadata');
+  'conversion receives authored visual facts, not pixels or image-upload metadata');
 assert.doesNotMatch(requests[0].directPrompt, /不应发送|旧视频稿|历史全局外貌|第4镜原动作/u);
 assert.deepEqual(requests[0].referenceAssetIds, requests[0].primaryReferenceAssetIds);
 assert.equal(JSON.stringify(board), original, 'H3/video references/shots are never rewritten');
@@ -404,19 +407,22 @@ const [roomFirst, roomLast] = buildDirectStoryboardImageBatchRequests(roomBoard,
 }, context);
 assert.ok(roomFirst.conversionSource.includes(roomEntryText), 'the source preserves a character-to-door distance without substituting character-to-character distance');
 assert.ok(!roomFirst.conversionSource.includes(roomExitText), 'a later shot never becomes the first-frame target');
-assert.match(roomFirst.conversionSource, /随后后拉才揭示的侧肩.*不默认合入首帧/u);
-assert.match(roomFirst.conversionSource, /未来剧情只解释起始空间余量/u);
+assert.match(roomFirst.conversionSource, /第一镜的开始边界与入口状态；首镜后续动作尚未发生/u);
 assert.match(roomFirst.conversionSource, /完整时序资料，按本张时刻取状态/u);
-assert.match(roomFirst.conversionSource, /真实距离及准确参照端点/u);
+assert.doesNotMatch(roomFirst.conversionSource, /首帧取景|人物之间的关系|取景高于身份展示/u);
+assert.match(roomFirst.directPrompt, /首帧取景/u, 'unconverted boundary fallback retains its framing');
 assert.ok(roomLast.conversionSource.includes(roomExitText));
-assert.match(roomLast.conversionSource, /先承接具名世界位置、距离端点.*再按结束机位取景/u);
+assert.match(roomLast.conversionSource, /帧位要求：视频尾帧，最后一镜结束时的最终可见状态/u);
+assert.match(roomLast.directPrompt, /尾帧取景/u);
 const [roomCustom] = buildDirectStoryboardImageBatchRequests(roomBoard, {
   mode: 'storyboard-shots', referenceAssetIds: ['a'],
   frames: [{ sourceShotId: 'shot-1', timeSec: 0, description: '守卫在门外近景；阿莲在画外寝宫中央，距门槛约四米，尚未走近。' }],
 }, context);
 assert.ok(roomCustom.conversionSource.includes(roomEntryText));
 assert.equal(roomCustom.imageFrameTimeSec, 0);
-assert.match(roomCustom.conversionSource, /不能把后续位移、接触或入画局部提前拼进本张/u);
+assert.match(roomCustom.conversionSource, /已选定的本张静帧：守卫在门外近景；阿莲在画外寝宫中央，距门槛约四米，尚未走近。/u);
+assert.match(roomCustom.conversionSource, /本段画面时刻：0 秒/u);
+assert.doesNotMatch(roomCustom.conversionSource, /静帧取景|人物之间的关系|取景高于身份展示/u);
 assert.equal(JSON.stringify(roomBoard), roomBefore, 'still sources do not change saved H3, video shots or distance facts');
 
 const baseApi: ImageApiConfig = { enabled: true, backend: 'openai', baseUrl: 'https://example.invalid/v1', apiKey: '', model: 'images' };

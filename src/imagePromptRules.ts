@@ -4,10 +4,15 @@ import {
 import { FULL_BODY_LAYOUT_RULE, imagePromptOutputSpecificationRule, type ImagePromptOutputSpecification } from './imageGeneration';
 import type { ImageVariant } from './types';
 import { IMAGE_PROMPT_LANDSCAPE_SCOPE_CONTRACT, isLandscapeImageRequest } from './imageLocationScope';
-import { DIRECTED_ACTION_RELATION_RULE, IMAGE_STORY_SPATIAL_STATE_RULE, STORYBOARD_FRAME_VISIBILITY_RULE } from './spatialContinuityRules';
+import {
+  DIRECTED_ACTION_RELATION_RULE, IMAGE_STORY_SPATIAL_STATE_RULE,
+  SPATIAL_COORDINATE_RULE, SPATIAL_CONTINUITY_REVIEW_RULE,
+  STORYBOARD_FRAME_VISIBILITY_RULE, STORYBOARD_SPATIAL_FRAME_RULE,
+} from './spatialContinuityRules';
 import {
   GOOGLE_NANO_BANANA_RULE_ID, GROK_IMAGINE_RULE_ID,
   MODEL_FAMILY_CATEGORY_PRESETS, MODEL_FAMILY_RULE_SETS, MODEL_FAMILY_FIVE_VIEW_PRESET_IDS,
+  MODEL_FAMILY_SOURCE_SPATIAL_RULE, MODEL_FAMILY_SPATIAL_OUTPUT_RULE,
   LEGACY_MODEL_FAMILY_CATEGORY_PRESETS_V19, LEGACY_MODEL_FAMILY_RULE_SETS_V19,
   isGoogleNanoBananaImageModel, isGrokImagineImageModel,
 } from './imagePromptModelFamilies';
@@ -2145,6 +2150,58 @@ export const isNarrativeImageRequest = (
   || kind === 'grid'
   || kind === 'location' && (imageVariant === 'snapshot' || imageVariant === 'first-frame');
 
+const STORYBOARD_IMAGE_CONVERSION_RULE = [
+  '这是分镜单帧生图转换器，不是视频提示词润色器。只选择一个明确可见的瞬间，使用一个景别、一个机位和一套光线。',
+  '把抽象信息转成原文允许的可见证据、人物可见反应、物体状态或空间结果；不得直接把抽象句子复制成人物动作。',
+  '删除时间戳、时长、镜头切换、运镜过程、台词、音效、制作说明、模板占位词和字段标签；保留当前瞬间的具名人物、距离及测量端点、地标、通路、朝向、机位和裁切，直接写成画面正文。不生成拼图、额外分格、字幕、镜头编号、Logo、水印或界面。',
+  '参考图按本次绑定用途提供人物身份、外貌与服装设计，或场景、道具外观；当前时刻的衣着或裸露状态、动作、姿态、视线和构图由本镜事实决定，默认衣橱不覆盖当前状态，不继承参考图中的临时持物或历史动作。场景透视和物件外观没有可靠比例尺时不推定精确距离。',
+  '人物、长期装备、地点结构、主光源和物种身体结构沿用资料中的连续性锚点；仅描述本镜实际可见的细节，不为呈现身份补脸、补全身体或增加画外人物。作品与姓名用于识别身份，不据原作设定另添外貌、装备、动作或剧情。',
+  '非类人主体保留资料指定的头部、感知结构、躯干、肢体与附肢数量、体表材质和运动方式；除剧情明确拟人化外，不改成人类或另一种身体结构。',
+].join('\n');
+
+/** One runtime owner for narrative conversion. The full storyboard contract
+ * already contains the visibility and world-state contracts. */
+export const imagePromptNarrativeContract = (
+  kind: ImagePromptAssetKind,
+  imageVariant?: ImageVariant,
+): string => kind === 'storyboard'
+  ? [
+      STORYBOARD_IMAGE_CONVERSION_RULE,
+      SPATIAL_COORDINATE_RULE,
+      DIRECTED_ACTION_RELATION_RULE,
+      SPATIAL_CONTINUITY_REVIEW_RULE,
+      STORYBOARD_SPATIAL_FRAME_RULE,
+    ].join('\n')
+  : isNarrativeImageRequest(kind, imageVariant)
+    ? [DIRECTED_ACTION_RELATION_RULE, IMAGE_STORY_SPATIAL_STATE_RULE].join('\n')
+    : '';
+
+const narrativeContractBlocks = [
+  STORYBOARD_IMAGE_CONVERSION_RULE,
+  STORYBOARD_SPATIAL_FRAME_RULE,
+  STORYBOARD_FRAME_VISIBILITY_RULE,
+  IMAGE_STORY_SPATIAL_STATE_RULE,
+  DIRECTED_ACTION_RELATION_RULE,
+  SPATIAL_COORDINATE_RULE,
+  SPATIAL_CONTINUITY_REVIEW_RULE,
+  SOURCE_SPATIAL_FACT_RULE,
+  MODEL_FAMILY_SOURCE_SPATIAL_RULE,
+  `仅在当前画面要求剧情或多人空间关系时：${MODEL_FAMILY_SPATIAL_OUTPUT_RULE}`,
+  MODEL_FAMILY_SPATIAL_OUTPUT_RULE,
+  ...(['natural-language', 'sd-tags', 'nai-tags'] as const).map(sourceSpatialOutputRule),
+].sort((a, b) => b.length - a.length);
+
+/** Remove only exact first-party blocks from a request copy before composing
+ * the shared contract once. Edited/custom prose, saved rules and frozen task
+ * records are untouched; identity sheets retain their existing rule scope. */
+export const stripImagePromptNarrativeContracts = (
+  rules: string,
+  kind: ImagePromptAssetKind,
+  imageVariant?: ImageVariant,
+): string => isNarrativeImageRequest(kind, imageVariant)
+  ? narrativeContractBlocks.reduce((result, contract) => result.split(contract).join(''), rules)
+  : rules;
+
 export const buildImagePromptConverterSystemPrompt = (
   selection: ResolvedImagePromptSelection,
   extraRules = '',
@@ -2153,6 +2210,17 @@ export const buildImagePromptConverterSystemPrompt = (
 ): string => {
   const landscape = isLandscapeImageRequest(selection.assetKind, imageVariant);
   const narrative = isNarrativeImageRequest(selection.assetKind, imageVariant);
+  const selectedRules = [
+    '<image_prompt_rule_set>',
+    selection.ruleSet.systemPrompt,
+    selection.ruleSet.outputRules,
+    '</image_prompt_rule_set>',
+    '<image_prompt_category_preset>',
+    selection.preset.systemPrompt,
+    selection.preset.outputRules,
+    '</image_prompt_category_preset>',
+    cleanString(extraRules) ? `<image_prompt_extra_rules>\n${cleanString(extraRules)}\n</image_prompt_extra_rules>` : '',
+  ].filter(Boolean).join('\n');
   return [
   '你是独立生图提示词转换器。必须把输入资料重新组织为最终生图提示词，不能照搬字段、复述规则或输出制作过程。',
   landscape ? '' : '输入出现性别、gender、雄性、雌性或自定义性别时，它是不可改写的主体身份事实：最终提示词必须保留准确语义，不得遗漏、反转或强制二元化；目标格式为英文标签时应转换为该后端能够识别且语义等价的主体标签。',
@@ -2160,17 +2228,9 @@ export const buildImagePromptConverterSystemPrompt = (
   landscape ? '' : IMAGE_PROMPT_VISIBLE_CHARACTER_IDENTITY_CONTRACT,
   landscape ? '' : IMAGE_PROMPT_CURRENT_LAYOUT_CONTRACT,
   `目标后端：${selection.backend}；规则集：${selection.ruleSet.name}；资产分类：${selection.preset.name}；格式：${selection.ruleSet.format}。`,
-  '<image_prompt_rule_set>',
-  selection.ruleSet.systemPrompt,
-  selection.ruleSet.outputRules,
-  '</image_prompt_rule_set>',
-  '<image_prompt_category_preset>',
-  selection.preset.systemPrompt,
-  selection.preset.outputRules,
-  '</image_prompt_category_preset>',
+  stripImagePromptNarrativeContracts(selectedRules, selection.assetKind, imageVariant),
   outputFormatContract(selection.ruleSet.format),
   IMAGE_PROMPT_RESOLUTION_CONTRACT,
-  cleanString(extraRules) ? `<image_prompt_extra_rules>\n${cleanString(extraRules)}\n</image_prompt_extra_rules>` : '',
   // Keep the explicit full-body contract after the selected preset and any
   // caller-provided rules so a broad preset phrase such as “full-body,
   // knee-up, or half-body” cannot win by appearing later in the instruction
@@ -2181,10 +2241,8 @@ export const buildImagePromptConverterSystemPrompt = (
     : '',
   landscape ? '' : IMAGE_PROMPT_PROP_SCOPE_CONTRACT,
   selection.assetKind === 'grid' ? '以下剧情静帧空间与动作规则逐格应用；每格一个所选时刻，画布保留当前要求的全部画格，不把整张多宫格改成单帧。' : '',
-  narrative ? IMAGE_PROMPT_DIRECTED_ACTION_CONTRACT : '',
   landscape ? '' : IMAGE_PROMPT_NAMED_IDENTITY_CONTRACT,
-  selection.assetKind === 'storyboard' ? STORYBOARD_FRAME_VISIBILITY_RULE : '',
-  narrative && selection.assetKind !== 'storyboard' ? IMAGE_STORY_SPATIAL_STATE_RULE : '',
+  narrative ? imagePromptNarrativeContract(selection.assetKind, imageVariant) : '',
   landscape ? IMAGE_PROMPT_LANDSCAPE_SCOPE_CONTRACT : '',
   imagePromptOutputSpecificationRule(outputSpecification, imageVariant),
   '只返回最终提示词，不要复述以上规则。',

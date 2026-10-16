@@ -9,6 +9,7 @@ import { videoReferenceCharacterOwners, videoReferenceCharacterBindingWarning, t
 import { maskVideoPictureReferenceLiterals as maskReferenceLiterals, videoPictureReferencePattern as pictureReferencePattern } from './videoPictureReferences';
 import { prepareVideoSeedanceReferenceDraft } from './videoSeedanceReferenceBinding';
 import { videoSeedanceReferencePlan } from './videoSeedanceReferencePlan';
+import { videoH3MediaModeContract, videoH3MediaModeIssue } from './videoH3MediaMode';
 export { collectVideoPictureReferenceNumbers } from './videoPictureReferences';
 export { videoReferenceCharacterOwners, videoReferenceCharacterBindingWarning } from './videoReferenceCharacters';
 
@@ -25,6 +26,8 @@ export interface VideoH3ReferenceBinding {
   sourceLanguage?: 'zh' | 'en';
   /** Original persisted manifest, never reconstructed from current slot order. */
   sourcePictures?: Array<{ number: number; assetId: string }>;
+  /** Explicit future-tail slots; only their eventual pixels are unresolved. */
+  pendingPictureSlots?: Array<{ number: number; slotIndex: number; role: ReferenceRole }>;
   /** Picture provenance can remain valid when legacy identity metadata is damaged. */
   identityBindingWarning?: string;
   /** Actual result of rendering this exact request, retained by frozen retries. */
@@ -343,7 +346,7 @@ const videoH3ReferenceUsageEdit = (
 
 /** Pure serialization of explicit identity anchors. Warning-only failures
  * return the untouched text and never ask a model to regenerate a story. */
-export const prepareVideoH3ReferenceDraft = (
+const prepareVideoH3ReferenceDraftInternal = (
   project: Project, draft: VideoGenerationDraft, context: VideoH3ReferenceContext,
 ): PreparedVideoH3ReferenceDraft => {
   if (draft.source?.promptFormat === 'seedance') return prepareVideoSeedanceReferenceDraft(project, draft, videoSeedanceReferencePlan(draft.references, context));
@@ -459,6 +462,11 @@ export const prepareVideoH3ReferenceDraft = (
       continue;
     }
     let numbers = selected.flatMap((index) => plan.numbers?.[index] ? [plan.numbers[index]] : []);
+    const pending = binding.pendingPictureSlots?.filter((entry) => entry.number === originalNumber);
+    if (!numbers.length && pending?.length === 1) {
+      numbers = draft.references.flatMap((reference, index) => videoReferenceSlotIndex(reference, index) === pending[0].slotIndex
+        && reference.role === pending[0].role && plan.numbers?.[index] ? [plan.numbers[index]] : []);
+    }
     if (!numbers.length && assetId) {
       const originalAssets = project.assets.filter((asset) => asset.id === assetId);
       const owners = originalAssets.length === 1 ? videoReferenceCharacterOwners(referenceProject, originalAssets[0]) : [];
@@ -545,4 +553,22 @@ export const prepareVideoH3ReferenceDraft = (
       && sourceBoard[0].officialPromptEnSource === sourceBoard[0].officialPromptZh
       ? { source: { ...draft.source, language: 'en' as const } } : {}),
     h3ReferenceBinding: { ...binding, renderedPrompt: prompt, characterStates: structuredClone(characterStates) }, h3ReferenceWarnings: unique(warnings) }, warnings: unique(warnings), characterStates, ...(issue ? { issue } : {}) };
+};
+
+/** The mode is determined after the final selected slots have been resolved.
+ * Historical retries retain their exact snapshot; no old prompt is rewritten. */
+export const prepareVideoH3ReferenceDraft = (
+  project: Project, draft: VideoGenerationDraft, context: VideoH3ReferenceContext,
+): PreparedVideoH3ReferenceDraft => {
+  const prepared = prepareVideoH3ReferenceDraftInternal(project, draft, context);
+  if (draft.reuseTaskId || draft.source?.promptFormat === 'seedance' || draft.source?.promptFormat === 'ordinary'
+    || !isH3(prepared.draft.prompt)) return prepared;
+  const h3MediaMode = videoH3MediaModeContract(prepared.draft, context);
+  const mismatch = videoH3MediaModeIssue(h3MediaMode);
+  // Explicit H3 deliveries use the current contract. Legacy untyped pasted
+  // text remains readable and usable without upgrading historical behavior.
+  const issue = draft.source?.promptFormat === 'h3' || draft.h3MediaModeUpdate ? mismatch : undefined;
+  const warnings = unique([...prepared.warnings, ...(issue ? [issue] : [])]);
+  return { ...prepared, draft: { ...prepared.draft, h3MediaMode, h3ReferenceWarnings: warnings }, warnings,
+    ...(prepared.issue || issue ? { issue: prepared.issue || issue } : {}) };
 };

@@ -42,6 +42,6 @@ export const rememberStoryVisualConversion = (
   updatedAt: snapshot.createdAt,
   storyVisualConversions: [
     ...(project.storyVisualConversions || []).filter((entry) => entry.id !== snapshot.id),
-    { ...snapshot },
+    structuredClone(snapshot),
   ],
 });

@@ -712,6 +712,8 @@ export interface SemanticSegmentSource {
   events: Array<{ id: string; description: string; phase?: string; causality?: SemanticEventCausality }>;
   /** IDs may recur for an explicitly continuous utterance, never a local replay. */
   dialogues: Array<{ id: string; speaker: string; text: string; language?: string; continuation?: string }>;
+  /** AI-selected adopted staging for this segment, never original evidence. */
+  battleStaging?: import('./battleScenePlanning').BattleSceneStaging[];
 }
 
 export interface SemanticSequencePlanningSnapshot {

@@ -18,7 +18,7 @@ export interface SequenceDurationEstimateSnapshot {
   estimate: StoryDurationEstimate;
 }
 
-const ESTIMATE_RULE_VERSION = 'story-pacing-event-progression-v4';
+const ESTIMATE_RULE_VERSION = 'story-pacing-battle-staging-v5';
 const OPTIONAL_PACING_FIELDS = [
   'directorCategory',
   'directorStyle',
@@ -35,7 +35,7 @@ export const sequenceEstimateSourceFingerprint = (
   pacing: StoryPacingContext,
   segmentDurationSec?: number,
 ): string => JSON.stringify([
-  segmentDurationSec === undefined ? ESTIMATE_RULE_VERSION : 'story-pacing-event-progression-full-segments-v4',
+  segmentDurationSec === undefined ? ESTIMATE_RULE_VERSION : 'story-pacing-battle-staging-full-segments-v5',
   title.trim() || '未命名剧情',
   story,
   pacing.pace,

@@ -95,9 +95,14 @@ export const buildStoryboardImagePromptWithReferences = (
     '',
     REFERENCE_METADATA_START,
     REFERENCE_METADATA_HEADING,
-    ...assetsInActualUploadOrder.map((asset, index) => `${index + 1}. ${JSON.stringify(asset.name)} — ${storyboardImageReferenceRole(asset, context)}`),
-    '人物参考只保持对应身份、外貌和服装设计；本镜当前衣着状态、姿态、身体朝向、视线对象、世界位置、真实距离、机位、景别和裁切以以上画面描述为准。不要复制参考图中朝向观众的头部、正脸展示、临时持物、动作或背景，也不把参考图的合照间距当成本镜间距；允许侧脸、背面和局部特写，未入画的脸与身体不必补全。',
-    '场景和道具参考只保持相关外观，不带入历史动作与人物站位，不覆盖本镜已确认的距离端点、地标内外关系、可通行路径及动作起始所需空间。参考图中的门、柱列和透视只提供当前职责下的外观依据，没有可靠比例尺不推定精确米数；不得为贴近参考构图将室内远处人物搬到门口。上传顺序不代表人物左右站位；原视频 Subject/Picture 编号不是本次图片编号。',
+    ...assetsInActualUploadOrder.map((asset, index) => {
+      const characters = storyboardReferenceCharacters(asset, context);
+      const mapping = characters.length
+        ? `人物 ${characters.map((character) => JSON.stringify(character.name)).join('、')} — 身份、外貌与服装设计参考`
+        : `${JSON.stringify(asset.name)} — ${storyboardImageReferenceRole(asset, context)}`;
+      return `${index + 1}. ${mapping}`;
+    }),
+    '参考仅用于上述用途；动作、站位与构图以正文为准。',
     REFERENCE_METADATA_END,
   ].join('\n');
 };

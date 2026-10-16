@@ -46,6 +46,7 @@ import {
 } from '../videoTailReference';
 import { prepareVideoTailCharacterDraft } from '../videoTailCharacters';
 import { isVideoH3ReferenceInfo, prepareVideoH3ReferenceDraft, videoH3ReferenceCharacterIds, videoReferenceCharacterBindingWarning, videoReferenceCharacterOwners, type VideoH3CharacterReferenceState } from '../videoH3ReferenceBinding';
+import { videoH3MediaModeContract, videoH3MediaModeIssue } from '../videoH3MediaMode';
 import { offsetVideoReferenceSlotRoles, videoReferenceSlotLabels, videoReferenceUsage } from '../videoReferenceUsage';
 import { addVideoReference, removeVideoReference, videoMiddleFrameOrdinal, videoReferenceSelection, videoReferenceSlotIndex, videoReferenceSlotSpan, type VideoReferenceSelection } from '../videoReferenceSlots';
 import { videoSegmentCharacterHints, type VideoSegmentCharacterHintResult } from '../videoSegmentCharacters';
@@ -73,6 +74,7 @@ export interface VideoDirectorViewProps {
   onVoicePresetsChange?: (presets: ProjectVoicePresets) => void;
   onImportAudioFiles?: (files: File[]) => Promise<void>;
   onRepairIdentityBindings?: (storyboardId: string, language: 'zh' | 'en', characterIds?: string[]) => Promise<void>;
+  onRefreshH3References?: (draft: VideoGenerationDraft) => Promise<VideoGenerationDraft>;
 }
 
 function RunningHubAutoPromptNotice({ api }: { api?: AppSettings['videoTaskApi'] | Omit<AppSettings['videoTaskApi'], 'apiKey'> }) {
@@ -136,6 +138,41 @@ function VideoH3ReferenceNotices({ project, draft, warnings = [], onRepair, onRe
       {information.length > 0 && <details className="vd-h3-reference-info"><summary>RunningHub 图片槽映射说明</summary>{information.map((message) => <p key={message}>{message}</p>)}</details>}
       {repairError && <p className="vd-error" role="alert">{repairError}</p>}
     </div>
+  </div>;
+}
+
+function VideoH3MediaModeNotice({ draft, onRefresh, onUpdated, onBusy, disabled = false }: {
+  draft: VideoGenerationDraft;
+  onRefresh?: VideoDirectorViewProps['onRefreshH3References'];
+  onUpdated: (draft: VideoGenerationDraft) => void;
+  onBusy: (busy: boolean) => void;
+  disabled?: boolean;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const identity = JSON.stringify([draft.prompt, draft.references, draft.audioReferences, draft.parameters, draft.source]);
+  const latest = useRef(identity); latest.current = identity;
+  const inFlight = useRef(false);
+  const mounted = useRef(true);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  const issue = draft.h3MediaMode && videoH3MediaModeIssue(draft.h3MediaMode);
+  if (!issue || draft.reuseTaskId) return null;
+  const refresh = async () => {
+    if (!onRefresh || inFlight.current) return;
+    inFlight.current = true; setBusy(true); setError(''); onBusy(true);
+    const expected = identity;
+    try {
+      const updated = await onRefresh(structuredClone(draft));
+      if (!mounted.current || latest.current !== expected) throw new Error('本次选图或提示词已变化，更新结果未应用。');
+      onUpdated(updated);
+    } catch (cause) { if (mounted.current) setError(formatUserFacingError(cause)); }
+    finally { inFlight.current = false; if (mounted.current) setBusy(false); onBusy(false); }
+  };
+  return <div className="vd-notice" role="status" aria-label="H3参考模式">
+    <p>{issue}</p>
+    <p className="field-hint">保留剧情和镜头时间，只更新本次图片用途。普通参考槽中的开场、结束图片用于构图。</p>
+    {onRefresh && <button type="button" className="btn small" disabled={disabled || busy} onClick={() => { void refresh(); }}>{busy ? '正在更新本次参考…' : '更新本次参考'}</button>}
+    {error && <p className="vd-error" role="alert">{error}</p>}
   </div>;
 }
 
@@ -753,7 +790,7 @@ function useOneClickVideoTail(input: {
   return { busy, select, cancel: stop };
 }
 
-function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, settings, controller, tailFrameTools, initialDraft, initialParameterText, retryTaskIds, onOpenSettings, onOpenJobs, onOpenPrompt, onSubmittingChange, onRepairIdentityBindings, onImportAudio, onVideoApiParametersChange }: {
+function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, settings, controller, tailFrameTools, initialDraft, initialParameterText, retryTaskIds, onOpenSettings, onOpenJobs, onOpenPrompt, onSubmittingChange, onRepairIdentityBindings, onRefreshH3References, onImportAudio, onVideoApiParametersChange }: {
   project: Project;
   chapterId?: string;
   savedBatch?: VideoDirectorBatchDraft;
@@ -769,6 +806,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
   onOpenPrompt?: VideoDirectorViewProps['onOpenPrompt'];
   onSubmittingChange: (submitting: boolean) => void;
   onRepairIdentityBindings?: VideoDirectorViewProps['onRepairIdentityBindings'];
+  onRefreshH3References?: VideoDirectorViewProps['onRefreshH3References'];
   onImportAudio?: () => void;
   onVideoApiParametersChange?: VideoApiParameterReaderProps['onChange'];
 }) {
@@ -808,6 +846,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
   const [reviewLegacyDraft, setReviewLegacyDraft] = useState(Boolean(hasPreparedVideoBatchDraft(initialBatch) && !initialBatch?.promptFormat));
   const [referenceOverrides, setReferenceOverrides] = useState<Record<string, VideoImageReference[]>>(initialBatch?.referenceOverrides || {});
   const [audioOverrides, setAudioOverrides] = useState<Record<string, VideoAudioSelectionOverride>>(initialBatch?.audioOverrides || {});
+  const [h3ReferenceUpdates, setH3ReferenceUpdates] = useState<Record<string, VideoGenerationDraft>>(initialBatch?.h3ReferenceUpdates || {});
   const [referenceRoleOverrides, setReferenceRoleOverrides] = useState<Record<string, ReferenceRole[]>>(initialBatch?.referenceRoleOverrides || {});
   const [automaticTails, setAutomaticTails] = useState<Record<string, AutomaticVideoTailConfiguration>>(initialBatch?.automaticTails || {});
   // Derive the composite draft from the untouched original. Disabling the mode
@@ -833,10 +872,10 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
     batchDraftChangeRef.current({ planId, backend, workflowId, apiProfileId, runningHubWorkflowId, parameterText,
       parameterDrafts: [...parameterDrafts.current], selectedKeys: [...selectedKeys], languages,
       promptFormat: reviewLegacyDraft ? undefined : promptFormat, promptFormats: reviewLegacyDraft ? undefined : promptFormats,
-      referenceOverrides, referenceRoleOverrides, audioOverrides, automaticTails, tailCharacterModes,
+      referenceOverrides, referenceRoleOverrides, audioOverrides, h3ReferenceUpdates, automaticTails, tailCharacterModes,
       previewSegmentId, previewPane, settingsCollapsed, query });
   }, [planId, backend, workflowId, apiProfileId, runningHubWorkflowId, parameterText, selectedKeys, languages, promptFormat, promptFormats,
-    referenceOverrides, referenceRoleOverrides, audioOverrides, automaticTails, tailCharacterModes, previewSegmentId, previewPane, settingsCollapsed, query, reviewLegacyDraft]);
+    referenceOverrides, referenceRoleOverrides, audioOverrides, h3ReferenceUpdates, automaticTails, tailCharacterModes, previewSegmentId, previewPane, settingsCollapsed, query, reviewLegacyDraft]);
   const submittingRef = useRef(false);
   const mountedRef = useRef(true);
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
@@ -1035,6 +1074,16 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
         draft = automatic ? { ...bound, references: draft.references } : bound;
         const audioApi = usageContextForDraft(draft).api;
         draft = draft.reuseTaskId ? renderVideoAudioDraft(project, draft, audioApi) : prepareVideoAudioDraft(project, draft, audioApi);
+        const updated = h3ReferenceUpdates[candidate.key];
+        const actualModeDraft = automatic ? { ...draft, references: bindingInput.references } : draft;
+        const mediaIdentity = videoH3MediaModeContract(actualModeDraft, usageContextForDraft(draft)).inputIdentity;
+        const sourcePrompt = candidate.draft.h3ReferenceBinding?.basePrompt || candidate.draft.prompt;
+        if (updated?.h3MediaModeUpdate?.inputIdentity === mediaIdentity && updated.h3MediaModeUpdate.sourcePrompt === sourcePrompt) {
+          draft = { ...draft, prompt: updated.prompt, h3ReferenceBinding: updated.h3ReferenceBinding,
+            h3MediaMode: updated.h3MediaMode, h3MediaModeUpdate: updated.h3MediaModeUpdate,
+            h3ReferenceWarnings: updated.h3ReferenceWarnings, audioReferenceBinding: updated.audioReferenceBinding };
+          draft = prepareVideoAudioDraft(project, draft, audioApi);
+        }
         const referenceFingerprint = videoBatchReferenceFingerprint(draft, project.assets);
         if (!automatic && !mode) {
           const requestFingerprint = videoBatchRequestFingerprint(draft, project.assets,
@@ -1051,7 +1100,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
         };
       };
       return { ...row, zh: decorate(row.zh), en: decorate(row.en) };
-    }), [baseRows, audioOverrides, automaticTails, tailCharacterModes, characterDrafts, project, referenceUsageContext, retryConnection, settings]);
+    }), [baseRows, audioOverrides, h3ReferenceUpdates, automaticTails, tailCharacterModes, characterDrafts, project, referenceUsageContext, retryConnection, settings]);
   const referencePreviews = useMemo(() => videoPromptReferencePreviews(project, chapterId), [project, chapterId]);
   const rowReferencePreview = (row: VideoBatchRow, language: 'zh' | 'en') => (reviewLegacyDraft || (promptFormats[row.segmentId] || promptFormat) === 'h3')
     ? referencePreviews.find((entry) => entry.storyboardId === row.storyboardId && entry.language === language) : undefined;
@@ -1064,7 +1113,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
       setPromptFormats((current) => ({ ...current, [segmentId]: format }));
       setReferenceOverrides((current) => { const next = { ...current }; delete next[segmentId]; return next; });
       setReferenceRoleOverrides((current) => { const next = { ...current }; delete next[segmentId]; return next; });
-    } else { setPromptFormat(format); setPromptFormats({}); setReferenceOverrides({}); setReferenceRoleOverrides({}); }
+    } else { setPromptFormat(format); setPromptFormats({}); setH3ReferenceUpdates({}); setReferenceOverrides({}); setReferenceRoleOverrides({}); }
     setAutomaticTails({}); setTailCharacterModes({});
     setNotice(`已选择${videoPromptFormatLabel(format)}稿件，请核对正文、重新选择生成段与参考图；尚未提交视频。`);
   };
@@ -1079,6 +1128,9 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
   const selectedSignature = `${regenerateSucceeded ? 'regenerate-succeeded' : 'skip-succeeded'}|${connectionScope}|${selected.map((candidate) => `${candidate.key}:${candidate.requestFingerprint}`).join('|')}`;
   const previewRow = rows.find((row) => row.segmentId === previewSegmentId) || rows[0];
   const previewChoice = previewRow && rowChoice(previewRow);
+  const previewMediaModeDraft = previewChoice && automaticTails[previewChoice.segmentId]
+    ? { ...previewChoice.draft, references: videoBatchTailReferences(previewChoice.draft.references,
+      automaticTails[previewChoice.segmentId].placement, '__future_tail_binding__') } : previewChoice?.draft;
   const savedReferencePreview = previewRow && !previewChoice ? rowReferencePreview(previewRow, rowLanguage(previewRow)) : undefined;
   const imageRow = baseRows.find((row) => row.segmentId === imageSegmentId);
   const imageChoice = imageRow && rowChoice(imageRow);
@@ -1146,7 +1198,9 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
     ? `第 ${selectedReferencePreview.segmentIndex || '?'} 段：${selectedReferencePreview.referenceNotice}`
     : '部分已选稿件已变化或不存在，请重新选择。' : pending.map((candidate) => {
     const frozen = candidate.draft.reuseTaskId ? findReusableVideoTask(project, candidate.draft.reuseTaskId)?.videoJob?.snapshot : undefined;
-    const issue = referenceIssue(candidate) || validateVideoAudioReferences(project, candidate.draft, usageContextForDraft(candidate.draft).api, frozen?.audios)[0]; return issue ? `第 ${candidate.segmentIndex} 段：${issue}` : '';
+    const modeIssue = !candidate.draft.reuseTaskId && candidate.draft.source?.promptFormat === 'h3' && candidate.draft.h3MediaMode
+      ? videoH3MediaModeIssue(candidate.draft.h3MediaMode) : undefined;
+    const issue = referenceIssue(candidate) || modeIssue || validateVideoAudioReferences(project, candidate.draft, usageContextForDraft(candidate.draft).api, frozen?.audios)[0]; return issue ? `第 ${candidate.segmentIndex} 段：${issue}` : '';
   }).find(Boolean) || '');
   const selectLanguage = (row: VideoBatchRow, language: 'zh' | 'en') => {
     const candidate = row[language];
@@ -1167,7 +1221,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
     setNotice(`已选择当前计划的 ${keys.size} 段${language === 'zh' ? '中文' : '英文描述'}；${rows.length - keys.size} 段尚无可用稿件。`);
   };
   const changePlan = (nextId: string, noticeText = '切换计划后已清空本轮选段、参考图、音频与自动衔接；原分镜和提示词未改动。') => {
-    setPlanId(nextId); setSelectedKeys(new Set()); setLanguages({}); setPromptFormats({}); setReferenceOverrides({}); setReferenceRoleOverrides({}); setAudioOverrides({}); setAutomaticTails({}); setTailCharacterModes({}); setPreviewSegmentId(''); setImageSegmentId(''); setConfirmation(undefined); setFeeConfirmed(false); setRegenerateSucceeded(false); setReviewFrozenFormats(false); setReviewLegacyDraft(false); setQuery(''); setError(''); setNotice(noticeText);
+    setPlanId(nextId); setSelectedKeys(new Set()); setLanguages({}); setPromptFormats({}); setH3ReferenceUpdates({}); setReferenceOverrides({}); setReferenceRoleOverrides({}); setAudioOverrides({}); setAutomaticTails({}); setTailCharacterModes({}); setPreviewSegmentId(''); setImageSegmentId(''); setConfirmation(undefined); setFeeConfirmed(false); setRegenerateSucceeded(false); setReviewFrozenFormats(false); setReviewLegacyDraft(false); setQuery(''); setError(''); setNotice(noticeText);
   };
   useEffect(() => {
     if (plans.some((item) => item.id === planId)) return;
@@ -1500,6 +1554,9 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
           {previewChoice.draft.audioReferences?.map((reference) => { const frozen = previewChoice.draft.reuseTaskId ? findReusableVideoTask(project, previewChoice.draft.reuseTaskId)?.videoJob?.snapshot.audios?.find((item) => item.slotIndex === reference.slotIndex) : undefined; const asset = project.assets.find((item) => item.id === reference.assetId); return <div key={`audio-${reference.slotIndex}`} className="vd-batch-audio-preview"><span>音频 {reference.slotIndex + 1} · {frozen?.name || asset?.name || '音频缺失'} → {frozen?.targetLabel || videoAudioTargetLabel(project, reference.target)}<small>{audioRetainModes.find((mode) => mode.id === reference.retainMode)?.label}{reference.notes ? ` · ${reference.notes}` : ''}</small></span></div>; })}
           {!previewChoice.draft.references.length && !automaticTails[previewChoice.segmentId] && <p className="vd-empty">本段未带入参考图。</p>}</div> : savedReferencePreview ? <SavedReferencePromptPreview key={savedReferencePreview.id} preview={savedReferencePreview} onOpenPrompt={onOpenPrompt} /> : <div className="vd-empty">本段还没有当前语言的有效提示词。</div>}</div>
         {previewChoice && <VideoH3ReferenceNotices key={previewChoice.key} project={project} draft={previewChoice.draft} warnings={previewChoice.draft.h3ReferenceWarnings} onRepair={onRepairIdentityBindings} onRepairingChange={setIdentityRepairing} disabled={interactionLocked} />}
+        {previewChoice && previewMediaModeDraft && <VideoH3MediaModeNotice key={`mode:${previewChoice.key}`} draft={previewMediaModeDraft}
+          onRefresh={onRefreshH3References} onBusy={setIdentityRepairing} disabled={interactionLocked}
+          onUpdated={(updated) => { setH3ReferenceUpdates((current) => ({ ...current, [previewChoice.key]: updated })); setConfirmation(undefined); setNotice('本段本次参考已更新，源分镜原稿保留，可直接生成视频。'); }} />}
         <div className="vd-batch-preview-footer"><button className="btn small" disabled={!previewChoice || !selected.length || interactionLocked} onClick={() => { if (!previewChoice) return; const copied = referencesForCopy(previewChoice); clearAutomaticTails(selected.map((candidate) => candidate.segmentId)); setReferenceOverrides((current) => { const next = { ...current }; selected.forEach((candidate) => { next[candidate.segmentId] = cloneVideoReferences(copied); }); return next; }); setReferenceRoleOverrides((current) => { const next = { ...current }; selected.forEach((candidate) => { next[candidate.segmentId] = videoReferenceSelection(copied, previewChoice.draft.referenceSlotRoles).referenceSlotRoles!; }); return next; }); setNotice(`已将第 ${previewRow.segmentIndex} 段的静态选图应用到全部 ${selected.length} 个已选段；受影响段的自动衔接已清除，需要时请重新设置。`); }}>本段图片应用到全部已选</button><span>仅改变本批次，不改原分镜；不复制待生成的尾帧依赖。</span></div>
       </aside>
     </div>
@@ -1534,7 +1591,7 @@ export function VideoDirectorView(props: VideoDirectorViewProps) {
   return <ChapterVideoDirectorView key={videoDirectorChapterKey(props.project.id, chapterId)} {...props} chapterId={chapterId} />;
 }
 
-function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterDraftChange, settings, controller, tailFrameTools, launchRequest, onOpenSettings, onOpenPrompt, onOpenVideoAssets, onOpenJobs, onChangeExecution, onVideoApiParametersChange, onRepairIdentityBindings, onVoicePresetsChange, onImportAudioFiles }: VideoDirectorViewProps) {
+function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterDraftChange, settings, controller, tailFrameTools, launchRequest, onOpenSettings, onOpenPrompt, onOpenVideoAssets, onOpenJobs, onChangeExecution, onVideoApiParametersChange, onRepairIdentityBindings, onRefreshH3References, onVoicePresetsChange, onImportAudioFiles }: VideoDirectorViewProps) {
   const draftScope = videoDirectorChapterKey(project.id, chapterId);
   const initial = readVideoDirectorChapterDraft(chapterDraft || (chapterId ? chapterWorkspace(project, chapterId)?.videoDirector : undefined)) || draftCache.get(draftScope);
   const [generationMode, setGenerationMode] = useState<'single' | 'batch'>(initial?.generationMode || 'single');
@@ -1791,7 +1848,7 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
     {onChangeExecution && <VideoExecutionControls settings={settings} onChange={onChangeExecution} />}
     {onImportAudioFiles && <input hidden ref={audioFileInput} type="file" accept=".mp3,.wav,.flac" multiple aria-label="导入参考音频文件" onChange={(event) => { const files = Array.from(event.target.files || []); event.target.value = ''; if (files.length) void onImportAudioFiles(files).then(() => setNotice('参考音频已加入资产库，请在声音预设或本段音频槽中选择。'), (cause) => setError(formatUserFacingError(cause))); }} />}
     {onVoicePresetsChange && <ProjectVoicePresetEditor project={project} disabled={submitting || batchSubmitting} onChange={onVoicePresetsChange} onImportAudio={importAudio} />}
-    {generationMode === 'batch' && <div id="vd-batch-generation-panel" role="tabpanel" className="vd-batch-host"><VideoBatchPanel key={`${draftScope}:${launchRequest?.batchTaskIds?.length ? launchRequest.id : 'standard-batch'}`} project={project} chapterId={chapterId} savedBatch={batchDraft} onBatchDraftChange={setBatchDraft} settings={settings} controller={controller} tailFrameTools={tailFrameTools} initialDraft={draft} initialParameterText={parameterText} retryTaskIds={launchRequest?.batchTaskIds} onOpenSettings={onOpenSettings} onOpenJobs={onOpenJobs} onOpenPrompt={onOpenPrompt} onSubmittingChange={setBatchSubmitting} onRepairIdentityBindings={onRepairIdentityBindings} onImportAudio={importAudio} onVideoApiParametersChange={onVideoApiParametersChange} /></div>}
+    {generationMode === 'batch' && <div id="vd-batch-generation-panel" role="tabpanel" className="vd-batch-host"><VideoBatchPanel key={`${draftScope}:${launchRequest?.batchTaskIds?.length ? launchRequest.id : 'standard-batch'}`} project={project} chapterId={chapterId} savedBatch={batchDraft} onBatchDraftChange={setBatchDraft} settings={settings} controller={controller} tailFrameTools={tailFrameTools} initialDraft={draft} initialParameterText={parameterText} retryTaskIds={launchRequest?.batchTaskIds} onOpenSettings={onOpenSettings} onOpenJobs={onOpenJobs} onOpenPrompt={onOpenPrompt} onSubmittingChange={setBatchSubmitting} onRepairIdentityBindings={onRepairIdentityBindings} onRefreshH3References={onRefreshH3References} onImportAudio={importAudio} onVideoApiParametersChange={onVideoApiParametersChange} /></div>}
     <div id="vd-single-generation-panel" role="tabpanel" className="vd-layout" hidden={generationMode !== 'single'}><div className="vd-stack">
       <section className="card vd-prompt-card"><div className="card-title"><h2>1. 本次视频提示词</h2><button className="btn small" type="button" onClick={() => { const format = defaultVideoPromptFormat(project); setPromptFormat(format); setPicker('prompt'); setPickedPromptId(draft.source?.storyboardId && draft.source.promptFormat === format ? videoPromptChoiceKey(draft.source.storyboardId, draft.source.language || 'zh', format) : ''); }}>从提示词导演台选择</button></div>
         <label className="field"><span>视频名称</span><input value={draft.name} onChange={(event) => patchDraft({ name: event.target.value })} placeholder="为本次生成的视频命名" /></label>
@@ -1800,6 +1857,9 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
         <label className="field"><span>本次生成使用的完整提示词</span><textarea aria-label="本次生成使用的完整提示词" className="vd-prompt-editor" value={delivery.draft.prompt} onChange={(event) => patchDraft({ prompt: event.target.value, audioReferenceBinding: delivery.draft.audioReferenceBinding, reuseTaskId: undefined, h3ReferenceBinding: undefined, seedanceReferenceBinding: undefined })} placeholder="选择已有中文 / 英文描述，或在这里填写完整提示词。不会重新扩写、翻译对白或裁剪字数。" /></label>
         <button className="btn small" type="button" onClick={() => { void navigator.clipboard.writeText(delivery.draft.prompt).then(() => setNotice('已复制本次实际提交提示词。'), () => setError('复制失败，请选中提示词手动复制。')); }}>复制本次提示词</button>
         <VideoH3ReferenceNotices key={`${project.id}:${draft.source?.storyboardId}:${draft.source?.language}`} project={project} draft={delivery.draft} warnings={delivery.warnings} onRepair={repairSingleIdentityBindings} onRepairingChange={setIdentityRepairing} disabled={submitting || batchSubmitting || identityRepairing} />
+        <VideoH3MediaModeNotice draft={delivery.draft} onRefresh={onRefreshH3References} onBusy={setIdentityRepairing}
+          disabled={submitting || batchSubmitting || identityRepairing}
+          onUpdated={(updated) => { setDraft(updated); setNotice('本次参考已更新，剧情和镜头时间保留，可直接生成视频。'); }} />
         <p className="field-hint">长剧情一次选择一个视频段；选择英文仅带入已有英文描述，不自动把中文对白翻译为英文。</p>
       </section>
       <section className="card vd-reference-card"><div className="card-title"><h2>2. 本次参考图片 · {draft.references.length} 张</h2><button type="button" className="btn small vd-tail-entry" aria-label="单段用上段尾帧" disabled={submitting || singleTail.busy || tailFrameTools?.busy || !draft.source?.sequencePlanId || !draft.source?.segmentId || draft.source?.segmentIndex === 1} onClick={useSinglePreviousTail}>{singleTail.busy ? '末帧提取中…' : '用上段尾帧'}</button><button className="btn small" type="button" onClick={() => { setPickedSelection(useCurrentVideoDraftImages(draft, draft.references.map((reference) => reference.assetId), images)); setPicker('images'); }}>从图片资产库选择</button></div>
@@ -1828,7 +1888,7 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
         <VideoOutputParameters scope="single" source={sourceKind} parameterText={parameterText} availableKeys={parameterKeys} {...videoOutputParameterPresentation(presentationApi, parsedParameters.value)} requiresMapping={sourceKind !== 'api' || activeApi?.provider === 'runninghub'} disabled={submitting || batchSubmitting} onChange={updateParameter} onOpenSettings={onOpenSettings} />
         <details className="vd-details"><summary>可选参数覆盖（不填保持原值）</summary><div className="vd-stack"><p className="field-hint">高级参数：默认不覆盖种子、采样、尺寸和音频连接。只填写你要改变的值；留空恢复工作流 / 接口默认值。</p><div className="vd-parameter-grid">{parameterKeys.filter((key) => !isVideoOutputParameterKey(key)).map((key) => <label className="field" key={key}><span>{{ seed: '种子', steps: '采样步数', cfg: 'CFG', fps: '帧率' }[key] || key}</span><input value={videoParameterInputText(parsedParameters.value[key])} disabled={Boolean(parsedParameters.issue)} placeholder="保留原值" onChange={(event) => updateParameter(key, event.target.value)} /></label>)}</div><label className="field"><span>额外参数 JSON（仅显式覆盖字段）</span><textarea aria-label="本次额外参数 JSON" className="vd-code" rows={5} value={parameterText} onChange={(event) => setParameterText(event.target.value)} onBlur={() => { const parsed = readVideoParameterText(parameterText); if (!parsed.issue) patchDraft({ parameters: parsed.value }); }} /></label><button type="button" className="btn small" onClick={() => { patchDraft({ parameters: {} }); setParameterText('{}'); }}>清除本次参数覆盖</button></div></details>
         <details className="vd-tracking-note"><summary>任务追踪说明</summary><p>不设置等待超时。界面只显示后端提供的真实进度和已耗时，切换页面仍继续追踪。</p></details>
-        <button className="btn primary vd-generate-button" type="button" disabled={submitting || batchSubmitting || identityRepairing || singleTail.busy || tailFrameTools?.busy || sourceStale || Boolean(draftReferencePreview) || !draft.prompt.trim() || Boolean(slotMismatch || audioIssue)} onClick={() => { void generate(); }}>{submitting ? '正在建立任务…' : '生成视频'}</button><p className="field-hint">点击才会提交生成，API 可能产生费用；不会自动重复提交结果不明的任务。</p>
+        <button className="btn primary vd-generate-button" type="button" disabled={submitting || batchSubmitting || identityRepairing || singleTail.busy || tailFrameTools?.busy || sourceStale || Boolean(draftReferencePreview) || !draft.prompt.trim() || Boolean(slotMismatch || audioIssue || delivery.issue)} onClick={() => { void generate(); }}>{submitting ? '正在建立任务…' : '生成视频'}</button><p className="field-hint">点击才会提交生成，API 可能产生费用；不会自动重复提交结果不明的任务。</p>
         {audioIssue && <p className="vd-error" role="alert">{audioIssue}</p>}
         {error && <p className="vd-error" role="alert">{formatUserFacingError(error)}</p>}{notice && <p className="vd-success" role="status">{notice}</p>}
       </section>

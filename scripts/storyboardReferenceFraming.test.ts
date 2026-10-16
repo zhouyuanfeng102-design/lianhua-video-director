@@ -56,10 +56,10 @@ test('all boundary and ordinary frames exclude same-shot automatic outputs; expl
 
 test('tail target uses terminal camera crop while start target uses entry crop, preserving the original H3', () => {
   const [first, tail] = buildStoryboardImageRequests(board, 'boundary-frames', context);
-  assert.match(first.conversionSource, /首帧取景：按第一镜起始时刻/u);
-  assert.match(tail.conversionSource, /尾帧取景：按最后一镜结束时刻/u);
-  assert.match(tail.conversionSource, /必须采用运镜终点/u);
-  assert.match(tail.conversionSource, /只呈现该局部，其他人物即使仍在场也可在画外/u);
+  assert.match(first.conversionSource, /第一镜开始边界的入口状态/u);
+  assert.match(tail.conversionSource, /最后一镜动作完成后的最终状态/u);
+  assert.doesNotMatch(tail.conversionSource, /尾帧取景：|取景高于身份展示/u,
+    'generic crop and gaze rules belong to the converter, while the source keeps the actual terminal camera');
   assert.ok(tail.conversionSource.includes(shot.action));
   assert.ok(tail.conversionSource.includes(shot.camera));
 });
@@ -78,9 +78,9 @@ test('boundary framing keeps entry distance and late reveal while reference appe
   const locationImage = image('narrow-door', { role: 'scene', prompt: '旧图：两人紧贴站在门边' });
   const submitted = buildStoryboardImagePromptWithReferences(body, [portrait, locationImage], context);
   assert.ok(submitted.startsWith(`${body}\n\n`), 'reference metadata preserves the authored endpoint distance and visibility byte-for-byte');
-  assert.match(submitted, /不把参考图的合照间距当成本镜间距/u);
-  assert.match(submitted, /不覆盖本镜已确认的距离端点、地标内外关系、可通行路径及动作起始所需空间/u);
-  assert.match(submitted, /没有可靠比例尺不推定精确米数/u);
+  assert.match(submitted, /参考仅用于上述用途；动作、站位与构图以正文为准/u);
+  assert.doesNotMatch(submitted, /合照间距|没有可靠比例尺|室内远处人物搬到门口/u,
+    'submission adds only attachment mapping and a short boundary to the authored scene');
   assert.doesNotMatch(submitted, /旧图：两人紧贴站在门边/u, 'reference appearance does not become a historical staging command');
 });
 
@@ -98,10 +98,10 @@ test('actual pixel order and prompt bindings remain aligned after primary-first 
   const body = '绝死绝命侧身面对右侧的马雷，自然侧脸看向马雷下盘。';
   const prompt = buildStoryboardImagePromptWithReferences(body, merged.referenceAssets, context);
   assert.ok(prompt.startsWith(body));
-  assert.match(prompt, /1\. "second" — 人物 "马雷"/u);
-  assert.match(prompt, /2\. "first" — 人物 "绝死绝命"/u);
+  assert.match(prompt, /1\. 人物 "马雷" — 身份、外貌与服装设计参考/u);
+  assert.match(prompt, /2\. 人物 "绝死绝命" — 身份、外貌与服装设计参考/u);
   assert.match(prompt, /3\. "unbound" — 普通画面参考/u);
-  assert.match(prompt, /允许侧脸、背面和局部特写/u);
+  assert.match(prompt, /动作、站位与构图以正文为准/u);
   assert.equal(buildStoryboardImagePromptWithReferences(body, [], context), body);
 });
 
@@ -120,7 +120,7 @@ test('direct image-to-image shares boundary framing and actual character mapping
   assert.equal(direct.length, 2);
   assert.deepEqual(direct[1].referenceAssetIds, [bound.id, oldShot.id, free.id]);
   assert.match(direct[1].directPrompt, /尾帧取景：按最后一镜结束时刻/u);
-  assert.match(direct[1].directPrompt, /1\. "portrait" — 人物 "马雷"/u);
+  assert.match(direct[1].directPrompt, /1\. 人物 "马雷" — 身份、外貌与服装设计参考/u);
   assert.match(direct[1].directPrompt, /3\. "unbound" — 普通画面参考/u);
   assert.doesNotMatch(direct[1].directPrompt, /历史构图：|旧图锚点：/u);
 });

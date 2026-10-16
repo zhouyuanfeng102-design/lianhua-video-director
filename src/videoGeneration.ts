@@ -97,8 +97,11 @@ const officialH3SubmissionIssue = (
   const binding = draft.h3ReferenceBinding;
   const audio = draft.audioReferenceBinding;
   const imagePrompt = audio && draft.prompt === audio.renderedPrompt ? audio.basePrompt : draft.prompt;
+  const mediaUpdate = draft.h3MediaModeUpdate;
+  const authoredSource = mediaUpdate && binding?.basePrompt === mediaUpdate.updatedPrompt
+    ? mediaUpdate.sourcePrompt : binding?.basePrompt;
   const officialBody = binding && binding.projectId === project?.id && imagePrompt === binding.renderedPrompt
-    && body.prompt === draft.prompt ? { ...body, prompt: binding.basePrompt } : body;
+    && body.prompt === draft.prompt ? { ...body, prompt: authoredSource } : body;
   return getOfficialH3SubmissionIssue(
     officialBody,
     board,
@@ -1508,6 +1511,8 @@ export class VideoGenerationEngine {
     // placement, but display/fingerprint the exact eventual submission text.
     draft.prompt = validationDraft.prompt;
     draft.h3ReferenceBinding = validationDraft.h3ReferenceBinding;
+    draft.h3MediaMode = validationDraft.h3MediaMode;
+    draft.h3MediaModeUpdate = validationDraft.h3MediaModeUpdate;
     draft.seedanceReferenceBinding = validationDraft.seedanceReferenceBinding;
     draft.h3ReferenceWarnings = validationDraft.h3ReferenceWarnings;
     draft.audioReferences = validationDraft.audioReferences;

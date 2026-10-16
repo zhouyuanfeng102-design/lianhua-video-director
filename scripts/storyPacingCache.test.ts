@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import ts from 'typescript';
 import {
   isSequencePlanningRequestStale,
+  invalidateSequenceSegmentsForMasterPrompt,
   resolveSequenceSegmentDuration,
   resolveWorkspaceDirectorLook,
 } from '../src/appEffects';
@@ -11,6 +12,7 @@ import { assertSequenceSegmentDurationContract, roundUpSequenceDurationToFullSeg
 import { normalizeGridDirectorInputMode } from '../src/gridDirectorWorkflow';
 import { activeDirectorWorkflow } from '../src/gridRetirement';
 import { isSemanticSequencePlan } from '../src/semanticSequencePlan';
+import { activeChapter } from '../src/chapters';
 import {
   createSequenceDurationEstimateSnapshot,
   readSequencePlanDurationEstimate,
@@ -306,6 +308,7 @@ const runAppCache = (patch: Record<string, unknown> = {}) => {
   const bindings: Record<string, unknown> = {
     storyInput: story, storyName: '练剑', storyPacing: pacing,
     state: { project: { sourceDocuments: [{ content: story }] } }, directorScene: undefined,
+    activeChapter,
     durationEstimate: saved, estimateConfirmed: true,
     sequenceEstimateSourceFingerprint,
     resolvedPlanningSegmentDuration: 15,
@@ -358,7 +361,9 @@ test('真实App同源估时和源文回退保持正确，不改固定秒数和�
 });
 
 test('真实App初始化和跨项目恢复仅恢复合法快照，旧计划不伪造已确认估时', () => {
-  const restore = callback('syncWorkspaceUiState'); assert.ok(ts.isBlock(restore.body));
+  assert.ok(callback('syncWorkspaceUiState').getText(parsedApp).includes('restoreChapterUiState(loadedState)'),
+    'workspace restoration must still delegate to the production chapter restore callback');
+  const restore = callback('restoreChapterUiState'); assert.ok(ts.isBlock(restore.body));
   const restoreStatements = restore.body.statements;
   const restoreWrites = restoreStatements.filter((node) => ts.isExpressionStatement(node)
     && ts.isCallExpression(node.expression)
@@ -374,7 +379,7 @@ test('真实App初始化和跨项目恢复仅恢复合法快照，旧计划不�
     assert.deepEqual(initial, { durationEstimate: expected, estimateConfirmed: Boolean(expected) });
     const writes: Record<string, unknown> = {};
     evaluate([declaration('loadedPlan', restoreStatements), declaration('loadedEstimate', restoreStatements), ...restoreWrites], {
-      loadedState: { project: { sequencePlans: plan ? [plan] : [] } }, readSequencePlanDurationEstimate,
+      loadedState: { project: { sequencePlans: plan ? [plan] : [] } }, savedControls: undefined, readSequencePlanDurationEstimate,
       setDurationEstimate: (value: unknown) => { writes.estimate = value; },
       setEstimateConfirmed: (value: unknown) => { writes.confirmed = value; },
       setTotalDuration: (value: unknown) => { writes.total = value; },
@@ -459,12 +464,13 @@ const generationHarness = (options: {
     busy: [] as unknown[], generationIssues: [] as string[],
     durationIdentityChanges: 0, durationIdentityAborts: 0,
   };
-  const state: any = { project: { id: 'project-a', sequencePlans: [], storyboards: [], scenes: [], characters: [], sourceDocuments: [{ content: story }], directorSettingsConfirmedFingerprint: 'director-original' }, settings: { textApi: { enabled: options.configured !== false, baseUrl: 'https://pacing.invalid', model: 'mock-model' } } };
+  const state: any = { project: { id: 'project-a', activeChapterId: 'chapter-a', sequencePlans: [], storyboards: [], scenes: [], characters: [], sourceDocuments: [{ id: 'chapter-a', content: story }], directorSettingsConfirmedFingerprint: 'director-original' }, settings: { textApi: { enabled: options.configured !== false, baseUrl: 'https://pacing.invalid', model: 'mock-model' } } };
   const stateRef = { current: state }; const identity = { current: 'request-original' }; const epoch = { current: 1 };
   const abort = { current: null as AbortController | null }; const operation = { current: 0 };
   const requestedIdentity = { current: '' }; const activePlan = { current: '' };
   const bindings: Record<string, unknown> = {
     state, stateRef, storyInput: story, storyName: '练剑', directorScene: undefined,
+    activeChapter, currentChapterId: activeChapter(state.project)?.id || '', generationPromptFormat: 'h3',
     directorSettingsConfirmed: true, directorSettingsConfirmationIssue: '', liveDirectorSettingsFingerprint: 'director-original',
     setSequenceSettingsOpen: () => {},
     resolveSourceIntegrityForAction: () => options.integrity || Promise.resolve(story),
@@ -532,7 +538,7 @@ const generationHarness = (options: {
       return { id: 'created-master', finalPrompt: 'mock full prompt', shots: [],
         durationSec: options.plannedEstimate?.recommendedSec ?? input.durationSec };
     },
-    parseMasterTimelinePrompt: () => [], validateSequencePlan: () => [],
+    parseMasterTimelinePrompt: () => [], validateSequencePlan: () => [], invalidateSequenceSegmentsForMasterPrompt,
     upsertSequencePlan: (plans: VideoSequencePlan[], plan: VideoSequencePlan) => [plan, ...plans],
     setState: (update: (value: unknown) => unknown) => { stateRef.current = update(stateRef.current); },
   };
@@ -864,10 +870,11 @@ test('真实切换计划恢复原所选15秒，查看旧6秒片段只更改单�
   const presetStatement = declaration('durationPresetForSeconds', parsedApp.statements);
   const setters = Object.fromEntries(['setCustomDuration', 'setDurationPreset', 'setPlanningSegmentDurationPreset',
     'setPlanningCustomSegmentDuration', 'setDurationMode', 'setTotalDuration', 'setTotalDurationTouched', 'setSegmentationMode',
-    'setDurationEstimate', 'setEstimateConfirmed'].map((name) => [name, (value: unknown) => { writes[name] = value; }]));
-  const { view, restore } = evaluate([presetStatement, declaration('setDirectorDurationForSegment'), declaration('restoreSequencePlanTiming')], {
+    'setDurationEstimate', 'setEstimateConfirmed', 'setGenerationPromptFormatState', 'setConfirmedSequencePlanFingerprint',
+    'setAcceptedSequencePlanMismatchFingerprint', 'setAcknowledgedCompressedPlanFingerprint'].map((name) => [name, (value: unknown) => { writes[name] = value; }]));
+  const { view, restore } = evaluate([presetStatement, declaration('setDirectorDurationForSegment'), declaration('restoreSequencePlanState')], {
     ...setters, resolveSequenceSegmentDuration, readSequencePlanDurationEstimate,
-  }, '({view: setDirectorDurationForSegment, restore: restoreSequencePlanTiming})');
+  }, '({view: setDirectorDurationForSegment, restore: restoreSequencePlanState})');
   const legacy = { ...fullSegmentFixture(), totalDurationSec: 80, requestedTotalDurationSec: 80,
     segments: [{ ...fixture().segments[0], durationSec: 6, globalEndSec: 6 }] };
   const frozen = JSON.stringify(legacy);
@@ -879,7 +886,7 @@ test('真实切换计划恢复原所选15秒，查看旧6秒片段只更改单�
   const activePlanIdRef = { current: 'another-plan' }; let restored = 0;
   const select = evaluate([declaration('chooseSequenceSegment')], {
     stateRef: { current: { project: { sequencePlans: [legacy] } } }, activePlanIdRef,
-    cancelSequenceGeneration: () => {}, restoreSequencePlanTiming: () => { restored += 1; },
+    cancelSequenceGeneration: () => {}, restoreSequencePlanState: () => { restored += 1; },
     isSemanticSequencePlan, restoreSequenceDirectorSettings: unexpectedMutation,
     setActivePlanId: () => {}, setActiveSegmentId: () => {}, setActiveStoryboardId: () => {},
     setDirectorDurationForSegment: view,
@@ -936,7 +943,7 @@ test('真实切换到语义计划恢复该计划保存的导演快照，同计�
   const select = evaluate([declaration('chooseSequenceSegment')], {
     stateRef: { current: state }, activePlanIdRef, isSemanticSequencePlan,
     cancelSequenceGeneration: () => {},
-    restoreSequencePlanTiming: (plan: VideoSequencePlan) => restoredTiming.push(plan.id),
+    restoreSequencePlanState: (plan: VideoSequencePlan) => restoredTiming.push(plan.id),
     restoreSequenceDirectorSettings: (savedFingerprint?: string) => {
       restoredFingerprints.push(savedFingerprint); restoreDirector(savedFingerprint);
     },
@@ -972,6 +979,7 @@ await asyncTest('真实旧80/15计划在任何本地调整或API之前只报告�
   const frozen = JSON.stringify(state); const notices: string[] = [];
   const bindings = {
     busy: false, sequenceBatchRunning: false, sequencePromptRefreshRef: { current: null }, sequenceBatchIdentityRef: { current: null },
+    generationPromptFormatRef: { current: 'h3' },
     storyboardBuildLeaseRef: { current: undefined }, workspaceEpochRef: { current: 1 },
     stateRef: { current: state }, activePlanIdRef: { current: plan.id }, activeSequencePlan: plan,
     activeSegmentId: plan.segments[0].id, activeSequenceSegment: plan.segments[0],

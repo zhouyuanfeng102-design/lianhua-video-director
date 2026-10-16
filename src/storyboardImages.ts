@@ -28,8 +28,7 @@ import {
 import { publicVideoContinuityLock } from './videoPrivateScope';
 import { readStoryboardImageH3Source } from './storyboardImageH3Source';
 export { readStoryboardImageH3Source } from './storyboardImageH3Source';
-import { DIRECTED_ACTION_RELATION_RULE, STORYBOARD_SPATIAL_FRAME_RULE } from './spatialContinuityRules';
-import { storyboardImageFramingInstruction, storyboardImageReferenceRole, storyboardReferenceCharacters } from './storyboardImageReferences';
+import { storyboardImageReferenceRole, storyboardReferenceCharacters } from './storyboardImageReferences';
 import { DEFAULT_FIRST_PERSON_SUBJECT } from './semanticEvents';
 import { buildStoryboardImageBaseName, createStoryboardImageNameAllocator } from './storyboardImageNames';
 import type { StoryboardImageFramePlan } from './storyboardImagePlan';
@@ -69,7 +68,7 @@ export interface StoryboardImageRequest extends StoryboardImageFrameMetadata {
   referenceAssetIds: string[];
   /** User-checked global or per-shot references that must take priority over inferred supplemental assets. */
   primaryReferenceAssetIds: string[];
-  /** Rules and project facts for the text converter; never send directly to an image model. */
+  /** Selected-frame and project facts for the text converter; never send directly to an image model. */
   conversionSource: string;
   width: number;
   height: number;
@@ -404,8 +403,6 @@ const sharedPromptLines = (
   storyboard: Storyboard,
   purpose?: StoryboardImagePurpose,
 ): string[] => [
-  '生成单张电影剧情静帧。严格依据当前剧情和当前镜头，不改写剧情，不随机添加人物、动作、道具、地点或事件。',
-  '剧情原文与全局锁用于理解世界观、人物身份、场景陈设和道具的前后状态；曾经出现、购买或持有的物件不是每张图都必须出现。按本张选定瞬间的持有、交接、放下、使用或消耗结果决定可见道具，不能把后续动作提前画进首帧。',
   line('剧情标题', storyboard.sourceStoryTitle || '当前视频剧情'),
   // A first frame is an entry boundary. Supplying the whole removal/contact
   // chain here lets an image model jump straight to the shot's final state.
@@ -1483,13 +1480,6 @@ export const buildStoryboardImageAssetVisualAnchor = (
   ].filter(Boolean).join('\n');
 };
 
-const finalRestrictions = [
-  '只表现上述剧情在该镜头中的一个明确可见瞬间，保持人物身份、外观、当前衣物状态、当前实际可见道具、空间方位和光线连续；默认衣橱只作身份基底，不能覆盖本镜当前衣物或裸露状态。长期装备按其稳定携带方式呈现，临时物件只在剧情当前状态需要时呈现。',
-  DIRECTED_ACTION_RELATION_RULE,
-  '物种形态与身体结构是不可改写的连续性事实：非类人主体必须保持资料指定的头部/感知结构、躯干、肢体与附肢数量、体表材质和运动方式；除剧情明确拟人化外，不得人类化或擅自改成另一种身体结构。',
-  '禁止拼贴、九宫格、多格漫画、前后对比图；禁止字幕、文字、Logo、水印、UI、边框和镜头编号。',
-].join('\n');
-
 const buildRequest = (
   storyboard: Storyboard,
   shot: VideoShot,
@@ -1507,9 +1497,8 @@ const buildRequest = (
   const imageVariant = imageVariantForStoryboardPurpose(purpose);
   const purposeLines = purpose === 'first-frame'
     ? [
-        '帧位要求：这是视频首帧，定格在第一镜开始边界的入口状态；若原稿从正在发生的动作开始，只取该起始瞬间，不另选稍后的动作阶段。先保留具名人物世界位置、距离端点和可通行间隔，再按起始机位确定可见集合；不得提前表现动作结果。',
+        '帧位要求：这是视频首帧，定格在第一镜开始边界的入口状态；首镜后续动作尚未发生。',
         `镜头位置：第 ${shot.index} 镜，共 ${total} 镜。`,
-        '首帧时间边界高于整镜动作链：下面首镜权威原文用于确定已确认的入口人物、空间与机位；其中随后、镜尾或动作完成后的变化尚未发生，不得提前画进首帧。随后后拉才揭示的侧肩、走近才成立的接触和后续入画者，不默认属于起始可见集合；不能把画外的人移到门口来凑同框。未来动作只解释起始空间余量，不提前改变距离、站位、衣物或接触状态。',
         line(officialShot ? '最终 H3 首镜原文（仅入口状态用于当前首帧）' : '首镜权威画面原文（仅入口状态用于当前首帧）', authoritativeDescription),
         line('本镜剧情目的', shot.purpose),
         line('画面主体与站位', shot.subject),
@@ -1521,7 +1510,7 @@ const buildRequest = (
       ]
     : purpose === 'last-frame'
       ? [
-          '帧位要求：这是视频尾帧，必须呈现最后一镜动作完成后的最终状态。先承接该时刻具名人物的世界位置、距离端点和通路，再按结束机位确定实际可见集合；人物间距只能随既有动作变化，不因机位或裁切改变。不自行续写下一动作或下一事件。',
+          '帧位要求：这是视频尾帧，取最后一镜动作完成后的最终状态。',
           line('最后一镜权威画面描述', authoritativeDescription),
           ...shotPromptLines(shot, total),
           line('承接上一镜的可见结果', previousShot?.result),
@@ -1529,8 +1518,7 @@ const buildRequest = (
         ]
       : customFrame?.imageFrameIndex
         ? [
-            `帧位要求：这是用户指定的本段 ${customFrame.imageFrameCount} 张分镜图片中的第 ${customFrame.imageFrameIndex} 张，只生成这一张单幅静帧。`,
-            '本张画面采用下面 AI 已选定的明确瞬间；先保留当时具名世界位置、距离端点、阻隔和可通行路径，再按当时机位确定裁切与实际可见集合。来源镜头的完整动作、结束状态与未来剧情只用于理解连续性和空间余量，不把后续位移、接触或入画局部提前画进本张，也不修改视频镜头、时长或台词。',
+            `帧位要求：这是用户指定的本段 ${customFrame.imageFrameCount} 张分镜图片中的第 ${customFrame.imageFrameIndex} 张，采用下面 AI 已选定的单个瞬间。`,
             line('AI 选定的本张静帧', customFrame.imageFrameDescription),
             typeof customFrame.imageFrameTimeSec === 'number'
               ? `AI 选定的本段时刻：${customFrame.imageFrameTimeSec} 秒（仅供定位单个瞬间，不渲染为文字）。`
@@ -1541,7 +1529,7 @@ const buildRequest = (
             line('来源镜头结束结果（连续性背景）', shot.result),
           ]
         : [
-          '帧位要求：这是当前镜头的分镜图片，先选定最能体现本镜剧情因果的一个实际时刻，再保留当时具名世界位置、距离端点、阻隔和可通行路径，随后由当时机位确定景别、裁切和可见集合；只表现该时刻已经发生的动作与结果，不把后续过程合并入画。',
+          '帧位要求：这是当前镜头的一张分镜静帧，取本镜中的一个实际时刻。',
           line('本镜权威画面描述', authoritativeDescription),
           ...shotPromptLines(shot, total),
           line('本镜入口状态（上一镜可见结果）', previousShot?.result),
@@ -1569,14 +1557,10 @@ const buildRequest = (
     referenceAssetIds: continuityContext.referenceAssetIds,
     primaryReferenceAssetIds: continuityContext.primaryReferenceAssetIds,
     conversionSource: [
-      customFrame?.imageFrameIndex
-        ? '当前图片规划优先：只表现 AI 选定的本张静帧中实际可见的人物、局部与单个瞬间；先保留具名世界位置、距离端点和可通行间隔，再确定当时机位与裁切。完整人物名单、动作过程和结束状态不要求全部入画，但最终 H3 明确的站位、距离、机位、身体侧别与在画/画外状态始终有效，选帧描述不能借构图覆盖或重排它们。'
-        : '当前镜事实优先：先确定本张时刻和动作阶段，再保留具名世界位置、距离端点、阻隔与可通行路径，然后由当时机位确定取景与实际可见集合，最后锁定入画人物或局部的身份；不为展示完整外貌改变距离、站位、视线、姿态与裁切。',
-      STORYBOARD_SPATIAL_FRAME_RULE,
+      // The converter's shared rules interpret these facts. Do not copy its
+      // spatial/pose contracts into every selected frame's source payload.
       ...purposeLines,
-      storyboardImageFramingInstruction(purpose),
       ...(officialShot ? [
-        '上述权威镜头描述是最终已确认 H3 的原文；下方结构化旧稿、人物默认资料及参考图文字只补充未明确的事实，冲突时由 AI 保留最终 H3 中的空间、机位与在画/画外语义，不回滚成旧稿。',
         line('最终 H3 主体标签对应', officialSource?.subjectDefinitions),
         line('最终 H3 整体视觉前言', officialSource?.visualPreamble),
       ] : []),
@@ -1588,7 +1572,6 @@ const buildRequest = (
       ] : []),
       ...continuityContext.lines,
       ...sharedPromptLines(storyboard, purpose),
-      finalRestrictions,
     ].filter(Boolean).join('\n'),
     ...canvas,
   };

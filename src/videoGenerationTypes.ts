@@ -111,6 +111,10 @@ export interface VideoImageReference {
 export interface VideoGenerationDraft {
   name: string;
   prompt: string;
+  /** Final selected-media contract; frozen with the actual connection and parameters. */
+  h3MediaMode?: import('./videoH3MediaMode').VideoH3MediaModeContract;
+  /** Explicit request-only AI reference update; the saved storyboard is untouched. */
+  h3MediaModeUpdate?: import('./videoH3MediaMode').VideoH3MediaModeUpdate;
   /** Exact authored identity anchors used only to serialize image bindings. */
   h3ReferenceBinding?: import('./videoH3ReferenceBinding').VideoH3ReferenceBinding;
   /** Seedance source mapping, request-local reference prose and frozen identities. */

@@ -13,6 +13,7 @@ import {
 } from '../src/storyboardImages';
 import type { StoryboardImageGenerationRequest, StoryboardImageRequest } from '../src/storyboardImages';
 import { createStoryboardImageNameAllocator, storyboardImageBoardLabel } from '../src/storyboardImageNames';
+import { DIRECTED_ACTION_RELATION_RULE, STORYBOARD_SPATIAL_FRAME_RULE } from '../src/spatialContinuityRules';
 import { safeFileName } from '../src/storage';
 import {
   createImageGenerationTask,
@@ -191,9 +192,9 @@ customFrameRequests.forEach((request, offset) => {
   assert.equal(request.imageFrameDescription, customFramePlans[offset].description);
   assert.equal(request.imageFrameTimeSec, customFramePlans[offset].timeSec);
   assert.ok(request.conversionSource.includes(customFramePlans[offset].description));
-  assert.match(request.conversionSource, /^当前图片规划优先：只表现 AI 选定的本张静帧中实际可见的人物、局部与单个瞬间/u);
-  assert.match(request.conversionSource, /完整人物名单、动作过程和结束状态不要求全部入画/u);
-  assert.match(request.conversionSource, /最终 H3 明确的站位、距离、机位、身体侧别与在画\/画外状态始终有效/u);
+  assert.match(request.conversionSource, /^帧位要求：这是用户指定的本段 5 张分镜图片中的第 \d 张，采用下面 AI 已选定的单个瞬间/u);
+  assert.ok(!request.conversionSource.includes(STORYBOARD_SPATIAL_FRAME_RULE),
+    'selected-frame data must not duplicate the converter spatial contract');
   assert.match(request.name, new RegExp(`第 ${offset + 1}/5 张分镜图片$`, 'u'));
   assert.match(request.conversionSource, /来源镜头.*连续性背景/u);
   assert.equal(
@@ -239,8 +240,8 @@ assert.notEqual(
   'a frozen frame descriptor must not conceal edits to its underlying source shot',
 );
 assert.equal(shotRequests.length, storyboard.shots.length, 'one storyboard image is required for every actual generated shot');
-assert.match(shotRequests[0].conversionSource, /^当前镜事实优先：先确定本张时刻和动作阶段，再保留具名世界位置、距离端点、阻隔与可通行路径，然后由当时机位确定取景与实际可见集合，最后锁定/u,
-  'ordinary one-frame-per-shot generation resolves world-space facts before framing and visible identity detail');
+assert.match(shotRequests[0].conversionSource, /^帧位要求：这是当前镜头的一张分镜静帧/u,
+  'ordinary one-frame-per-shot generation retains its requested moment scope as source data');
 shotRequests.forEach((request, offset) => {
   const shot = storyboard.shots[offset];
   assert.equal(request.purpose, 'storyboard-shot');
@@ -257,8 +258,9 @@ shotRequests.forEach((request, offset) => {
   for (const detail of [shot.purpose, shot.subject, shot.action, shot.camera, shot.lighting, shot.result, shot.prompt]) {
     assert.match(request.conversionSource, new RegExp(detail, 'u'), `shot ${shot.index} converter source omitted its own plot detail: ${detail}`);
   }
-  assert.match(request.conversionSource, /严格依据当前剧情和当前镜头/u);
-  assert.match(request.conversionSource, /禁止字幕、文字、Logo、水印/u);
+  assert.ok(!request.conversionSource.includes(DIRECTED_ACTION_RELATION_RULE),
+    'generic action rules belong in the converter system prompt, not its source facts');
+  assert.doesNotMatch(request.conversionSource, /静帧取景：|禁止字幕、文字、Logo、水印/u);
 });
 assert.match(
   shotRequests[1]?.conversionSource || '',
@@ -2233,8 +2235,7 @@ const [spatialFirst, spatialLast] = buildStoryboardImageRequests(spatialBoardWit
 assert.ok(spatialFirst.conversionSource.includes(h3SpatialTexts[0]));
 assert.ok(!spatialFirst.conversionSource.includes(h3SpatialTexts[1]), 'the first frame must not see a later shot as its frame target');
 assert.doesNotMatch(spatialFirst.conversionSource, /旧镜尾结果/u);
-assert.match(spatialFirst.conversionSource, /首帧时间边界高于整镜动作链/u);
-assert.match(spatialFirst.conversionSource, /其中随后、镜尾或动作完成后的变化尚未发生/u);
+assert.match(spatialFirst.conversionSource, /第一镜开始边界的入口状态；首镜后续动作尚未发生/u);
 assert.ok(spatialLast.conversionSource.includes(h3SpatialTexts[1]));
 const spatialFrames = h3SpatialShots.flatMap((shot, offset) => [
   { sourceShotId: shot.id, description: `第${offset + 1}镜入口：阿莲在画面左侧，守卫在画面右侧，沿用最终H3原机位。`, timeSec: shot.startSec + 0.2 },
@@ -2247,7 +2248,8 @@ spatialCustomRequests.forEach((request, offset) => {
   assert.ok(request.conversionSource.includes(spatialFrames[offset].description));
   assert.deepEqual(request.primaryReferenceAssetIds, [explicitShotReference.id, characterReference.id]);
   assert.equal(buildStoryboardImageRequestFromFrame(spatialBoardWithReferences, request.shotId, request, spatialContext).conversionSource, request.conversionSource);
-  assert.match(request.conversionSource, /选帧描述不能借构图覆盖或重排它们/u);
+  assert.match(request.conversionSource, /采用下面 AI 已选定的单个瞬间/u);
+  assert.ok(!request.conversionSource.includes(STORYBOARD_SPATIAL_FRAME_RULE));
 });
 assert.equal(JSON.stringify(spatialBoard), spatialBoardBefore);
 assert.equal(JSON.stringify(spatialContext), spatialContextBefore);
@@ -2275,8 +2277,8 @@ assert.ok(canonicalRoomFirst.conversionSource.includes(canonicalRoomEntry),
   'a first frame without usable H3 still receives final canonical distance and initial camera evidence');
 assert.ok(!canonicalRoomFirst.conversionSource.includes(canonicalRoomExit), 'later canonical shots are not first-frame targets');
 assert.match(canonicalRoomFirst.conversionSource, /首镜权威画面原文（仅入口状态用于当前首帧）/u);
-assert.match(canonicalRoomFirst.conversionSource, /随后后拉才揭示的侧肩.*不默认属于起始可见集合/u);
-assert.match(canonicalRoomFirst.conversionSource, /未来动作只解释起始空间余量/u);
+assert.match(canonicalRoomFirst.conversionSource, /首镜后续动作尚未发生/u);
+assert.ok(!canonicalRoomFirst.conversionSource.includes(STORYBOARD_SPATIAL_FRAME_RULE));
 assert.equal(JSON.stringify(canonicalRoomBoard), canonicalRoomBefore);
 const fullReferenceH3 = `subject_definitions: <Subject 1> 阿莲；<Subject 2> 守卫\nsummary: 交接\nretention_analysis: 保留“[Shot 99]”的字面字条内容\ndetailed_description: Soft moonlight with a steady camera.\n${h3SpatialTexts.join('\n')}\noverall_soundscape: N/A\nnon_diegetic_music: N/A`;
 const fullReferenceBoard = { ...spatialBoard, officialPromptZh: fullReferenceH3 };
@@ -3082,10 +3084,11 @@ const directedActionBoard: Storyboard = {
   shotCount: 1,
 };
 const directedActionSource = buildStoryboardImageRequests(directedActionBoard, 'storyboard-shots')[0]?.conversionSource || '';
-assert.match(directedActionSource, /施事者.*动作.*目标.*终点/u);
-assert.match(directedActionSource, /不能把摄影机.*自动当成目标/u);
-assert.match(directedActionSource, /目标在画外.*不得凭动作对象把画外人物补入/u);
+assert.doesNotMatch(directedActionSource, /施事者.*动作.*目标.*终点|不得凭动作对象把画外人物补入/u,
+  'generic action rules belong to conversion while the source retains this shot\'s actual target and camera');
 assert.match(directedActionSource, /敌群从山口向石台上的夏提雅冲锋/u);
 assert.match(directedActionSource, /运动终点是夏提雅/u);
+assert.ok(directedActionSource.includes(directedActionBoard.shots[0].space));
+assert.ok(directedActionSource.includes(directedActionBoard.shots[0].camera));
 
 console.log('storyboard image prompt and binding regression checks passed');

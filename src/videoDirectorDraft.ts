@@ -52,6 +52,8 @@ export interface VideoDirectorBatchDraft {
   promptFormats?: Record<string, VideoPromptFormat>;
   referenceOverrides: Record<string, VideoImageReference[]>;
   audioOverrides?: Record<string, import('./videoAudioTypes').VideoAudioSelectionOverride>;
+  /** Explicit request-only H3 reference updates, keyed by language choice. */
+  h3ReferenceUpdates?: Record<string, VideoGenerationDraft>;
   referenceRoleOverrides: Record<string, ReferenceRole[]>;
   automaticTails: Record<string, AutomaticVideoTailConfiguration>;
   tailCharacterModes: Record<string, {
@@ -302,6 +304,7 @@ export const applyVideoPromptChoice = (
   const label = `${choice.label}${choice.segmentIndex ? ` · 第 ${choice.segmentIndex} 段` : ''}`;
   const next: VideoGenerationDraft = {
     ...draft, name: label, prompt: choice.prompt, reuseTaskId: undefined, h3ReferenceBinding: undefined, seedanceReferenceBinding: undefined,
+    h3MediaMode: undefined, h3MediaModeUpdate: undefined,
     source: {
       chapterId: chapterIdForStoryboard(project, board),
       storyboardId: board.id, sequencePlanId: board.sequencePlanId, segmentId: board.segmentId,

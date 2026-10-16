@@ -179,7 +179,7 @@ export const directStoryboardImageSourceFingerprint = (
   const assets = new Map(context.assets.map((asset) => [asset.id, asset]));
   const hasConversion = Boolean(context.directPromptConversion);
   return `direct-storyboard-image-${hasConversion ? `v${context.directPromptConversion?.version ?? 2}` : 'v1'}-${fnv1a(JSON.stringify({
-    referenceFramingVersion: 3,
+    referenceFramingVersion: 4,
     includeReferenceMetadata: Boolean(context.includeReferenceMetadata),
     boardId: storyboard.id, shotId: request.shotId,
     // Never reuse one moment's image prompt for another moment, first frame
@@ -278,6 +278,15 @@ export const buildDirectStoryboardImageBatchRequests = (
       line('已选定的本张静帧', imageExcerpt(frame.imageFrameDescription || '')),
       ...(frame.imageFrameTimeSec === undefined ? [] : [`本段画面时刻：${frame.imageFrameTimeSec} 秒，仅作静帧定位，不渲染时间文字。`]),
     ] : [];
+    const conversionMomentLines = purpose === 'first-frame'
+      ? ['帧位要求：视频首帧，第一镜的开始边界与入口状态；首镜后续动作尚未发生。']
+      : purpose === 'last-frame'
+        ? ['帧位要求：视频尾帧，最后一镜结束时的最终可见状态。']
+        : frame ? [
+          `帧位要求：本段自定义 ${frame.imageFrameCount} 张分镜图片中的第 ${frame.imageFrameIndex} 张，采用下面已选定的单个瞬间。`,
+          line('已选定的本张静帧', imageExcerpt(frame.imageFrameDescription || '')),
+          ...(frame.imageFrameTimeSec === undefined ? [] : [`本段画面时刻：${frame.imageFrameTimeSec} 秒，仅作静帧定位。`]),
+        ] : [];
     const request: DirectStoryboardImageRequest = {
       ...template, ...frame, purpose,
       name: allocateName(buildStoryboardImageBaseName(storyboard, template.shotIndex, purpose, context.projectName, frame)),
@@ -292,7 +301,9 @@ export const buildDirectStoryboardImageBatchRequests = (
         ? template.directPrompt
         : [...momentLines, storyboardImageFramingInstruction(purpose), template.directPrompt].join('\n'),
       conversionSource: [
-        ...momentLines, storyboardImageFramingInstruction(purpose),
+        // Keep the selected moment as data; generic framing belongs to the
+        // converter rules. The unconverted direct fallback above still needs it.
+        ...conversionMomentLines,
         directVisualSource(storyboard, storyboard.shots.find((shot) => shot.id === shotId)!).body,
       ].join('\n'),
     };
@@ -363,7 +374,7 @@ export const buildDirectStoryboardImageRequests = (
       assetKind: 'storyboard', assetType: 'reference', assetRole: 'composition', referenceRole: 'composition',
       imageVariant: 'storyboard-frame',
       referenceAssetIds: [...referenceAssetIds], primaryReferenceAssetIds: [...referenceAssetIds],
-      conversionSource: [storyboardImageFramingInstruction('storyboard-shot'), visual.body].join('\n'),
+      conversionSource: visual.body,
       directPrompt, directPromptSource: reusable ? 'current-image-prompt' : visual.source,
       width: output.width, height: output.height, sizeOverride: output.sizeOverride, resolutionPlan: output.resolutionPlan,
     };

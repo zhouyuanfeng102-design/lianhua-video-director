@@ -1,5 +1,6 @@
 import { normalizeStoryReferenceContext } from './storyReferences';
 import { normalizeStoryVisualActionPlan, normalizeStoryVisualParagraphs } from './storyVisualAction';
+import { normalizeBattleSceneStagingList } from './battleScenePlanning';
 import { MAX_PLANNED_SEQUENCE_SEGMENT_DURATION_SEC, requestedSegmentDurationWindows } from './sequenceDurationContract';
 import { sourceContentHash } from './sourceContentHash';
 import type { StoryPacingContext } from './storyPacing';
@@ -284,7 +285,8 @@ const readSemanticSource = (value: unknown, label: string, sourceLength?: number
       ...(typeof item.language === 'string' ? { language: item.language } : {}),
       ...(typeof item.continuation === 'string' ? { continuation: item.continuation } : {}) };
   });
-  return { sourceEvidence, events, dialogues };
+  const battleStaging = normalizeBattleSceneStagingList(value.battleStaging);
+  return { sourceEvidence, events, dialogues, ...(battleStaging.length ? { battleStaging } : {}) };
 };
 
 /** Storage helper: shape-only deep copy; does not recover or fabricate evidence. */

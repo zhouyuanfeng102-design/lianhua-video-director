@@ -1,6 +1,7 @@
 import type { StoryPreparationWarning } from './storyPreparationReview';
+import { normalizeBattleSceneStaging, type BattleSceneStaging } from './battleScenePlanning';
 
-export const STORY_VISUAL_ENGINE_VERSION = 'story-action-3.0';
+export const STORY_VISUAL_ENGINE_VERSION = 'story-action-3.1';
 export type StoryVisualDetailMode = 'faithful' | 'detailed';
 
 export interface StoryVisualActionPlan {
@@ -26,6 +27,8 @@ export interface StoryVisualParagraph {
   eventIds: string[];
   text: string;
   stagingAdditions: string[];
+  /** Adopted scene choreography, separate from original event facts. */
+  battleStaging?: BattleSceneStaging;
 }
 
 const object = (value: unknown): Record<string, unknown> | undefined => (
@@ -84,7 +87,9 @@ export const normalizeStoryVisualParagraphs = (value: unknown, _plan?: StoryVisu
     let id = modelId;
     for (let suffix = 2; usedDisplayIds.has(id); suffix += 1) id = `${modelId}-${suffix}`;
     usedDisplayIds.add(id);
-    paragraphs.push({ id, sourceParagraphIds, eventIds, text: text(paragraph.text), stagingAdditions: strings(paragraph.stagingAdditions) });
+    const battleStaging = normalizeBattleSceneStaging(paragraph.battleStaging);
+    paragraphs.push({ id, sourceParagraphIds, eventIds, text: text(paragraph.text), stagingAdditions: strings(paragraph.stagingAdditions),
+      ...(battleStaging ? { battleStaging } : {}) });
   }
   return paragraphs;
 };

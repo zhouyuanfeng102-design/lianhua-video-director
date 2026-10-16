@@ -373,10 +373,10 @@ try {
   await bounded(boundaries.run({ mode: 'boundary-frames' }));
   assert.equal(boundaries.calls.length, 2, 'the existing first/last-frame button converts each boundary with the selected rules');
   assert.equal(boundaries.conversions.length, 2);
-  assert.match(boundaries.conversions[0].source, /本张是视频首帧.*第一镜的开始/u);
-  assert.match(boundaries.conversions[1].source, /本张是视频尾帧.*最后一镜结束/u);
+  assert.match(boundaries.conversions[0].source, /视频首帧.*第一镜的开始/u);
+  assert.match(boundaries.conversions[1].source, /视频尾帧.*最后一镜结束/u);
   assert.ok(boundaries.calls.every((call, index) => call.input.prompt.includes(boundaries.conversions[index].prompt)));
-  assert.ok(boundaries.calls.every((call) => !/本张是视频首帧|本张是视频尾帧|首帧取景：|尾帧取景：/u.test(call.input.prompt)),
+  assert.ok(boundaries.calls.every((call) => !/帧位要求：|本张是视频首帧|本张是视频尾帧|首帧取景：|尾帧取景：/u.test(call.input.prompt)),
     'local boundary production instructions become converter input instead of being used as the final image prompt');
   assert.deepEqual(boundaries.calls.map((call) => call.input.referenceImages), [[pngB, pngA], [pngB, pngA]]);
   assert.deepEqual(boundaries.imageTasks().map((task) => [task.sourceShotId, task.imageVariant]), [['shot-1', 'first-frame'], ['shot-4', 'last-frame']]);
