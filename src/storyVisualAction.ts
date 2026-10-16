@@ -1,5 +1,6 @@
 import type { StoryPreparationWarning } from './storyPreparationReview';
 import { normalizeBattleSceneStaging, type BattleSceneStaging } from './battleScenePlanning';
+import { normalizeSceneStaging, normalizeSceneStagingList, type SceneStaging } from './sceneStaging';
 
 export const STORY_VISUAL_ENGINE_VERSION = 'story-action-3.1';
 export type StoryVisualDetailMode = 'faithful' | 'detailed';
@@ -19,6 +20,7 @@ export interface StoryVisualActionPlan {
     uncertainties: string[];
   }>;
   summary: string;
+  sceneStaging?: SceneStaging[];
 }
 
 export interface StoryVisualParagraph {
@@ -29,6 +31,8 @@ export interface StoryVisualParagraph {
   stagingAdditions: string[];
   /** Adopted scene choreography, separate from original event facts. */
   battleStaging?: BattleSceneStaging;
+  /** Shared world and event phases; also applies to ordinary non-battle scenes. */
+  sceneStaging?: SceneStaging;
 }
 
 const object = (value: unknown): Record<string, unknown> | undefined => (
@@ -71,7 +75,9 @@ export const normalizeStoryVisualActionPlan = (value: unknown, sourceText?: stri
       result: text(event.result), uncertainties: strings(event.uncertainties),
     });
   }
-  return { version: 1, sourceParagraphs, events, summary: text(raw.summary) };
+  const sceneStaging = normalizeSceneStagingList(raw.sceneStaging);
+  return { version: 1, sourceParagraphs, events, summary: text(raw.summary),
+    ...(sceneStaging.length ? { sceneStaging } : {}) };
 };
 
 export const normalizeStoryVisualParagraphs = (value: unknown, _plan?: StoryVisualActionPlan): StoryVisualParagraph[] => {
@@ -88,8 +94,9 @@ export const normalizeStoryVisualParagraphs = (value: unknown, _plan?: StoryVisu
     for (let suffix = 2; usedDisplayIds.has(id); suffix += 1) id = `${modelId}-${suffix}`;
     usedDisplayIds.add(id);
     const battleStaging = normalizeBattleSceneStaging(paragraph.battleStaging);
+    const sceneStaging = normalizeSceneStaging(paragraph.sceneStaging);
     paragraphs.push({ id, sourceParagraphIds, eventIds, text: text(paragraph.text), stagingAdditions: strings(paragraph.stagingAdditions),
-      ...(battleStaging ? { battleStaging } : {}) });
+      ...(battleStaging ? { battleStaging } : {}), ...(sceneStaging ? { sceneStaging } : {}) });
   }
   return paragraphs;
 };

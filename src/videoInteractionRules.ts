@@ -1,3 +1,13 @@
+
+
+/** Exact previous request blocks; compatibility only, never composed into current rules. */
+export const LEGACY_VIDEO_INTERACTION_DIRECTION_RULE_V2_5_1 = "逐镜先写实际交互双方，再写摄影机观察：用稳定姓名说明谁向谁进攻、谁沿谁的退避路径追击、谁看向哪位对手或其来袭武器、谁在对哪位听者说话。进攻者的躯干与发力方向围绕具名对手及当前攻击落点组织，防守者的视线与身体回应当前来袭；沉默者照剧情观察、挡闪或行动。头部、身体、眼神与武器可以因侧身、旋转或回头合理不同，不要求全部同向，但必须沿同一事件解释，不能让动作主体正对镜头挥舞而真正受攻者无因落在其背后。\n\n把人物之间的动作方向和摄影机的视向分开落实。人物持续面对或追随实际对手，摄影机从这条具名交互轴的已有一侧观察并随实际动作移动；允许侧脸、背影、遮挡或画外对手。写出当前机位下双方谁在前后或哪一画面侧、攻击如何穿过双方之间的空间，而不是只写“向前冲、镜头跟拍、轴线一致”。目标在画外时保留其具名世界位置和画外方向，不把摄影机、观众、门或墙当作动作终点。\n\n推近、跟随和反打只改变观察，不要求演员转向镜头、追随镜头转头或把对手搬入身后。身份图只锁身份与外观，人物朝观众的静态姿势不成为当镜指令；讲话也不要求为口型转到正面。原文明确的对观众讲话、真实回头或对手主观视点仍保留，并写明摄影机与被注视对象的关系，不把“不看镜头”变成所有场景的机械禁令。\n\n关键攻击镜头具体写出头部与视线的具名落点、胸部和髋部相对对手的正面/侧向关系、发力肢体与受力物在哪一侧；仅写“看向对手”不能代替身体朝向。踢向目标时，起脚前建立对目标的观察及可执行的身体姿态，接触近处物体所需的短暂低头照真实动作表达，随后沿物体路径关注对方回应，不改成面向观众而背向目标后踢。前踢、侧踢、后踢或旋转踢按原文已有招式及当前获准展开分别表达，后踢/背身须来自该事件，不能因正面构图自动产生；转身或改变攻击侧须写出当前动作过程，不能在切镜后偷偷重置。允许角色按攻防侧身、回头和使用原设能力，不强令头、胸、髋、武器始终同向；未知细节只在获准规划或中文新稿中安排，已有稿及翻译仅保真。";
+export const LEGACY_VIDEO_PHYSICAL_DISTANCE_RULE_V2_5_1 = "同一场景沿用当前原文、关联场地、确认进入/退出状态和真实参考职责建立的可通行布局。明确当前路段、固定地标、双方站位与武器可及关系；高柱、远景或身份图不能推定精确米数或更大的战斗区域。原文给出距离、狭窄程度、步数或作用范围时按依据落实；未知布局只在获准规划或中文新稿中安排一种持续自洽的相对尺度，不逐镜造新坐标、米数和场地。\n\n每镜的space/action/result或对应自然正文写明双方进入关系、真实移动接近、接触或落空及各自退出关系。追击与退避属于同一相对运动：对手继续后退时进攻者沿其实际路线追上，只有真实进入武器够及范围后才发生近身挡击；不能一镜分离很远、下一镜省略移动直接贴身相撞。原文中的倒飞、滑退、旋转、被挡回弹继续跨镜，不为镜头方便无故让某人站定、落地或停等另一人。已确认原稿没有写的移动，只能在获准中文新稿补足，不能由翻译或参考更新重排。\n\n下一镜从前镜双方末态继续：所在路段、前后关系、身体朝向、视线目标、运动阶段、握持与支撑、真实间距及武器位置中与下一动作有关的状态保持。景别、裁切、焦距、推拉、反打与切镜改变画面观感，不改变真实间距或让人物无因移到对手身后；位置变化来自本段已有行进、转身、受力或原剧情明确的瞬移与转场。镜头边界、时间和镜数按当前权限保持，不把这些写作要求变成本地几何效验、门禁或重试。\n\n双方的相对位移必须由各自真实动作实现：用退步/换步、蹬地起跳与腾空、受力倒飞、脚部接地滑退或原设悬浮等准确方式表达当前事件，不用一个“高速后退”省略支撑与身体姿态。前后镜继承当前阶段及空中或接地状态，仍在空中不无因落地，已落地就以实际支撑接下一步或招架；不把后跃换成贴地滑行，不把被击退变成主动跑开。被投掷物与人物的关系同时保持实体路径和回应先后：避让后从其身体哪侧/上方通过、前后遮挡怎样接续及原有终点应进入现有正文，不用含混“穿过人物”替代擦身或落空，也不把画面投影重叠误写成穿透身体。仅按本次获准新稿展开必要细节，不添加原剧情未成立的落地、碰撞或能力；已确认稿的原有移动方式、阶段、路径与结果保持。";
+export const LEGACY_VIDEO_INTERACTION_TRANSLATION_RULE_V2_5_1 = "翻译及本轮翻译修复只保真已确认中文每镜的具名双方、身体与视线关系、进攻目标和轨迹、同步追击/退避、实际接近、可及的接触或落空、各自回应与退出关系，以及摄影机相对交互轴的位置和画内/画外投影。中文已经写出的阶段速度、身体和兵刃末态、场地尺度与真实间距逐项保持，切镜不成为人物重摆。\n\n区分 camera follows the fighters 与 fighters turn to follow the camera，faces the named opponent 与 faces the camera；保留具体姓名，不能以forward、the corridor、background figure或camera泛化具名对手。景别变近、镜头推拉或切换机位不译成人物接近、退后或改变场地。只有中文已成立的主观视点、直视镜头或真实转身才保留相应关系，不自行添加米数、步法、攻击落点、机位或动作阶段。\n\n保留每句原话、真实说话人、听者、原语种，以及沉默时的注意与行动；内心判断、观察和格式说明不变成发话。原对白全文原字保持，不在英译或格式修复重新区分小说译注，不补新剧情、表演、空间、台词、声音或时间；保持当前输出格式、参考标签和确认边界。\n\n逐项保真中文已写的头部/视线、胸部/髋部朝向、支撑与发力侧、具体踢法、物体在身体哪侧、实体飞行高度和擦身/遮挡后的路径及终点；身体面向具名目标不能因摄影机观察正脸而译成背向对手，front/side kick不变成back kick，passes beside/above不变成passes through the body。退步、后跃、倒飞、滑退和悬浮分别保留，起跳/腾空/落地支撑与同步招架、速度变化和事件先后不简化成全程贴地移动或一切同时发生；镜头对身体与交点的可见范围保持。以上只保真已确认中文，不给缺失的身体角度、接触、阶段、路径或结局补写新事实。";
+export const LEGACY_VIDEO_INTERACTION_RULES_V2_5_1 = [
+  LEGACY_VIDEO_INTERACTION_DIRECTION_RULE_V2_5_1, LEGACY_VIDEO_PHYSICAL_DISTANCE_RULE_V2_5_1,
+].join('\n\n');
+
 /** Shared directing facts, independent of H3/Seedance serialization.
  * These instructions are consumed inside the existing model request. They
  * neither inspect output prose nor reject, rewrite or re-run saved work. */
@@ -37,21 +47,18 @@ export const LEGACY_VIDEO_INTERACTION_TRANSLATION_RULE_V1_8_8 = [
 ].join('\n\n');
 
 export const VIDEO_INTERACTION_DIRECTION_RULE = [
-  LEGACY_VIDEO_INTERACTION_DIRECTION_RULE_V1_8_8,
-  '关键攻击镜头具体写出头部与视线的具名落点、胸部和髋部相对对手的正面/侧向关系、发力肢体与受力物在哪一侧；仅写“看向对手”不能代替身体朝向。踢向目标时，起脚前建立对目标的观察及可执行的身体姿态，接触近处物体所需的短暂低头照真实动作表达，随后沿物体路径关注对方回应，不改成面向观众而背向目标后踢。前踢、侧踢、后踢或旋转踢按原文已有招式及当前获准展开分别表达，后踢/背身须来自该事件，不能因正面构图自动产生；转身或改变攻击侧须写出当前动作过程，不能在切镜后偷偷重置。允许角色按攻防侧身、回头和使用原设能力，不强令头、胸、髋、武器始终同向；未知细节只在获准规划或中文新稿中安排，已有稿及翻译仅保真。',
+  "逐镜采用场面计划中具名行动者、动作对象与实际注意关系：攻击、递接、追击、逃离或对话分别写清向谁、作用于谁或从谁处离开；支撑、发力与对方回应按同一事件表达。身体朝向、头部转角、视线、武器方向和摄影机观察对象各自说明必要部分，可以自然不同向。",
+  "转身、回头与更换目标由已有刺激、动作或当前获准调度产生，并在连续过程中发生；摄影机跟随、反打、环绕或正面取景只观察此过程。按当前动作选择正面、侧面、背面及画外关系；角色已有的直视镜头、目标主观视点与背身招式照原意保留。身份资料与镜头关注不新增身体转向或更换攻击目标。",
 ].join('\n\n');
 
 export const VIDEO_PHYSICAL_DISTANCE_RULE = [
-  LEGACY_VIDEO_PHYSICAL_DISTANCE_RULE_V1_8_8,
-  '双方的相对位移必须由各自真实动作实现：用退步/换步、蹬地起跳与腾空、受力倒飞、脚部接地滑退或原设悬浮等准确方式表达当前事件，不用一个“高速后退”省略支撑与身体姿态。前后镜继承当前阶段及空中或接地状态，仍在空中不无因落地，已落地就以实际支撑接下一步或招架；不把后跃换成贴地滑行，不把被击退变成主动跑开。被投掷物与人物的关系同时保持实体路径和回应先后：避让后从其身体哪侧/上方通过、前后遮挡怎样接续及原有终点应进入现有正文，不用含混“穿过人物”替代擦身或落空，也不把画面投影重叠误写成穿透身体。仅按本次获准新稿展开必要细节，不添加原剧情未成立的落地、碰撞或能力；已确认稿的原有移动方式、阶段、路径与结果保持。',
+  "采用同一场面的可通行区域、固定地标与双方进入距离，按照各自实际位移形成退出关系。近身接触以前有必要的接近；自主退步、后跃、受力倒飞、接地滑退或既有悬浮各用对应的启动、支撑与连续阶段。距离已给数值则保留测量端点，未知时采用有依据的相对尺度，不从身份图、景别或远处柱列推算米数。",
+  "人物与物体移动写出必要的路径和末态：从哪一侧擦过、在哪里受阻或接地、最终停在谁的身体哪侧或哪个地标区域。下一动作从真实末态接续，摄影机变化只改变投影与可见范围。已确认稿或翻译保持既有移动方式、阶段、路径和结果，不利用缺失细节重编场面。",
 ].join('\n\n');
 
 export const VIDEO_INTERACTION_RULES = [VIDEO_INTERACTION_DIRECTION_RULE, VIDEO_PHYSICAL_DISTANCE_RULE].join('\n\n');
 
-export const VIDEO_INTERACTION_TRANSLATION_RULE = [
-  LEGACY_VIDEO_INTERACTION_TRANSLATION_RULE_V1_8_8,
-  '逐项保真中文已写的头部/视线、胸部/髋部朝向、支撑与发力侧、具体踢法、物体在身体哪侧、实体飞行高度和擦身/遮挡后的路径及终点；身体面向具名目标不能因摄影机观察正脸而译成背向对手，front/side kick不变成back kick，passes beside/above不变成passes through the body。退步、后跃、倒飞、滑退和悬浮分别保留，起跳/腾空/落地支撑与同步招架、速度变化和事件先后不简化成全程贴地移动或一切同时发生；镜头对身体与交点的可见范围保持。以上只保真已确认中文，不给缺失的身体角度、接触、阶段、路径或结局补写新事实。',
-].join('\n\n');
+export const VIDEO_INTERACTION_TRANSLATION_RULE = "翻译保真已采用的具名交互双方、动作对象、身体/头部朝向、视线目标、发力与支撑、同步进退、接触/落空、实体路径、末态及画内/画外关系。faces the opponent与faces the camera、主动退让与受力倒飞、旁侧掠过与穿透分别按源稿表达；摄影机关注或移动只翻译其观察关系。对话保持原话、原语种、唯一声源和听者状态，不从旧资料补动作、距离、转身、摄影或结局。";
 
 /** Exact first-party request blocks only; saved prose and custom additions are
  * never rewritten. The current directing rules are supplied by the caller. */
@@ -62,7 +69,8 @@ export const stripLegacyVideoInteractionRules = (value: string): string => {
     ...[VIDEO_INTERACTION_RULES, VIDEO_INTERACTION_DIRECTION_RULE,
       VIDEO_PHYSICAL_DISTANCE_RULE, VIDEO_INTERACTION_TRANSLATION_RULE]
       .map((text) => ({ text, preserve: true })),
-    ...[LEGACY_VIDEO_INTERACTION_RULES_V1_8_8, LEGACY_VIDEO_INTERACTION_DIRECTION_RULE_V1_8_8,
+    ...[LEGACY_VIDEO_INTERACTION_RULES_V2_5_1, LEGACY_VIDEO_INTERACTION_DIRECTION_RULE_V2_5_1, LEGACY_VIDEO_PHYSICAL_DISTANCE_RULE_V2_5_1,
+      LEGACY_VIDEO_INTERACTION_TRANSLATION_RULE_V2_5_1, LEGACY_VIDEO_INTERACTION_RULES_V1_8_8, LEGACY_VIDEO_INTERACTION_DIRECTION_RULE_V1_8_8,
       LEGACY_VIDEO_PHYSICAL_DISTANCE_RULE_V1_8_8, LEGACY_VIDEO_INTERACTION_TRANSLATION_RULE_V1_8_8,
       LEGACY_VIDEO_INTERACTION_RULES_V1_8_1, LEGACY_VIDEO_INTERACTION_DIRECTION_RULE_V1_8_1,
       LEGACY_VIDEO_PHYSICAL_DISTANCE_RULE_V1_8_1, LEGACY_VIDEO_INTERACTION_TRANSLATION_RULE_V1_8_1]

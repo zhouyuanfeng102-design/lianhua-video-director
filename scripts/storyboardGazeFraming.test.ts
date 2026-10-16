@@ -22,18 +22,20 @@ for (const format of ['natural-language', 'sd-tags', 'nai-tags'] as const) {
   });
   assert.ok(system.includes(STORYBOARD_FRAME_VISIBILITY_RULE));
   assert.ok(system.includes(IMAGE_STORY_SPATIAL_STATE_RULE), 'each output format keeps world distance before camera crop and identity detail');
-  assert.ok(system.indexOf(STORYBOARD_FRAME_VISIBILITY_RULE) > system.indexOf(legacyPreset.preset.outputRules),
-    'current shot crop and gaze rules override old display-oriented presets for every output format');
-  assert.match(system, /尾帧以该镜动作产生的退出状态为依据，保留结束时刻的世界位置、剩余空间、机位与取景/u);
-  assert.match(system, /背面不补正脸，单眼侧脸不强求双眼，手脚特写不拉远补脸/u);
-  assert.match(system, /目标主观视角/u);
-  assert.match(system, /合理回头/u);
-  assert.match(system, /所选时刻及对应动作阶段 → 同一镜头在该时刻的双方世界站位、距离[\s\S]*摄影机位置与朝向[\s\S]*当前可见身份细节/u);
+  assert.ok(system.indexOf(STORYBOARD_FRAME_VISIBILITY_RULE) < system.indexOf(IMAGE_PROMPT_VISIBLE_CHARACTER_IDENTITY_CONTRACT),
+    'the event, world, adopted camera and visible extent are established before identity expansion');
+  assert.equal(system.split(STORYBOARD_FRAME_VISIBILITY_RULE).length - 1, 1);
+  assert.equal(system.split(IMAGE_STORY_SPATIAL_STATE_RULE).length - 1, 1,
+    'nested world/visibility contracts are supplied once for every output format');
+  assert.match(STORYBOARD_FRAME_VISIBILITY_RULE, /首帧取进入状态，尾帧取行动产生的退出状态/u);
+  assert.match(STORYBOARD_FRAME_VISIBILITY_RULE, /先描述当前可见面[\s\S]*从角色资料选入相应可见外貌/u);
+  assert.match(STORYBOARD_FRAME_VISIBILITY_RULE, /主观视点/u);
+  assert.match(STORYBOARD_FRAME_VISIBILITY_RULE, /回头[\s\S]*头身不同向/u);
 }
 assert.doesNotMatch(IMAGE_PROMPT_PROPORTION_CONTRACT, /构图以完整主体和自然留白为先/u);
 assert.match(IMAGE_PROMPT_PROPORTION_CONTRACT, /局部特写沿用局部取景/u);
 assert.match(IMAGE_PROMPT_VISIBLE_CHARACTER_IDENTITY_CONTRACT, /可见身份以当前景别、朝向、遮挡和裁切为边界/u);
-assert.match(DIRECTED_ACTION_RELATION_RULE, /不要求身体、头部、视线与武器全部同向/u);
+assert.match(DIRECTED_ACTION_RELATION_RULE, /分别保留身体姿态、头部转角、视线落点和动作对象/u);
 const characterSystem = buildImagePromptConverterSystemPrompt(
   resolveImagePromptSelection({ backend: 'openai', assetKind: 'character', imageVariant: 'full-body' }), '', 'full-body',
 );

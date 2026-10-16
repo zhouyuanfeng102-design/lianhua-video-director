@@ -7,6 +7,7 @@ import type { SemanticSequencePlanningInput } from '../semanticSequencePlan';
 import { STORY_PACING_RULE } from '../storyPacing';
 import { STORY_CAUSALITY_RULE } from '../storyCausalityRules';
 import { VIDEO_SCENE_CONTEXT_RULE } from '../videoSceneContext';
+import { SCENE_STAGING_OUTPUT_SHAPE } from '../sceneStaging';
 import type { SequenceDurationMode, TextApiConfig, VideoSequencePlan } from '../types';
 import { videoPacingWithoutCreativeRequirement } from '../videoCreativeDirection';
 import { requestTextModel, TextModelHttpError, TextModelResponseError } from './llm';
@@ -70,8 +71,9 @@ const SEMANTIC_SEQUENCE_COMMON_RULE = [
   '先理解全文叙述视角、人物称呼和连续事件，再分段。按地点、连续时间、人物目标、阻碍与局势变化组织完整场面，content让观众看懂人物相对关系、行动来由与结果怎样推进剧情；入场、交谈、行动与回应可以在同一场面连续发生，不把事件条目、人物介绍或一招一式写成暗示一项一镜的拍摄清单。narrativePurpose写本段具体叙事职责，entryState/exitState/continuityPack传递当前真实状态；分段不是先为后续摄影预填镜数。背景信息、旁观者反应或被动句中记载的真实可见行动，同样属于必须分配的剧情事件，不能因为栏目名称、姓名未出现或正文只描述受击结果就遗漏行动者。结合characterContinuity中的id/name/aliases确认称呼对应，资料中的能力本身不代表本段发生过该事件。',
   'originalSourceContext若存在，是与当前story匹配的画面描述转化前原始小说，只用于回查指代、真实攻击来源、比喻及判断依据；当前story是被采用的剧情稿，不因旧原文而撤销用户已改变的剧情，不补入本段未分配的事件，也不提前揭示原文尚未知的身份。',
   'originalSourceContext.actionPlan若存在，是转化时保留的原文事件依据：沿用events中的稳定id、行动者、对象、原动作和结果，按当前片段实际推进填写semanticSource.events及phase，不重新猜测攻击来源或把踢改为扔。paragraphs中的stagingAdditions是用户采用的画面编排补充，不是原文事实，保持已采用稿的动作连续性，但不能用编排补充制造新伤势、能力、胜负或身份。sourceEvidence仍从本次story中逐字取证；actionPlan.evidence属于旧原文，仅用于因果核对，不伪造为本次story的字符位置。',
-  'paragraphs.battleStaging若存在，是已采用的内部场面编排，不是新增原文证据。新分段在semanticSource.battleStaging数组保留本段实际采用的编排部分：沿用sourceEventIds、factLocks和行动组/阶段的稳定id，按当前段真实推进裁定空间层、路径、准备、触发、接触、受力结果、恢复与进出状态；长场面跨段时传递已完成与未完成阶段，不重复完整动作。factLocks仍是模型记录的原文约束，stagingChoices是画面设计选择；两者不得混成sourceEvidence或宣称为原文新增能力、伤势、胜负。对白预算由你结合原话、自然发话和可并行行动决定，不套固定人数、动作数、对白字数或比例配额；preserveDialogueIds只沿用本段确有的对白ID，没有就省略。旧稿没有此字段不表示需要本地推断或自动补写。',
-  'semanticSource.battleStaging为可选数组，元素结构为{version:1,sceneType?:string,sourceEventIds?:string[],factLocks?:string[],stagingChoices?:string[],actionGroups?:[{id,participants?:string[],role?,spatialLayer?,route?,objective?}],actionPhases?:[{id,sourceEventId?,groupIds?:string[],actor?,target?,setup?,trigger?,contact?,result?,recovery?}],dialogueBudget?:{strategy?:string,parallelToAction?:boolean,speechDurationSec?:number,actionDurationSec?:number,preserveDialogueIds?:string[]},entryState?:string,exitState?:string}。问号仅说明字段可省略，不是JSON字符；id和其它文字字段都是字符串，预算秒数为非负数。仅传本段采用的编排，不把此结构写成镜头表，也不把字段名抄进content正文；正文仍须自然呈现本段实际动作及对白。',
+  '在本次同一规划中先沿完整场面建立sceneStaging，再分配事件阶段和段界。它适用于交谈、行进、观察、交战和物体运动，不按段落或出场人物重新摆场面。originalSourceContext.actionPlan.sceneStaging或paragraphs.sceneStaging已有记录时沿用sceneId、参与者和phase的稳定id及仍适用的世界关系；没有记录时在当前调用内根据本次剧情形成场面选择。场面记录是采用的表现方式，不是新增原文事实，不填未知精确坐标。',
+  `每段semanticSource.sceneStaging为可选数组，元素结构为${SCENE_STAGING_OUTPUT_SHAPE}。同一连续场面跨段沿用sceneId，只保留本段实际推进的phases并衔接其startState/endState；participants分别记录世界位置、身体面向、视线对象和动作对象，motionPath/motionEndpoint分别记录真实移动路径和终点，不能从身体朝向反推位移。sourceEventIds/eventId只沿用实际事件id，participantIds引用本场参与者id；未知关系省略。entryState/exitState与本段正文来自同一事件进度，不新增镜头表或摄影要求。`,
+  '旧paragraphs.battleStaging若存在，仍作为已采用战斗编排读取并在semanticSource.battleStaging保留本段适用部分，factLocks与stagingChoices不混成原文证据；沿用行动组与阶段id，不重复生成另一套相互竞争的站位。没有旧字段的普通剧情无需新增战斗记录。',
   '长事件可以跨多个D秒片段；给每段分配该事件真实推进的不同阶段，入口、已完成状态、当前推进与出口要明确。不同段可以引用同一事件ID或原文证据，不等于重复发生；已经完成的动作和对白只作承接事实，不能再从头重演。前段还未完成的真实动作或长发话，必须标清连续位置而非重复起点。',
   '原文和AI创作必须分离：semanticSource.sourceEvidence只列本段所依据的原文字句，逐字保留；可选sourceStart/sourceEnd使用完整story的UTF-16半开区间，无法确认准确位置则两者都省略。content是你根据归属事件写成的本段完整可执行剧情正文，不是原文截取工具的输出，也不是总剧情摘要。不得用一段全文冒充每个片段正文。',
   'semanticSource.events列当前段实际承担的事件描述、稳定ID和可选phase；semanticSource.dialogues列本段实际发声的原话、准确说话人、稳定ID及可选language/continuation。ID在跨段延续时可相同，但具体阶段或接续内容不得无意重放。没有具体对白就给空dialogues，不把人物资料、名称、场景概述或交谈概述改成新台词。没有可引用事件或证据时相应数组可为空，由你保持真实语义。',

@@ -55,6 +55,7 @@ export const buildOfficialSeedanceInput = (project: Project, board: Storyboard):
       currentCharacterVoiceFacts: currentCharacterVoiceFacts(context.characters || [], project.characters),
       audioLedgerFacts: structuredClone(board.audioLedger || []),
       sourceStoryContent: board.sourceStoryContent || context.sceneContent || '',
+      ...(board.sceneStaging?.length ? { sceneStaging: structuredClone(board.sceneStaging) } : {}),
       ...(sequenceSegmentContext ? { sequenceSegmentContext } : {}),
       sourceSceneSnapshots: (board.sourceSceneSnapshots || []).map((scene) => ({ id: scene.id, title: scene.title, content: scene.content })),
       shots: board.shots.map((shot) => ({ ...shot,

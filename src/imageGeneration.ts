@@ -894,25 +894,25 @@ const IMAGE_VARIANT_SPECS: Readonly<Record<ImageVariant, ImageVariantGenerationS
   snapshot: {
     id: 'snapshot',
     label: '故事快照',
-    direction: '剧情发生瞬间的故事快照，主体动作和环境关系清晰；保留该时刻人物世界位置、真实间距、地标内外关系和行动通路，再确定机位与可见动作。',
+    direction: '按当前采纳稿选定一个剧情时刻，沿用该时刻的场面关系与机位，再写取景中实际可见的动作、环境和必要身份；身份图的正面展示姿势不改变人物的动作对象和观察面。',
     canvas: SQUARE_CANVAS,
   },
   'first-frame': {
     id: 'first-frame',
     label: '分镜首帧',
-    direction: '视频分镜首帧，明确初始构图、人物站位和主光源；保留动作起始时刻的世界位置、真实距离、行动空间和初始机位，随后走近或运镜才出现的状态不提前入画。',
+    direction: '视频分镜首帧采用当前采纳稿的起始时刻和初始机位，先保留人物世界位置、朝向、真实距离与行动空间，再写该取景实际可见的身份和主光源；随后走近或运镜才出现的状态不提前入画。',
     canvas: SQUARE_CANVAS,
   },
   'last-frame': {
     id: 'last-frame',
     label: '分镜尾帧',
-    direction: '视频分镜尾帧，保留该镜结束时已实际发生的移动结果、人物世界位置和距离，再按结束机位呈现可见结果，不提前接续下一动作。',
+    direction: '视频分镜尾帧采用当前采纳稿的结束时刻，保留已经发生的移动结果、人物位置、朝向和距离，再按既定结束机位呈现可见结果及必要身份，不为了看清脸部改变观察面，不提前接续下一动作。',
     canvas: LANDSCAPE_CANVAS,
   },
   'storyboard-frame': {
     id: 'storyboard-frame',
     label: '分镜图片',
-    direction: '单镜头剧情分镜图片，先选择一个时刻，保留该阶段的人物世界位置、距离及行动通路，再表现当前机位可见的主体、动作状态和光线；不将整镜过程与结果同时入画。',
+    direction: '单镜头剧情分镜图片，先固定当前采纳稿中的一个时刻与该时刻的机位，保留该阶段的人物世界位置、朝向、距离及行动通路，再写取景实际可见的动作、光线和必要身份；不将整镜过程与结果同时入画，也不为展示人物正面另选视点。',
     canvas: LANDSCAPE_CANVAS,
   },
   icon: {

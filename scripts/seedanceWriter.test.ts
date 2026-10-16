@@ -20,9 +20,14 @@ const input = {
     { id: 'lin-image', name: '林霜外观', mediaType: 'image', referenceRole: 'character', responsibility },
     { id: 'scene-image', name: '石柱空间', mediaType: 'image', referenceRole: 'scene', responsibility: '石柱、左右绕行区域和里尤洛的遮挡位置。' },
   ],
-  subjectDefinitions: [{ name: '林霜', description: '持枪的蓝袍人物', motion: '枪杆近身迎击、接触后回防并绕柱左行', referenceAssetIds: ['lin-image'] }],
+  subjectDefinitions: [{ name: '林霜', description: '持枪的蓝袍人物', motion: '枪杆近身迎击、接触后回防并绕柱左行', referenceAssetIds: ['lin-image'] },
+    { name: '里尤洛', kind: 'character', description: '站在柱后的人物', motion: 'UNADOPTED_CHARACTER_HABIT' }],
   constraints: ['保持林霜的枪与蓝袍连续，石柱的左右空间不反转。'],
-  sourceEvidence: { story: sourceStory, shotMode: 'exact', shotCount: 3, entryState: '兽人正向林霜逼近', exitState: '第二个兽人倒飞，里尤洛仍在柱后', motionReferenceSupported: false },
+  sourceEvidence: { story: sourceStory, shotMode: 'exact', shotCount: 3, entryState: '兽人正向林霜逼近', exitState: '第二个兽人倒飞，里尤洛仍在柱后', motionReferenceSupported: false,
+    creativeDirection: { cameraTerms: ['UNADOPTED_CAMERA_MENU'] },
+    directorStyleSummary: 'UNADOPTED_DIRECTOR_SUMMARY', extraRequirement: 'UNADOPTED_CAMERA_HINT',
+    sequenceSegmentContext: { creativeDirection: { cameraTerms: ['UNADOPTED_NESTED_CAMERA_MENU'] }, segment: { content: sourceStory } },
+    sceneStaging: [{ version: 1, sceneId: 'training', participants: [{ id: 'lin', bodyFacing: '兽人', gazeTarget: '兽人', actionTarget: '兽人' }] }] },
 };
 const chinese = [
   '视频规格：时长 30 秒；画面比例 16:9；分辨率 2K；声音模式 stereo。',
@@ -54,6 +59,10 @@ const written = await generateOfficialSeedancePrompt({ input, request: async (sy
   assert.match(system, /Seedance/u, 'the Chinese model request has a Seedance contract');
   assert.match(system, /连续|概括/u, 'the writer receives continuous-action expression guidance');
   assert.match(system, /少数|关键|记忆点/u, 'the writer is guided to select important contacts rather than enumerate every punch');
+  assert.ok(user.includes('sceneStaging') && user.includes('bodyFacing'), 'adopted relations reach the existing writer call');
+  for (const unused of ['UNADOPTED_CAMERA_MENU', 'UNADOPTED_DIRECTOR_SUMMARY', 'UNADOPTED_CAMERA_HINT', 'UNADOPTED_NESTED_CAMERA_MENU', 'UNADOPTED_CHARACTER_HABIT']) {
+    assert.equal(user.includes(unused), false, 'unadopted camera preferences cannot re-direct the expression stage');
+  }
   assert.ok(!/必须[^\n]*(?:\[Shot|<Subject|<Picture|integrated_multimodal_description)/u.test(system), 'the dedicated writer must not require H3 serialization');
   for (const fact of [sourceStory, input.canonicalPrompt, responsibility, '枪杆近身迎击、接触后回防并绕柱左行', 'lin-image', 'shotCount', '7.5']) {
     assert.ok(user.includes(fact) || user.includes(JSON.stringify(fact).slice(1, -1)), `the internal request keeps source evidence: ${fact}`);

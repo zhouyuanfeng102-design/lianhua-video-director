@@ -80,6 +80,8 @@ export interface PromptSubjectDefinitionInput {
 
 export interface PromptAdapterInput {
   canonicalPrompt: string;
+  /** Adopted world/action facts; adapters must not infer new staging from cards. */
+  sceneStaging?: readonly import('./sceneStaging').SceneStaging[];
   durationSec: number;
   aspectRatio: string;
   resolution: string;
@@ -861,6 +863,18 @@ function isH3KeyframeReferenceManifest(manifest: ReferenceManifest): boolean {
     && firstFrames.length <= 1
     && lastFrames.length <= 1;
 }
+
+/** Media selection determines the requested H3 envelope, never the story or
+ * a local rewrite of an already authored delivery. */
+export const h3MediaModeForReferences = (references: readonly PromptReferenceInput[]): 'base' | 'keyframe' | 'full-reference' => {
+  const assets = references.map(normalizeReference);
+  if (!assets.length) return 'base';
+  const boundaryOnly = assets.length <= 2 && assets.every((asset) => asset.mediaType === 'image'
+    && (asset.role === 'first-frame' || asset.role === 'last-frame'))
+    && assets.filter((asset) => asset.role === 'first-frame').length <= 1
+    && assets.filter((asset) => asset.role === 'last-frame').length <= 1;
+  return boundaryOnly ? 'keyframe' : 'full-reference';
+};
 
 /**
  * A visual anchor can arrive from an editable style preset as a delimiter-only

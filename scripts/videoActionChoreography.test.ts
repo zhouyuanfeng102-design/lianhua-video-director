@@ -172,10 +172,11 @@ const eventCases = [{
   result: '陆青接住并抱稳布袋，双方站位保持',
 }];
 const eventTimes = [0, 6, 11, 16, 22, 29, 35];
-const assertEventDirection = (system: string, translation = false): void => {
+const assertEventDirection = (system: string, translation = false, expression = false): void => {
   assert.ok(translation
     ? system.includes(VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE) || system.includes(VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE)
-    : system.includes(VIDEO_ACTION_CHOREOGRAPHY_RULE) || system.includes(VIDEO_ACTION_CAUSALITY_RULE),
+    : expression ? system.includes(VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE)
+      : system.includes(VIDEO_ACTION_CHOREOGRAPHY_RULE) || system.includes(VIDEO_ACTION_CAUSALITY_RULE),
   'the production request contains the complete instruction for its current writing authority');
   if (translation) {
     assert.ok(!system.includes(VIDEO_ACTION_CHOREOGRAPHY_RULE));
@@ -235,7 +236,7 @@ try {
     const result = await generateSingleSegmentPrompt({ board, context, converter, reviewWithAi: true, clean, now: () => 123,
       onQualifiedChinese: (value) => { checkpoint = structuredClone(value); assert.equal(value.officialPromptZh, zh); assert.equal(value.officialPromptEn, ''); },
       request: async (system, user, stage) => {
-        stages.push(stage); assertScope(system, stage === 'translate' ? 'translation' : 'generation');
+        stages.push(stage); assertScope(system, stage === 'translate' ? 'translation' : 'existing');
         if (stage === 'convert') {
           const data = block(user, 'video_conversion_data');
           assert.equal(data.sourceStoryContent, story);
@@ -357,8 +358,8 @@ try {
     const eventStages: SingleSegmentPromptStage[] = [];
     const result = await generateSingleSegmentPrompt({ board, context: { assets: [], characters: [] }, converter, sequenceSegmentContext: semantic,
       reviewWithAi: true, clean, request: async (system, user, stage) => {
-        eventStages.push(stage); assertScope(system, stage === 'translate' ? 'translation' : 'generation');
-        assertEventDirection(system, stage === 'translate');
+        eventStages.push(stage); assertScope(system, stage === 'translate' ? 'translation' : 'existing');
+        assertEventDirection(system, stage === 'translate', true);
         if (stage === 'translate') {
           assert.doesNotMatch(user, /<semantic_segment_source_data>/u, 'translation cannot use source understanding to invent missing choreography');
           const data = block(user, user.includes('<review_data>') ? 'review_data' : 'translation_identity_data');
@@ -403,7 +404,7 @@ try {
       request: async (system, user) => {
         seedanceCalls++;
         if (seedanceCalls === 1) {
-          assert.ok(system.includes(VIDEO_ACTION_CAUSALITY_RULE)); assertEventDirection(system);
+          assert.ok(!system.includes(VIDEO_ACTION_CAUSALITY_RULE)); assertEventDirection(system, false, true);
           const data = block(user, 'seedance_source_data');
           assert.deepEqual(data.sourceEvidence.sequenceSegmentContext.segment.semanticSource.events[0].causality, causality);
           assert.equal(data.sourceEvidence.sourceStoryContent, content); assert.equal(data.specification.durationSec, 35);
@@ -441,8 +442,8 @@ try {
   assert.ok(embeddedConverter.systemPrompt.includes(legacyGenerationRule), 'scope isolation does not rewrite the saved custom converter');
   groups++;
 
-  // Explicit regeneration is fresh action writing even when a proven master
-  // supplies provenance. That evidence must still keep the confirmed schedule.
+  // Explicit downstream regeneration expresses the source plan; it does not
+  // reacquire source choreography permission from the master's provenance.
   {
     const master = makeBoard();
     master.id = 'action-master'; master.sequencePlanId = 'action-master-plan'; master.sourceContentHash = sourceContentHash(story);
@@ -477,10 +478,10 @@ try {
     const result = await regenerateSequenceReferencePrompt({ mode: 'regenerate', board, segment, masterSource,
       context: { assets: [], characters: [] }, converter, reviewWithAi: true, clean,
       request: async (system, user, stage) => {
-        stages.push(stage); assertScope(system, stage === 'translate' ? 'translation' : 'generation');
-        if (stage === 'convert') { assertEventDirection(system); return canonical; }
+        stages.push(stage); assertScope(system, stage === 'translate' ? 'translation' : 'existing');
+        if (stage === 'convert') { assertEventDirection(system, false, true); return canonical; }
         if (stage === 'review') {
-          assertEventDirection(system); const data = block(user, 'video_staging_review_data');
+          assertEventDirection(system, false, true); const data = block(user, 'video_staging_review_data');
           assert.equal(data.taskAuthority, 'preserve-confirmed-schedule'); assert.equal(data.durationSec, 4);
           assert.equal(data.shotMode, 'exact'); assert.equal(data.shotCount, 1);
           assert.deepEqual(data.shots.map((shot: any) => [shot.id, shot.startSec, shot.endSec]), [[board.shots[0].id, 0, 4]]);
@@ -514,7 +515,7 @@ try {
     const before = structuredClone(board); let calls = 0;
     const result = await convertStoryboardDraftToFinal({ draft: board, converter, characters: [actor], clean,
       request: async (system, user) => {
-        calls++; assertScope(system, 'generation');
+        calls++; assertScope(system, 'existing');
         const data = block(user, 'video_conversion_data'); assert.equal(data.sourceStoryContent, neutralStory);
         for (const shot of data.shotEvidence) assert.equal(shot.selectedPrivateFacts.length, privateSelection ? 1 : 0);
         if (privateSelection) assert.equal(data.shotEvidence[0].selectedPrivateFacts[0].profile.fullBody, actor.nsfwProfile?.fullBody);
@@ -541,16 +542,16 @@ try {
     groups++;
   }
   // Malformed JSON uses the existing transport recovery, with preservation
-  // authority even though the first review was allowed to direct a new draft.
+  // authority just like the first source-preserving H3 expression call.
   {
     const board = makeBoard(); const before = structuredClone(board); let reviews = 0;
     const stages: SingleSegmentPromptStage[] = [];
     const result = await generateSingleSegmentPrompt({ board, context: { assets: [], characters: [] }, converter, reviewWithAi: true, clean,
       request: async (system, user, stage) => {
         stages.push(stage);
-        if (stage === 'convert') { assertScope(system, 'generation'); return board.finalPrompt; }
+        if (stage === 'convert') { assertScope(system, 'existing'); return board.finalPrompt; }
         if (stage === 'review') {
-          reviews++; assertScope(system, reviews === 1 ? 'generation' : 'existing');
+          reviews++; assertScope(system, 'existing');
           if (reviews === 1) return '{unreadable JSON';
           const data = block(user, 'h3_staging_delivery_repair_data'); assert.equal(data.candidateDelivery, '{unreadable JSON');
           assert.equal(data.sourceStoryContent, story); return envelope(h3Body(false), board);

@@ -14,6 +14,7 @@ import { maskVideoPictureReferenceLiterals } from './videoPictureReferences';
 import { VIDEO_SCENE_CONTEXT_RULE, type VideoSceneContext } from './videoSceneContext';
 import { MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE } from './nsfwPromptRules';
 import { hasNsfwDetailSignal } from './promptConstraints';
+import { ADOPTED_VIDEO_EXPRESSION_RULE } from './videoCreativeDirection';
 
 export interface OfficialSeedancePromptInput extends PromptAdapterInput {
   /** Request authority only; not an authored section or a source-fingerprint input. */
@@ -359,13 +360,27 @@ const assertSeedanceRequestCurrent = (isCurrent?: () => boolean): void => {
 export const generateOfficialSeedancePrompt = async ({ input, request, isCurrent }: GenerateOfficialSeedancePromptOptions): Promise<Seedance25PromptCompilation> => {
   assertSeedanceRequestCurrent(isCurrent);
   const metadata = compileOfficialSeedancePrompt(input);
+  // Keep the saved fingerprint inputs intact, while the writer receives the
+  // adopted shots rather than the original menu of directing preferences.
+  const { creativeDirection: _creativeDirection, directorStyleSummary: _directorStyleSummary,
+    extraRequirement: _extraRequirement, ...adoptedSourceEvidence } = input.sourceEvidence || {};
+  const expressionSourceEvidence: Record<string, unknown> = { ...adoptedSourceEvidence };
+  const sequenceContext = adoptedSourceEvidence.sequenceSegmentContext;
+  if (sequenceContext && typeof sequenceContext === 'object' && !Array.isArray(sequenceContext)) {
+    const { creativeDirection: _planningPreferences, ...adoptedContext } = sequenceContext as Record<string, unknown>;
+    expressionSourceEvidence.sequenceSegmentContext = adoptedContext;
+  }
   const evidence = {
     voiceFactScope: input.voiceFactScope || 'source-grounded-new-draft',
     canonicalPrompt: input.canonicalPrompt,
-    sourceEvidence: input.sourceEvidence,
+    sourceEvidence: expressionSourceEvidence,
     ...(input.sceneContext ? { sceneContext: structuredClone(input.sceneContext) } : {}),
     specification: { durationSec: metadata.durationSec, aspectRatio: input.aspectRatio, resolution: input.resolution, audioMode: input.audioMode },
-    subjectDefinitions: input.subjectDefinitions || [],
+    subjectDefinitions: (input.subjectDefinitions || []).map((subject) => {
+      if (subject.kind !== 'character') return subject;
+      const { motion: _defaultMotion, ...identity } = subject;
+      return identity;
+    }),
     references: input.references || [],
     referenceManifest: metadata.referenceManifest.assets,
     shotPrivateDetails: input.shotPrivateDetails || [],
@@ -377,7 +392,7 @@ export const generateOfficialSeedancePrompt = async ({ input, request, isCurrent
     JSON.stringify(input.sourceEvidence || ''),
     ...(input.constraints || []),
   ) ? MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE : '';
-  const response = await request([SEEDANCE_CHINESE_WRITER_RULE, VIDEO_SCENE_CONTEXT_RULE, nsfwVideoActionRule].filter(Boolean).join('\n\n'),
+  const response = await request([SEEDANCE_CHINESE_WRITER_RULE, ADOPTED_VIDEO_EXPRESSION_RULE, VIDEO_SCENE_CONTEXT_RULE, nsfwVideoActionRule].filter(Boolean).join('\n\n'),
     `<seedance_source_data>\n${JSON.stringify(evidence, null, 2).replace(/</gu, '\\u003c').replace(/>/gu, '\\u003e')}\n</seedance_source_data>\n依据以上当前证据返回完整 Seedance 中文成稿。`);
   assertSeedanceRequestCurrent(isCurrent);
   const promptZh = cleanSeedancePrompt(response);

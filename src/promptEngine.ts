@@ -1369,6 +1369,7 @@ export const buildShots = (params: {
         sound: plannedShot.sound.trim(),
         result: plannedShot.result.trim(),
         authoredBy: 'text-api',
+        ...(plannedShot.sceneStaging ? { sceneStaging: structuredClone(plannedShot.sceneStaging) } : {}),
         ...(plannedShot.visiblePrivatePartsByCharacter ? {
           visiblePrivatePartsByCharacter: Object.fromEntries(Object.entries(plannedShot.visiblePrivatePartsByCharacter)
             .map(([characterId, parts]) => [characterId, [...parts]])),

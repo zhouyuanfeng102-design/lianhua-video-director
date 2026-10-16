@@ -246,6 +246,7 @@ export interface PromptCharacterParticipationSnapshot extends PromptCharacterPar
 }
 
 export interface StoryboardRevision {
+  sceneStaging?: import('./sceneStaging').SceneStaging[];
   id: string;
   storyboardId?: string;
   revision?: number;
@@ -552,6 +553,8 @@ export interface StoryAnalysisProp {
 }
 
 export interface VideoShot {
+  /** Adopted scene/event state at this shot, never a local spatial verdict. */
+  sceneStaging?: import('./sceneStaging').SceneStaging[];
   id: string;
   index: number;
   startSec: number;
@@ -592,6 +595,7 @@ export interface VideoShot {
 
 /** A complete shot decision authored by the text model in automatic mode. */
 export interface AiStoryboardShotPlan {
+  sceneStaging?: import('./sceneStaging').SceneStaging[];
   startSec: number;
   endSec: number;
   /** Model-provided source explanation; unlocated text is retained without claiming an exact source range. */
@@ -618,6 +622,8 @@ export interface AiStoryboardShotPlan {
 }
 
 export interface AiStoryboardPlan {
+  /** Same-scene choices produced within the existing directing request. */
+  sceneStaging?: import('./sceneStaging').SceneStaging[];
   reason?: string;
   breakdown?: string[];
   shots: AiStoryboardShotPlan[];
@@ -726,6 +732,8 @@ export interface SemanticSegmentSource {
   dialogues: Array<{ id: string; speaker: string; text: string; language?: string; continuation?: string }>;
   /** AI-selected adopted staging for this segment, never original evidence. */
   battleStaging?: import('./battleScenePlanning').BattleSceneStaging[];
+  /** Model-authored world and event phases shared with adjacent segments. */
+  sceneStaging?: import('./sceneStaging').SceneStaging[];
 }
 
 export interface SemanticSequencePlanningSnapshot {
@@ -859,6 +867,7 @@ export interface StoryboardImageToImageSettings {
 }
 
 export interface Storyboard {
+  sceneStaging?: import('./sceneStaging').SceneStaging[];
   /** Digest of standalone source/configuration, independent of the output format. */
   promptGenerationSourceFingerprint?: string;
   storyReferenceContext?: StoryReferenceContext;

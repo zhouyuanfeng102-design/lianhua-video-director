@@ -1,356 +1,82 @@
 import assert from 'node:assert/strict';
 import {
-  SPATIAL_COORDINATE_RULE, SPATIAL_CONTINUITY_REVIEW_RULE, SPATIAL_TRANSLATION_RULE,
-  DIRECTED_ACTION_RELATION_RULE, STORYBOARD_FRAME_VISIBILITY_RULE, STORYBOARD_SPATIAL_FRAME_RULE,
+  SCENE_STAGING_GENERATION_RULE, SPATIAL_COORDINATE_RULE, SPATIAL_CONTINUITY_REVIEW_RULE,
+  SPATIAL_TRANSLATION_RULE, STORYBOARD_FRAME_VISIBILITY_RULE, STORYBOARD_SPATIAL_FRAME_RULE,
   LEGACY_STORYBOARD_SPATIAL_FRAME_RULE_V1_8_1,
 } from '../src/spatialContinuityRules';
-import * as ruleExports from '../src/videoActingCameraRules';
 import {
-  STORY_MOVEMENT_RELATION_RULE, STORY_SPOKEN_CONTENT_RULE,
   VIDEO_INTERACTION_RULES, VIDEO_INTERACTION_TRANSLATION_RULE,
 } from '../src/videoInteractionRules';
-import { STORY_CAUSALITY_RULE } from '../src/storyCausalityRules';
-import { DIALOGUE_DELIVERY_RULE, NO_DIALOGUE_PERFORMANCE_RULE } from '../src/audioPromptPolicy';
-import { SEEDANCE_CHINESE_WRITER_RULE } from '../src/seedancePromptRules';
 import {
-  VIDEO_CONTINUOUS_SCENE_RULE,
-  VIDEO_ACTING_CAMERA_PRESERVATION_RULES,
-  VIDEO_NATURAL_PERFORMANCE_RULE,
-  VIDEO_WORLD_SPACE_CAMERA_RULE,
-  VIDEO_AI_SHOT_COVERAGE_RULE,
-  VIDEO_CAMERA_SELECTION_RULE,
-  VIDEO_MOTIVATED_LIGHTING_RULE,
-  VIDEO_ACTING_CAMERA_FIELD_RULE,
-  VIDEO_ACTING_CAMERA_REVIEW_RULE,
-  VIDEO_ACTING_CAMERA_TRANSLATION_RULE,
-  VIDEO_ACTING_CAMERA_RULES,
-  LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_1_0,
-  LEGACY_VIDEO_AI_SHOT_COVERAGE_RULE_V2_1_0,
-  LEGACY_VIDEO_CAMERA_SELECTION_RULE_V2_1_0,
-  LEGACY_VIDEO_ACTING_CAMERA_FIELD_RULE_V2_1_0,
-  LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_0_1,
-  LEGACY_VIDEO_CAMERA_SELECTION_RULE_V2_0_1,
-  LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_1,
-  LEGACY_VIDEO_ACTING_CAMERA_TRANSLATION_RULE_V1_8_1,
-  stripLegacyVideoActingCameraRules,
+  VIDEO_ACTING_CAMERA_RULES, VIDEO_CONTINUOUS_SCENE_RULE, VIDEO_NATURAL_PERFORMANCE_RULE,
+  VIDEO_WORLD_SPACE_CAMERA_RULE, VIDEO_AI_SHOT_COVERAGE_RULE, VIDEO_CAMERA_SELECTION_RULE,
+  VIDEO_MOTIVATED_LIGHTING_RULE, VIDEO_ACTING_CAMERA_FIELD_RULE,
+  VIDEO_ACTING_CAMERA_REVIEW_RULE, VIDEO_ACTING_CAMERA_TRANSLATION_RULE,
+  VIDEO_ACTING_CAMERA_PRESERVATION_RULES, LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_5_1,
+  LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_1_0, LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_0_1,
+  LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_1, stripLegacyVideoActingCameraRules,
 } from '../src/videoActingCameraRules';
+import { VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT,
+  VIDEO_PROMPT_ENGLISH_AI_REVIEW_SYSTEM_PROMPT } from '../src/promptTranslation';
 
-// Contract tests inspect only the instructions supplied to AI. They never
-// decide whether an AI answer's emotion, shot count or background is valid.
-const tests: Array<{ name: string; run: () => void }> = [];
-const test = (name: string, run: () => void): void => { tests.push({ name, run }); };
+// These checks cover generation authority, ordering and request compatibility.
+// They do not claim that a video model executes a pose or a spatial relation.
+const rules = [SCENE_STAGING_GENERATION_RULE, VIDEO_CONTINUOUS_SCENE_RULE,
+  SPATIAL_COORDINATE_RULE, SPATIAL_CONTINUITY_REVIEW_RULE, VIDEO_INTERACTION_RULES,
+  VIDEO_NATURAL_PERFORMANCE_RULE, VIDEO_WORLD_SPACE_CAMERA_RULE,
+  VIDEO_AI_SHOT_COVERAGE_RULE, VIDEO_CAMERA_SELECTION_RULE,
+  VIDEO_MOTIVATED_LIGHTING_RULE, VIDEO_ACTING_CAMERA_FIELD_RULE];
+assert.equal(VIDEO_ACTING_CAMERA_RULES, rules.join('\n\n'));
+for (const rule of rules) assert.equal(VIDEO_ACTING_CAMERA_RULES.split(rule).length - 1, 1);
+assert.equal(VIDEO_ACTING_CAMERA_RULES.includes(VIDEO_ACTING_CAMERA_REVIEW_RULE), false,
+  'the source contract generates the adopted scene without a candidate-review instruction');
+assert.equal(VIDEO_WORLD_SPACE_CAMERA_RULE.includes(VIDEO_INTERACTION_RULES), false,
+  'camera projection no longer nests the same interaction contract');
+assert.equal(VIDEO_WORLD_SPACE_CAMERA_RULE.includes(SPATIAL_COORDINATE_RULE), false);
 
-test('the module exposes text contracts and one request-only compatibility helper; the current bundle contains each directing rule once', () => {
-  assert.equal(ruleExports.stripLegacyVideoActingCameraRules, stripLegacyVideoActingCameraRules);
-  for (const [name, value] of Object.entries(ruleExports)) {
-    if (name === 'stripLegacyVideoActingCameraRules') continue;
-    assert.ok(typeof value === 'string' && value.length > 0, `${name} must remain a text contract`);
-  }
-  const rules = [
-    VIDEO_CONTINUOUS_SCENE_RULE, VIDEO_NATURAL_PERFORMANCE_RULE, VIDEO_WORLD_SPACE_CAMERA_RULE,
-    VIDEO_AI_SHOT_COVERAGE_RULE, VIDEO_CAMERA_SELECTION_RULE,
-    VIDEO_MOTIVATED_LIGHTING_RULE, VIDEO_ACTING_CAMERA_FIELD_RULE,
-    VIDEO_ACTING_CAMERA_REVIEW_RULE,
-  ];
-  assert.equal(VIDEO_ACTING_CAMERA_RULES, rules.join('\n\n'));
-  for (const rule of rules) assert.equal(VIDEO_ACTING_CAMERA_RULES.split(rule).length - 1, 1);
-  assert.equal(VIDEO_ACTING_CAMERA_RULES.includes(VIDEO_ACTING_CAMERA_TRANSLATION_RULE), false);
-});
-
-test('request compatibility preserves complete current bundles and every current single camera/spatial/frame rule', () => {
-  const currentRules = [
-    VIDEO_ACTING_CAMERA_RULES, VIDEO_ACTING_CAMERA_TRANSLATION_RULE,
-    VIDEO_CONTINUOUS_SCENE_RULE, VIDEO_ACTING_CAMERA_PRESERVATION_RULES,
-    VIDEO_NATURAL_PERFORMANCE_RULE, VIDEO_WORLD_SPACE_CAMERA_RULE,
-    VIDEO_AI_SHOT_COVERAGE_RULE, VIDEO_CAMERA_SELECTION_RULE,
-    VIDEO_MOTIVATED_LIGHTING_RULE, VIDEO_ACTING_CAMERA_FIELD_RULE,
-    VIDEO_ACTING_CAMERA_REVIEW_RULE, SPATIAL_COORDINATE_RULE,
-    SPATIAL_CONTINUITY_REVIEW_RULE, SPATIAL_TRANSLATION_RULE,
-    DIRECTED_ACTION_RELATION_RULE, STORYBOARD_FRAME_VISIBILITY_RULE, STORYBOARD_SPATIAL_FRAME_RULE,
-  ];
-  for (const rule of currentRules) {
-    assert.equal(stripLegacyVideoActingCameraRules(rule), rule,
-      'shared legacy text nested inside a current block must not remove current instructions');
-  }
-  const currentRequest = currentRules.join('\ncustom separator\n');
-  assert.equal(stripLegacyVideoActingCameraRules(currentRequest), currentRequest);
-});
-
-test('request compatibility removes full changed legacy blocks in mixed requests while preserving current rules and custom text', () => {
-  const prefix = 'User custom direction: keep the original fight outcome.\n';
-  const suffix = '\nCustom appendix: the camera observes the action.';
-  const mixed = prefix + LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_1
-    + '\n' + VIDEO_ACTING_CAMERA_RULES + '\n'
-    + LEGACY_VIDEO_ACTING_CAMERA_TRANSLATION_RULE_V1_8_1
-    + '\n' + VIDEO_ACTING_CAMERA_TRANSLATION_RULE + '\n'
-    + LEGACY_STORYBOARD_SPATIAL_FRAME_RULE_V1_8_1
-    + '\n' + STORYBOARD_SPATIAL_FRAME_RULE + suffix;
-  const expected = prefix + '\n' + VIDEO_ACTING_CAMERA_RULES + '\n'
-    + '\n' + VIDEO_ACTING_CAMERA_TRANSLATION_RULE + '\n'
-    + '\n' + STORYBOARD_SPATIAL_FRAME_RULE + suffix;
-  assert.equal(stripLegacyVideoActingCameraRules(mixed), expected);
-  assert.equal(stripLegacyVideoActingCameraRules(LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_1), '');
-  assert.equal(stripLegacyVideoActingCameraRules(prefix + suffix), prefix + suffix,
-    'custom prose is not a semantic rewriting target');
-});
-
-test('2.0.1 camera requests upgrade once without changing custom prose, translation or the saved preset', () => {
-  const custom = '用户运镜要求：保留有叙事依据的武器接触特写。';
-  for (const retired of [LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_0_1, LEGACY_VIDEO_CAMERA_SELECTION_RULE_V2_0_1]) {
-    const preset = [custom, retired, VIDEO_ACTING_CAMERA_TRANSLATION_RULE].join('\n\n');
-    const snapshot = preset;
-    const currentRequest = [stripLegacyVideoActingCameraRules(preset), VIDEO_ACTING_CAMERA_RULES].join('\n\n');
-    assert.equal(currentRequest.split(VIDEO_CAMERA_SELECTION_RULE).length - 1, 1);
-    assert.equal(currentRequest.includes(retired), false);
-    assert.ok(currentRequest.includes(custom));
-    assert.ok(currentRequest.includes(VIDEO_ACTING_CAMERA_TRANSLATION_RULE));
-    assert.equal(stripLegacyVideoActingCameraRules(currentRequest), currentRequest);
-    assert.equal(preset, snapshot, 'request compatibility does not migrate stored preset text');
-  }
-});
-
-test('continuous scenes and current downstream preservation keep separate photography permissions', () => {
-  for (const requirement of [
-    /按地点、连续时间、人物目标、阻碍及局势变化组织连续场面/u,
-    /事件条目、人物登场、段落标题与生成窗口都不自动成为摄影切点/u,
-    /身份资料是辨认与连续性依据，不是需要演出的事件/u,
-    /不为每个微动作编造小数秒排程/u,
-  ]) assert.match(VIDEO_CONTINUOUS_SCENE_RULE, requirement);
-  for (const requirement of [
-    /保留既定镜数、顺序、切点、景别、机位、轴线侧别、运镜、观察对象与注意交接/u,
-    /不授权主动选镜、改机位、切特写、拆合镜头或另编摄影/u,
-    /连续动作强度、对方同步回应、接触或落空及进入退出状态/u,
-    /原对白逐字保留原语言、具名说话人、声源、完整发话区间/u,
-    /不借澄清重做摄影/u,
-  ]) assert.match(VIDEO_ACTING_CAMERA_PRESERVATION_RULES, requirement);
-  assert.equal(VIDEO_ACTING_CAMERA_PRESERVATION_RULES.includes(VIDEO_AI_SHOT_COVERAGE_RULE), false);
-  assert.equal(VIDEO_ACTING_CAMERA_PRESERVATION_RULES.includes(VIDEO_CAMERA_SELECTION_RULE), false);
-});
-
-test('the retired current director bundle is recognized without changing saved presets or current transcription', () => {
-  const oldRules = [LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_1_0,
-    LEGACY_VIDEO_AI_SHOT_COVERAGE_RULE_V2_1_0, LEGACY_VIDEO_CAMERA_SELECTION_RULE_V2_1_0,
-    LEGACY_VIDEO_ACTING_CAMERA_FIELD_RULE_V2_1_0];
-  for (const old of oldRules) {
-    const saved = ['custom visual preference', old].join('\n');
-    const snapshot = saved;
-    const request = [stripLegacyVideoActingCameraRules(saved), VIDEO_ACTING_CAMERA_PRESERVATION_RULES].join('\n');
-    assert.equal(request.includes(old), false);
-    assert.equal(request.includes(VIDEO_AI_SHOT_COVERAGE_RULE), false);
-    assert.ok(request.includes(VIDEO_ACTING_CAMERA_PRESERVATION_RULES));
-    assert.equal(saved, snapshot);
-  }
-});
-
-test('performance follows story stimuli and permits warranted strong emotion without mechanical quotas', () => {
-  for (const requirement of [
-    /原剧情、人物关系、已知性格和当前信息/u,
-    /身份与面容稳定不等于表情冻结/u,
-    /刺激后的理解、回应与自然回落/u,
-    /不要求每镜凑齐一套微动作/u,
-    /原文有强烈喜悦、恐惧、愤怒等就保留/u,
-    /不能一律改成面无表情或微笑/u,
-    /不指定固定眨眼频率、每秒表情次数/u,
-  ]) assert.match(VIDEO_NATURAL_PERFORMANCE_RULE, requirement);
-});
-
-test('speaker and listener have separate timing and reactions without forcing visible faces or new actions', () => {
-  for (const requirement of [
-    /说话者的口型和语气跟随自己的原话及停顿/u,
-    /倾听者依实际听到的信息/u,
-    /不代说、不随别人的台词张口/u,
-    /不把不说话写成紧咬嘴唇或全程木然/u,
-    /表情不随切镜机械重置/u,
-    /不强迫背影和远景展示不可见的面部细节/u,
-    /不为表演新增剧情事件、改变原有情绪走向或添加影响因果的人物动作/u,
-  ]) assert.match(VIDEO_NATURAL_PERFORMANCE_RULE, requirement);
-});
-
-test('identity-profile habits and expression anchors do not become fixed acting or premature story events', () => {
-  for (const requirement of [
-    /普通身份资料中的性格、动作习惯/u,
-    /“笑容明亮”“被某事后神色如常”等静态或条件式表情锚点只是角色参考/u,
-    /不是当镜必须执行的事件或全程固定表情/u,
-    /不把整份档案逐镜复制成动作命令/u,
-    /以当前段真实事件触发表演变化/u,
-    /档案里的条件只有当前剧情实际触发才适用/u,
-    /不把后段才发生的动作或后果提前/u,
-    /不为丰富表情添加影响剧情的动作/u,
-    /保留原有角色身份与用户明确设定/u,
-    /不擅自改变年龄、衣着、外貌或已确认状态/u,
-  ]) assert.match(VIDEO_NATURAL_PERFORMANCE_RULE, requirement);
-});
-
-test('world route, camera pose and actually visible background are distinct and legal frontal tracking is retained', () => {
-  for (const requirement of [
-    /世界空间记录起点、当前所在路段、目的地/u,
-    /镜头空间记录摄影机相对人物的位置、朝向、运动轨迹/u,
-    /行进路线和目的地不等于摄影机朝向/u,
-    /正面跟拍可以是摄影机位于人物前方并向后退拍/u,
-    /背景应来自人物身后、摄影机实际视野所及的路段/u,
-    /不能仅因人物将到达某地就把该目的地凭空换成背后背景/u,
-    /不把所有背景变化都判成错误/u,
-    /摄影机换位不等于人物转身/u,
-    /不为修复空间虚构掉头、瞬移、时间跳跃或新路线/u,
-  ]) assert.match(VIDEO_WORLD_SPACE_CAMERA_RULE, requirement);
-});
-
-test('world-space direction carries named body sides, screen projection and scene continuity once', () => {
-  for (const rule of [SPATIAL_COORDINATE_RULE, SPATIAL_CONTINUITY_REVIEW_RULE]) {
-    assert.equal(VIDEO_WORLD_SPACE_CAMERA_RULE.split(rule).length - 1, 1);
-    assert.equal(VIDEO_ACTING_CAMERA_RULES.split(rule).length - 1, 1);
-    assert.equal(VIDEO_ACTING_CAMERA_TRANSLATION_RULE.includes(rule), false,
-      'translation does not independently re-plan spatial staging');
-  }
-  for (const requirement of [
-    /人物自身左右/u,
-    /世界站位/u,
-    /观众画面左右（screen-left\/screen-right）/u,
-    /不能凭镜像画面互换人物、身体侧别或地标/u,
-    /左右前方机位变化不必然越轴/u,
-    /画外人物只保留空间关系/u,
-    /不机械固定每个人永远在屏幕某侧/u,
-  ]) assert.match(VIDEO_WORLD_SPACE_CAMERA_RULE, requirement);
-});
-
-test('AI selects shot coverage by information and space while confirmed conversion boundaries stay fixed', () => {
-  for (const requirement of [
-    /先排本段各事件的实际起止、完整对白与必要反应，再决定摄影覆盖/u,
-    /不预设三镜或其他镜数，不按15秒等分/u,
-    /用户exact镜数严格保持/u,
-    /auto从能清楚表现全部因果的最少必要视角开始/u,
-    /规划JSON沿用reason（保存后对应shotCountReason）以及purpose\/transition/u,
-    /当前取景与自然镜内调整无法清楚表达下一项关键叙事信息时，才切向所需的新画面/u,
-    /不是硬性一镜到底/u,
-    /少而充分的镜头与简单连贯的摄影/u,
-    /一个连续镜头已能看清接触、轨迹与回应时，优先在镜内调整关注/u,
-    /一个镜头可以承载相互因果的多个事件、动作与话轮/u,
-    /镜头时长不等于事件持续时长/u,
-    /保留既定镜数、顺序和切点/u,
-    /不重切已确认稿或裁掉对白/u,
-  ]) assert.match(VIDEO_AI_SHOT_COVERAGE_RULE, requirement);
-});
-
-test('selected camera terms are real inputs and unselected shots still get motivated AI choices', () => {
-  for (const requirement of [
-    /用户实际选择的cameraTerms及具体运镜要求是真实创作输入/u,
-    /明确的必选或指定镜头要求按其范围遵守/u,
-    /选择了多个效果不等于每镜同时叠加所有/u,
-    /不能把用户选择全部丢掉/u,
-    /未选择时依据观看任务选择简洁固定、自然跟随或必要运动/u,
-    /普通多选偏好是可用手段，不是逐项展示任务/u,
-    /高速动作不等于快速剪辑/u,
-    /不能回退为每镜固定同一种默认跟拍/u,
-    /每镜在现有camera写出景别、必要的机位\/视角/u,
-    /在purpose或camera用简短可执行语句落实选择理由/u,
-    /不强制正脸覆盖/u,
-  ]) assert.match(VIDEO_CAMERA_SELECTION_RULE, requirement);
-});
-
-test('character attention and attack targets do not automatically select camera subjects or close-ups', () => {
-  for (const requirement of [
-    /分别确定人物的视线\/攻击目标与摄影的主体、取景范围和焦点/u,
-    /由剧情行动决定并写在direction\/action\/performance/u,
-    /摄影的观看任务是让观众理解已经发生的关系、接触、反应或关键新信息/u,
-    /观察、判断或寻找破绽先用关系构图及观察者的视线、表情、姿态表达/u,
-    /目光落点本身不构成推近局部、追随视线切特写或定格的摄影要求/u,
-    /局部特写在关键局部提供必要新信息、现有关系景别无法读清或用户明确指定时使用/u,
-    /原剧情确需的接触细节、线索及局部变化保留/u,
-    /裁切仍继承具名对象与方向关系/u,
-  ]) assert.match(VIDEO_CAMERA_SELECTION_RULE, requirement);
-  assert.equal(VIDEO_ACTING_CAMERA_TRANSLATION_RULE.includes(VIDEO_CAMERA_SELECTION_RULE), false,
-    'translation only preserves approved framing instead of choosing a new camera focus');
-  assert.doesNotMatch(VIDEO_CAMERA_SELECTION_RULE, /马雷|腹部|肚子|禁止(?:全部|所有)特写/u,
-    'source camera decisions are general rules, not a case-specific framing blacklist');
-});
-
-test('lighting is scene-driven with world-source continuity rather than fixed camera-side or numeric presets', () => {
-  for (const requirement of [
-    /用户选择的lightingTerms及明确光影要求/u,
-    /没有选择也要自主给出符合情境的具体光影/u,
-    /保持世界中的主光源方位和时间连续/u,
-    /不把每镜同一句“左侧光”当成光源连续/u,
-    /原剧情需要阴影或强烈风格时照常保留/u,
-    /不凭空新增灯具、天气或昼夜变化/u,
-    /不强制固定色温数值或明暗比/u,
-    /在已有lighting及镜内光影文字/u,
-  ]) assert.match(VIDEO_MOTIVATED_LIGHTING_RULE, requirement);
-});
-
-test('decisions fit existing shot fields and H3 sections without a new report or schema', () => {
-  for (const requirement of [
-    /现有逐镜内容/u,
-    /purpose、action、performance、direction、space、camera、lighting、transition、result/u,
-    /保持既有数据结构/u,
-    /H3稿将这些既定内容融入当前每个\[Shot N\]的现有段落/u,
-    /保持既有H3顶层section名称、顺序、参考标签和输出格式/u,
-    /时间切点保持源头排程/u,
-    /转换和翻译不根据风格或资料重新设计摄影/u,
-    /仍保持用户固定段长与exact镜数/u,
-    /不新增表演审查、空间地图、运镜理由等H3顶层字段或附录/u,
-    /不输出内部推理链/u,
-  ]) assert.match(VIDEO_ACTING_CAMERA_FIELD_RULE, requirement);
-});
-
-test('AI self-review repairs the full prompt without local semantic gates or paid video reruns', () => {
-  for (const requirement of [
-    /同一AI对照当前段原文/u,
-    /实际选择的运镜\/光影/u,
-    /表演是否有触发依据和自然变化/u,
-    /机位和视向是否确实能看到所写背景/u,
-    /在当前阶段允许的字段和边界内修正/u,
-    /保留本来合理的强烈表演、固定镜头、正面跟拍和背景变化/u,
-    /复核修复后返回完整最终正文/u,
-    /全部内容判断由AI完成/u,
-    /不增加本地语义拦截、关键词否决或表情\/镜数配额/u,
-    /不要求先生成视频或重新运行收费视频/u,
-  ]) assert.match(VIDEO_ACTING_CAMERA_REVIEW_RULE, requirement);
-});
-
-test('translation preserves confirmed acting and camera-space distinctions without replanning', () => {
-  assert.equal(VIDEO_ACTING_CAMERA_TRANSLATION_RULE.split(SPATIAL_TRANSLATION_RULE).length - 1, 1);
-  assert.equal(VIDEO_ACTING_CAMERA_RULES.includes(SPATIAL_TRANSLATION_RULE), false);
-  for (const requirement of [
-    /已确认中文H3为唯一执行稿/u,
-    /逐镜表演幅度、触发和回落/u,
-    /说话与倾听归属、世界路线、人物朝向/u,
-    /双方进入\/退出关系/u,
-    /机位视向、可见背景/u,
-    /准确区分人物向目的地前进与摄影机向后退拍/u,
-    /保留中文已经明确的强烈情绪或静止状态/u,
-    /只修复翻译遗漏与歧义/u,
-    /不另作镜数、机位、剧情或光影设计/u,
-    /不改变H3 section、参考标签、\[Shot N\]和At切点/u,
-  ]) assert.match(VIDEO_ACTING_CAMERA_TRANSLATION_RULE, requirement);
-});
-
-test('video and the independent Seedance writer share interaction/distance facts without importing still-frame serialization', () => {
-  for (const bundle of [VIDEO_ACTING_CAMERA_RULES, SEEDANCE_CHINESE_WRITER_RULE]) {
-    assert.equal(bundle.split(VIDEO_INTERACTION_RULES).length - 1, 1);
-    assert.equal(bundle.includes(VIDEO_INTERACTION_TRANSLATION_RULE), false,
-      'new writing receives directing facts rather than a translation-only scope');
-    assert.doesNotMatch(bundle, /静帧只冻结一个动作阶段/u,
-      'continuous video writing must not inherit the still-frame-only contract');
-  }
-  assert.equal(VIDEO_ACTING_CAMERA_TRANSLATION_RULE.split(VIDEO_INTERACTION_TRANSLATION_RULE).length - 1, 1);
-  assert.equal(VIDEO_ACTING_CAMERA_TRANSLATION_RULE.includes(VIDEO_INTERACTION_RULES), false,
-    'translation preserves current staging instead of planning a new layout');
-});
-
-test('source understanding preserves retreat/pursuit and interprets spoken words before literal delivery', () => {
-  assert.ok(STORY_CAUSALITY_RULE.includes(STORY_MOVEMENT_RELATION_RULE));
-  for (const bundle of [STORY_CAUSALITY_RULE, DIALOGUE_DELIVERY_RULE, SEEDANCE_CHINESE_WRITER_RULE]) {
-    assert.ok(bundle.includes(STORY_SPOKEN_CONTENT_RULE),
-      'each source writer distinguishes a spoken spell from its editorial translation');
-  }
-  assert.ok(SEEDANCE_CHINESE_WRITER_RULE.includes(NO_DIALOGUE_PERFORMANCE_RULE),
-    'the independent writer shares positive non-speaking performance and source-grounded sound scope');
-  assert.match(STORY_SPOKEN_CONTENT_RULE, /翻译、参考更新、衔接和纯格式修复保真当前已确认的全部发声原字与归属/u,
-    'new source interpretation must not strip dialogue from existing translation/repair tasks');
-});
-
-for (const { name, run } of tests) {
-  run();
-  console.log(`PASS ${name}`);
+for (const field of ['sceneId', 'worldRelations', 'bodyFacing', 'gazeTarget', 'actionTarget',
+  'cameraTarget', 'motionPath', 'motionEndpoint', 'endState']) {
+  assert.ok(SCENE_STAGING_GENERATION_RULE.includes(field), field);
 }
-console.log(`videoActingCameraRules: ${tests.length} tests passed (text contracts only, no API or media calls).`);
+assert.match(SCENE_STAGING_GENERATION_RULE, /原事件与世界关系 → 连续行动及末态 → 摄影观看任务 → 当前可见范围 → 可见身份/u);
+assert.match(SCENE_STAGING_GENERATION_RULE, /动作方向和最终位置分别表达/u);
+assert.match(SPATIAL_COORDINATE_RULE, /身体的前方不等于摄影机前景/u);
+assert.match(SCENE_STAGING_GENERATION_RULE, /转身、回头或改换目标须由剧情事件/u);
+assert.match(SCENE_STAGING_GENERATION_RULE, /主观视点、正脸、反打和环绕都可以/u);
+assert.match(SCENE_STAGING_GENERATION_RULE, /头、胸髋、眼神与武器可因当前动作合理不同向/u);
+assert.match(VIDEO_WORLD_SPACE_CAMERA_RULE, /cameraTarget[\s\S]*bodyFacing、gazeTarget及actionTarget分开/u);
+assert.match(VIDEO_NATURAL_PERFORMANCE_RULE, /完整身份不强制露脸/u);
+assert.match(VIDEO_NATURAL_PERFORMANCE_RULE, /说话者口型跟随自己的原话与停顿/u);
+assert.match(STORYBOARD_FRAME_VISIBILITY_RULE, /先描述当前可见面[\s\S]*从角色资料选入相应可见外貌/u);
+
+for (const rule of [VIDEO_ACTING_CAMERA_PRESERVATION_RULES, VIDEO_ACTING_CAMERA_TRANSLATION_RULE]) {
+  assert.equal(rule.includes(SCENE_STAGING_GENERATION_RULE), false);
+  assert.equal(rule.includes(VIDEO_CAMERA_SELECTION_RULE), false,
+    'downstream transcription and translation do not acquire photography authority');
+}
+assert.equal(VIDEO_ACTING_CAMERA_TRANSLATION_RULE.split(SPATIAL_TRANSLATION_RULE).length - 1, 1);
+assert.equal(VIDEO_ACTING_CAMERA_TRANSLATION_RULE.split(VIDEO_INTERACTION_TRANSLATION_RULE).length - 1, 1);
+for (const system of [VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT,
+  VIDEO_PROMPT_ENGLISH_AI_REVIEW_SYSTEM_PROMPT]) {
+  assert.ok(system.includes(VIDEO_ACTING_CAMERA_TRANSLATION_RULE));
+  assert.equal(system.includes(SCENE_STAGING_GENERATION_RULE), false);
+  assert.match(system, /不在翻译阶段重新导演/u);
+}
+
+const current = [VIDEO_ACTING_CAMERA_RULES, VIDEO_ACTING_CAMERA_TRANSLATION_RULE,
+  VIDEO_ACTING_CAMERA_PRESERVATION_RULES, SCENE_STAGING_GENERATION_RULE,
+  STORYBOARD_FRAME_VISIBILITY_RULE, STORYBOARD_SPATIAL_FRAME_RULE];
+for (const rule of current) assert.equal(stripLegacyVideoActingCameraRules(rule), rule);
+for (const old of [LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_5_1,
+  LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_1_0, LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_0_1,
+  LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_1, LEGACY_STORYBOARD_SPATIAL_FRAME_RULE_V1_8_1]) {
+  const custom = '用户自定义：保留当前剧情和摄影。';
+  const frozen = custom + '\n' + old;
+  const snapshot = frozen;
+  const request = stripLegacyVideoActingCameraRules(frozen) + '\n' + VIDEO_ACTING_CAMERA_RULES;
+  assert.equal(request.includes(old), false);
+  assert.ok(request.includes(custom));
+  assert.equal(request.split(SCENE_STAGING_GENERATION_RULE).length - 1, 1);
+  assert.equal(frozen, snapshot, 'compatibility changes request copies rather than saved presets');
+}
+console.log('videoActingCameraRules: scene authority, visibility, translation and legacy compatibility contracts ready.');

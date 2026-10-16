@@ -7,7 +7,8 @@ import { readH3PromptProtocol } from '../src/h3PromptProtocol';
 import { sourceContentHash } from '../src/sourceIntegrity';
 import {
   buildVideoCreativeDirection, videoCreativeDirectionForBoard, VIDEO_CREATIVE_DIRECTION_DATA_RULE,
-  VIDEO_CREATIVE_DIRECTION_TRANSLATION_DATA_RULE, type VideoCreativeDirection,
+  VIDEO_CREATIVE_DIRECTION_TRANSLATION_DATA_RULE, ADOPTED_VIDEO_EXPRESSION_RULE,
+  adoptedVideoExpressionForBoard, type VideoCreativeDirection,
 } from '../src/videoCreativeDirection';
 import { VIDEO_ACTING_CAMERA_RULES, VIDEO_ACTING_CAMERA_PRESERVATION_RULES, VIDEO_ACTING_CAMERA_TRANSLATION_RULE } from '../src/videoActingCameraRules';
 import { SPATIAL_TRANSLATION_RULE } from '../src/spatialContinuityRules';
@@ -172,6 +173,30 @@ const assertShotFacts = (facts: Record<string, any>, board: Storyboard, planned 
     }
   }
 };
+const assertAdoptedExpression = (facts: Record<string, any>, board: Storyboard, system: string, english = false): void => {
+  assert.equal(Object.hasOwn(facts, 'creativeDirection'), false, 'downstream expression does not receive unused creative menus again');
+  const adopted = adoptedVideoExpressionForBoard(board);
+  assert.deepEqual(facts.adoptedVisualExpression, adopted.adoptedVisualExpression);
+  assert.deepEqual(facts.sceneStaging, adopted.sceneStaging);
+  const rule = english ? VIDEO_CREATIVE_DIRECTION_TRANSLATION_DATA_RULE : ADOPTED_VIDEO_EXPRESSION_RULE;
+  assert.equal(system.split(rule).length - 1, 1);
+  assert.equal(system.includes(VIDEO_CREATIVE_DIRECTION_DATA_RULE), false);
+};
+/** Synthetic model output for the existing delivery callback. Production no
+ * longer fabricates a candidate H3 body before this request. */
+const authoredH3Fixture = (board: Storyboard, facts: OfficialH3ProjectContext): string => {
+  const ids = [...new Set([...(board.globalReferenceAssetIds || []), ...board.shots.flatMap((shot) => shot.referenceAssetIds || [])])];
+  const full = ids.length > 0;
+  return [
+    ...(full ? ['subject_definitions:',
+      ...(facts.characters || []).map((actor, index) => `<Subject ${index + 1}> is ${actor.name}${ids[index] ? ` referenced from <Picture ${index + 1}>` : ''}: ordinary identity only.`),
+      ...ids.slice(facts.characters?.length || 0).map((_id, index) => `<Picture ${(facts.characters?.length || 0) + index + 1}> is the selected reference.`),
+      'summary: Continue the saved scene.', 'retention_analysis: Preserve selected identity and composition references.'] : []),
+    full ? 'detailed_description:' : 'integrated_multimodal_description:',
+    ...board.shots.map((shot, index) => `[Shot ${index + 1}] ${index ? `At 00:${shot.startSec.toFixed(3).padStart(6, '0')}, ` : ''}${canonicalShot(shot)}`),
+    'overall_soundscape: N/A', 'non_diegetic_music: N/A',
+  ].join('\n');
+};
 const noLocalCleaning = (): never => { throw new Error('model-authored content must not pass through local cleaning'); };
 const response = (value: unknown): HttpResult => ({
   status: 200, body: JSON.stringify({ choices: [{ message: { content: typeof value === 'string' ? value : JSON.stringify(value) } }] }),
@@ -289,7 +314,7 @@ test('legacy pacing-only requirements and empty preferences reach planning witho
   }
 });
 
-test('ordinary conversion, H3 and English delivery retain full direction and source staging without extra requests', async () => {
+test('ordinary conversion, H3 and English express adopted staging without resending creative selections or extra requests', async () => {
   const board = makeBoard(4);
   const before = JSON.stringify({ board, context });
   const stages: SingleSegmentPromptStage[] = [];
@@ -304,7 +329,7 @@ test('ordinary conversion, H3 and English delivery retain full direction and sou
         conversionCalls += 1;
         assert.equal(conversionCalls, 1, 'valid source conversion does not add a structural repair');
         const data = jsonBlock(user, 'video_conversion_data');
-        assertDirection(data.creativeDirection, direction); assertDirectionOnce(user); assertCreativeRuleOnce(system);
+        assertAdoptedExpression(data, board, system);
         assertShotFacts(data, board, true); assert.equal(data.sourceStoryContent, source);
         return board.finalPrompt;
       }
@@ -314,9 +339,10 @@ test('ordinary conversion, H3 and English delivery retain full direction and sou
         const data = jsonBlock(user, 'video_staging_review_data');
         const facts = data;
         assert.equal(facts.taskAuthority, 'preserve-confirmed-schedule', 'ordinary H3 delivery cannot replan even a fresh draft');
-        assertDirection(facts.creativeDirection, direction); assertDirectionOnce(user); assertCreativeRuleOnce(system);
+        assertAdoptedExpression(facts, board, system);
         assertShotFacts(facts, board); assert.equal(facts.sourceStoryContent, source);
-        finalChinese = data.candidatePrompt;
+        assert.equal(data.candidatePrompt, '', 'the existing model call authors the H3 sections');
+        finalChinese = authoredH3Fixture(board, context);
         assert.equal(readH3PromptProtocol(finalChinese)?.shots.length, 4);
         return finalChinese;
       }
@@ -329,7 +355,7 @@ test('ordinary conversion, H3 and English delivery retain full direction and sou
       assert.equal(englishCalls, 2, 'normal translation uses its existing review without another protocol repair');
       const data = jsonBlock(user, 'review_data');
       const review = data;
-      assertDirection(review.stagingContext.creativeDirection, direction); assertDirectionOnce(user); assertCreativeRuleOnce(system, true);
+      assertAdoptedExpression(review.stagingContext, board, system, true);
       assertShotFacts(review.stagingContext, board); assert.equal(review.sourcePrompt, finalChinese);
       assert.equal(data.candidateEnglishPrompt, finalEnglish);
       assert.match(system, /不(?:授权|以|得).*?(?:重|新增|改剧情)/u, 'context cannot authorize English replanning');
@@ -362,10 +388,11 @@ for (const count of [2, 4] as const) {
         assert.notEqual(stage, 'convert', 'confirmed master slices cannot make another conversion request');
         if (stage === 'review') {
           const data = jsonBlock(user, 'video_staging_review_data');
-          assertDirection(data.creativeDirection, direction); assertDirectionOnce(user); assertCreativeRuleOnce(system);
+          assertAdoptedExpression(data, board, system);
           assertShotFacts(data, board); assert.equal(data.segmentScope.segmentId, board.segmentId);
           assert.equal(data.segmentScope.savedSegmentSourceStoryContent, source);
-          finalChinese = data.candidatePrompt;
+          assert.equal(data.candidatePrompt, '');
+          finalChinese = authoredH3Fixture(board, context);
           const protocol = readH3PromptProtocol(finalChinese);
           assert.ok(protocol); assert.equal(protocol.shots.length, count); assert.ok(protocol.references.length > 0);
           assert.deepEqual(protocol.shots, board.shots.map((shot, index) => ({
@@ -377,7 +404,7 @@ for (const count of [2, 4] as const) {
         if (englishCalls === 1) assert.equal(user, finalChinese);
         else {
           const data = jsonBlock(user, 'review_data');
-          assertDirection(data.stagingContext.creativeDirection, direction); assertDirectionOnce(user); assertCreativeRuleOnce(system, true);
+          assertAdoptedExpression(data.stagingContext, board, system, true);
           assertShotFacts(data.stagingContext, board); assert.equal(data.sourcePrompt, finalChinese);
         }
         return finalChinese.replaceAll('林舟', 'Lin Zhou');
@@ -393,9 +420,8 @@ for (const count of [2, 4] as const) {
   });
 }
 
-test('empty saved preferences remain arrays through confirmed Chinese and English reviews without default cameras', async () => {
+test('empty saved preferences are not reintroduced into expression and do not create default cameras', async () => {
   const board = makeBoard(4, buildVideoCreativeDirection(), true);
-  const expected: VideoCreativeDirection = { stylePreset: { id: '' }, cameraTerms: [], lightingTerms: [], extraRequirement: '' };
   const stages: SingleSegmentPromptStage[] = [];
   let candidate = ''; let englishCalls = 0;
   const result = await generateSingleSegmentPrompt({
@@ -405,13 +431,12 @@ test('empty saved preferences remain arrays through confirmed Chinese and Englis
       assertActingRuleOnce(system, stage === 'translate');
       if (stage === 'review') {
         const data = jsonBlock(user, 'video_staging_review_data');
-        assertCreativeRuleOnce(system);
-        assertDirection(data.creativeDirection, expected); assertShotFacts(data, board);
-        candidate = data.candidatePrompt;
+        assertAdoptedExpression(data, board, system); assertShotFacts(data, board);
+        assert.equal(data.candidatePrompt, '');
+        candidate = authoredH3Fixture(board, context);
       } else if (++englishCalls === 2) {
         const data = jsonBlock(user, 'review_data');
-        assertCreativeRuleOnce(system, true);
-        assertDirection(data.stagingContext.creativeDirection, expected); assertShotFacts(data.stagingContext, board);
+        assertAdoptedExpression(data.stagingContext, board, system, true); assertShotFacts(data.stagingContext, board);
       } else assert.equal(user, candidate);
       return candidate;
     },
@@ -472,14 +497,14 @@ test('anonymous source camera facts remain the photography authority through Chi
       assertActingRuleOnce(system, stage === 'translate');
       if (stage === 'review') {
         assert.equal(stages.length, 1, 'the readable conflict goes directly to the same AI review, not a local semantic gate');
-        assertCreativeRuleOnce(system);
         const data = jsonBlock(user, 'video_staging_review_data');
-        assert.deepEqual(data.creativeDirection.cameraTerms, []); assert.deepEqual(data.creativeDirection.lightingTerms, []);
+        assertAdoptedExpression(data, anonymousBoard, system);
         assert.equal(data.sourceStoryContent, anonymousSource); assertShotFacts(data, anonymousBoard);
         assert.equal(data.shots[1].camera, conflictingCamera);
         assert.match(data.shots[1].direction, /摄影机位于人物右侧/u, 'both unmodified conflicting facts reach AI');
-        initialCandidate = data.candidatePrompt;
-        assert.ok(initialCandidate.includes(conflictingCamera), 'the actual H3 candidate exposes the conflicting camera');
+        assert.equal(data.candidatePrompt, '', 'the current delivery call authors H3 from the source facts');
+        initialCandidate = authoredH3Fixture(anonymousBoard, anonymousContext);
+        assert.ok(initialCandidate.includes(conflictingCamera), 'the synthetic model fixture retains the conflicting source camera');
         const protocol = readH3PromptProtocol(initialCandidate);
         assert.ok(protocol);
         assert.deepEqual(protocol.shots, [
@@ -497,11 +522,9 @@ test('anonymous source camera facts remain the photography authority through Chi
         translatedEnglish = reviewedChinese.replaceAll('匿名甲', 'Synthetic Actor A');
       } else {
         assert.equal(englishCalls, 2, 'no repair or re-planning call is needed for a protocol-preserving AI edit');
-        assertCreativeRuleOnce(system, true);
         const data = jsonBlock(user, 'review_data');
+        assertAdoptedExpression(data.stagingContext, anonymousBoard, system, true);
         assert.equal(data.sourcePrompt, reviewedChinese); assert.equal(data.candidateEnglishPrompt, translatedEnglish);
-        assert.deepEqual(data.stagingContext.creativeDirection.cameraTerms, []);
-        assert.deepEqual(data.stagingContext.creativeDirection.lightingTerms, []);
         assert.equal(data.stagingContext.shots[1].camera, conflictingCamera,
           'saved raw evidence is not silently rewritten; confirmed Chinese is the translation authority');
       }
@@ -587,8 +610,9 @@ test('three seated actors keep body-side ownership and screen placement through 
         assert.equal(data.sourceStoryContent, spatialSource);
         assert.equal(data.shots[1].space, shots[1].space);
         assert.equal(data.shots[1].direction, shots[1].direction);
-        candidateChinese = data.candidatePrompt;
-        assert.ok(candidateChinese.includes(incorrectScreenMapping), 'AI receives the contradictory original candidate unchanged');
+        assert.equal(data.candidatePrompt, '');
+        candidateChinese = authoredH3Fixture(spatialBoard, spatialContext);
+        assert.ok(candidateChinese.includes(incorrectScreenMapping), 'the synthetic model fixture carries the original spatial wording');
         const protocol = readH3PromptProtocol(candidateChinese);
         assert.ok(protocol);
         assert.deepEqual(protocol.shots, [{ marker: '[Shot 1]', cut: null }, { marker: '[Shot 2]', cut: 'At 00:07.000' }]);

@@ -101,6 +101,7 @@ import {
 } from './storySegmentation';
 import { videoBatchContinuationPersistenceIssue } from './videoBatchContinuation';
 import { isSemanticSequencePlan, normalizeSemanticSegmentSource, normalizeStoryVisualConversionSnapshot } from './semanticSequencePlan';
+import { normalizeSceneStagingList } from './sceneStaging';
 import { STORY_CAUSALITY_RULE } from './storyCausalityRules';
 import {
   createBuiltInVisualStylePresets,
@@ -2978,7 +2979,7 @@ const normalizePersistedProject = (
     // Pull this field out before spreading the saved board. Otherwise an
     // invalid persisted value survives whenever normalization returns
     // undefined, because the original `...board` field is copied first.
-    const { seedance25Output: rawSeedance25Output, ...boardFields } = board;
+    const { seedance25Output: rawSeedance25Output, sceneStaging: rawSceneStaging, ...boardFields } = board;
     const seedance25Output = normalizeSeedance25Output(rawSeedance25Output);
     const hasSourceIds = Array.isArray(board.sourceSceneIds);
     const incomingSourceIds = hasSourceIds
@@ -3022,6 +3023,7 @@ const normalizePersistedProject = (
       : [];
     return {
       ...normalizeStoryReferenceProvenance(boardFields),
+      ...(rawSceneStaging !== undefined ? { sceneStaging: normalizeSceneStagingList(rawSceneStaging) } : {}),
       sceneId,
       storyboardImageCount: normalizeStoryboardImageCount(board.storyboardImageCount),
       ...(board.imageToImage !== undefined
@@ -3081,6 +3083,9 @@ const normalizePersistedProject = (
               ? { h3CharacterParticipation: normalizeCharacterParticipationSnapshot(revision.h3CharacterParticipation) } : {}),
             ...(Object.prototype.hasOwnProperty.call(revision ?? {}, 'creativeDirection')
               ? { creativeDirection: normalizeVideoCreativeDirection(revision.creativeDirection) }
+              : {}),
+            ...(Object.prototype.hasOwnProperty.call(revision ?? {}, 'sceneStaging')
+              ? { sceneStaging: normalizeSceneStagingList(revision.sceneStaging) }
               : {}),
             ...(typeof revision?.targetModelId === 'string' ? { targetModelId: revision.targetModelId } : {}),
             ...(normalizedRevisionSeedance25Output ? { seedance25Output: normalizedRevisionSeedance25Output } : {}),

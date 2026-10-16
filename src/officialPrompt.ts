@@ -385,6 +385,8 @@ export const buildOfficialH3SubjectDefinitions = (
       // clothing transition, appearance plus stable body facts carry identity;
       // keep only the separately modelled signature props here.
       anchor: description(dynamicClothing ? '' : character.anchor, character.signatureProps),
+      // Retained in legacy compile metadata/source fingerprints. The live
+      // model expression path receives adopted shot facts rather than habits.
       motion: character.motionHabits,
       referenceAssetIds,
     });
@@ -446,6 +448,7 @@ export const buildOfficialH3CompileInput = (
     : 0;
   return {
     canonicalPrompt: normalizeCanonicalTimelineSoundCueTimes(canonicalPromptSource(board), soundTimelineOffset),
+    ...(board.sceneStaging?.length ? { sceneStaging: structuredClone(board.sceneStaging) } : {}),
     durationSec: board.promptPlan?.durationSec || board.durationSec,
     aspectRatio: board.promptPlan?.aspectRatio || board.aspectRatio,
     resolution: board.promptPlan?.resolution || board.resolution,
@@ -471,6 +474,7 @@ export const buildOfficialH3CompileInput = (
 
 const officialH3FingerprintPayload = (input: PromptAdapterInput, referenceContext?: StoryReferenceContext): string => JSON.stringify({
   canonicalPrompt: input.canonicalPrompt,
+  ...(input.sceneStaging?.length ? { sceneStaging: input.sceneStaging } : {}),
   durationSec: input.durationSec,
   aspectRatio: input.aspectRatio,
   resolution: input.resolution,

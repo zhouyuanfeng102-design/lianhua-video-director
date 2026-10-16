@@ -16,6 +16,7 @@ import { normalizeH3IdentityBindings } from './h3IdentityBindings';
 import { normalizeCharacterParticipationSnapshot } from './characterParticipation';
 import { normalizeH3DeliveryWarnings } from './h3DeliveryWarnings';
 import { normalizeVideoCreativeDirection, type VideoCreativeDirection } from './videoCreativeDirection';
+import { normalizeSceneStagingList, type SceneStaging } from './sceneStaging';
 
 export interface VersionShotLike {
   id: string;
@@ -56,6 +57,7 @@ export interface StoryboardRevisionSource {
   audioLedger?: AudioCue[];
   sequencePromptHandoff?: SequencePromptHandoffStamp;
   creativeDirection?: VideoCreativeDirection;
+  sceneStaging?: SceneStaging[];
   /** Target model paired with the saved adapted prompt, when any. */
   targetModelId?: string;
   targetOutput?: VersionTargetOutput;
@@ -93,6 +95,7 @@ export interface StoryboardRevision {
   promptTrace?: PromptTrace;
   sequencePromptHandoff?: SequencePromptHandoffStamp;
   creativeDirection?: VideoCreativeDirection;
+  sceneStaging?: SceneStaging[];
   /** Target model paired with the saved adapted prompt, when any. */
   targetModelId?: string;
   targetOutput?: VersionTargetOutput;
@@ -239,6 +242,9 @@ export function createStoryboardRevision(
     ...(source.creativeDirection !== undefined
       ? { creativeDirection: normalizeVideoCreativeDirection(source.creativeDirection) }
       : {}),
+    ...(source.sceneStaging !== undefined
+      ? { sceneStaging: normalizeSceneStagingList(source.sceneStaging) }
+      : {}),
     ...(source.targetModelId !== undefined ? { targetModelId: textOf(source.targetModelId) } : {}),
     ...(source.targetOutput !== undefined ? { targetOutput: clone(source.targetOutput) } : {}),
     ...(source.seedance25Output !== undefined ? { seedance25Output: clone(source.seedance25Output) } : {}),
@@ -289,6 +295,9 @@ export function restoreStoryboardRevisionSnapshot<
     // Old revisions have no matching creative evidence. Clear a newer board's
     // snapshot rather than associating today's controls with historical text.
     creativeDirection,
+    // A historical revision owns its adopted scene as well as its shots.
+    // Absence clears a newer scene instead of attaching it to an older draft.
+    sceneStaging: revision.sceneStaging === undefined ? undefined : normalizeSceneStagingList(revision.sceneStaging),
     // Board-level controls are authoritative when this snapshot is consumed.
     // Restore the fields actually known by the revision so newer controls
     // cannot override its saved evidence. Missing optional identities are not

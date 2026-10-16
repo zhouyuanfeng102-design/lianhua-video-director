@@ -7710,6 +7710,7 @@ export default function App() {
           reason: [modelPlan.reason, modelReviewLabel].filter(Boolean).join("；"),
           breakdown: modelPlan.breakdown,
           shots: modelPlan.shots,
+          ...(modelPlan.sceneStaging ? { sceneStaging: structuredClone(modelPlan.sceneStaging) } : {}),
         };
         const modelShotCount = modelPlan.shots.length;
         recommendationNow = {
@@ -7873,6 +7874,9 @@ export default function App() {
         // Historical master slices retain their own video bindings. New image
         // picker choices live exclusively in imageToImage, never in H3 input.
         globalReferenceAssetIds: effectiveReferenceIds,
+        sceneStaging: structuredClone(aiStoryboardPlan?.sceneStaging
+          ?? (canonicalMasterSlice ? masterBoardForSegment?.sceneStaging
+            : semanticContext?.contentOverridden ? undefined : semanticContext?.segment.semanticSource?.sceneStaging)),
         shots,
         finalPrompt: "",
         createdAt: existingSegmentBoard?.createdAt || t,
@@ -8854,6 +8858,7 @@ export default function App() {
           ...liveBoard,
           ...(mode !== "translate-english" ? {
             shots: refreshedOfficialBoard.shots,
+            sceneStaging: refreshedOfficialBoard.sceneStaging,
             shotCount: refreshedOfficialBoard.shotCount,
             recommendedShotCount: refreshedOfficialBoard.recommendedShotCount,
             audioLedger: refreshedOfficialBoard.audioLedger,
@@ -16538,6 +16543,7 @@ function StoryboardView(ctx: AppContext) {
       promptTrace: revision.promptTrace,
       sequencePromptHandoff: revision.sequencePromptHandoff,
       creativeDirection: normalizeVideoCreativeDirection(revision.creativeDirection),
+      sceneStaging: revision.sceneStaging ? structuredClone(revision.sceneStaging) : undefined,
       targetModelId: revision.targetModelId,
       targetOutput: revision.targetOutput,
       seedance25Output: revision.seedance25Output,

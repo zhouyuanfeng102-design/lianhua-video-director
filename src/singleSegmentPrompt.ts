@@ -8,10 +8,11 @@ import {
   buildOfficialH3SubjectDefinitions,
   hasCurrentOfficialH3EnglishPrompt,
   hasCurrentOfficialH3Prompt,
+  officialH3CanonicalSourceMatches,
   type OfficialH3ProjectContext,
 } from './officialPrompt';
 import { buildBudgetedOfficialH3References } from './officialReferenceBudget';
-import type { PromptReferenceInput } from './promptAdapters';
+import { h3MediaModeForReferences, type PromptReferenceInput } from './promptAdapters';
 import { translateVideoPromptToEnglish } from './promptTranslation';
 import { createRuntimeErrorLogEntry } from './runtimeErrorLog';
 import { resolveConfirmedMasterSliceSource, type ConfirmedMasterSliceSourceContext } from './confirmedMasterSliceSource';
@@ -31,13 +32,13 @@ import { publicVideoContinuityLock, selectedVideoPrivateFacts } from './videoPri
 import { stampSequencePromptHandoff, type SequencePromptHandoffContext } from './sequencePromptHandoff';
 import { semanticSegmentStoryContent, type SemanticSegmentSourceContext } from './semanticSequencePlan';
 import {
-  VIDEO_CREATIVE_DIRECTION_DATA_RULE,
+  ADOPTED_VIDEO_EXPRESSION_RULE,
   VIDEO_CREATIVE_DIRECTION_TRANSLATION_DATA_RULE,
-  videoCreativeDirectionForBoard,
+  adoptedVideoExpressionForBoard,
 } from './videoCreativeDirection';
 import { VIDEO_ACTING_CAMERA_RULES, VIDEO_ACTING_CAMERA_PRESERVATION_RULES, VIDEO_ACTING_CAMERA_TRANSLATION_RULE, stripLegacyVideoActingCameraRules } from './videoActingCameraRules';
 import { buildVideoSceneContext, VIDEO_SCENE_CONTEXT_RULE, type VideoSceneContext } from './videoSceneContext';
-import { VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE, VIDEO_ACTION_EVENT_REVIEW_RULE, withVideoActionChoreographyScope } from './videoActionChoreographyRules';
+import { VIDEO_ACTION_EVENT_REVIEW_RULE, withVideoActionChoreographyScope } from './videoActionChoreographyRules';
 import {
   MOSE_JIANGHU_NSFW_VIDEO_ACTION_PRESERVATION_RULE,
   MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE,
@@ -136,7 +137,7 @@ const savedStagingFacts = (
   canonicalPrompt,
   durationSec: board.durationSec,
   audioMode: board.audioMode,
-  creativeDirection: videoCreativeDirectionForBoard(board),
+  ...adoptedVideoExpressionForBoard(board),
   segmentScope: {
     sequencePlanId: board.sequencePlanId, segmentId: board.segmentId,
     segmentIndex: board.segmentIndex, segmentCount: board.segmentCount,
@@ -158,6 +159,7 @@ const savedStagingFacts = (
     performance: shot.performance, camera: shot.camera, dialogue: shot.dialogue,
     lighting: shot.lighting, sound: shot.sound, result: shot.result, transition: shot.transition,
     prompt: shot.prompt, referenceAssetIds: shot.referenceAssetIds,
+    ...(shot.sceneStaging?.length ? { sceneStaging: structuredClone(shot.sceneStaging) } : {}),
     nsfwContinuity: shot.nsfwContinuity, visiblePrivatePartsByCharacter: shot.visiblePrivatePartsByCharacter,
     selectedPrivateFacts: selectedVideoPrivateFacts(characters || [], shot.visiblePrivatePartsByCharacter),
   })),
@@ -198,8 +200,11 @@ export async function generateSingleSegmentPrompt(
   const synchronizeCanonical = canReplanStaging || dossierRefresh;
   // Serialize once before an asynchronous request. Later mutation of a caller's
   // object cannot mix two source snapshots within one conversion/review run.
-  const semanticSegmentData = input.sequenceSegmentContext
-    ? untrustedJson({ sequenceSegmentContext: input.sequenceSegmentContext }) : undefined;
+  const semanticExpressionContext = input.sequenceSegmentContext
+    ? (({ creativeDirection: _planningPreferences, ...adoptedContext }) => adoptedContext)(input.sequenceSegmentContext)
+    : undefined;
+  const semanticSegmentData = semanticExpressionContext
+    ? untrustedJson({ sequenceSegmentContext: semanticExpressionContext }) : undefined;
   const sceneContext = input.mode === 'translate-english' ? undefined : structuredClone(input.sceneContext ?? input.sequenceSegmentContext?.storyUnderstandingContext?.sceneContext
     ?? buildVideoSceneContext({ board: input.board, locations: input.context.locations, assets: input.context.assets,
       references: getSingleSegmentReferences(input.board, input.context), chapterId: input.board.chapterId }));
@@ -273,7 +278,7 @@ export async function generateSingleSegmentPrompt(
         ? currentSystem
         : `${currentSystem}\n\n${VIDEO_WARDROBE_SCOPE_RULE}`;
       const creativeScopeRule = stage === 'translate'
-        ? VIDEO_CREATIVE_DIRECTION_TRANSLATION_DATA_RULE : VIDEO_CREATIVE_DIRECTION_DATA_RULE;
+        ? VIDEO_CREATIVE_DIRECTION_TRANSLATION_DATA_RULE : ADOPTED_VIDEO_EXPRESSION_RULE;
       if (!scopedSystem.includes(creativeScopeRule)) scopedSystem += `\n\n${creativeScopeRule}`;
       const actingCameraRule = stage === 'translate' ? VIDEO_ACTING_CAMERA_TRANSLATION_RULE
         : stage === 'review' && canReplanStaging && !formatOnly && !serializationRepair
@@ -340,10 +345,7 @@ export async function generateSingleSegmentPrompt(
       // Master provenance still locks the confirmed schedule above; it does
       // not turn an explicit fresh conversion into preservation of old prose.
       scopedSystem = withVideoActionChoreographyScope(scopedSystem, stage === 'translate' ? 'translation'
-        : seedance && stage !== 'convert' ? 'format-only'
-        : formatOnly || serializationRepair || system.includes(VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE) ? 'format-only'
-          : (!input.purpose || input.purpose === 'initial') && !input.skipConversion ? 'generation'
-            : 'existing');
+        : canReplanStaging && stage === 'review' && !formatOnly && !serializationRepair ? 'generation' : 'format-only');
       for (;;) {
         const allowance = stage === 'convert' || seedance ? undefined : allowances[stage];
         try {
@@ -375,6 +377,9 @@ export async function generateSingleSegmentPrompt(
     assertCurrent();
     const preserveExistingAudio = input.purpose === 'continuity-repair' || input.purpose === 'reference-refresh' || dossierRefresh;
     const existingBindings = official.h3IdentityBindings;
+    const currentReferences = getSingleSegmentReferences(official, input.context);
+    const deliveryMediaMode = h3MediaModeForReferences(currentReferences);
+    const chooseDeliveryFormat = input.purpose === 'reference-refresh' || !official.officialPromptZh?.trim();
     const requiresParticipation = initialDelivery || synchronizeCanonical || Boolean(official.h3CharacterParticipation);
     const needsIdentityEnvelope = existingBindings !== undefined || requiresParticipation;
     const reviewData = {
@@ -391,13 +396,14 @@ export async function generateSingleSegmentPrompt(
         id: character.id, name: character.name, gender: character.gender, apparentAge: character.apparentAge,
         aliases: characterParticipationAliases(character, identityCharacters),
         race: character.race, appearance: character.appearance, outfit: character.outfit,
-        anchor: character.anchor, personality: character.personality, motionHabits: character.motionHabits,
+        anchor: character.anchor,
         ...(('baseName' in character) ? { baseName: String((character as typeof character & { baseName?: string }).baseName || '') } : {}),
         ...(('formLabel' in character) ? { formLabel: String((character as typeof character & { formLabel?: string }).formLabel || '') } : {}),
         ...(('variantOf' in character) ? { variantOf: String((character as typeof character & { variantOf?: string }).variantOf || '') } : {}),
         ...(('transformationType' in character) ? { transformationType: String((character as typeof character & { transformationType?: string }).transformationType || '') } : {}),
       })),
-      currentReferences: referenceFacts(getSingleSegmentReferences(input.board, input.context)),
+      currentReferences: referenceFacts(currentReferences),
+      deliveryMediaMode,
       ...(input.sequenceHandoff ? { sequenceHandoff: input.sequenceHandoff } : {}),
       ...(input.purpose === 'continuity-repair' ? { revisionScope: 'adjacent-segment-continuity-only' } : {}),
       ...(input.purpose === 'reference-refresh' ? { revisionScope: 'reference-refresh-non-audio-only' } : {}),
@@ -415,8 +421,8 @@ export async function generateSingleSegmentPrompt(
       } : {}),
     };
     const reviewSystem = [
-      '你是最终视频提示词的AI视听调度校验与修复导演。沿用本次已有最终交付调用，对照完整原稿和原始逐镜事实检查candidatePrompt，直接修复后返回完整交付，不新增独立审核步骤。',
-      '剧情、人物参与、身份关联与两稿排程是否一致由你在本次回答中判断并修复，程序不再用逐字证据、身份句位置或人物覆盖规则否决正文。请直接交付修复后的完整结果与同步的人物记录，不返回通过结论或等待本地检查；侧面描写结合上下文明确行动者、承受者与结果，不把画外参与或仅被提及强制改成出镜。',
+      '你负责将已经采纳的场面、动作和摄影表达成最终H3交付。沿用本次已有交付调用，保真转写当前执行稿，不重新导演，不新增独立审核步骤。',
+      '直接返回完整正文与同步的人物记录，不返回审核结论或等待本地检查。人物参与、身份引用和镜内声画表达依据当前采纳稿登记，画外参与或仅被提及的人物不强制改成出镜；既有稿的修改只限本次任务授权。',
       `如果candidateState为canonical-awaiting-h3-delivery，程序尚未取得可用H3草稿。请在本次已有交付中结合canonicalPrompt原始候选、本段剧情和保存镜头证据，${canReplanStaging ? '按本次显式对白修复权限修复排程' : '保真整理源头镜头与既定排程'}后直接生成完整H3；不要把空candidatePrompt当成无需生成，不用缺少局部字段或时间空档拒绝交付。普通新稿不得借格式交付重新选择镜数、切点、机位或运镜。`,
       VIDEO_DIALOGUE_STAGING_RULE,
       VIDEO_SPATIAL_CONTINUITY_RULE,
@@ -427,10 +433,15 @@ export async function generateSingleSegmentPrompt(
       DIALOGUE_LANGUAGE_RULE,
       H3_DIALOGUE_FORMAT_RULE,
       H3_FINAL_BODY_FORMAT_RULE,
+      chooseDeliveryFormat
+        ? `deliveryMediaMode=${deliveryMediaMode}由本次实际currentReferences决定。${deliveryMediaMode === 'full-reference'
+          ? '本次必须由你交付六个官方章节：subject_definitions、summary、retention_analysis、detailed_description、overall_soundscape、non_diegetic_music。原逐镜执行正文完整保真进入detailed_description，其他章节仅说明本次真实参考的身份、用途和保留关系，不重新导剧情或推断参考图中的朝向。'
+          : '本次使用三个官方章节：integrated_multimodal_description、overall_soundscape、non_diegetic_music；不为未来可能添加的图片预造Subject/Picture/Audio或全参考说明。'}`
+        : '本次有限更新保留candidatePrompt已有官方章节和所有真实参考标签；实际参考清单只用于理解既有职责，不借本次表达重写为另一份剧情。',
       ...(input.sequenceSegmentContext ? [] : [SAVED_STAGING_SOURCE_POSITION_RULE]),
-      'sourceStoryContent是剧情依据，shots是原始镜头计划，canonicalPrompt是转换后的逐镜正文；原始计划不是本地允许名单，发现矛盾由你结合完整剧情判断。candidatePrompt是待交付H3稿，检查每句台词的声源、可见口型与听者，及每次切镜的人物位置、朝向、运动目标、机位和镜尾承接是否仍明确。',
+      'canonicalPrompt是本次已经采纳的逐镜执行正文，sceneStaging与shots记录源头的场面及摄影选择；sourceStoryContent用于追溯剧情与完整原对白，不授予重新编排空间、动作和摄影的权限。已有稿有限更新优先保留candidatePrompt。把既有说话人、可见口型、听者、人物位置、朝向、运动目标、机位和镜尾承接保真写入相应镜头。',
       '把中文执行稿已经展开的同一动作链逐镜写入H3现有正文：双方进入关系、实际进退、具名攻击目标、对方同步回应、接触或落空、速度变化和双方末态一起表达；不要序列化成一个人摆姿势、对手在背后静止或只剩运镜词。canonicalPrompt和H3保持同一攻防顺序、动作强度、场地与连续状态，首尾画面来自这条事件链。普通新稿、已确认稿、参考更新、格式修复与英译只传递已有展开，不另编打法、改机位或改变切点；两稿排程同步重写仅限本次明确授权的dialogue-repair。',
-      `creativeDirection保留完整的用户导演、视觉、运镜、光影与额外要求，但这些资料在本阶段不授予重新选镜权。保真传递源头已落实的表演、景别、机位、运镜、观察对象和光影，只澄清已有表达；${canReplanStaging ? '本次显式对白排程修复按taskAuthority同步修正，两份交付一致，exact镜数不变' : '普通新稿同样保持源头镜数、顺序、切点、时长边界和摄影安排，不因偏好或空的运镜选择另选机位'}，不为套用偏好新增剧情。英文阶段以本次最终中文为准，不能再次按偏好另编。`,
+      `adoptedVisualExpression只保留源头已落实的摄影与光影，sceneStaging保留已经采纳的世界关系与动作阶段；${canReplanStaging ? '本次显式对白排程修复按taskAuthority同步修正，两份交付一致，exact镜数不变' : '保持源头镜数、顺序、切点、时长边界和摄影安排'}。characterIdentityFacts仅供辨认当镜已经参与的人物，anchor不是要求复现资料姿态或补展示镜的命令。英文阶段以本次最终中文为准。`,
       ...(canReplanStaging ? [H3_STAGING_DELIVERY_RULE, H3_IDENTITY_BINDINGS_RULE] : [
         `源头分镜已给出的每句完整发话起止、具名说话人及口部动作先后是本次转换依据。不要把“亲吻结束后开口”改写成“亲吻同时清晰说话”，也不要在人物介绍、动作正文和结果摘要重复执行同一次亲吻。保留已确认发话区间，不因镜头构图、参考图更新或翻译擅自转交台词、缩短长句时间、移入相邻段或增加镜头；${input.sequenceSegmentContext ? '跨段事件与时长重新分配只属于重新AI语义分段，当前阶段不得重分段。' : '全片事件与时长重新分配只属于重新生成总稿的源头规划。'}`,
       ]),
@@ -517,29 +528,27 @@ export async function generateSingleSegmentPrompt(
   };
 
   const prepareH3ReviewCandidate = (candidate: Storyboard): Storyboard => {
-    try {
-      // The legacy compiler can synthesize a prompt from old shot fields when
-      // canonical text is unreadable. In an AI-reviewed run, do not mistake
-      // that reconstruction for a usable response from this generation.
-      if (reviewWithAi) applyConvertedPromptToShots(candidate.shots, candidate.finalPrompt, candidate.durationSec);
-      return applyOfficialH3Prompt(candidate, input.context);
-    }
-    catch (error) {
-      assertCurrent();
-      if (!reviewWithAi || (error instanceof Error && error.name === 'AbortError')) throw error;
-      // The original canonical body is passed to the already scheduled AI
-      // review. Never label it as H3 or fabricate a successful final artifact.
-      const savedBodyIsCurrent = hasCurrentOfficialH3Prompt(candidate, input.context);
+    if (reviewWithAi) {
+      // The existing model delivery owns all official sections. Do not seed
+      // it with locally invented summary/retention or reconstructed staging.
+      const canonicalIsCurrent = !candidate.promptPlan?.canonicalPrompt || candidate.promptPlan.canonicalPrompt === candidate.finalPrompt;
+      const savedBodyIsCurrent = canonicalIsCurrent && hasCurrentOfficialH3Prompt(candidate, input.context)
+        && (input.purpose !== 'reference-refresh' || !candidate.sourceStale);
+      const referenceRefreshKeepsSource = input.purpose === 'reference-refresh'
+        && Boolean(candidate.officialPromptZh?.trim()) && !candidate.sourceStale
+        && !candidate.characterDossierDirty
+        && canonicalIsCurrent
+        && officialH3CanonicalSourceMatches(candidate);
+      const preserveSavedBody = savedBodyIsCurrent || referenceRefreshKeepsSource;
       return {
         ...candidate,
-        officialPromptZh: savedBodyIsCurrent ? candidate.officialPromptZh : '',
-        officialPromptSource: savedBodyIsCurrent ? candidate.officialPromptSource : '',
-        h3IdentityBindings: savedBodyIsCurrent ? candidate.h3IdentityBindings : undefined,
-        h3CharacterParticipation: savedBodyIsCurrent ? candidate.h3CharacterParticipation : undefined,
-        h3DeliveryWarnings: [...new Set([...(candidate.h3DeliveryWarnings || []),
-          '中间排程暂不能读取，已保留原始候选和原镜头，交由本次 AI 完成最终提示词。'])],
+        officialPromptZh: preserveSavedBody ? candidate.officialPromptZh : '',
+        officialPromptSource: preserveSavedBody ? candidate.officialPromptSource : '',
+        h3IdentityBindings: preserveSavedBody ? candidate.h3IdentityBindings : undefined,
+        h3CharacterParticipation: preserveSavedBody ? candidate.h3CharacterParticipation : undefined,
       };
     }
+    return applyOfficialH3Prompt(candidate, input.context);
   };
 
   const synchronizeIntermediateShots = (candidate: Storyboard, canonicalPrompt: string): Storyboard['shots'] => {

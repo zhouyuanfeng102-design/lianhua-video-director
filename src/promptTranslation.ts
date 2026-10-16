@@ -1,6 +1,6 @@
 import { AUDIO_TRANSLATION_SCOPE_RULE, DIALOGUE_DELIVERY_RULE, DIALOGUE_VOICE_IDENTITY_TRANSLATION_RULE, VOICE_PROFILE_TRANSLATION_PRESERVATION_RULE } from './audioPromptPolicy';
 import { buildPromptDialogueProtection, getPromptSpeakerNames } from './promptDialogueLanguage';
-import { VIDEO_DIALOGUE_STAGING_RULE, VIDEO_SPATIAL_CONTINUITY_RULE, VIDEO_STAGING_REVIEW_RULE, VIDEO_WARDROBE_SCOPE_RULE } from './videoConversionRules';
+import { VIDEO_WARDROBE_SCOPE_RULE } from './videoConversionRules';
 import {
   H3_DIALOGUE_FORMAT_RULE,
   H3_CLIP_TIME_RULE,
@@ -42,7 +42,7 @@ export interface TranslateVideoPromptToEnglishOptions {
 
 const VIDEO_PROMPT_ENGLISH_TRANSLATION_RULES = [
   '你是专业的视频生成提示词翻译器。只将画面、动作、环境与音效描述翻译成自然、准确的英文，人物对白的原语言不随提示词描述语言改变。',
-  '只翻译语言，不改写剧情，不添加或删除镜头，不改变时间戳、镜头数量、主体名称、动作因果、台词原字、字段顺序或参考关系。',
+  '只翻译sourcePrompt已采用的场面：事件阶段、世界关系、行动与末态先成立，摄影和可见身份按原稿逐项传递；sceneStaging与人物档案只帮助理解，不重排身体朝向、视线、动作对象、cameraTarget或动作终点。保留原有镜数、切点、姓名、因果、对白、字段和参考关系，不在翻译阶段重新导演。',
   '若输入是 MiniMax H3 官方格式，严格保留全部官方 section 的名称与顺序、每个 [Shot N] 标记、<Subject N>/<Picture N>/<Video N>/<Audio N> 引用及镜头切点。',
   '逐镜保留人物位置、面向、世界与画面运动方向、机位所在轴线一侧、入镜/镜尾状态，以及每句对白的声音身份、声源方位、画内或画外状态、口型和非说话人聆听安排。不要把后续镜头的空间说明合并到第1镜，不把上山译成下山、接近译成远离，也不为说话把背对人物改成回头。',
   '保持源稿已明确的身体朝向、头部注意对象和实际对话对象，摄影机的跟随或切换不等于人物转向摄影机。场地可通行尺度、武器够及范围、镜头开始与结束的真实间距，以及造成距离变化的追赶、退避和受力位移逐项保留；景别变近不能译成人物靠近。已确认的可说原话保持完整，沉默者的观察、防守、动作及无发话时间窗原样保留，不把小说解释、参考职责或格式标记添进发声内容，也不凭上下文重新删改源稿对白。',
@@ -86,9 +86,6 @@ const VIDEO_PROMPT_ENGLISH_AI_REVIEW_BASE_SYSTEM_PROMPT = [
   ...VIDEO_PROMPT_ENGLISH_TRANSLATION_RULES.slice(1),
   '对照 sourcePrompt 完整原稿，亲自逐镜校验 candidateEnglishPrompt 候选译文：主体与姓名、身份与指代、动作及因果、摄影与运镜、时间戳与切点、字段顺序、镜头数量和参考图/视频/音频关系。人物中文原名不能因罗马音、英文意译或代词替换而失去对应身份。',
   '亲自逐句核对全部对白的原字、原语言、说话人、顺序、所属镜头与相对时刻；默认保持原语言对白，不把中文对白擅自翻成英文，不改变说话人，不新增台词。只有原稿对该句有明确语言授权才按授权翻译。',
-  VIDEO_DIALOGUE_STAGING_RULE,
-  VIDEO_SPATIAL_CONTINUITY_RULE,
-  VIDEO_STAGING_REVIEW_RULE,
   '本阶段以已确认的 sourcePrompt 为翻译依据，stagingContext 仅帮助理解原镜头与人物，不授权再次改剧情、重排镜界或虚构机位。检查中文稿已有的声音—口型绑定、逐镜空间/朝向与转身过渡是否在英文中原样成立；修复翻译造成的遗漏和矛盾，不对中文稿另作本地推断。',
   '如发现任何遗漏、错误、错位、错误翻译或结构变化，在本次回复中自行修复并再次对照完整原稿校验，直到给出完整修复结果；不要只返回问题清单、通过/不通过结论，也不要要求用户手动改写。候选已经正确时完整原样返回。',
   '本次输入不使用内部占位符。不要依赖程序在本地恢复人物名、替换对白、重排时间戳或修补内容；所有修复必须由你生成完整最终英文提示词。',
