@@ -102,8 +102,7 @@ const folders = ['build', 'electron', 'public', 'scripts', 'src'];
 const files = [
   'index.html', 'package.json', 'package-lock.json', 'README.md', 'AGENTS.md', 'tsconfig.json', 'tsconfig.tests.json', 'vite.config.ts',
   '启动开发模式.bat', '启动莲华视频导演台-EXE.bat', '启动莲华视频导演台.bat',
-  '多功能提示词模版5S.md', '多功能提示词模版10S.md', '多功能提示词模版15S.md',
-  '莲华视频导演台-完整改造方案.md', releaseNotesRelativePath, launcherSourceName,
+  releaseNotesRelativePath, launcherSourceName,
 ];
 // Include the linked public documentation without copying arbitrary local
 // documents, test reports, or user data into a recovery source archive.

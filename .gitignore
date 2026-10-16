@@ -55,3 +55,9 @@ release/
 *.key
 *.p12
 *.pfx
+
+# Local reference documents excluded from the public project.
+/多功能提示词模版10S.md
+/多功能提示词模版15S.md
+/多功能提示词模版5S.md
+/莲华视频导演台-完整改造方案.md
