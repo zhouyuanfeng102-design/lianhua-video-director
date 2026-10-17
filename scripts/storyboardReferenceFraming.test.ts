@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { buildCustomStoryboardImageRequests, buildStoryboardImageRequests, mergeStoryboardReferenceInputs, resolveStoryboardReferenceInputs } from '../src/storyboardImages';
 import { buildDirectStoryboardImageBatchRequests } from '../src/storyboardImageToImage';
-import { buildStoryboardImagePromptWithReferences, storyboardImageFramingInstruction, storyboardReferenceCharacters } from '../src/storyboardImageReferences';
+import { buildStoryboardImagePromptWithReferences, storyboardImageFramingInstruction, storyboardReferenceCharacters, STORYBOARD_CHARACTER_REFERENCE_POSE_BOUNDARY } from '../src/storyboardImageReferences';
 import type { Character, ReferenceAsset, Storyboard, VideoShot } from '../src/types';
 
 const character = (id: string, name: string): Character => ({
@@ -79,6 +79,8 @@ test('boundary framing keeps entry distance and late reveal while reference appe
   const submitted = buildStoryboardImagePromptWithReferences(body, [portrait, locationImage], context);
   assert.ok(submitted.startsWith(`${body}\n\n`), 'reference metadata preserves the authored endpoint distance and visibility byte-for-byte');
   assert.match(submitted, /参考仅用于上述用途；动作、站位与构图以正文为准/u);
+  assert.equal(submitted.split(STORYBOARD_CHARACTER_REFERENCE_POSE_BOUNDARY).length - 1, 1,
+    'the character identity image receives its pose boundary alongside the separate environment mapping');
   assert.doesNotMatch(submitted, /合照间距|没有可靠比例尺|室内远处人物搬到门口/u,
     'submission adds only attachment mapping and a short boundary to the authored scene');
   assert.doesNotMatch(submitted, /旧图：两人紧贴站在门边/u, 'reference appearance does not become a historical staging command');
@@ -122,5 +124,7 @@ test('direct image-to-image shares boundary framing and actual character mapping
   assert.match(direct[1].directPrompt, /尾帧取景：按最后一镜结束时刻/u);
   assert.match(direct[1].directPrompt, /1\. 人物 "马雷" — 身份、外貌与服装设计参考/u);
   assert.match(direct[1].directPrompt, /3\. "unbound" — 普通画面参考/u);
+  for (const request of direct) assert.equal(request.directPrompt.split(STORYBOARD_CHARACTER_REFERENCE_POSE_BOUNDARY).length - 1, 1,
+    'both direct boundary frames carry the same identity-only reference constraint');
   assert.doesNotMatch(direct[1].directPrompt, /历史构图：|旧图锚点：/u);
 });

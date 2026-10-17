@@ -10,7 +10,8 @@ import { DIRECTED_ACTION_RELATION_RULE, IMAGE_STORY_SPATIAL_STATE_RULE, STORYBOA
 import type { TextApiConfig } from '../src/types';
 
 // Only synthetic source and stubbed text transport. No image API, user data,
-// semantic keyword validator, or extra model-review round is involved.
+// semantic keyword validator, or extra model-review round is involved. These
+// assertions verify contracts and transport, not real-model gaze correctness.
 const selection = resolveImagePromptSelection({ backend: 'openai', assetKind: 'storyboard' });
 const legacyPreset = {
   ...selection,
@@ -24,6 +25,10 @@ for (const format of ['natural-language', 'sd-tags', 'nai-tags'] as const) {
   assert.ok(system.includes(IMAGE_STORY_SPATIAL_STATE_RULE), 'each output format keeps world distance before camera crop and identity detail');
   assert.ok(system.indexOf(STORYBOARD_FRAME_VISIBILITY_RULE) < system.indexOf(IMAGE_PROMPT_VISIBLE_CHARACTER_IDENTITY_CONTRACT),
     'the event, world, adopted camera and visible extent are established before identity expansion');
+  assert.ok(system.indexOf(DIRECTED_ACTION_RELATION_RULE) < system.indexOf(IMAGE_PROMPT_VISIBLE_CHARACTER_IDENTITY_CONTRACT),
+    'directed interaction reaches each format before identity expansion');
+  assert.equal(system.split(DIRECTED_ACTION_RELATION_RULE).length - 1, 1,
+    'the current directed-interaction contract is composed once');
   assert.equal(system.split(STORYBOARD_FRAME_VISIBILITY_RULE).length - 1, 1);
   assert.equal(system.split(IMAGE_STORY_SPATIAL_STATE_RULE).length - 1, 1,
     'nested world/visibility contracts are supplied once for every output format');
@@ -43,7 +48,12 @@ assert.equal(characterSystem.includes(STORYBOARD_FRAME_VISIBILITY_RULE), false,
   'ordinary identity sheets retain their explicitly selected camera and full-body layout');
 assert.match(characterSystem, /必须执行全身构图合同/u);
 
+const monsterChargeSource = '二号机位于近处，朝画面纵深中的第一使徒亚当突进，视线焦点与粒子短刃刃尖均指向亚当本体。亚当在前进路线远端，低头看向二号机。低机位从二号机侧后方观察；本张冻结突进中的一个时刻。';
 const fixtures = [
+  {
+    source: monsterChargeSource,
+    result: '低机位从二号机侧后方观察，二号机以侧背面入画，身体前倾朝纵深中的第一使徒亚当突进，头部与光学观测器朝向亚当，粒子短刃刃尖指向亚当本体。亚当站在二号机前进路线远端，低头注视逼近的二号机。',
+  },
   {
     source: '首帧先近拍微开的门缝与门外明川，寝宫内青岚距门槛约四米，明川到门槛的距离没有给出。随后后拉才揭示青岚的侧肩，再下一镜她才冲向明川；本张保持第一镜起始时刻。',
     result: '门缝近景，明川仍站在门外向内注视。青岚保持寝宫内距门槛约四米的画外位置，两者之间的连续室内地面尚未被跨越；起始裁切没有她的侧肩。',
@@ -67,6 +77,12 @@ const fixtures = [
   {
     source: '明川的主观镜头，摄影机就是明川眼睛所在位置。青岚朝明川说话，看向镜头位置。',
     result: '明川的主观视角，青岚面向明川所在的摄影机位置，自然直视镜头说话，明川本人保持画外。',
+  },
+  {
+    // This deliberately incomplete stub remains format-valid. Passing it
+    // demonstrates the boundary of protocol validation, not a repaired gaze.
+    source: monsterChargeSource,
+    result: '低仰角废墟画面，二号机全速向前冲锋，刀尖直指正前方，第一使徒亚当位于远景。',
   },
 ];
 const config: TextApiConfig = {
@@ -97,7 +113,8 @@ try {
     const fixture = fixtures[current];
     const output = await requestImagePromptConverter(config, 'storyboard', fixture.source, 'natural-language',
       buildImagePromptConverterSystemPrompt(legacyPreset));
-    assert.equal(output, fixture.result, 'AI-authored gaze/crop stays intact without local rewriting or veto');
+    assert.equal(output, fixture.result,
+      'format-valid model text, including omitted target relations, stays intact without a local semantic rewrite or veto');
     assert.equal(calls - before, 1, 'valid conversion uses one existing request, with no added semantic review');
   }
   assert.equal(networkAttempts, 0);
@@ -106,4 +123,4 @@ try {
   if (originalWindow === undefined) Reflect.deleteProperty(globalThis, 'window');
   else Object.defineProperty(globalThis, 'window', { configurable: true, writable: true, value: originalWindow });
 }
-console.log('Storyboard gaze/framing: world-state-first contracts, all output formats, off-screen entry distance, late reveal, side/back view, final close-up, natural head turn, POV, and single-call transport passed.');
+console.log('Storyboard gaze/framing contracts and single-call mock transport passed for named charge targets, off-screen positions, close-ups, head turns and POV. Real-model gaze and image results were not tested.');

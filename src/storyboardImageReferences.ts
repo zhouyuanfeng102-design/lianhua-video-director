@@ -20,6 +20,8 @@ const REFERENCE_METADATA_START = '【莲华程序参考用途 v1 开始】';
 const REFERENCE_METADATA_END = '【莲华程序参考用途 v1 结束】';
 const REFERENCE_METADATA_HEADING = '本次实际上传图片（严格按此顺序）：';
 
+export const STORYBOARD_CHARACTER_REFERENCE_POSE_BOUNDARY = '上述人物身份参考只提供外形、配色、服装与身体结构；不继承参考图的站姿、头部朝向、视线或正脸展示，按当前正文中的具名动作对象、注视对象和机位呈现可见面。构图与首尾状态参考仍按各自明确用途使用。';
+
 /** Only a complete, trailing, versioned application block is ours. A mention
  * in authored prose, an incomplete block, or legacy unmarked text stays intact.
  * Natural-language sanitization may replace its line breaks with commas. */
@@ -114,6 +116,11 @@ export const buildStoryboardImagePromptWithReferences = (
 ): string => {
   const authoredBody = stripStoryboardImageReferenceMetadata(body);
   if (!assetsInActualUploadOrder.length) return authoredBody;
+  const hasCharacterIdentityReference = assetsInActualUploadOrder.some((asset) => asset.id !== context.continuityAssetId && (
+    storyboardReferenceCharacters(asset, context).length > 0
+    || asset.referenceEntityBinding === undefined && asset.characterReferenceId === undefined
+      && ((asset.referenceRole || asset.role) === 'character' || asset.sourceEntityKind === 'character')
+  ));
   return [
     authoredBody,
     '',
@@ -127,6 +134,7 @@ export const buildStoryboardImagePromptWithReferences = (
         : `${JSON.stringify(asset.name)} — ${storyboardImageReferenceRole(asset, context)}`;
       return `${index + 1}. ${mapping}`;
     }),
+    ...(hasCharacterIdentityReference ? [STORYBOARD_CHARACTER_REFERENCE_POSE_BOUNDARY] : []),
     ...(context.sourcePrompt === undefined && context.currentFrameSpatialSource === undefined ? [] : buildStoryboardReferenceIdentityLines(
       assetsInActualUploadOrder.flatMap((asset, index) => (asset.id === context.continuityAssetId ? [] : storyboardReferenceCharacters(asset, context))
         .map((character) => ({ pictureNumber: index + 1, characterId: character.id, name: character.name }))),

@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import {
   buildStoryboardImagePromptWithReferences, hasStoryboardImageReferenceMetadata,
   refreshStoryboardImageReferenceMetadata, stripStoryboardImageReferenceMetadata,
+  STORYBOARD_CHARACTER_REFERENCE_POSE_BOUNDARY,
 } from '../src/storyboardImageReferences';
 import { buildDirectStoryboardImagePromptWithReferences } from '../src/storyboardImageToImage';
 import { assertValidFinalImagePrompt } from '../src/imagePromptRules';
@@ -38,7 +39,7 @@ test('refresh changes only application-owned reference metadata and can remove a
   assert.equal(refreshStoryboardImageReferenceMetadata(refreshed, [], context), body);
 });
 
-test('three character references keep only actual ordered bindings, uses and one short boundary', () => {
+test('three character references keep actual ordered bindings and one shared identity-pose boundary', () => {
   const actors = ['夏提雅', '新贝•里尤洛', '亚乌拉'].map((name, index) => ({ ...actor, id: `actor-${index}`, name }));
   const images = actors.map((character, index) => ({ ...asset(`image-${index}`), name: character.name,
     characterReferenceId: character.id }));
@@ -46,8 +47,36 @@ test('three character references keep only actual ordered bindings, uses and one
   const metadata = prompt.slice(prompt.indexOf('【莲华程序参考用途 v1 开始】'));
   assert.match(metadata, /1\. 人物 "新贝•里尤洛" — 身份、外貌与服装设计参考\n2\. 人物 "夏提雅" — 身份、外貌与服装设计参考\n3\. 人物 "亚乌拉" — 身份、外貌与服装设计参考/u);
   for (const character of actors) assert.equal(metadata.split(character.name).length - 1, 1, 'bound character names do not repeat asset labels');
+  assert.equal(metadata.split(STORYBOARD_CHARACTER_REFERENCE_POSE_BOUNDARY).length - 1, 1,
+    'multiple character references share one identity-only pose boundary');
   assert.match(metadata, /参考仅用于上述用途；动作、站位与构图以正文为准。/u);
-  assert.doesNotMatch(metadata, /门|柱|室内|场景和道具|Subject|Picture|正脸|合照|精确米数/u);
+  assert.doesNotMatch(metadata, /门|柱|室内|场景和道具|Subject|Picture|合照|精确米数/u);
+});
+
+test('pose inheritance boundary follows actual character identity use, not a reference filename or historical role', () => {
+  const cases: { name: string; image: ReferenceAsset; identity: boolean }[] = [
+    { name: 'current entity binding', image: { ...first, referenceEntityBinding: { kind: 'character', entityId: actor.id } }, identity: true },
+    { name: 'legacy current character binding', image: first, identity: true },
+    { name: 'legacy unspecified character identity', image: { ...first, characterReferenceId: undefined }, identity: true },
+    { name: 'cleared entity binding', image: { ...first, referenceEntityBinding: null }, identity: false },
+    { name: 'stale entity binding', image: { ...first, referenceEntityBinding: { kind: 'character', entityId: 'missing' } }, identity: false },
+    { name: 'cleared character binding', image: { ...first, characterReferenceId: null }, identity: false },
+    { name: 'stale character binding', image: { ...first, characterReferenceId: 'missing' }, identity: false },
+    { name: 'explicit composition', image: { ...first, role: 'composition', characterReferenceId: undefined, name: '构图与首尾姿态参考' }, identity: false },
+    { name: 'prop appearance', image: { ...first, role: 'prop', characterReferenceId: undefined }, identity: false },
+  ];
+  for (const fixture of cases) {
+    const prompt = buildStoryboardImagePromptWithReferences(body, [fixture.image], context);
+    assert.equal(prompt.includes(STORYBOARD_CHARACTER_REFERENCE_POSE_BOUNDARY), fixture.identity, fixture.name);
+    assert.equal(stripStoryboardImageReferenceMetadata(prompt), body, `${fixture.name} preserves authored gaze and crop`);
+  }
+  const continuityOnly = buildStoryboardImagePromptWithReferences(body, [first], { ...context, continuityAssetId: first.id });
+  assert.equal(continuityOnly.includes(STORYBOARD_CHARACTER_REFERENCE_POSE_BOUNDARY), false,
+    'an appearance-continuity first image is not relabeled as a character identity reference');
+  assert.match(continuityOnly, /本批已成功首图 — 仅作人物外观、场景外观与光线连续参考/u);
+  const mixed = buildStoryboardImagePromptWithReferences(body, [first, replacement], { ...context, continuityAssetId: first.id });
+  assert.equal(mixed.split(STORYBOARD_CHARACTER_REFERENCE_POSE_BOUNDARY).length - 1, 1);
+  assert.match(mixed, /1\. 本批已成功首图[\s\S]*2\. 人物 "绝死绝命" — 身份、外貌与服装设计参考/u);
 });
 
 test('current character bindings override provenance while cleared and stale bindings retain unbound uses', () => {
@@ -79,7 +108,8 @@ test('refresh recognizes old long v1 blocks and replaces only their application-
   const refreshed = refreshStoryboardImageReferenceMetadata(legacy, [replacement], context);
   assert.equal(stripStoryboardImageReferenceMetadata(refreshed), authored);
   assert.equal(refreshed, buildStoryboardImagePromptWithReferences(authored, [replacement], context));
-  assert.doesNotMatch(refreshed, /旧资产名|正脸展示|参考图中的门、柱列/u);
+  assert.doesNotMatch(refreshed, /旧资产名|不要复制参考图中朝向观众的头部|参考图中的门、柱列/u);
+  assert.equal(refreshed.split(STORYBOARD_CHARACTER_REFERENCE_POSE_BOUNDARY).length - 1, 1);
 });
 
 test('natural-language protocol cleaning preserves recognizable complete metadata and exact cleaned body', () => {

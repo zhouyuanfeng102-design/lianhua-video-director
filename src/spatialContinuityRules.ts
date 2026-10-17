@@ -29,9 +29,17 @@ export const SPATIAL_TRANSLATION_RULE = "空间翻译只传递sourcePrompt已采
  * accidentally become the implied destination.  This remains an AI planning
  * contract rather than a keyword parser: the model must resolve the relation
  * from the full story and the confirmed shot. */
-export const DIRECTED_ACTION_RELATION_RULE = [
+export const LEGACY_DIRECTED_ACTION_RELATION_RULE_V2_5_6 = [
   "当前静帧继承已采用的“具名行动者 → 动作或直接受力物 → 具名目标/真实终点”关系。分别保留身体姿态、头部转角、视线落点和动作对象；相机观察谁不改变谁在向谁行动，合理的侧身、回头、主观视点或直视镜头按原意保留。",
   "所选动作阶段只冻结一个时刻：起始、过程中或结果各用该时刻真实位置和姿态；目标在画内时写出其对应关系，目标在画外时保留其具名位置和画外方向，不因对象已知而补人。动作路径与最终落点用主体或地标参照，不以向前、背景或观众代替；使用当前机位自然可见的正面、侧面或背面。",
+].join('\n\n');
+
+export const DIRECTED_ACTION_RELATION_RULE = [
+  "当前静帧先冻结已采用的动作阶段，将“具名行动者 → 动作或直接受力物 → 具名目标/真实终点”直接写进最终生图正文。分别保留身体姿态、头部转角、视线落点和动作对象；原稿明确冲向、攻击、注视谁，就保留该对象的姓名，不能压缩成向前冲锋、刀尖指向正前方或冷酷俯瞰。多人分别绑定各自对象，不把所有人的视线统一朝向观众或同一人。",
+  "先写当前人物交互与取景，再写可见外貌：交代行动者朝谁移动或施力、身体面向谁或哪里、头部与眼睛（或感知器官）注视谁，以及目标相对行动者的位置和画内/画外状态。目标明确在画外时只保留必要的具名方向，不补人；局部特写只表达可见的动作与必要画外关系，不补脸或拉远取景。首帧、尾帧和中间帧分别采用该时刻的进入、退出或指定状态，不把随后转身、靠近、出招或结果提前画入。",
+  "摄影机相对于行动者—目标交互轴的位置决定可见面。沿用已明确的机位、视向和裁切，再说明人物在该机位下自然可见的正面、侧面或背面；低仰角和前景本身不代表人物面向摄影机。例如行动者向纵深中的对手突进、相机在行动者后侧时，应呈现其侧背面，头部朝向具名对手；相机在对手一侧拍到行动者正面时，要保留对手在行动者前方的对应关系，不能同时把对手放在其身后。示例只解释关系，不为其他镜头改机位或统一背拍；机位未写全时仅补足与原有站位、取景相容的观察关系，不改剧情或走位。",
+  "合理侧身、横持武器、逃跑回望和头身不同向按原意保留，不要求身体、眼睛与武器全部同向。目标主观视角、摄影机确在被注视者的位置或明确要求直视镜头时，保留有依据的朝镜头视线。身份资料或预设中的正脸、双眼、胸甲与完整展示要求服从本张实际可见面，不能为展示这些特征扭转人物。",
+  "自然语言在外貌段落之前写清上述具名关系；SD共享场景段与NAI基础段保留交互对象和机位，各角色段绑定自己的朝向、视线与可见面，不因标签压缩丢失目标。关系应成为实际画面描述，而非只留在分析、标题或参考用途说明；不输出规则口号或新增审核报告。",
 ].join('\n\n');
 
 /** Shared request-time story-space contract. No local distance inference,
@@ -58,6 +66,11 @@ export const STORYBOARD_SPATIAL_FRAME_RULE = [
   SPATIAL_COORDINATE_RULE,
   "静帧使用本次已采用的sceneStaging及对应镜头在所选时刻的事实；最后确认的H3逐镜正文已明确的位置、动作与摄影不被旧canonical、旧图说明或身份图构图覆盖。缺失处仅用同一事件的已有结构化资料帮助理解，不另建机位或改变阶段。最新人物资料只更新身份外观，不改变入画名单、身体朝向、视线、路径或摄影；无真实像素时不声称看过参考图。" ,
 ].join('\n\n');
+
+/** Exact previous composition, removed only from runtime request copies. */
+export const LEGACY_STORYBOARD_SPATIAL_FRAME_RULE_V2_5_6 = STORYBOARD_SPATIAL_FRAME_RULE.replace(
+  DIRECTED_ACTION_RELATION_RULE, LEGACY_DIRECTED_ACTION_RELATION_RULE_V2_5_6,
+);
 
 /** Exact 1.8.1 first-party text, retained only for request-time compatibility. */
 /** Request-time AI direction only. No local geometry verdicts or prose rewriting. */
