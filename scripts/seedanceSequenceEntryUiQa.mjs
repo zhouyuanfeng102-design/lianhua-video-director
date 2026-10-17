@@ -29,7 +29,8 @@ const story = parts.join('\n');
 
 // Fixture construction uses the real semantic materializer, canonical parser,
 // H3 artifact compiler, provenance sealer and startup normalization. Its sole
-// purpose is to give the built UI a trustworthy public checkpoint and old H3.
+// purpose is to give the built UI a trustworthy public checkpoint and old H3,
+// plus the same semantic plan before either segment has a public storyboard.
 const fixtureCode = `
 import {createInitialState, normalizeState} from './src/storage.ts';
 import {materializeSemanticSequencePlan, semanticSegmentStoryContent} from './src/semanticSequencePlan.ts';
@@ -76,17 +77,27 @@ plan.reviewConfirmedAt=now;plan.reviewConfirmedFingerprint=sequencePlanReviewFin
 state.project=project;state.projects=[project];state.activeProjectId=project.id;
 const normalized=normalizeState(state);
 for(const segment of normalized.project.sequencePlans[0].segments){const board=normalized.project.storyboards.find(item=>item.id===segment.storyboardId);const action=resolveSequenceSegmentPromptAction(segment,normalized.project.storyboards,plan.id,officialH3ContextForStoryboard(normalized.project,board));if(action.action!=='complete')throw new Error('Fixture H3 result is not current: '+action.action);}
-process.stdout.write(JSON.stringify(normalized));
+const fresh=structuredClone(normalized);
+fresh.project.storyboards=[];
+const freshPlan=fresh.project.sequencePlans[0];
+freshPlan.generationPromptFormat='seedance';
+for(const segment of freshPlan.segments){delete segment.storyboardId;segment.status='planned';}
+freshPlan.reviewConfirmedFingerprint=sequencePlanReviewFingerprint(freshPlan);
+fresh.project.chapterWorkspaces[data.chapterId].directorControls.generationPromptFormat='seedance';
+fresh.projects=[fresh.project];
+process.stdout.write(JSON.stringify({checkpoint:normalized,fresh:normalizeState(fresh)}));
 `;
 const builtFixture = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', fixtureCode], { cwd: root, windowsHide: true, encoding: 'utf8', timeout: 30_000, maxBuffer: 30 * 1024 * 1024 });
 if (builtFixture.status !== 0) throw new Error(`Isolated fixture construction failed: ${builtFixture.stderr}`);
-const fixture = JSON.parse(builtFixture.stdout);
+const { checkpoint: fixture, fresh: freshFixture } = JSON.parse(builtFixture.stdout);
 
 const bootstrap = `import {preview} from 'vite'; const server=await preview({preview:{host:'127.0.0.1',port:${port},strictPort:true,open:false}}); console.log('Isolated built Seedance sequence QA ready');`;
 const preview = spawn(process.execPath, ['--input-type=module', '-e', bootstrap], { cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
 const harness = createQaProcessHarness({ electron: preview, qaLabel: 'Seedance sequence entry built UI QA', runTimeoutMs: 180_000, closeTimeoutMs: 10_000 });
 let browser; let context; let page; let failure; let failFirstEnglish = true; let failChineseWriter = false;
 let deferChineseFailure = false; let deferredChineseResponse; let cancelledDeferredRetry = false;
+let deferredPlanningResponse;
+let allowNewStoryboards = false;
 const englishFailureReason = 'mock first Seedance English unavailable';
 const chineseFailureReason = '首段中文服务维护中，请稍后重试';
 const errors = []; const blockedRequests = []; const requests = []; const screenshots = [];
@@ -119,6 +130,33 @@ const preserved = (state) => state.project.storyboards.map((board) => ({
 }));
 const readState = () => page.evaluate((key) => JSON.parse(localStorage.getItem(key) || '{}'), storageKey);
 const readRuntimeLog = () => page.evaluate((key) => JSON.parse(localStorage.getItem(key) || '[]'), runtimeLogStorageKey);
+const assertCurrentSavedSeedance = (state) => {
+  const result = spawnSync(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', `
+    import assert from 'node:assert/strict'; import fs from 'node:fs';
+    import {buildOfficialSeedanceInput,hasCurrentSeedancePrompt} from './src/seedanceSource.ts';
+    import {getSequencePromptHandoffStatus} from './src/sequencePromptHandoff.ts';
+    import {resolveSequenceSegmentPromptAction} from './src/appEffects.ts';
+    import {officialH3ContextForStoryboard} from './src/officialH3Context.ts';
+    const state=JSON.parse(fs.readFileSync(0,'utf8')); const project=state.project; const plan=project.sequencePlans[0];
+    assert.equal(project.storyboards.length,2);
+    const checks=plan.segments.map(segment=>{
+      const board=project.storyboards.find(item=>item.id===segment.storyboardId);
+      assert.ok(board,'newly generated storyboard is linked to its segment');
+      const input=buildOfficialSeedanceInput(project,board);
+      assert.equal(input.sourceEvidence.sequenceSegmentContext.segmentIndex,segment.index);
+      assert.ok(hasCurrentSeedancePrompt(project,board,'en'),'saved Chinese and English remain fresh against committed project');
+      assert.equal(resolveSequenceSegmentPromptAction(segment,project.storyboards,plan.id,officialH3ContextForStoryboard(project,board),'seedance',project).action,'complete');
+      const handoff=getSequencePromptHandoffStatus(board,project,'seedance');
+      assert.equal(handoff.kind,segment.index===1?'first':'current');
+      return {segmentIndex:segment.index,storyboardId:board.id,sourceFingerprint:board.seedance25Output.sourceFingerprint,handoff:handoff.kind};
+    });
+    const changed=structuredClone(project); changed.storyboards[0].shots[0].action+='（实际动作来源已修改）';
+    assert.equal(hasCurrentSeedancePrompt(changed,changed.storyboards[0]),false,'real source edits still invalidate saved output');
+    process.stdout.write(JSON.stringify(checks));
+  `], { cwd: root, windowsHide: true, encoding: 'utf8', input: JSON.stringify(state), timeout: 30_000, maxBuffer: 4 * 1024 * 1024 });
+  assert.equal(result.status, 0, `Saved Seedance freshness validation failed: ${result.stderr}`);
+  return JSON.parse(result.stdout);
+};
 const batchButton = () => page.locator('.director-generate-bar').getByRole('button', { name: '顺序生成未完成的Seedance', exact: true });
 const capture = async (name) => { await page.screenshot({ path: path.join(output, `${name}.png`), fullPage: false }); screenshots.push(`${name}.png`); };
 const enterDirector = async () => {
@@ -173,8 +211,42 @@ const run = async () => {
       const user = (payload.messages || []).filter((message) => message.role === 'user').map((message) => textOf(message.content)).join('\n');
       const seedance = tagged(user, 'seedance_source_data');
       const handoff = tagged(user, 'sequence_text_handoff_data')?.sequenceHandoff;
+      const planning = tagged(user, 'storyboard_planning_data');
+      const planningReview = tagged(user, 'storyboard_ai_review_data');
+      const conversion = tagged(user, 'video_conversion_data');
       let kind; let index; let response;
-      if (seedance) {
+      if (/智能导演分类器/u.test(system)) {
+        assert.ok(allowNewStoryboards, 'checkpoint retries must not repeat public planning');
+        kind = 'director'; index = parts.findIndex((part) => user.includes(`剧情：${part}`)) + 1;
+        assert.ok([1, 2].includes(index));
+        response = JSON.stringify({ mode: 'narrative', reason: '山道药草交接是连续叙事动作。' });
+      } else if (planning || planningReview) {
+        assert.ok(allowNewStoryboards, 'checkpoint retries must not request a new public storyboard');
+        kind = planning ? 'planning' : 'planning-review';
+        const source = planning || planningReview;
+        index = source.sequenceSegmentContext?.segmentIndex;
+        assert.ok([1, 2].includes(index), 'public planning receives the assigned semantic segment');
+        assert.equal(source.sourceStory, parts[index - 1]);
+        if (index === 2) {
+          assert.equal(source.sequenceSegmentContext.previousPromptHandoff?.previousFinalPrompt, chinese(1),
+            'second public planner inherits the first saved Seedance Chinese');
+        }
+        response = JSON.stringify({ reason: '按本段原文完成一个十五秒连续镜头。', breakdown: ['当前药草交接阶段'],
+          aiReview: { status: 'passed', summary: '保留本段全部原文与连续动作。', issues: [] }, shots: [{
+            startSec: 0, endSec: 15, durationSec: 15, localTimeRangeSec: [0, 15], sourceExcerpt: parts[index - 1],
+            purpose: '呈现本段药草交接阶段', subject: '师傅与徒弟', action: parts[index - 1], camera: '稳定中景侧拍，保持山道方向',
+            transition: '连续动作', lighting: '清晨柔和侧光', sound: '药草摩擦声与山道环境声',
+            result: index === 1 ? '师傅右手指仍触药草根部，徒弟双手正在接拢' : '徒弟拿着药草，二人沿山道前行',
+            space: '师傅在左，徒弟在右，山道通向背景', performance: '双方专注完成当前药草交接阶段',
+            direction: '师傅面向徒弟，保持山道方向', dialogue: '无',
+          }] });
+      } else if (conversion) {
+        assert.ok(allowNewStoryboards, 'checkpoint retries must not rewrite the public prompt');
+        kind = 'canonical-convert'; index = parts.indexOf(conversion.sourceStoryContent) + 1;
+        assert.ok([1, 2].includes(index));
+        if (index === 2) assert.equal(conversion.sequenceHandoff?.previousFinalPrompt, chinese(1));
+        response = conversion.shotEvidence.map((shot) => shot.localStructureDraft).join('\n');
+      } else if (seedance) {
         kind = 'seedance-writer'; index = seedance.sourceEvidence?.sequenceSegmentContext?.segmentIndex;
         assert.ok([1, 2].includes(index), 'writer receives its exact semantic segment');
         if (failChineseWriter) {
@@ -212,7 +284,15 @@ const run = async () => {
         }
         response = english(index);
       } else throw new Error(`Unexpected planning/H3 request during checkpoint reuse: ${system.slice(0, 90)}`);
-      requests.push({ kind, segmentIndex: index, ...(handoff ? { previousPromptKind: handoff.previousPromptKind, previousTargetSourceFingerprint: handoff.previousTargetSourceFingerprint } : {}) });
+      requests.push({ kind, segmentIndex: index,
+        ...(seedance ? { semanticContextReceived: true } : {}),
+        ...(handoff ? { previousPromptKind: handoff.previousPromptKind, previousTargetSourceFingerprint: handoff.previousTargetSourceFingerprint } : {}) });
+      if (kind === 'planning' && index === 1 && deferredPlanningResponse) {
+        const pending = deferredPlanningResponse;
+        deferredPlanningResponse = undefined;
+        pending.markStarted();
+        await pending.gate;
+      }
       await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: response } }] }) });
     } catch (error) {
       errors.push(String(error)); await route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":{"message":"isolated sequence QA rejected request"}}' }).catch(() => {});
@@ -325,12 +405,107 @@ const run = async () => {
   assert.ok(!cancelledChinese.project.sequencePlans[0].segments[0].failureReason, 'late response does not restore the cleared failure reason');
   assert.deepEqual(requests.slice(cancelledRetryStart).map((request) => [request.kind, request.segmentIndex]), [['seedance-writer', 1]],
     'cancelled retry never translates or starts the next segment');
+
+  // Regression: the old path constructed Seedance input before committing the
+  // new segment/storyboard link. Only a genuinely empty public checkpoint can
+  // expose the resulting missing semantic evidence and immediately stale draft.
+  failChineseWriter = false; deferChineseFailure = false; failFirstEnglish = false; allowNewStoryboards = true;
+  const freshStart = requests.length;
+  await page.evaluate(({ key, fixture }) => { localStorage.clear(); sessionStorage.clear(); localStorage.setItem(key, JSON.stringify(fixture)); }, { key: storageKey, fixture: freshFixture });
+  await page.reload({ waitUntil: 'networkidle' }); await enterDirector();
+  const initialFresh = await readState();
+  assert.deepEqual(initialFresh.project.storyboards, []);
+  assert.ok(initialFresh.project.sequencePlans[0].segments.every((segment) => !segment.storyboardId && segment.status === 'planned'));
+  assert.equal(await page.getByRole('group', { name: '目标提示词格式', exact: true }).getByRole('button', { name: 'Seedance', exact: true }).getAttribute('aria-pressed'), 'true');
+  await capture('fresh-semantic-plan-before-generation');
+  const pendingPlanning = {};
+  pendingPlanning.gate = new Promise((resolve) => { pendingPlanning.release = resolve; });
+  pendingPlanning.started = new Promise((resolve) => { pendingPlanning.markStarted = resolve; });
+  deferredPlanningResponse = pendingPlanning;
+  await batchButton().click();
+  await pendingPlanning.started;
+  try {
+    const pendingResult = page.locator('.director-result-pane.empty-result-pane');
+    await pendingResult.getByText('第 1 段正在生成', { exact: true }).waitFor();
+    assert.equal(await pendingResult.getByText(/生成中断/u).count(), 0,
+      'an active first-generation request must not be labelled interrupted');
+    assert.equal(await pendingResult.getByText('正在生成本段分镜和提示词，完成后会自动显示结果。', { exact: true }).count(), 1);
+    assert.equal(await pendingResult.getByRole('button', { name: '正在生成本段Seedance…', exact: true }).isDisabled(), true);
+    assert.equal(await pendingResult.getByRole('button', { name: '重试本段Seedance', exact: true }).count(), 0);
+    await capture('fresh-first-segment-generating');
+  } finally { pendingPlanning.release(); }
+  await page.waitForFunction(({ key, planId }) => {
+    const project = JSON.parse(localStorage.getItem(key) || '{}').project;
+    const plan = project?.sequencePlans.find((item) => item.id === planId);
+    return plan?.segments.length === 2 && plan.segments.every((segment) => {
+      const board = project.storyboards.find((item) => item.id === segment.storyboardId);
+      return segment.status === 'ready' && board?.seedance25Output?.promptEn
+        && board.seedance25Output.englishSourceFingerprint === board.seedance25Output.sourceFingerprint;
+    });
+  }, { key: storageKey, planId }, { timeout: 50_000 });
+  await page.getByRole('button', { name: '取消顺序生成', exact: true }).waitFor({ state: 'hidden' });
+  const freshComplete = await readState();
+  assert.deepEqual(requests.slice(freshStart).map((request) => [request.kind, request.segmentIndex]), [1, 2].flatMap((index) =>
+    ['director', 'planning', 'planning-review', 'canonical-convert', 'seedance-writer', 'seedance-english'].map((kind) => [kind, index])),
+  'one click plans, saves and generates both previously unbound segments without retry');
+  const freshSavedChecks = assertCurrentSavedSeedance(freshComplete);
+  assert.deepEqual(await readRuntimeLog(), [], 'successful fresh batch produces no false failure diagnostic');
+  assert.equal(await page.getByText('Seedance 官方稿已过期', { exact: true }).count(), 0);
+  assert.deepEqual(freshComplete.project.generationTasks, []); assert.deepEqual(freshComplete.project.assets, []);
+  await capture('fresh-two-segments-complete-first-click');
+  await page.reload({ waitUntil: 'networkidle' }); await enterDirector();
+  const freshReloadedChecks = assertCurrentSavedSeedance(await readState());
+  assert.deepEqual(freshReloadedChecks, freshSavedChecks, 'save and startup normalization preserve fresh source identities and continuity');
+  assert.equal(requests.length, freshStart + 12, 'reload does not generate additional public or target results');
+  await capture('fresh-two-segments-reloaded-current');
+
+  // A genuine stale predecessor still blocks the next segment, and this
+  // preflight failure must reach the error log even without an HTTP request.
+  const blockedFixture = structuredClone(freshComplete);
+  const blockedPlan = blockedFixture.project.sequencePlans[0];
+  blockedPlan.segments[0].locked = true;
+  const predecessor = blockedFixture.project.storyboards.find((board) => board.id === blockedPlan.segments[0].storyboardId);
+  predecessor.seedance25Output.sourceFingerprint = 'qa-genuinely-outdated-source';
+  const blockedBoard = blockedFixture.project.storyboards.find((board) => board.id === blockedPlan.segments[1].storyboardId);
+  delete blockedBoard.seedance25Output;
+  blockedFixture.project.chapterWorkspaces[chapterId].directorControls.activeSegmentId = blockedPlan.segments[1].id;
+  blockedFixture.projects = [blockedFixture.project];
+  await page.evaluate(({ key, fixture }) => { localStorage.clear(); sessionStorage.clear(); localStorage.setItem(key, JSON.stringify(fixture)); }, { key: storageKey, fixture: blockedFixture });
+  await page.reload({ waitUntil: 'networkidle' }); await enterDirector();
+  const beforeHandoffFailure = await readState();
+  const blockedRequestCount = requests.length;
+  await batchButton().click();
+  await page.waitForFunction((key) => JSON.parse(localStorage.getItem(key) || '[]').some((entry) => entry.stage === 'sequence-prompt-handoff'), runtimeLogStorageKey);
+  await page.getByRole('button', { name: '取消顺序生成', exact: true }).waitFor({ state: 'hidden' });
+  const handoffLogs = await readRuntimeLog();
+  assert.equal(handoffLogs.length, 1, 'one blocked predecessor produces one diagnostic');
+  const handoffFailureLog = handoffLogs[0];
+  assert.equal(handoffFailureLog.stage, 'sequence-prompt-handoff');
+  assert.ok(handoffFailureLog.message.includes('第 2 段衔接失败'));
+  assert.ok(handoffFailureLog.message.includes('第 1 段的中文 Seedance 稿已失效'));
+  assert.ok(handoffFailureLog.message.includes(planId));
+  assert.ok(handoffFailureLog.message.includes(blockedPlan.segments[1].id));
+  assert.equal(handoffFailureLog.projectId, projectId);
+  assert.equal(await page.locator('.runtime-error-log-count').textContent(), '1');
+  assert.equal(requests.length, blockedRequestCount, 'handoff preflight stops before requesting the next model');
+  assert.deepEqual((await readState()).project.storyboards, beforeHandoffFailure.project.storyboards,
+    'blocked handoff preserves both public storyboards and the saved old Seedance draft');
+  await page.locator('.runtime-error-log-trigger').click();
+  const handoffDialog = page.getByRole('dialog', { name: '报错日志', exact: true });
+  await handoffDialog.waitFor();
+  assert.ok((await handoffDialog.innerText()).includes('分段提示词衔接检查'));
+  await capture('stale-predecessor-handoff-failure-logged');
+  await handoffDialog.getByRole('button', { name: '关闭', exact: true }).click();
   assert.deepEqual(errors, []); assert.deepEqual(blockedRequests, []);
   const report = { passed: true, builtApp: true, isolatedBrowserStorage: true, mockedTextApiOnly: true,
     semanticSegments: 2, independentH3AndSeedance: true, exactSeedancePredecessor: true, englishOnlyBatchRetry: true,
     englishFailureLogged: true, chineseFailureLogged: true, chineseFailureStopsSequence: true, persistentFailureDiagnostics: true,
     retryClearsStaleFailure: true, cancelledRetryIgnoresLateFailure: true,
-    failureLogs: [englishFailureLog, chineseFailureLog], requests, screenshots, errors, blockedRequests };
+    activeFirstSegmentShowsGenerating: true,
+    freshSemanticPlanFirstClickComplete: true, freshSourceContextPresent: true, savedAndReloadedOutputsCurrent: true,
+    realSourceChangesInvalidateOutput: true, freshSavedChecks, freshReloadedChecks,
+    stalePredecessorBlocksAndLogsOnce: true,
+    failureLogs: [englishFailureLog, chineseFailureLog, handoffFailureLog], requests, screenshots, errors, blockedRequests };
   fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(report, null, 2));
   console.log(`Seedance sequence entry built UI QA passed: ${path.join(output, 'report.json')}`);
 };

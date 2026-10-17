@@ -82,6 +82,9 @@ export default defineConfig({
             'h3OutputRecovery.ts',
             'videoH3ReferenceBinding.ts',
             'videoSeedanceReferenceBinding.ts',
+            // Shared Seedance parsing is a pure binding/participation contract.
+            // Keeping it in domain creates a startup initialization cycle.
+            'seedanceSections.ts',
             // H3 bindings read the pattern during module initialization; keep
             // its dependency-free parser here rather than in the domain cycle.
             'videoPictureReferences.ts',

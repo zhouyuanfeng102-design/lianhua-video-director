@@ -1,6 +1,8 @@
 import { characterVariantAliases, characterVariantBaseName, characterVariantDisplayName } from './characterVariants';
 import { sourceContentHash } from './sourceContentHash';
-import type { Character, CharacterPresence, H3IdentityBindings, PromptCharacterParticipation, PromptCharacterParticipationSnapshot, Storyboard } from './types';
+import { readSeedanceSections } from './seedanceSections';
+import { maskVideoPictureReferenceLiterals } from './videoPictureReferences';
+import type { Character, CharacterPresence, H3IdentityBindings, PromptCharacterParticipation, PromptCharacterParticipationSnapshot, Seedance25Output, Storyboard } from './types';
 
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const unique = <T,>(values: readonly T[]): T[] => [...new Set(values)];
@@ -135,15 +137,43 @@ const mentionPattern = /提(?:及|到|起)|谈论|想到|想起|回忆|听说|�
 const visualBefore = /(?:可见|看到|看见|远景|近景|特写|画面(?:中|内)|景深(?:处|内)|画幅|入画|站着的|站立的|静立的|visible|in (?:the )?(?:foreground|background|frame)|close[- ]up)[^。！？;；\n]{0,45}$/iu;
 const visualAfter = /^[^。！？;；\n]{0,36}(?:站(?:在|立|着)|坐(?:在|着)|静立|伫立|走(?:向|到|出|入)|奔跑|冲(?:向|锋)|挥(?:动|舞|枪|剑)|抬(?:头|手)|转身|面向|身穿|穿着|举(?:起|着)|飞(?:起|出)|跃(?:起|向)|倒(?:下|地)|跪(?:下|地)|后退|俯视|凝视|注视|微笑|皱眉|闭眼|睁眼|握(?:着|住)|抚摸|拥抱|亲吻|入画|出现在画面|stands?\b|standing\b|sits?\b|sitting\b|walks?\b|runs?\b|wears?\b|wearing\b|faces?\b|facing\b|holds?\b|holding\b|raises?\b|turns?\b|strikes?\b|charges?\b|attacks?\b|looks?\b|thrusts?\b|swings?\b|slashes?\b)/iu;
 
+interface CharacterParticipationIndex {
+  catalog: CharacterIdentitySource[];
+  byId: Map<string, CharacterIdentitySource>;
+  aliasesByCharacter: Map<CharacterIdentitySource, string[]>;
+  patterns: Map<string, RegExp>;
+  ambiguousAliases: string[];
+}
+
+/** One call owns this index. Names, aliases and archive state may change on
+ * existing objects, so a later call must never reuse a global object cache. */
+const characterParticipationIndex = (catalog: CharacterIdentitySource[]): CharacterParticipationIndex => {
+  const rawByCharacter = new Map(catalog.map((character) => [character, rawAliases(character)]));
+  const owners = new Map<string, CharacterIdentitySource[]>();
+  for (const character of catalog) for (const alias of rawByCharacter.get(character)!) {
+    const matches = owners.get(alias);
+    if (matches) matches.push(character); else owners.set(alias, [character]);
+  }
+  return {
+    catalog,
+    byId: new Map(catalog.map((character) => [character.id, character])),
+    aliasesByCharacter: new Map(catalog.map((character) => [character, rawByCharacter.get(character)!
+      .filter((alias) => owners.get(alias)!.length === 1 && owners.get(alias)![0].id === character.id)])),
+    patterns: new Map([...owners.keys()].map((alias) => [alias, namePattern(alias)])),
+    ambiguousAliases: [...owners].filter(([, matches]) => matches.length !== 1).map(([alias]) => alias),
+  };
+};
+
 /** Conservative legacy reading for display/request binding only. It never
  * rewrites saved prompts or treats a quoted mention as a visible character. */
-export const resolvePromptCharacterParticipation = (
+const resolvePromptCharacterParticipationIndexed = (
   prompt: string,
   characters: readonly CharacterIdentitySource[],
   options: { participation?: PromptCharacterParticipationSnapshot; identityBindings?: H3IdentityBindings } = {},
+  sharedIndex?: CharacterParticipationIndex,
 ): CharacterParticipationResult => {
-  const catalog = active(characters);
-  const byId = new Map(catalog.map((character) => [character.id, character]));
+  const catalog = sharedIndex?.catalog || active(characters);
+  const byId = sharedIndex?.byId || new Map(catalog.map((character) => [character.id, character]));
   const results = new Map<string, ResolvedCharacterParticipation>();
   const add = (id: string, presence: CharacterPresence, shotIndex: number, evidence: string, source: ResolvedCharacterParticipation['source']) => {
     const character = byId.get(id);
@@ -163,8 +193,8 @@ export const resolvePromptCharacterParticipation = (
     for (const entry of saved.characters) add(entry.characterId, entry.presence, entry.shotIndex, entry.evidence, 'metadata');
     return { characters: [...results.values()], ambiguousNames: [], usedFallback: false };
   }
-  const ambiguousNames = unique(catalog.flatMap(rawAliases)).filter((alias) => !resolveCharacterAlias(alias, catalog)
-    && namePattern(alias).test(prompt));
+  const index = sharedIndex || characterParticipationIndex(catalog);
+  const ambiguousNames = index.ambiguousAliases.filter((alias) => index.patterns.get(alias)!.test(prompt));
   for (const shot of promptShots(prompt)) {
     const noAudio = shot.text.replace(/<sound>[\s\S]*?<\/sound>/giu, '');
     const narrative = noAudio.replace(/<d>[\s\S]*?<\/d>/giu, '').replace(/[“「『][\s\S]*?[”」』]|"[^"\n]*"/gu, '');
@@ -173,10 +203,11 @@ export const resolvePromptCharacterParticipation = (
     let actionText = narrative;
     for (const entry of options.identityBindings?.characters || []) actionText = actionText.replace(entry.referenceAnchor, '');
     actionText = actionText.replace(/(?:Identity|身份)\s*[:：][^\n。.!?]+[。.!?]?/giu, '');
+    const clauses = actionText.split(/(?<=[。！？!?；;])|\n/gu);
     for (const character of catalog) {
-      for (const alias of characterParticipationAliases(character, catalog)) {
-        const pattern = namePattern(alias);
-        for (const clause of actionText.split(/(?<=[。！？!?；;])|\n/gu)) {
+      for (const alias of index.aliasesByCharacter.get(character)!) {
+        const pattern = index.patterns.get(alias)!;
+        for (const clause of clauses) {
           const match = pattern.exec(clause);
           if (!match) continue;
           const before = clause.slice(0, match.index);
@@ -206,6 +237,12 @@ export const resolvePromptCharacterParticipation = (
   return { characters: [...results.values()], ambiguousNames, usedFallback: true };
 };
 
+export const resolvePromptCharacterParticipation = (
+  prompt: string,
+  characters: readonly CharacterIdentitySource[],
+  options: { participation?: PromptCharacterParticipationSnapshot; identityBindings?: H3IdentityBindings } = {},
+): CharacterParticipationResult => resolvePromptCharacterParticipationIndexed(prompt, characters, options);
+
 /** New AI deliveries must account for unique names actually present in shot
  * prose. This is a coverage check only: the model decides visible/offscreen/
  * mentioned, and a quoted mention never mandates a visual identity binding. */
@@ -217,11 +254,92 @@ export const characterParticipationCoverageIssues = (
   .filter((entry) => !participation.characters.some((item) => item.characterId === entry.characterId))
   .map((entry) => `镜头正文出现了可唯一对应人物“${entry.name}”的称呼，characterParticipation缺少该人物记录。请结合最终镜头判断visible/offscreen/mentioned，不为补记录强迫入画，不删除正文称呼来规避。`);
 
+/** Seedance declares its segment subjects in a dedicated continuity section.
+ * A quiet subject's identity is evidence even without a particular action verb.
+ * Reference notes and dialogue mentions are not cast declarations. This adapter
+ * does not apply Seedance's section semantics to H3 or unstructured story prose. */
+export const resolveSeedanceCharacterParticipation = (
+  selectedPrompt: string,
+  characters: readonly CharacterIdentitySource[],
+  output?: Seedance25Output,
+): CharacterParticipationResult => {
+  // Use the saved Chinese identity only for its exact, verified English pair.
+  // Romanized names are never guessed, nor borrowed from an unrelated H3 draft.
+  const prompt = output?.promptZh && selectedPrompt === output.promptEn
+    && output.sourceFingerprint && output.englishSourceFingerprint === output.sourceFingerprint
+    ? output.promptZh : selectedPrompt;
+  const parsed = readSeedanceSections(prompt);
+  if (!parsed) return resolvePromptCharacterParticipation(prompt, characters);
+  const catalog = active(characters);
+  const index = characterParticipationIndex(catalog);
+  const sectionText = (name: keyof typeof parsed.sections) => prompt.slice(parsed.sections[name].start, parsed.sections[name].end);
+  const timeline = sectionText('timeline');
+  // Natural Seedance time ranges identify segment shots; they do not use [Shot].
+  let shotIndex = 0;
+  const indexedTimeline = timeline.replace(/^[ \t]*(?=[【\[]?[ \t]*\d+(?:\.\d+)?[ \t]*(?:秒|s(?:ec(?:onds?)?)?)?[ \t]*(?:至|到|to\b|[-–—~])[ \t]*\d)/gimu,
+    () => `[Shot ${++shotIndex}] `);
+  const narrative = resolvePromptCharacterParticipationIndexed(indexedTimeline, catalog, {}, index);
+  const results = new Map(narrative.characters.map((entry) => [entry.characterId, entry]));
+  const aliases = unique(catalog.flatMap((character) => index.aliasesByCharacter.get(character)!))
+    .sort((left, right) => right.length - left.length);
+  const add = (character: CharacterIdentitySource, presence: CharacterPresence, evidence: string) => {
+    const prior = results.get(character.id);
+    results.set(character.id, prior ? { ...prior,
+      ...(rank[presence] > rank[prior.presence] ? { presence } : {}),
+      evidence: unique([...prior.evidence, evidence]),
+      visibleEvidence: unique([...prior.visibleEvidence, ...(presence === 'visible' ? [evidence] : [])]),
+    } : { characterId: character.id, name: character.name, presence,
+      // A segment-wide identity does not prove a particular shot number.
+      shotIndexes: [], visibleShotIndexes: [], evidence: [evidence],
+      visibleEvidence: presence === 'visible' ? [evidence] : [], source: 'text' });
+  };
+  const subjects = sectionText('subjects');
+  const masked = maskVideoPictureReferenceLiterals(subjects);
+  const directDeclaration = new RegExp(`^[ \\t]*(?:${aliases.map(escaped).join('|') || '(?!)'})[ \\t]*(?:为|是|保持|持续|身(?:穿|着)|穿|戴|is\\b|are\\b|wears?\\b|wearing\\b|keeps?\\b)`, 'iu');
+  // A comma may separate two direct identity declarations. Preserve offsets,
+  // and do not split names embedded in another person's relational biography.
+  const maskedSubjects = masked.replace(/[,，]/gu, (comma, offset: number) => directDeclaration.test(masked.slice(offset + 1))
+    && !mentionPattern.test(masked.slice(0, offset).split(/[。！？!?；;\r\n]/u).slice(-1)[0] || '') ? '；' : comma);
+  const clauses = [...maskedSubjects.matchAll(/[^。！？!?；;\r\n]+[。！？!?；;]?/gu)];
+  for (const clauseMatch of clauses) {
+    const clause = clauseMatch[0];
+    const evidence = subjects.slice(clauseMatch.index!, clauseMatch.index! + clause.length).trim();
+    for (const character of catalog) for (const alias of index.aliasesByCharacter.get(character)!) {
+      const match = index.patterns.get(alias)!.exec(clause);
+      if (!match) continue;
+      const before = clause.slice(0, match.index);
+      const after = clause.slice(match.index + match[0].length);
+      // Require a direct subject declaration, including a coordinated list.
+      // A character mentioned inside someone else's biography is not declared.
+      let prefix = before;
+      for (const candidate of aliases) prefix = prefix.replace(index.patterns.get(candidate)!, '');
+      if (!/^[ \t]*(?:[-*•][ \t]*)?(?:(?:本段|当前)(?:出镜)?(?:人物|主体)[：:]?[ \t]*)?(?:[、与和及,&\s]|\band\b)*$/iu.test(prefix)
+        || /^(?:的|姐姐|妹妹|哥哥|弟弟|这个名字|的名字|'s\b|’s\b)/u.test(after.trim())) continue;
+      const absent = /(?:仅|只)(?:被)?提(?:及|到)|未(?:曾)?出(?:场|镜)|(?:本段|本镜|全段)[^。！？;；]{0,8}(?:不出(?:场|镜)|不入画|不在场|不出现)|不(?:会)?出(?:场|镜)|不在(?:本段|本镜)(?:出场|出镜)?|mentioned only|only mentioned|does not appear|not present|absent from/iu.test(clause);
+      const hypothetical = mentionPattern.test(before) || /[？?]|是否|假如|如果|想象|假扮|伪装成/iu.test(clause);
+      const offscreen = offscreenPattern.test(clause) || /仅(?:有)?(?:声音|声线)|只(?:有)?(?:声音|声线)|仅作(?:为)?旁白|voice[- ]only|voice[- ]over|narrator/iu.test(clause);
+      add(character, absent || hypothetical ? 'mentioned' : offscreen ? 'offscreen' : 'visible', evidence);
+    }
+  }
+  // Names outside actual declarations remain a separate mention hint. Image
+  // descriptions, a reference list and quoted dialogue cannot promote them.
+  for (const character of catalog) {
+    if (results.has(character.id)) continue;
+    const alias = index.aliasesByCharacter.get(character)!.find((candidate) => index.patterns.get(candidate)!.test(prompt));
+    if (alias) add(character, 'mentioned', alias);
+  }
+  const ambiguousNames = index.ambiguousAliases.filter((alias) => index.patterns.get(alias)!.test(prompt));
+  return { characters: [...results.values()], ambiguousNames, usedFallback: true };
+};
+
 export const resolveStoryboardCharacterParticipation = (
-  board: Pick<Storyboard, 'officialPromptZh' | 'officialPromptEn' | 'officialPromptEnSource' | 'h3IdentityBindings' | 'h3IdentityBindingsEn' | 'h3CharacterParticipation'>,
+  board: Pick<Storyboard, 'officialPromptZh' | 'officialPromptEn' | 'officialPromptEnSource' | 'h3IdentityBindings' | 'h3IdentityBindingsEn' | 'h3CharacterParticipation' | 'seedance25Output'>,
   characters: readonly Character[],
   prompt: string,
 ): CharacterParticipationResult => {
+  if (readSeedanceSections(prompt) || board.seedance25Output && (prompt === board.seedance25Output.promptZh || prompt === board.seedance25Output.promptEn)) {
+    return resolveSeedanceCharacterParticipation(prompt, characters, board.seedance25Output);
+  }
   const chinese = board.officialPromptZh;
   if (chinese && (prompt === chinese || prompt === board.officialPromptEn && board.officialPromptEnSource === chinese)) {
     return resolvePromptCharacterParticipation(chinese, characters, { participation: board.h3CharacterParticipation, identityBindings: board.h3IdentityBindings });

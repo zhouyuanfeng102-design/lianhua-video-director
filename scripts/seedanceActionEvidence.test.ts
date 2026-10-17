@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { buildOfficialSeedanceInput, hasCurrentSeedancePrompt } from '../src/seedanceSource';
+import { assertCurrentSeedancePrompt, buildOfficialSeedanceInput, hasCurrentSeedancePrompt } from '../src/seedanceSource';
 import { getOfficialSeedanceSourceFingerprint } from '../src/seedancePrompt';
 import { SEEDANCE_CHINESE_WRITER_RULE } from '../src/seedancePromptRules';
 import { semanticSegmentStoryContent, type SemanticSegmentSourceContext } from '../src/semanticSequencePlan';
@@ -133,9 +133,16 @@ test('action-evidence changes invalidate Seedance cache while preserving histori
   board.seedance25Output = { targetId: 'seedance-2.5', promptZh, durationSec: 15,
     sourceFingerprint: fingerprint, referenceManifest: [], warnings: [], generatedAt: 2 };
   assert.equal(hasCurrentSeedancePrompt(project, board), true);
+  assert.doesNotThrow(() => assertCurrentSeedancePrompt(project, board), 'saved Chinese alone is sufficient for continuation');
   snapshot.actionPlan!.events[0].phases!.push('已确认的脚部作用与木箱运动衔接');
   assert.notEqual(getOfficialSeedanceSourceFingerprint(buildOfficialSeedanceInput(project, board)), fingerprint);
   assert.equal(hasCurrentSeedancePrompt(project, board), false);
+  assert.throws(() => assertCurrentSeedancePrompt(project, board), (error: unknown) => {
+    assert.equal((error as { code: string }).code, 'SEEDANCE_SOURCE_MISMATCH');
+    assert.match((error as Error).message, /第 1 段/);
+    assert.ok((error as Error).message.includes(fingerprint));
+    return true;
+  }, 'real source edits must remain invalid and expose source diagnostics');
   assert.equal(board.seedance25Output.promptZh, promptZh);
 });
 

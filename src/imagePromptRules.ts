@@ -2071,6 +2071,15 @@ export const IMAGE_PROMPT_PROP_SCOPE_CONTRACT = [
   '不要按“剑”或“食物”等类别一刀切，按剧情中的归属、持续性和叙事功能判断：临时借剑不等于长期佩剑，全文明确的长期身份标志也不因物品类别被删除。保留题材、世界观、背景风格、服装与真正的长期装备；稳定装备也按当前取景与剧情状态显露，不强制每镜手持。',
 ].join('\n');
 
+/** Preserve authored physical dimensions in the existing narrative conversion.
+ * This is prompt guidance only: no local size inference or output repair. */
+export const IMAGE_PROMPT_PROP_SCALE_CONTRACT = [
+  '当前静帧实际可见的道具，必须把具名物件及其已明确的物理尺寸直接写进最终生图正文：保留长、宽、高、直径等各自的尺寸维度、原数值和原单位，不混用不同物件或不同部件的尺寸，不擅自换算、取整或补造数值。道具资料标为候选只决定它是否在本张入画；一旦可见，其已知尺寸不能随资料压缩而丢失，也不能只留在输入资料、参考用途或说明字段里。未给尺寸时仅沿用原文已有的小型、单手可握等相对描述，不凭名称、类型或无标尺参考图猜测厘米数。',
+  '手持、穿戴或接触道具按当前具名持有者及手掌、前臂、身体或接触部位表现真实尺度关系，已知物理尺寸持续成立；不凭人物身高另造精确比值，不把所有道具都缩成掌心大小。低仰角、近景、透视与裁切改变投影而不改变实体尺寸，正常近大远小和局部取景仍保留。光柱、火焰、光晕及其他外放效果按剧情展开，不将效果范围当成道具本体大小，也不因强调主体或填满画面放大道具。',
+  '先取本张时刻对应的道具状态：剧情明确变大、缩小、伸缩或切换形态时，以该时刻已经发生的变化及明确尺寸覆盖默认尺寸，未知变形后数值只用已有相对描述；首帧不提前采用尾帧大小，也不把变形前后尺寸同时套到同一实体。人物变成巨人、换了持有者或改变机位本身不表示道具同步变大。已放下的物件按当前可见位置表现，画外物件不为说明尺寸补入画面，不添加尺子、尺寸线或标注文字。',
+  '自然语言将物件名称、尺寸和必要的人体参照自然写入同一句画面描述；SD共享场景段、NAI基础段保留物件与尺寸的对应，相关人物段保留谁持有什么及其可见关系，不因标签压缩删除数值与单位。多宫格逐格沿用各自时刻的尺寸事实，不输出尺寸分析、检查报告或额外制作参数。',
+].join('\n');
+
 /** A storyboard converter must retain the semantic destination of a directed
  * action.  Keep this separate from identity rules so user presets cannot
  * accidentally replace it with a generic “dynamic action” phrase. */
@@ -2195,12 +2204,13 @@ const STORYBOARD_IMAGE_CONVERSION_RULE = [
 /** One runtime owner for narrative conversion. The full storyboard contract
  * already contains the visibility and world-state contracts. */
 export const imagePromptNarrativeContract = (kind: ImagePromptAssetKind, imageVariant?: ImageVariant): string => kind === 'storyboard'
-  ? [STORYBOARD_IMAGE_CONVERSION_RULE, STORYBOARD_SPATIAL_FRAME_RULE].join('\n')
+  ? [STORYBOARD_IMAGE_CONVERSION_RULE, STORYBOARD_SPATIAL_FRAME_RULE, IMAGE_PROMPT_PROP_SCALE_CONTRACT].join('\n')
   : isNarrativeImageRequest(kind, imageVariant)
-    ? [IMAGE_STORY_SPATIAL_STATE_RULE, DIRECTED_ACTION_RELATION_RULE, SPATIAL_COORDINATE_RULE].join('\n')
+    ? [IMAGE_STORY_SPATIAL_STATE_RULE, DIRECTED_ACTION_RELATION_RULE, SPATIAL_COORDINATE_RULE, IMAGE_PROMPT_PROP_SCALE_CONTRACT].join('\n')
     : '';
 
 const narrativeContractBlocks = [
+  IMAGE_PROMPT_PROP_SCALE_CONTRACT,
   LEGACY_DIRECTED_ACTION_RELATION_RULE_V2_5_6, LEGACY_STORYBOARD_SPATIAL_FRAME_RULE_V2_5_6,
   LEGACY_IMAGE_STORY_SPATIAL_STATE_RULE_V2_5_1, LEGACY_DIRECTED_ACTION_RELATION_RULE_V2_5_1,
   LEGACY_STORYBOARD_FRAME_VISIBILITY_RULE_V2_5_1, LEGACY_STORYBOARD_SPATIAL_FRAME_RULE_V2_5_1,

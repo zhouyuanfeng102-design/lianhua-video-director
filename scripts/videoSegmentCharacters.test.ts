@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { videoSegmentCharacterHints } from '../src/videoSegmentCharacters';
+import { resolveSeedanceCharacterParticipation } from '../src/characterParticipation';
 import type { Character, Project, Storyboard, VideoSegment, VideoSequencePlan } from '../src/types';
 
 const character = (id: string, name: string, aliases: string[] = [], assetIds: string[] = []): Character => ({
@@ -121,4 +122,83 @@ const boardWith = (prompt: string, patch: Partial<Storyboard> = {}): Storyboard 
   assert.equal(result.characters[0]?.referenceImageCount, 1, 'current same-ID assets remain available');
 }
 
-console.log('videoSegmentCharacters tests passed: final prompt, names, later shots, English, mentions, forms, immutability');
+const seedancePrompt = (subjects: string, timeline: string, references = '无参考图片。') => [
+  '视频规格：30秒，16:9。', `参考素材与职责：${references}`, `主体连续性：${subjects}`,
+  '一句话概述：一行人安静汇合。', `连续时间轴：\n\n${timeline}`, '全局约束：保持人物身份连续。',
+].join('\n\n');
+
+{
+  // Regression shape: a silent fourth actor is declared in continuity and
+  // gestures later, with neither a H3 shot marker nor the legacy action verbs.
+  const people = ['青舟', '银霁', '赤羽', '棠梨'].map((name, index) => character(`actor-${index}`, name, [], [`image-${index}`]));
+  const prompt = seedancePrompt(
+    '青舟为二十岁左右男性，黑色碎发，穿黑色西装；银霁为女性人造人，银白长发，动作轻盈；赤羽为高挑女性，穿皮衣，本段不显露龙角；棠梨为十九岁左右女性，穿短衣短裤。本段实际发话者为赤羽；其余人物在本段不说话。',
+    '0秒至9秒，青舟站在空地中央，银霁走出舱门。\n\n9秒至17秒，青舟盘坐。\n\n17秒至22秒，赤羽抱胸而立，棠梨等人也摆手拒绝。\n\n22秒至30秒，青舟转身。',
+  );
+  const project = { ...baseProject(people), assets: people.map((person, index) => ({
+    id: `image-${index}`, name: person.name, type: 'character', mediaType: 'image', tags: [],
+  })) } as unknown as Project;
+  const h3 = shotPrompt('[Shot 1] 青舟站在门口。');
+  const board = boardWith(h3, { seedance25Output: { targetId: 'seedance-2.5', promptZh: prompt,
+    promptEn: 'Video specs: 30 seconds.\nReferences and responsibilities: None.\nSubject continuity: Four adults keep their appearance.\nSummary: A quiet meeting.\nContinuous timeline: 0–30 seconds, they gather.\nGlobal constraints: Keep identities.',
+    durationSec: 30, sourceFingerprint: 'current', englishSourceFingerprint: 'current', referenceManifest: [], warnings: [], generatedAt: 1 } });
+  const before = JSON.stringify({ project, board });
+  const result = videoSegmentCharacterHints(project, undefined, segment(), board, prompt);
+  assert.deepEqual(new Set(result.characters.map((entry) => entry.id)), new Set(people.map((person) => person.id)), 'quiet named subjects do not depend on a short action-verb dictionary');
+  assert.equal(result.mentionedCharacters.length, 0);
+  assert.equal(result.characters.find((entry) => entry.id === 'actor-3')?.referenceImageCount, 1);
+  const participation = resolveSeedanceCharacterParticipation(prompt, people);
+  assert.equal(participation.characters.find((entry) => entry.characterId === 'actor-3')?.presence, 'visible');
+  assert.ok(participation.characters.find((entry) => entry.characterId === 'actor-3')?.evidence.some((value) => value.startsWith('棠梨为')));
+  assert.deepEqual(participation.characters.find((entry) => entry.characterId === 'actor-3')?.shotIndexes, [3], 'natural timeline paragraphs retain their real shot number');
+  assert.deepEqual(new Set(videoSegmentCharacterHints(project, undefined, segment(), board, board.seedance25Output!.promptEn!).characters.map((entry) => entry.id)),
+    new Set(people.map((person) => person.id)), 'the exact verified Seedance English pair uses its Chinese identities rather than unrelated H3');
+  const stalePair = { ...board, seedance25Output: { ...board.seedance25Output!, englishSourceFingerprint: 'old' } };
+  assert.deepEqual(videoSegmentCharacterHints(project, undefined, segment(), stalePair, board.seedance25Output!.promptEn!).characters, [], 'a stale English pair cannot borrow Chinese identities');
+  assert.deepEqual(videoSegmentCharacterHints(project, undefined, segment(), board, `${board.seedance25Output!.promptEn}\nEdited.`).characters, [], 'edited English cannot silently borrow a saved identity pairing');
+  assert.equal(JSON.stringify({ project, board }), before, 'the format adapter does not edit stored prompts or source data');
+}
+
+{
+  const people = ['晨星', '暮云', '远川', '秋水', '映月', '文竹', '嘉木'].map((name) => character(name, name));
+  const prompt = seedancePrompt(
+    '晨星与暮云保持原有衣着；远川为画外发声者，穿旧披风；秋水为白发女性，本段不出场；映月仅被提及，穿蓝裙；文竹是否在场尚不确定。',
+    '0秒至30秒，晨星站在门前说：“嘉木穿着银袍站在塔顶。”',
+    '嘉木参考图：嘉木穿着银袍，站在塔顶。',
+  );
+  const participation = resolveSeedanceCharacterParticipation(prompt, people);
+  const presence = Object.fromEntries(participation.characters.map((entry) => [entry.characterId, entry.presence]));
+  assert.equal(presence.晨星, 'visible');
+  assert.equal(presence.暮云, 'visible', 'a coordinated continuity declaration includes quiet companions');
+  assert.equal(presence.远川, 'offscreen');
+  for (const name of ['秋水', '映月', '文竹', '嘉木']) assert.equal(presence[name], 'mentioned', `${name} is not promoted by an exclusion, uncertain declaration, image description or dialogue quote`);
+  const fallback = resolveSeedanceCharacterParticipation('主体连续性：嘉木为银发女性。', people);
+  assert.equal(fallback.characters.find((entry) => entry.characterId === '嘉木')?.presence, 'mentioned', 'a heading-shaped fragment is not a verified Seedance section structure');
+}
+
+{
+  for (const delimiter of ['，', ',', '；', '\n']) {
+    const people = [character('a', '青岚'), character('b', '白榆')];
+    const prompt = seedancePrompt(`青岚为青年穿黑衣${delimiter}白榆为青年穿白衣。`, '0秒至30秒，空地安静。');
+    assert.deepEqual(new Set(resolveSeedanceCharacterParticipation(prompt, people).characters.filter((entry) => entry.presence === 'visible').map((entry) => entry.characterId)),
+      new Set(['a', 'b']), `direct identity declarations survive ${JSON.stringify(delimiter)} separators`);
+    const relative = seedancePrompt(`青岚为青年穿黑衣${delimiter}青岚的朋友白榆为青年穿白衣。`, '0秒至30秒，空地安静。');
+    assert.equal(resolveSeedanceCharacterParticipation(relative, people).characters.find((entry) => entry.characterId === 'b')?.presence,
+      'mentioned', 'a named relative inside another subject biography is not a direct segment subject declaration');
+  }
+  const english = ['Video specs: 30 seconds.', 'References and responsibilities: None.', 'Subject continuity: Rowan is a young man.\nLark is a woman.',
+    'Summary: A meeting.', 'Continuous timeline:\n0 to 10 seconds, Rowan stands at the gate.\n10 to 30 seconds, Lark walks out.', 'Global constraints: Keep identities.'].join('\n');
+  assert.deepEqual(resolveSeedanceCharacterParticipation(english, [character('rowan', 'Rowan'), character('lark', 'Lark')]).characters.find((entry) => entry.characterId === 'lark')?.visibleShotIndexes,
+    [2], 'English natural timeline ranges also retain later-shot participation');
+}
+
+{
+  const people = [character('form-a', '云歌·普通形态'), character('form-b', '云歌·战斗形态'),
+    character('other', '旧友'), { ...character('archived', '退役者'), dossier: { archivedIntoCharacterId: 'other' } } as Character];
+  const prompt = seedancePrompt('云歌为长发女性；旧友的姐姐穿红裙；退役者为短发女性。', '0–30秒，空地无人。');
+  const result = resolveSeedanceCharacterParticipation(prompt, people);
+  assert.deepEqual(result.characters.filter((entry) => entry.presence === 'visible'), [], 'an ambiguous visual form, relative or archived dossier is not guessed');
+  assert.ok(result.ambiguousNames.includes('云歌'));
+}
+
+console.log('videoSegmentCharacters tests passed: H3 compatibility, Seedance declared quiet subjects, natural time ranges, verified English pairing, exclusions, names, forms and immutability');

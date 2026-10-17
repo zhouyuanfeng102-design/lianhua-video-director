@@ -87,3 +87,15 @@ export const hasCurrentSeedancePrompt = (project: Project, board: Storyboard, la
   return language === 'zh' || Boolean(output.promptEn && output.englishSourceFingerprint === output.sourceFingerprint
     && !getVideoPromptInstructionLeak(output.promptEn));
 };
+
+/** Validate a newly written target before accepting it as a usable checkpoint.
+ * Canonical-only checkpoints may still carry an older target and do not call this. */
+export const assertCurrentSeedancePrompt = (project: Project, board: Storyboard): void => {
+  if (hasCurrentSeedancePrompt(project, board)) return;
+  const expected = getOfficialSeedanceSourceFingerprint(buildOfficialSeedanceInput(project, board));
+  throw Object.assign(new Error(
+    `${board.segmentIndex ? `第 ${board.segmentIndex} 段` : '当前分镜'} Seedance 中文稿未通过当前来源校验；`
+    + `计划=${board.sequencePlanId || '单段'}，分段=${board.segmentId || board.id}，`
+    + `生成指纹=${board.seedance25Output?.sourceFingerprint || '缺失'}，当前指纹=${expected}。请刷新本段提示词。`,
+  ), { code: 'SEEDANCE_SOURCE_MISMATCH' });
+};

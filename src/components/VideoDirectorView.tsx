@@ -965,7 +965,9 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
         && retry.draft.runningHubWorkflowId === runningHubWorkflowId
         && (backend === 'comfyui'
           ? (retry.draft.workflowId || '') === workflowId
-          : (retry.draft.apiProfileId || '') === apiProfileId);
+          : (retry.draft.apiProfileId || '') === apiProfileId)
+        && !Object.prototype.hasOwnProperty.call(referenceOverrides, row.segmentId)
+        && !Object.prototype.hasOwnProperty.call(referenceRoleOverrides, row.segmentId);
       const references = cloneVideoReferences(referenceOverrides[row.segmentId] || retry.draft.references);
       const retryParameters = parameterText === retryParameterBaselineText
         ? structuredClone(retry.draft.parameters)
@@ -1033,12 +1035,19 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
   // selection is intentional too; never restore deselected identity images.
   const hasEditedTailReferences = (segmentId: string): boolean => Boolean(tailCharacterModes[segmentId]?.editedReferences)
     || Object.prototype.hasOwnProperty.call(referenceOverrides, segmentId);
-  const characterDrafts = useMemo(() => new Map(baseRows.flatMap((row) => [row.zh, row.en]
+  const characterDrafts = useMemo(() => new Map(baseRows.filter((row) => tailCharacterModes[row.segmentId]).flatMap((row) => [row.zh, row.en]
     .filter((candidate): candidate is VideoBatchChoiceCandidate => Boolean(candidate))
     .map((candidate) => [candidate.key, prepareVideoTailCharacterDraft(project, candidate.draft, { preserveSlots: hasEditedTailReferences(candidate.segmentId) })] as const))), [baseRows, project, tailCharacterModes, referenceOverrides]);
+  const prepareCharacterCandidate = (candidate: VideoBatchChoiceCandidate) => {
+    const cached = characterDrafts.get(candidate.key);
+    if (cached) return cached;
+    const prepared = prepareVideoTailCharacterDraft(project, candidate.draft, { preserveSlots: hasEditedTailReferences(candidate.segmentId) });
+    characterDrafts.set(candidate.key, prepared);
+    return prepared;
+  };
   const characterSourceFingerprint = (row: VideoBatchRow, rebuild = false): string => JSON.stringify([row.zh, row.en].map((candidate) => {
     if (!candidate) return null;
-    const prepared = rebuild ? prepareVideoTailCharacterDraft(project, candidate.draft, { preserveSlots: true }) : characterDrafts.get(candidate.key)!;
+    const prepared = rebuild ? prepareVideoTailCharacterDraft(project, candidate.draft, { preserveSlots: true }) : prepareCharacterCandidate(candidate);
     return [candidate.draft, prepared.issue, prepared.draft.prompt,
       videoBatchReferenceFingerprint(prepared.draft, project.assets)];
   }));
@@ -1073,7 +1082,15 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
         // Their final slots are resolved after applying the tail placement.
         if (!automatic) draft = { ...draft, references: videoReferenceUsage(draft.references, usageContextForDraft(draft)) };
         const bindingInput = automatic ? { ...draft, references: videoBatchTailReferences(draft.references, automatic.placement, '__future_tail_binding__') } : draft;
-        const bound = prepareVideoH3ReferenceDraft(project, bindingInput, usageContextForDraft(draft)).draft;
+        // baseRows already binds the unchanged source selection. Only a later
+        // slot/role/tail override needs another image-binding pass. Keeping
+        // that initial prepared shape also preserves saved tail fingerprints
+        // and historical retry snapshots.
+        const needsImageBinding = automatic || mode || referenceRoleOverrides[row.segmentId]
+          || !draft.reuseTaskId && reviewFrozenFormats && retryEntriesBySegment.has(row.segmentId)
+          || draft.prompt !== candidate.draft.prompt
+          || JSON.stringify(draft.references) !== JSON.stringify(candidate.draft.references);
+        const bound = needsImageBinding ? prepareVideoH3ReferenceDraft(project, bindingInput, usageContextForDraft(draft)).draft : bindingInput;
         draft = automatic ? { ...bound, references: draft.references } : bound;
         const audioApi = usageContextForDraft(draft).api;
         draft = draft.reuseTaskId ? renderVideoAudioDraft(project, draft, audioApi) : prepareVideoAudioDraft(project, draft, audioApi);
@@ -1103,8 +1120,9 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
         };
       };
       return { ...row, zh: decorate(row.zh), en: decorate(row.en) };
-    }), [baseRows, audioOverrides, h3ReferenceUpdates, automaticTails, tailCharacterModes, characterDrafts, project, referenceUsageContext, retryConnection, settings]);
-  const referencePreviews = useMemo(() => videoPromptReferencePreviews(project, chapterId), [project, chapterId]);
+    }), [baseRows, audioOverrides, h3ReferenceUpdates, automaticTails, tailCharacterModes, characterDrafts, project, referenceUsageContext, referenceRoleOverrides, retryEntriesBySegment, reviewFrozenFormats, retryConnection, settings]);
+  const referencePreviews = useMemo(() => reviewLegacyDraft || promptFormat === 'h3' || Object.values(promptFormats).includes('h3')
+    ? videoPromptReferencePreviews(project, chapterId) : [], [project, chapterId, reviewLegacyDraft, promptFormat, promptFormats]);
   const rowReferencePreview = (row: VideoBatchRow, language: 'zh' | 'en') => (reviewLegacyDraft || (promptFormats[row.segmentId] || promptFormat) === 'h3')
     ? referencePreviews.find((entry) => entry.storyboardId === row.storyboardId && entry.language === language) : undefined;
   const rowLanguage = (row: VideoBatchRow): 'zh' | 'en' => languages[row.segmentId] || (row.zh || rowReferencePreview(row, 'zh') ? 'zh' : 'en');
@@ -1289,12 +1307,25 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
     setRegenerateSucceeded(allowed); setConfirmation(undefined); setError('');
     setNotice(allowed ? '已允许重新生成所选的成功项；原视频保留，新任务可能再次收费。进行中或结果待确认项仍不会重复提交。' : '已恢复默认去重：相同的成功任务会跳过。');
   };
+  // A pending extraction must still notice identity/material edits before a
+  // composite mode is enabled. Track its source data without preparing every
+  // segment and both languages during unrelated preview/UI renders. A newly
+  // extracted frame is not part of these existing identity/source bindings.
+  const tailIdentitySourceFingerprint = useMemo(() => {
+    const ids = new Set(project.characters.flatMap((character) => character.assetIds));
+    project.storyboards.forEach((board) => {
+      [...(board.globalReferenceAssetIds || []), ...(board.promptPlan?.referenceAssetIds || []),
+        ...board.shots.flatMap((shot) => shot.referenceAssetIds || [])].forEach((id) => ids.add(id));
+    });
+    return JSON.stringify([project.characters, project.assets.filter((asset) => ids.has(asset.id))
+      .map((asset) => ({ ...asset, dataUrl: asset.checksum ? undefined : asset.dataUrl }))]);
+  }, [project.characters, project.storyboards, project.assets]);
   const manualTail = useOneClickVideoTail({
     project, tools: tailFrameTools,
     scopeKey: JSON.stringify([project.id, planId, sequenceFingerprint, connectionScope, parameterText, languages,
       [...selectedKeys].sort(), rows.map((row) => [row.segmentId, row.zh?.draft, row.en?.draft,
         row.zh?.referenceFingerprint, row.en?.referenceFingerprint]), automaticTails, tailCharacterModes,
-      baseRows.map((row) => characterSourceFingerprint(row))]),
+      tailIdentitySourceFingerprint]),
     onBusyChange: setTailSelecting, onNotice: setNotice, onError: setError,
     onApply: (references, context) => {
       copyReferences(context.segmentId, references);
@@ -1347,7 +1378,8 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
   const prepareTailCharacters = (row: VideoBatchRow, candidate: VideoBatchChoiceCandidate) => {
     if (!tailFrameTools?.available || !tailFrameTools.extract) throw new Error('本地视频抽帧工具暂不可用，请检查视频处理工具。');
     const original = baseRows.find((entry) => entry.segmentId === row.segmentId);
-    const prepared = characterDrafts.get(candidate.key);
+    const sourceCandidate = original?.[candidate.language];
+    const prepared = sourceCandidate && prepareCharacterCandidate(sourceCandidate);
     if (!original || !prepared || prepared.issue) throw new Error(prepared?.issue || '本段稿件已变化，请重新选择。');
     const locator = lookupPreviousSequenceSegment(project, { sequencePlanId: planId, segmentId: row.segmentId });
     if (!locator.previousSegment) throw new Error(locator.reason || '无法确定准确的上一段。');
@@ -1620,7 +1652,7 @@ export function VideoDirectorView(props: VideoDirectorViewProps) {
 
 function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterDraftChange, settings, controller, tailFrameTools, launchRequest, onOpenSettings, onOpenPrompt, onOpenVideoAssets, onOpenJobs, onChangeExecution, onVideoApiParametersChange, onRepairIdentityBindings, onRefreshH3References, onVoicePresetsChange, onCharacterVoiceProfileChange, onImportAudioFiles }: VideoDirectorViewProps) {
   const draftScope = videoDirectorChapterKey(project.id, chapterId);
-  const initial = readVideoDirectorChapterDraft(chapterDraft || (chapterId ? chapterWorkspace(project, chapterId)?.videoDirector : undefined)) || draftCache.get(draftScope);
+  const [initial] = useState(() => readVideoDirectorChapterDraft(chapterDraft || (chapterId ? chapterWorkspace(project, chapterId)?.videoDirector : undefined)) || draftCache.get(draftScope));
   const [generationMode, setGenerationMode] = useState<'single' | 'batch'>(initial?.generationMode || 'single');
   const [batchDraft, setBatchDraft] = useState<VideoDirectorBatchDraft | undefined>(initial?.batch);
   const [batchSubmitting, setBatchSubmitting] = useState(false);
@@ -1648,10 +1680,13 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
   const projectIdRef = useRef(project.id);
   const mountedRef = useRef(true);
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
-  const choices = useMemo(() => videoPromptChoices(project, chapterId, promptFormat), [project, chapterId, promptFormat]);
-  const referencePreviews = useMemo(() => videoPromptReferencePreviews(project, chapterId, promptFormat), [project, chapterId, promptFormat]);
-  const draftReferencePreview = !draft.reuseTaskId && (!draft.source?.promptFormat || draft.source.promptFormat === 'h3')
-    ? videoPromptReferencePreviews(project, chapterId).find((entry) => entry.storyboardId === draft.source?.storyboardId && entry.language === (draft.source?.language || 'zh')) : undefined;
+  const choices = useMemo(() => generationMode === 'single' && picker === 'prompt'
+    ? videoPromptChoices(project, chapterId, promptFormat) : [], [project, chapterId, promptFormat, generationMode, picker]);
+  const referencePreviews = useMemo(() => generationMode === 'single' && picker === 'prompt'
+    ? videoPromptReferencePreviews(project, chapterId, promptFormat) : [], [project, chapterId, promptFormat, generationMode, picker]);
+  const draftReferencePreview = useMemo(() => generationMode === 'single' && draft.source?.storyboardId && !draft.reuseTaskId && (!draft.source?.promptFormat || draft.source.promptFormat === 'h3')
+    ? videoPromptReferencePreviews(project, chapterId).find((entry) => entry.storyboardId === draft.source?.storyboardId && entry.language === (draft.source?.language || 'zh')) : undefined,
+  [generationMode, project, chapterId, draft.source?.storyboardId, draft.source?.language, draft.source?.promptFormat, draft.reuseTaskId]);
   const images = useMemo(() => project.assets.filter(isVideoDirectorImage), [project.assets]);
   const reusedSnapshot = draft.reuseTaskId ? findReusableVideoTask(project, draft.reuseTaskId)?.videoJob?.snapshot : undefined;
   const reusedConnection = reusedSnapshot?.connection.backend === draft.backend && reusedSnapshot.draft.runningHubWorkflowId === draft.runningHubWorkflowId ? reusedSnapshot.connection : undefined;
@@ -1663,11 +1698,12 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
   const referenceUsageContext = useMemo(() => ({ backend: draft.backend, workflow: activeWorkflow, api: activeApi, slotRoles: draft.referenceSlotRoles }), [draft.backend, draft.referenceSlotRoles, activeWorkflow, activeApi]);
   const effectiveReferences = videoReferenceUsage(draft.references, referenceUsageContext);
   const delivery = useMemo(() => {
+    if (generationMode !== 'single') return { draft, warnings: [], characterStates: [] };
     const clean = draft.audioReferenceBinding && draft.prompt === draft.audioReferenceBinding.renderedPrompt ? { ...draft, prompt: draft.audioReferenceBinding.basePrompt, audioReferenceBinding: undefined } : draft;
     const imageDelivery = prepareVideoH3ReferenceDraft(project, { ...clean, references: videoReferenceUsage(draft.references, referenceUsageContext) }, referenceUsageContext);
     return { ...imageDelivery, draft: draft.reuseTaskId ? renderVideoAudioDraft(project, imageDelivery.draft, activeApi) : prepareVideoAudioDraft(project, imageDelivery.draft, activeApi) };
-  }, [project, draft, referenceUsageContext, activeApi]);
-  const audioIssue = validateVideoAudioReferences(project, delivery.draft, activeApi, reusedSnapshot?.audios)[0];
+  }, [project, draft, referenceUsageContext, activeApi, generationMode]);
+  const audioIssue = generationMode === 'single' ? validateVideoAudioReferences(project, delivery.draft, activeApi, reusedSnapshot?.audios)[0] : undefined;
   const sourceStale = !draft.reuseTaskId && Boolean(
     project.storyboards.find((board) => board.id === draft.source?.storyboardId)?.sourceStale
     || project.sequencePlans.find((plan) => plan.id === draft.source?.sequencePlanId)?.sourceStale,
@@ -1876,7 +1912,7 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
     {onImportAudioFiles && <input hidden ref={audioFileInput} type="file" accept=".mp3,.wav,.flac" multiple aria-label="导入参考音频文件" onChange={(event) => { const files = Array.from(event.target.files || []); event.target.value = ''; if (files.length) void onImportAudioFiles(files).then(() => setNotice('参考音频已加入资产库，请在声音预设或本段音频槽中选择。'), (cause) => setError(formatUserFacingError(cause))); }} />}
     {onVoicePresetsChange && <ProjectVoicePresetEditor project={project} disabled={submitting || batchSubmitting} onChange={onVoicePresetsChange} onCharacterVoiceProfileChange={onCharacterVoiceProfileChange} onImportAudio={importAudio} />}
     {generationMode === 'batch' && <div id="vd-batch-generation-panel" role="tabpanel" className="vd-batch-host"><VideoBatchPanel key={`${draftScope}:${launchRequest?.batchTaskIds?.length ? launchRequest.id : 'standard-batch'}`} project={project} chapterId={chapterId} savedBatch={batchDraft} onBatchDraftChange={setBatchDraft} settings={settings} controller={controller} tailFrameTools={tailFrameTools} initialDraft={draft} initialParameterText={parameterText} retryTaskIds={launchRequest?.batchTaskIds} onOpenSettings={onOpenSettings} onOpenJobs={onOpenJobs} onOpenPrompt={onOpenPrompt} onSubmittingChange={setBatchSubmitting} onRepairIdentityBindings={onRepairIdentityBindings} onRefreshH3References={onRefreshH3References} onImportAudio={importAudio} onVideoApiParametersChange={onVideoApiParametersChange} /></div>}
-    <div id="vd-single-generation-panel" role="tabpanel" className="vd-layout" hidden={generationMode !== 'single'}><div className="vd-stack">
+    {generationMode === 'single' && <div id="vd-single-generation-panel" role="tabpanel" className="vd-layout"><div className="vd-stack">
       <section className="card vd-prompt-card"><div className="card-title"><h2>1. 本次视频提示词</h2><button className="btn small" type="button" onClick={() => { const format = defaultVideoPromptFormat(project); setPromptFormat(format); setPicker('prompt'); setPickedPromptId(draft.source?.storyboardId && draft.source.promptFormat === format ? videoPromptChoiceKey(draft.source.storyboardId, draft.source.language || 'zh', format) : ''); }}>从提示词导演台选择</button></div>
         <label className="field"><span>视频名称</span><input value={draft.name} onChange={(event) => patchDraft({ name: event.target.value })} placeholder="为本次生成的视频命名" /></label>
         {draft.source ? <div className="vd-source"><span>来源：{draft.source.label || '提示词导演台'} · {videoPromptFormatLabel(draft.source.promptFormat)} · {draft.source.language === 'en' ? '已有英文描述' : '中文提示词'}</span>{onOpenPrompt && draft.source.storyboardId && <button className="btn small ghost" type="button" onClick={() => onOpenPrompt(draft.source!.storyboardId!, draft.source)}>查看原稿</button>}<button className="btn small ghost" type="button" onClick={() => patchDraft({ source: undefined, h3ReferenceBinding: undefined, seedanceReferenceBinding: undefined })}>解除来源关联</button></div> : <p className="field-hint">也可以直接粘贴或手动输入提示词，无需先创建分镜。</p>}
@@ -1919,7 +1955,7 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
         {audioIssue && <p className="vd-error" role="alert">{audioIssue}</p>}
         {error && <p className="vd-error" role="alert">{formatUserFacingError(error)}</p>}{notice && <p className="vd-success" role="status">{notice}</p>}
       </section>
-    </div></div>
+    </div></div>}
     {picker === 'prompt' && <VideoPickerDialog title="从提示词导演台选择提示词" className="vd-prompt-selection-dialog" onClose={() => setPicker(undefined)}>
       <div className="vd-prompt-selection-toolbar">
         <label className="field"><span>提示词格式</span><select aria-label="选择提示词格式" value={promptFormat} onChange={(event) => { setPromptFormat(event.target.value as VideoPromptFormat); setPickedPromptId(''); }}><option value="h3">H3</option><option value="seedance">Seedance</option><option value="ordinary">普通稿</option></select></label>

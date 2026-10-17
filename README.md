@@ -4,13 +4,13 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的 Windows 桌面工作台。
 
-当前版本：**2.5.7** · 2026-10-17 · Windows 64 位 · 便携运行
+当前版本：**2.6.2** · 2026-10-17 · Windows 64 位 · 便携运行
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows 便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-2.5.7.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-2.6.2.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
 1. 下载上面的 EXE，放在可写入的文件夹里，双击运行，无需安装 Node.js。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
@@ -32,14 +32,14 @@
 - **自定义生图+反推图片提示词**：输入要求生成图片，或复用上传/资产库参考图，通过视觉 API 反推可复制的提示词与人物、物品、场景、风格详情。反推同步显示在聊天和资料任务，支持后台执行、停止、重试及项目保存恢复；原有生图支持原文直发或规则转换，结果自动入库。
 - **项目与资产管理**：管理图片、视频和音频，保存项目包、备份资料并导出提示词。
 
-## 最新更新 · v2.5.7
+## 最新更新 · v2.6.2
 
-- 剧情生图先表达具名行动目标、注视对象与当前机位下的可见面，再展开外貌，减少交战人物转向观众的问题。
-- 人物身份参考明确只提供外观，不继承站姿、头部朝向与视线；构图与首尾参考继续按各自用途使用。
-- 保留主观镜头、侧拍、回头、目标画外与局部特写；共享规则作用于相关剧情生图入口，普通人物设定、风景和物品预设保持原用途。
-- 原图与历史任务保留；来源镜头存在时，可通过资产卡“重新生成”按当前规则重新转换。没有增加额外 AI 审核调用。
+- 修复进入视频导演台、切换长剧情分段时，人物分析和参考图绑定重复计算造成的卡顿。
+- 同次人物解析共用别名索引；界面复用未变化的参考图绑定，尾帧依赖按需读取，隐藏的单段面板跳过计算。
+- 保留 Seedance 静默人物识别、参考图关联及英文翻译修复，已有项目、提示词和历史任务继续使用。
+- 本轮性能与构建验证结果见发布说明。
 
-[查看本版完整说明](docs/releases/发布说明-2.5.7.md) · [历史版本归档](docs/releases/README.md)
+[查看本版完整说明](docs/releases/发布说明-2.6.2.md) · [历史版本归档](docs/releases/README.md)
 
 ## 从源码运行
 

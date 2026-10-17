@@ -15,6 +15,7 @@ import { VIDEO_SCENE_CONTEXT_RULE, type VideoSceneContext } from './videoSceneCo
 import { MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE } from './nsfwPromptRules';
 import { hasNsfwDetailSignal } from './promptConstraints';
 import { ADOPTED_VIDEO_EXPRESSION_RULE } from './videoCreativeDirection';
+import { getPromptDialogues, getPromptQuoteSpans } from './promptDialogueLanguage';
 
 export interface OfficialSeedancePromptInput extends PromptAdapterInput {
   /** Request authority only; not an authored section or a source-fingerprint input. */
@@ -83,24 +84,84 @@ export const cleanSeedancePrompt = (value: string): string => value
 export const SEEDANCE_ENGLISH_TRANSLATION_RULE = [
   STORY_CAUSALITY_TRANSLATION_RULE,
   '本次输入是 Seedance 2.5 自然语言提示词，保持视频规格、参考素材职责、主体连续性、概述、连续时间轴与全局约束的完整结构；章节标题翻译为英文，不删除开头内容。',
+  '完整中文源稿是唯一翻译依据：人物原名、每句原语言对白及其说话人、全部镜头起止值和顺序逐项保留，包括小数秒；不重新编排、缩短或四舍五入。候选校验时对照完整源稿修复上述项目，不能从内部占位符猜测或恢复内容。',
   '@Image N、@Video N、@Audio N、@Clay Render N 是完整参考素材标记；保留类型、空格、编号与对应职责，不重新编号。',
   '保持 Seedance 自然语言格式，不引入 MiniMax H3 专用section、[Shot N]、<Subject N>、<Picture N>、<d>或<sound>标签；声音和对白说明仍用自然语言。',
 ].join('\n');
 
 export const translateSeedancePromptToEnglish = async ({ sourcePrompt, request, isCurrent }: Pick<TranslateVideoPromptToEnglishOptions, 'sourcePrompt' | 'request' | 'isCurrent'>): Promise<string> => {
   assertVideoPromptHasNoInstructionLeak(sourcePrompt, 'Seedance 中文源稿');
-  const translated = await translateVideoPromptToEnglish({
+  const translate = (repair?: { candidateEnglishPrompt: string; deliveryIssue: string }): Promise<string> => translateVideoPromptToEnglish({
     sourcePrompt,
     promptFormat: 'seedance',
     isCurrent,
-    request: (system, user, transport) => request(`${system}\n\n${SEEDANCE_ENGLISH_TRANSLATION_RULE}`, user, transport),
+    request: (system, user, transport) => request(`${system}\n\n${SEEDANCE_ENGLISH_TRANSLATION_RULE}${repair
+      ? '\n本次仅修复上一次英文交付中已指出的完整性问题。对照完整 sourcePrompt 修复 candidateEnglishPrompt，保留已正确内容，不重新导演；只返回完整 Seedance 英文正文，不返回 JSON、内部占位符或 H3 标签。' : ''}`,
+    repair ? `<seedance_translation_repair_data>\n${JSON.stringify({ sourcePrompt, ...repair })
+      .replace(/</gu, '\\u003c').replace(/>/gu, '\\u003e')}\n</seedance_translation_repair_data>` : user, transport),
     clean: cleanSeedancePrompt,
+    // Natural-language Seedance is translated from the complete source, never
+    // the legacy token dictionary. Valid delivery takes exactly one request.
+    acceptAiAuthoredContent: true,
     reviewWithAi: false,
   });
+  const candidate = await translate();
+  try {
+    return readSeedanceEnglishDelivery(sourcePrompt, candidate);
+  } catch (error) {
+    if (!(error instanceof SeedanceEnglishDeliveryError)) throw error;
+    // Only a concrete delivery defect permits one source-aware repair. API
+    // failures/cancellation are not retried and a second defect is surfaced.
+    return readSeedanceEnglishDelivery(sourcePrompt, await translate({
+      candidateEnglishPrompt: candidate, deliveryIssue: error.message,
+    }));
+  }
+};
+
+class SeedanceEnglishDeliveryError extends Error {}
+
+const readSeedanceEnglishDelivery = (sourcePrompt: string, candidate: string): string => {
+  const translated = cleanSeedancePrompt(candidate);
+  if (!translated || /^\s*(?:\{|\[\s*\{|```)/u.test(translated)) {
+    throw new SeedanceEnglishDeliveryError('Seedance 英文未返回完整自然语言正文，中文稿已保留，请仅重试英文。');
+  }
   assertVideoPromptHasNoInstructionLeak(translated, 'Seedance 英文结果');
+  const prose = maskVideoPictureReferenceLiterals(translated.replace(/<\/?(?:d|sound)>/giu, 'LH_H3_DELIVERY_TAG'));
+  if (/^(?:subject_definitions|retention_analysis|detailed_description|integrated_multimodal_description|overall_soundscape|non_diegetic_music)\s*:|\[Shot\s+\d+\]|<(?:Subject|Picture|Video|Audio)\s+\d+>|LH_H3_DELIVERY_TAG/gmu.test(prose)) {
+    throw new SeedanceEnglishDeliveryError('Seedance 英文返回了 H3 专用结构，中文稿已保留，请仅重试英文。');
+  }
+  // Generic summary headings and standalone timecodes are also valid natural
+  // language; only H3-specific sections/tags above establish a format defect.
+  // Do not silently accept generated implementation tokens after leaving the
+  // masker. Authored literal tokens already present in the source stay valid.
+  const sourceTokens = new Set(sourcePrompt.match(/__LH_[A-Z_\d]*/giu) || []);
+  if ((translated.match(/__LH_[A-Z_\d]*/giu) || []).some((token) => !sourceTokens.has(token))) {
+    throw new SeedanceEnglishDeliveryError('Seedance 英文仍含新增的内部占位符，中文稿已保留，请仅重试英文。');
+  }
   const referenceTokens = (prompt: string): string[] => (prompt.match(/@(?:Image|Video|Audio|Clay Render)\s+\d+/gu) || []).sort();
   if (JSON.stringify(referenceTokens(sourcePrompt)) !== JSON.stringify(referenceTokens(translated))) {
-    throw new Error('Seedance 英文翻译改变了参考素材编号，中文稿已保留，请重试英文。');
+    throw new SeedanceEnglishDeliveryError('Seedance 英文翻译改变了参考素材编号，中文稿已保留，请重试英文。');
+  }
+  // Compare only explicit numeric time ranges, never infer or rewrite cuts.
+  const timeRanges = (prompt: string): number[][] => Array.from(prompt.matchAll(
+    /(?<![\d.:])((?:\d{1,2}:){0,2}\d+(?:\.\d+)?)\s*(seconds?|secs?|秒|s)?\s*(?:[-–—~～至到]|\bto\b)\s*(?:第\s*)?((?:\d{1,2}:){0,2}\d+(?:\.\d+)?)\s*(seconds?|secs?|秒|s)?(?![\da-z]|[.:]\d)/giu,
+  )).filter((match) => match[2] || match[4] || (match[1].includes(':') && match[3].includes(':')))
+    .map((match) => [match[1], match[3]].map((time) => time.split(':').reduce((seconds, part) => seconds * 60 + Number(part), 0)));
+  const sourceRanges = timeRanges(sourcePrompt);
+  // Do not infer timings from arbitrary prose when the source has no explicit
+  // numeric range that this reader can reliably compare.
+  if (sourceRanges.length && JSON.stringify(sourceRanges) !== JSON.stringify(timeRanges(translated))) {
+    throw new SeedanceEnglishDeliveryError('Seedance 英文翻译改变或遗漏了已确认时间范围，中文稿已保留，请仅重试英文。');
+  }
+  // Preserve literal utterances in source order without guessing speakers,
+  // counting names or treating every quoted description as dialogue.
+  const dialogue = getPromptDialogues(sourcePrompt).filter((line) => !line.translateToEnglish);
+  const quotes = getPromptQuoteSpans(translated).map((quote) => quote.content);
+  let quoteIndex = 0;
+  for (const line of dialogue) {
+    const found = quotes.indexOf(line.content, quoteIndex);
+    if (found < 0) throw new SeedanceEnglishDeliveryError('Seedance 英文翻译遗漏或改变了原语言对白，中文稿已保留，请仅重试英文。');
+    quoteIndex = found + 1;
   }
   return translated;
 };

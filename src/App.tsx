@@ -205,7 +205,7 @@ import {
   translateSeedancePromptToEnglish,
   type SeedanceOutputSaveIdentity,
 } from "./seedancePrompt";
-import { buildOfficialSeedanceInput, hasCurrentSeedancePrompt } from "./seedanceSource";
+import { assertCurrentSeedancePrompt, buildOfficialSeedanceInput, hasCurrentSeedancePrompt } from "./seedanceSource";
 import { getVideoPromptInstructionLeak } from "./videoPromptInstructionLeak";
 import {
   OFFICIAL_H3_TARGET_ID,
@@ -3671,6 +3671,10 @@ export default function App() {
       return next;
     });
   }, [view]);
+
+  const reportSequenceHandoffFailure = (planId: string, segment: VideoSegment, reason: string) =>
+    reportRuntimeError('sequence-prompt-handoff',
+      `第 ${segment.index} 段衔接失败（计划=${planId}，分段=${segment.id}）：${reason}`);
 
   // Both individual details and whole-log copying use the same redacted view.
   // Keep the stored historical entries untouched so diagnostics are not a
@@ -7258,6 +7262,7 @@ export default function App() {
       : undefined;
     const requestBatchIdentity = sequenceBatchIdentityRef.current;
     if (requestHandoff?.issue) {
+      reportSequenceHandoffFailure(override!.sequencePlanId!, segmentForGeneration!, requestHandoff.issue);
       reportOverrideFailure(requestHandoff.issue);
       notify(requestHandoff.issue, "error");
       return undefined;
@@ -7982,7 +7987,7 @@ export default function App() {
       if (!isGenerationRequestCurrent()) return undefined;
       let chineseCheckpoint: Storyboard | undefined;
       let canonicalCheckpointSaved = false;
-      const commitQualifiedBoard = (complete: Storyboard): boolean => {
+      const commitQualifiedBoard = (complete: Storyboard, requireTargetPrompt = false): boolean => {
         if (!segmentForGeneration && !fullTimeline) complete = { ...complete, promptGenerationSourceFingerprint: canonicalGenerationFingerprint };
         runtimeFailureStage = "storyboard-commit";
         // Our state wrapper executes functional updates synchronously against
@@ -8002,6 +8007,12 @@ export default function App() {
             if (JSON.stringify(live) !== requestExistingSegmentBoardSnapshot) return current;
           }
           if (current.project.id !== requestProjectId) return current;
+          if (requestPromptFormat === 'seedance' && requireTargetPrompt) {
+            runtimeFailureStage = 'seedance-source-consistency';
+            try { assertCurrentSeedancePrompt(current.project, complete); }
+            catch (error) { runtimeFailureDetail = error; throw error; }
+            runtimeFailureStage = 'storyboard-commit';
+          }
           let sequencePlans = current.project.sequencePlans;
           if (segmentForGeneration && override) {
             const currentPlan = sequencePlans.find(
@@ -8103,7 +8114,10 @@ export default function App() {
         complete = await generateSingleSegmentPrompt({
           voiceFactScope: 'source-grounded-new-draft',
           targetPromptFormat: requestPromptFormat,
-          buildSeedanceInput: (board) => buildOfficialSeedanceInput(state.project, board),
+          // The canonical checkpoint has just linked this new board to its
+          // segment. The render snapshot predates that link; use the guarded
+          // current project so writing and saved-source validation agree.
+          buildSeedanceInput: (board) => buildOfficialSeedanceInput(stateRef.current.project, board),
           onQualifiedCanonical: requestPromptFormat !== 'seedance' || fullTimeline && override?.deferCommit ? undefined : async (qualified) => {
             const saved = { ...qualified, ...(!segmentForGeneration ? { promptGenerationSourceFingerprint: canonicalGenerationFingerprint } : {}) };
             if (!commitQualifiedBoard(saved)) throw new Error("当前项目或本段已变化，公共分镜未覆盖已有内容。");
@@ -8121,7 +8135,7 @@ export default function App() {
           onAiTranslationReview: () => { if (isGenerationRequestCurrent()) notify("正在调用同一 API 对照完整中文校验并修复英文，主体与对白交给 AI 复核。"); },
           onQualifiedChinese: fullTimeline && override?.deferCommit ? undefined : async (qualified) => {
             const saved = { ...qualified, ...(!segmentForGeneration ? { promptGenerationSourceFingerprint: canonicalGenerationFingerprint } : {}) };
-            if (!commitQualifiedBoard(saved)) {
+            if (!commitQualifiedBoard(saved, true)) {
               const error = new Error("当前项目或本段已变化，中文结果未覆盖已有内容。");
               error.name = "AbortError";
               throw error;
@@ -8177,7 +8191,7 @@ export default function App() {
       if (!isGenerationRequestCurrent()) return undefined;
       // A qualified Chinese artifact is useful independently of translation.
       if (fullTimeline && override?.deferCommit) return complete;
-      if (!commitQualifiedBoard(complete)) {
+      if (!commitQualifiedBoard(complete, true)) {
         reportOverrideFailure("生成结果未能写入当前项目，请重试本段。");
         return undefined;
       }
@@ -8540,6 +8554,7 @@ export default function App() {
       : buildOfficialH3SourceFingerprint(board, officialH3ContextForStoryboard(project, board));
     const handoff = plan && segment ? buildSequencePromptHandoff(snapshot.project, plan.id, segment.id, format) : undefined;
     if (handoff?.issue || mode === 'continuity-repair' && !handoff?.context) {
+      if (handoff?.issue && plan && segment) reportSequenceHandoffFailure(plan.id, segment, handoff.issue);
       notify(handoff?.issue || "首段无需修复上段衔接。", "error"); return undefined;
     }
     if (mode === 'translate-english' && plan && (format === 'seedance' ? sourceBoard.seedance25Output?.sequencePromptHandoff : sourceBoard.sequencePromptHandoff)
@@ -8574,11 +8589,18 @@ export default function App() {
       }
       return true;
     };
-    const commit = async (qualified: Storyboard) => {
+    const commit = async (qualified: Storyboard, requireTargetPrompt = false) => {
       if (!isCurrent()) throw new Error("当前项目、分镜或目标格式已变化，结果未覆盖已有内容。");
       let accepted = false;
       setState((current) => {
         if (!isCurrent()) return current;
+        if (format === 'seedance' && requireTargetPrompt) {
+          const previousStage = runtimeFailureStage;
+          runtimeFailureStage = 'seedance-source-consistency';
+          try { assertCurrentSeedancePrompt(current.project, qualified); }
+          catch (error) { runtimeFailureDetail = error; throw error; }
+          runtimeFailureStage = previousStage;
+        }
         const now = Date.now();
         let saved = { ...qualified, ...(format === 'h3' && sourceBoard.seedance25Output ? { seedance25Output: sourceBoard.seedance25Output } : {}), updatedAt: now };
         if (!versionSaved && mode !== 'translate-english' && (format === 'seedance' ? sourceBoard.seedance25Output : sourceBoard.officialPromptZh)) {
@@ -8618,7 +8640,7 @@ export default function App() {
       const result = await generateSingleSegmentPrompt({
         board: sourceBoard, targetPromptFormat: format,
         ...(mode === 'regenerate' ? { voiceFactScope: 'source-grounded-new-draft' as const } : {}),
-        buildSeedanceInput: (board) => buildOfficialSeedanceInput(snapshot.project, board),
+        buildSeedanceInput: (board) => buildOfficialSeedanceInput(stateRef.current.project, board),
         context: officialH3ContextForStoryboard(snapshot.project, sourceBoard),
         sequenceHandoff: handoff?.context,
         sequenceSegmentContext: plan && segment && isSemanticSequencePlan(plan) ? semanticSegmentSourceContext(plan, segment) : undefined,
@@ -8630,7 +8652,7 @@ export default function App() {
         skipConversion: mode !== 'continuity-repair' && mode !== 'dialogue-repair',
         reviewWithAi: true, clean: cleanVideoPrompt, isCurrent,
         maxOutputTokens: snapshot.settings.textApi.maxTokens,
-        onQualifiedCanonical: commit, onQualifiedChinese: commit,
+        onQualifiedCanonical: commit, onQualifiedChinese: (qualified) => commit(qualified, true),
         onStage: (stage) => {
           runtimeFailureStage = stage === 'translate'
             ? format === 'seedance' ? 'seedance-english-prompt' : 'sequence-english-prompt'
@@ -8651,7 +8673,7 @@ export default function App() {
         },
       });
       if (!isCurrent()) return undefined;
-      await commit(result);
+      await commit(result, true);
       const saved = stateRef.current.project.storyboards.find((entry) => entry.id === result.id);
       const englishError = format === 'seedance' ? result.seedance25Output?.englishError : result.officialPromptEnError;
       if (englishError) reportRuntimeError(runtimeFailureStage, runtimeFailureDetail || englishError, errorContext);
@@ -8693,6 +8715,7 @@ export default function App() {
     const requestHandoff = mode === "translate-english" && !sourceBoard.sequencePromptHandoff
       ? undefined : buildSequencePromptHandoff(snapshot.project, plan.id, segment.id);
     if (requestHandoff?.issue || mode === "continuity-repair" && !requestHandoff?.context) {
+      if (requestHandoff?.issue) reportSequenceHandoffFailure(plan.id, segment, requestHandoff.issue);
       notify(requestHandoff?.issue || "首段没有上一段，无需修复开场衔接。", "error");
       return false;
     }
@@ -9352,6 +9375,21 @@ export default function App() {
     let successCount = 0;
     let lastProcessedSegmentId = "";
 
+    const canContinueAfterChinese = (board: Storyboard | undefined, segment: VideoSegment): boolean => {
+      if (format !== 'seedance') return true;
+      try {
+        if (!board) throw new Error(`第 ${segment.index} 段保存后找不到关联分镜，已停止后续段。`);
+        assertCurrentSeedancePrompt(stateRef.current.project, board);
+        return true;
+      } catch (error) {
+        reportRuntimeError('seedance-source-consistency', error);
+        const reason = formatUserFacingError(error);
+        updateSequenceSegmentRuntimeStatus(requestedIdentity, segment.id, 'failed', reason);
+        notify(reason, 'error');
+        return false;
+      }
+    };
+
     try {
       for (const segmentId of pendingIds) {
         if (!sequenceOperationIsCurrent(requestedIdentity)) break;
@@ -9421,16 +9459,19 @@ export default function App() {
             total: pendingIds.length,
             currentSegmentIndex: liveSegment.index,
           });
+          if (!refreshed) {
+            notify(`第 ${liveSegment.index} 段未完成对齐或输入已变化，已停止后续段，旧稿保持不变。`, "error");
+            break;
+          }
+          if (!canContinueAfterChinese(stateRef.current.project.storyboards.find((board) => board.id === liveBoard!.id), liveSegment)) break;
           try {
             await saveStateAsync(stateRef.current);
           } catch (error) {
+            reportRuntimeError('sequence-prompt-save', error);
             notify(
               `第 ${liveSegment.index} 段处理完成，但立即保存失败：${error instanceof Error ? error.message : "未知错误"}`,
               "error",
             );
-          }
-          if (!refreshed) {
-            notify(`第 ${liveSegment.index} 段未完成对齐或输入已变化，已停止后续段，旧稿保持不变。`, "error");
             break;
           }
           continue;
@@ -9495,15 +9536,18 @@ export default function App() {
             currentSegmentIndex: liveSegment.index,
           });
         }
+        if (!stillCurrent || !hasRealCompletedBoard) break;
+        if (!canContinueAfterChinese(stateRef.current.project.storyboards.find((board) => board.id === completedBoard!.id), liveSegment)) break;
         try {
           await saveStateAsync(stateRef.current);
         } catch (error) {
+          reportRuntimeError('sequence-prompt-save', error);
           notify(
             `第 ${liveSegment.index} 段处理完成，但立即保存失败：${error instanceof Error ? error.message : "未知错误"}`,
             "error",
           );
+          break;
         }
-        if (!stillCurrent || !hasRealCompletedBoard) break;
       }
 
       if (sequenceOperationIsCurrent(requestedIdentity)) {
@@ -13527,6 +13571,13 @@ function DirectorView(ctx: AppContext) {
       activeSequencePlan.id,
     ),
   );
+  const activeSequenceGenerating = Boolean(
+    productionMode === "sequence"
+    && activeSequenceSegment?.status === "generating"
+    && (sequenceBatchRunning
+      ? sequenceBatchProgress.currentSegmentIndex === activeSequenceSegment.index
+      : busy),
+  );
   const activeSequenceMasterStoryboardForDirector = activeSequencePlan?.masterStoryboardId
     ? state.project.storyboards.find(
         (board) => board.id === activeSequencePlan.masterStoryboardId,
@@ -16162,23 +16213,27 @@ function DirectorView(ctx: AppContext) {
                     <Empty
                       title={
                         productionMode === "sequence" && activeSequenceSegment
-                          ? activeSequenceSegment.failureReason
-                            ? `第 ${activeSequenceSegment.index} 段生成失败`
-                            : activeSequenceHasRealResult
-                              ? `第 ${activeSequenceSegment.index} 段官方交付稿已失效`
-                            : activeSequenceSegment.status === "generating"
-                              ? `第 ${activeSequenceSegment.index} 段生成中断`
-                              : `第 ${activeSequenceSegment.index} 段尚未生成`
+                          ? activeSequenceGenerating
+                            ? `第 ${activeSequenceSegment.index} 段正在生成`
+                            : activeSequenceSegment.failureReason
+                              ? `第 ${activeSequenceSegment.index} 段生成失败`
+                              : activeSequenceHasRealResult
+                                ? `第 ${activeSequenceSegment.index} 段官方交付稿已失效`
+                                : activeSequenceSegment.status === "generating"
+                                  ? `第 ${activeSequenceSegment.index} 段生成中断`
+                                  : `第 ${activeSequenceSegment.index} 段尚未生成`
                           : directorResultStoryboard?.finalPrompt?.trim()
                             ? `${generationPromptFormatLabel}交付稿待生成或刷新`
                             : `还没有${generationPromptFormatLabel}结果`
                       }
                       description={
                         productionMode === "sequence" && activeSequenceSegment
-                          ? (activeSequenceSegment.failureReason ? formatUserFacingError(activeSequenceSegment.failureReason) : "")
-                            || (activeSequenceHasRealResult
-                              ? "参考素材已变化；将调用 API 按当前参考图重新生成本段中英文提示词，保留本段镜数和时间边界，不重做全片或其他分段。"
-                              : "本段还没有真实分镜和非空最终提示词。")
+                          ? activeSequenceGenerating
+                            ? "正在生成本段分镜和提示词，完成后会自动显示结果。"
+                            : (activeSequenceSegment.failureReason ? formatUserFacingError(activeSequenceSegment.failureReason) : "")
+                              || (activeSequenceHasRealResult
+                                ? "参考素材已变化；将调用 API 按当前参考图重新生成本段中英文提示词，保留本段镜数和时间边界，不重做全片或其他分段。"
+                                : "本段还没有真实分镜和非空最终提示词。")
                           : directorResultStoryboard?.finalPrompt?.trim()
                             ? `沿用当前剧情与分镜，生成或刷新${generationPromptFormatLabel}中英文交付稿。`
                             : `已选择${generationPromptFormatLabel}，可直接从当前剧情生成分镜和目标提示词。`
@@ -16191,10 +16246,11 @@ function DirectorView(ctx: AppContext) {
                               variant="primary"
                               icon={<RefreshCw size={14} />}
                               disabled={busy || sequenceBatchRunning || activeSequenceSegment.locked}
-                            onClick={() => void generateCurrentSequenceSegment()}
-                          >
-                              {activeSequenceHasRealResult ? `刷新本段${generationPromptFormatLabel}` : `重试本段${generationPromptFormatLabel}`}
-                          </Button>
+                              onClick={() => void generateCurrentSequenceSegment()}
+                            >
+                              {activeSequenceGenerating ? `正在生成本段${generationPromptFormatLabel}…`
+                                : activeSequenceHasRealResult ? `刷新本段${generationPromptFormatLabel}` : `重试本段${generationPromptFormatLabel}`}
+                            </Button>
                           )}
                           {productionMode !== "sequence" && <Button small variant="primary" icon={<WandSparkles size={14} />}
                             disabled={busy || seedancePromptBusy} onClick={() => void buildStoryboard()}>

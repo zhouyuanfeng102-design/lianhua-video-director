@@ -70,6 +70,8 @@ const stageLabels: Readonly<Record<string, string>> = Object.freeze({
   'seedance-chinese-prompt': 'Seedance 中文提示词生成',
   'seedance-english-prompt': 'Seedance 英文提示词生成',
   'sequence-prompt-save': '本段提示词保存',
+  'sequence-prompt-handoff': '分段提示词衔接检查',
+  'seedance-source-consistency': 'Seedance 来源一致性检查',
   'story-analysis': '剧情解析',
   'story-preparation': 'AI 画面描述转化/扩写',
   'image-preparation': '生图准备',

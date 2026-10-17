@@ -3,10 +3,11 @@ import type { VideoGenerationDraft } from './videoGenerationTypes';
 import type { VideoSeedanceReferencePlan } from './videoSeedanceReferencePlan';
 import { maskVideoPictureReferenceLiterals } from './videoPictureReferences';
 import { sourceContentHash } from './sourceContentHash';
-import { resolvePromptCharacterParticipation } from './characterParticipation';
+import { resolveSeedanceCharacterParticipation } from './characterParticipation';
 import { characterVariantDisplayName } from './characterVariants';
 import { videoMiddleFrameOrdinal, videoReferenceSlotIndex } from './videoReferenceSlots';
 import { videoReferenceCharacterBindingWarning, videoReferenceCharacterOwners, type VideoCharacterReferenceState } from './videoReferenceCharacters';
+import { readSeedanceSections } from './seedanceSections';
 
 interface SeedanceSourceReference {
   token: string;
@@ -39,7 +40,6 @@ export interface VideoSeedanceReferenceBinding {
 }
 
 interface TextEdit { start: number; end: number; text: string }
-interface ReferenceSection { start: number; end: number; language: 'zh' | 'en'; inline: boolean }
 const unique = <T,>(values: readonly T[]): T[] => [...new Set(values)];
 const tokenPattern = (): RegExp => /@(?:Image\s+\d+|(?:图片|图)\s*\d+|Video\s+\d+|Audio\s+\d+|Clay Render\s+\d+|(?:视频|音频|粘土渲染)\s*\d+)/gu;
 const imageNumber = (token: string): number | undefined => {
@@ -60,29 +60,6 @@ const applyEdits = (prompt: string, edits: TextEdit[]): string => {
     result = result.slice(0, edit.start) + edit.text + result.slice(edit.end);
   }
   return result;
-};
-
-/** Require all six unique headings, rather than finding an arbitrary title
- * in a manual story. The literal masker preserves their UTF-16 coordinates. */
-const referenceSection = (prompt: string): ReferenceSection | undefined => {
-  const masked = maskVideoPictureReferenceLiterals(prompt);
-  const titleSets = [
-    ['视频规格', '参考素材与职责', '主体连续性', '一句话概述', '连续时间轴', '全局约束'],
-    ['Video specifications?', '(?:References?|Reference materials?|Reference assets?) and responsibilities', '(?:Subject|Character) continuity', '(?:One[- ]sentence summary|Summary)', 'Continuous timeline', 'Global constraints'],
-  ];
-  for (const [languageIndex, titles] of titleSets.entries()) {
-    const matches = titles.map((title) => [...masked.matchAll(new RegExp(`^[ \\t]*(?:#{1,6}[ \\t]+)?(?:${title})(?:[ \\t]*[（(][^\\r\\n）)]*[）)])?[ \\t]*(?:[:：][ \\t]*|(?=\\r?$))`, 'gimu'))]);
-    if (matches.some((entries) => entries.length !== 1)) continue;
-    const positions = matches.map((entries) => entries[0].index!);
-    if (positions.some((position, index) => index > 0 && position <= positions[index - 1])) continue;
-    const heading = matches[1][0];
-    let start = heading.index! + heading[0].length;
-    const inline = prompt[start] !== '\r' && prompt[start] !== '\n';
-    if (prompt[start] === '\r') start += 1;
-    if (prompt[start] === '\n') start += 1;
-    return { start, end: positions[2], language: languageIndex ? 'en' : 'zh', inline };
-  }
-  return undefined;
 };
 
 const roleResponsibility = (role: ReferenceRole, language: 'zh' | 'en', middleFrameOrdinal?: number): string => {
@@ -125,8 +102,9 @@ export const prepareVideoSeedanceReferenceDraft = (
     } : undefined;
   const binding = sourceBinding;
   const basePrompt = binding?.basePrompt || draft.prompt;
-  const section = binding ? referenceSection(basePrompt) : undefined;
-  const language = binding?.sourceLanguage || section?.language || sourceLanguage;
+  const sections = binding ? readSeedanceSections(basePrompt) : undefined;
+  const section = sections?.sections.references;
+  const language = binding?.sourceLanguage || sections?.language || sourceLanguage;
   const warnings: string[] = [];
   const masked = maskVideoPictureReferenceLiterals(basePrompt);
   const matches = [...masked.matchAll(tokenPattern())];
@@ -141,10 +119,7 @@ export const prepareVideoSeedanceReferenceDraft = (
   if (binding && !section && draft.references.length) warnings.push('Seedance 六个章节无法唯一定位，已保留参考说明；图片已选入，人物关联待确认。');
   if (unknownTokens.length) warnings.push(`${unknownTokens.join('、')} 缺少可证明的原素材对应，已保留原编号，未附加冲突图片引用；请核对当前参考说明。`);
   if (draft.references.length && !plan.numbers) warnings.push(plan.warning || '当前接口未明确 Seedance 图片引用顺序，已保留正文；人物关联待确认。');
-  const protectedEmptySection = Boolean(section && !binding?.references.length && draft.references.length
-    && basePrompt.slice(section.start, section.end) !== masked.slice(section.start, section.end));
-  if (protectedEmptySection) warnings.push('原空参考章节含受保护的字面内容，无法安全替换空参考声明；原文已保留，人物关联待确认。');
-  const canAssociate = Boolean(binding && section && !unknownTokens.length && !protectedEmptySection && plan.numbers);
+  const canAssociate = Boolean(binding && section && !unknownTokens.length && plan.numbers);
   const currentReferences: SeedanceCurrentReference[] = [];
   const lines: string[] = [];
   const selectedCharacters = new Map<string, { name: string; slots: number[]; associated: boolean }>();
@@ -216,14 +191,30 @@ export const prepareVideoSeedanceReferenceDraft = (
       language === 'en' ? 'Use these images only for their stated visual purposes. Keep the existing timeline, appearances, actions and dialogue.'
         : '以上图片仅按所述用途参考，出场、动作、衣着变化与对白沿用原时间轴。',
     ].join(newline) : language === 'en' ? 'No images are selected for this request.' : '本次未选择图片参考素材。';
-    const replacement = nonImages || hasLiterals
+    // An empty manifest describes what was available when the text was
+    // authored, not whether its reference section contains story facts.
+    // Preserve that section regardless of quotation marks, and scope any old
+    // no-material statement to authoring time so it cannot contradict this
+    // request's explicitly selected images.
+    const preservedEmptySource = !binding?.references.length;
+    const replacement = preservedEmptySource
+      ? [
+        section.inline ? '' : newline,
+        language === 'en'
+          ? 'Reference notes at original authoring time: statements that no reference material was supplied or used describe that earlier state only. This request uses the image list below; retain the original character, setting and action facts.'
+          : '原稿写作时的素材说明：其中未提供或不使用参考素材的陈述仅描述原稿写作时的状态。本次采用下方图片清单，原有人物、场景与动作设定继续保留。',
+        newline, body, body.endsWith(newline + newline) ? '' : newline + newline,
+        language === 'en' ? 'Reference images for this request (this list takes precedence):' : '本次提交的参考图片（以此清单为准）：',
+        newline, selectedBody, newline, newline,
+      ].join('')
+      : nonImages || hasLiterals
       ? `${applyEdits(body, bodyEdits.map((edit) => ({ ...edit, start: edit.start - section.start, end: edit.end - section.start })))}${body.endsWith(newline + newline) ? '' : newline + newline}${selectedBody}${newline}${newline}`
       : `${section.inline ? '' : newline}${selectedBody}${newline}${newline}`;
     for (let index = edits.length - 1; index >= 0; index -= 1) if (edits[index].start >= section.start && edits[index].end <= section.end) edits.splice(index, 1);
     edits.push({ start: section.start, end: section.end, text: replacement });
   }
   const renderedPrompt = noSourceAndNoImages ? basePrompt : applyEdits(basePrompt, edits);
-  const participation = resolvePromptCharacterParticipation(basePrompt, project.characters);
+  const participation = resolveSeedanceCharacterParticipation(basePrompt, project.characters, board?.seedance25Output);
   const relevant = unique([
     ...participation.characters.filter((entry) => entry.presence !== 'mentioned').map((entry) => entry.characterId),
     ...(binding?.characterStates || []).map((entry) => entry.characterId),

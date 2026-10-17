@@ -22,6 +22,8 @@ const REFERENCE_METADATA_HEADING = '本次实际上传图片（严格按此顺�
 
 export const STORYBOARD_CHARACTER_REFERENCE_POSE_BOUNDARY = '上述人物身份参考只提供外形、配色、服装与身体结构；不继承参考图的站姿、头部朝向、视线或正脸展示，按当前正文中的具名动作对象、注视对象和机位呈现可见面。构图与首尾状态参考仍按各自明确用途使用。';
 
+export const STORYBOARD_PROP_REFERENCE_SCALE_BOUNDARY = '参考外形、材质、配色与部件结构；实际尺寸以当前正文中已明确的尺寸及持有者比例为准，不从参考图占幅、三视图排版或无标尺的外观推定大小';
+
 /** Only a complete, trailing, versioned application block is ours. A mention
  * in authored prose, an incomplete block, or legacy unmarked text stays intact.
  * Natural-language sanitization may replace its line breaks with commas. */
@@ -89,7 +91,7 @@ export const storyboardImageReferenceRole = (
       const matches = entities?.filter((entity) => entity.id === binding.entityId) || [];
       if (matches.length === 1) return binding.kind === 'location'
         ? `场景 ${JSON.stringify(matches[0].name)} 的环境外观参考`
-        : `道具 ${JSON.stringify(matches[0].name)} 的外形参考`;
+        : `道具 ${JSON.stringify(matches[0].name)} 的外形参考；${STORYBOARD_PROP_REFERENCE_SCALE_BOUNDARY}`;
     }
     return '未绑定当前实体的普通画面参考，由本镜画面决定用途';
   }
@@ -102,7 +104,7 @@ export const storyboardImageReferenceRole = (
   }
   if (role === 'prop' || asset.sourceEntityKind === 'prop') {
     const prop = context.props?.find((item) => item.id === asset.sourceEntityId || item.assetIds.includes(asset.id));
-    return `道具${prop ? ` ${JSON.stringify(prop.name)}` : ''}的外形参考`;
+    return `道具${prop ? ` ${JSON.stringify(prop.name)}` : ''}的外形参考；${STORYBOARD_PROP_REFERENCE_SCALE_BOUNDARY}`;
   }
   return '普通画面参考，由本镜画面决定用途';
 };
@@ -127,7 +129,7 @@ export const buildStoryboardImagePromptWithReferences = (
     REFERENCE_METADATA_START,
     REFERENCE_METADATA_HEADING,
     ...assetsInActualUploadOrder.map((asset, index) => {
-      if (asset.id === context.continuityAssetId) return `${index + 1}. 本批已成功首图 — 仅作人物外观、场景外观与光线连续参考；人物身份以各自角色参考图为准，不沿用首图镜头、位置、动作、姿态或持物，尾图仍按当前结束时刻取景。`;
+      if (asset.id === context.continuityAssetId) return `${index + 1}. 本批已成功首图 — 仅作人物外观、场景外观与光线连续参考；人物身份以各自角色参考图为准，不沿用首图镜头、位置、动作、姿态或持物，不覆盖当前明确的道具尺寸，尾图仍按当前结束时刻取景。`;
       const characters = storyboardReferenceCharacters(asset, context);
       const mapping = characters.length
         ? `人物 ${characters.map((character) => JSON.stringify(character.name)).join('、')} — 身份、外貌与服装设计参考`

@@ -89,6 +89,9 @@ assert.ok(sequenceEntry);
 assert.match(runtimeLog.formatRuntimeErrorLog([sequenceEntry]), /AI 长剧情分段/u);
 
 for (const [stage, label] of [
+  ['sequence-prompt-handoff', '分段提示词衔接检查'],
+  ['seedance-source-consistency', 'Seedance 来源一致性检查'],
+  ['sequence-prompt-save', '本段提示词保存'],
   ['image-preparation', '生图准备'],
   ['image-reference-load', '生图参考图读取'],
   ['image-frame-plan', '分镜静帧规划（文本 API）'],

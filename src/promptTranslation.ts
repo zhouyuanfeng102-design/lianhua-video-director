@@ -330,7 +330,9 @@ export const translateVideoPromptToEnglish = async ({
     );
     const readIdentityDelivery = createH3IdentityDeliveryReader(identityBindings, undefined, { acceptAiAuthoredContent });
     const readDelivery = async (response: string): Promise<ReturnType<typeof readH3DeliveryEnvelope>> => {
-      if (!sourceIsH3 && !acceptAiAuthoredContent) return { h3Prompt: response.trim(), envelope: false };
+      // Seedance owns its natural-language delivery checks. Even a fenced or
+      // malformed candidate must not trigger H3 JSON/identity repair calls.
+      if (promptFormat === 'seedance' || (!sourceIsH3 && !acceptAiAuthoredContent)) return { h3Prompt: response.trim(), envelope: false };
       let candidate = response;
       let patchIssue: unknown;
       let attemptedIdentityPatch = false;
@@ -401,7 +403,7 @@ export const translateVideoPromptToEnglish = async ({
     }
     let english = reviewedDelivery.h3Prompt;
     if (!english) throw new Error('英文 AI 校验与修复返回空内容，未保存，原有结果保持不变。');
-    if (readH3PromptProtocol(sourcePrompt)) {
+    if (promptFormat !== 'seedance' && readH3PromptProtocol(sourcePrompt)) {
       english = await repairH3PromptProtocolWithAi({
         acceptAiAuthoredContent,
         formatReferencePrompt: sourcePrompt, candidatePrompt: english, language: '英文',

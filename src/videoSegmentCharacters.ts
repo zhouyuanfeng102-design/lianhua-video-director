@@ -1,5 +1,5 @@
 import { characterVariantDisplayName } from './characterVariants';
-import { resolvePromptCharacterParticipation, resolveStoryboardCharacterParticipation } from './characterParticipation';
+import { resolveSeedanceCharacterParticipation, resolveStoryboardCharacterParticipation } from './characterParticipation';
 import { semanticSequenceCharacters } from './semanticSequencePlan';
 import type { Project, ReferenceAsset, Storyboard, VideoSegment, VideoSequencePlan } from './types';
 
@@ -50,7 +50,7 @@ export const videoSegmentCharacterHints = (
   ].map(text).filter(Boolean).join('\n') : '';
   const participation = board && prompt
     ? resolveStoryboardCharacterParticipation(board, characters, prompt)
-    : resolvePromptCharacterParticipation(prompt || fallbackText, characters);
+    : resolveSeedanceCharacterParticipation(prompt || fallbackText, characters);
   const byId = new Map(characters.map((character) => [character.id, character]));
   const assets = new Map(project.assets.map((asset) => [asset.id, asset]));
   const hints = participation.characters.flatMap((entry): VideoSegmentCharacterHint[] => {
