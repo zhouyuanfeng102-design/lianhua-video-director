@@ -30,6 +30,20 @@ const reference = (slotIndex = 0, patch: Partial<VideoAudioReference> = {}): Vid
   assetId: 'voice-a', slotIndex, target: { kind: 'character', characterId: 'a' }, retainMode: 'reference', ...patch });
 const identity = (characterId = 'a', name = '甲人物', speakerToken = 'VoiceA') => ({ characterId, name, speakerToken, referenceAnchor: `${name}身份保持。` });
 
+test('audio references use the compiled clip speaker identity after first-vocal renumbering', () => {
+  const prompt = 'subject_definitions:\n<Subject 1> is 甲人物 (S2).\nsummary:\n[reference generation] Two people.\nretention_analysis:\nN/A\ndetailed_description:\n[Shot 1] 乙人物 (S1) says <d>[Chinese]先来。</d> 甲人物 (S2) says <d>[Chinese]好。</d>\noverall_soundscape:\nN/A\nnon_diegetic_music:\nN/A';
+  const input = draft(prompt, { audioReferences: [reference(0)], audioSelectionMode: 'override', h3ReferenceBinding: {
+    version: 1, projectId: 'audio-project', basePrompt: '甲人物 (S1) 的旧来源', renderedPrompt: prompt,
+    identities: { version: 1, characters: [identity('a', '甲人物', 'S1')] },
+    executionIdentities: { version: 1, characters: [identity('a', '甲人物', '(S2)')] },
+  } });
+  const result = renderVideoAudioDraft(project(), input, api);
+  assert.match(result.prompt, /<Audio 1> → 甲人物 \(S2\)/u);
+  assert.ok(!result.prompt.includes('((S2))'));
+  assert.equal(stripVideoAudioPromptBinding(result.prompt, result.audioReferenceBinding), prompt);
+  assert.equal(renderVideoAudioDraft(project(), result, api).prompt, result.prompt);
+});
+
 test('paired ledger uses explicit speaker IDs and unique aliases, not cast or filenames', () => {
   const prompt = '三人站在桥上，其中两人交谈。';
   const p = project([board(prompt, { audioLedger: [

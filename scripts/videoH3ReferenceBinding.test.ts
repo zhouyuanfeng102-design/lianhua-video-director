@@ -41,6 +41,28 @@ const cloud = (): VideoTaskApiConfig => ({ ...api, provider: 'runninghub', runni
   requestTemplate: JSON.stringify({ nodeInfoList: [{ nodeId: 'p', fieldName: 'value', fieldValue: '' }, ...Array.from({ length: 5 }, (_, index) => ({ nodeId: `i${index}`, fieldName: 'image', fieldValue: '' }))] }),
   runningHubMappedFields: [{ nodeId: 'p', fieldName: 'value', kind: 'prompt' }, ...Array.from({ length: 5 }, (_, imageIndex) => ({ nodeId: `i${imageIndex}`, fieldName: 'image', kind: 'image' as const, imageIndex }))] });
 const literals = (value: string): string[] => [...value.matchAll(/<(?:d|sound)>[\s\S]*?<\/(?:d|sound)>/gu)].map((match) => match[0]);
+const assertPictureBinding = (prompt: string, name: string, numbers: number[]): void => {
+  const pictures = numbers.map((number) => `<Picture ${number}>`).join(', ');
+  const escapedName = name.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+  assert.match(prompt, new RegExp(`(?:is ${escapedName}(?: \\(S\\d+\\))? referenced from|Visual identity reference for ${escapedName}:) ${pictures}`, 'u'));
+};
+const actionBody = (prompt: string): string => {
+  const header = /^(?:integrated_multimodal_description|detailed_description):/mu.exec(prompt)!;
+  const body = prompt.slice(header.index + header[0].length);
+  const tail = /^overall_soundscape:/mu.exec(body);
+  return tail ? body.slice(0, tail.index) : body;
+};
+const assertExecutionSource = (actual: string, source: string, _anchors: readonly string[] = [anchorA, anchorB]): void => {
+  const normalize = (value: string): string => {
+    let body = actionBody(value);
+    return body.replace(/ Visual identity reference for [^\r\n]*?: <Picture \d+>(?:, <Picture \d+>)*\./gu, '')
+      .replace(/<Subject\s+\d+>[ \t]*/gu, '').replace(/[SＳ][0-9０-９]+/gu, 'Sx').replace(/\s+/gu, ' ').trim();
+  };
+  assert.deepEqual(readH3PromptProtocol(actual)?.shots, readH3PromptProtocol(source)?.shots);
+  assert.deepEqual(literals(actual), literals(source));
+  assert.equal(actual.slice(actual.indexOf('overall_soundscape:')), source.slice(source.indexOf('overall_soundscape:')));
+  assert.equal(normalize(actual), normalize(source), 'only proven identity labels, source declarations and voice numbers are compiled; actions and time stay');
+};
 const scenePrompt = (scene: number | null = 9, person: number | null = 8, prop: number | null = 7): string => {
   const source = (number: number | null) => number === null ? 'defined by the canonical prompt' : `referenced from <Picture ${number}>`;
   const retention = (number: number | null) => number === null ? '' : `reference <Picture ${number}>`;
@@ -65,11 +87,11 @@ await test('稀疏RunningHub按明确物理槽引用，而通用数组使用真�
   const { project, draft } = fixture();
   const result = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api: cloud() });
   assert.ok(result.warnings.some((warning) => warning.includes('不能由本地映射核实')));
-  assert.match(result.draft.prompt, /甲: <Picture 3>/u);
-  assert.match(result.draft.prompt, /乙: <Picture 5>/u);
+  assertPictureBinding(result.draft.prompt, '甲', [3]);
+  assertPictureBinding(result.draft.prompt, '乙', [5]);
   const dense = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api });
-  assert.match(dense.draft.prompt, /甲: <Picture 2>/u);
-  assert.match(dense.draft.prompt, /乙: <Picture 3>/u);
+  assertPictureBinding(dense.draft.prompt, '甲', [2]);
+  assertPictureBinding(dense.draft.prompt, '乙', [3]);
   const body = buildVideoApiBody(cloud(), { ...result.draft, parameters: {} }, ['tail.png', 'a.png', 'b.png']);
   const fields = body.nodeInfoList as Array<{ nodeId: string; fieldValue: string }>;
   assert.equal(fields.find((field) => field.nodeId === 'p')?.fieldValue, result.draft.prompt);
@@ -78,14 +100,16 @@ await test('稀疏RunningHub按明确物理槽引用，而通用数组使用真�
   assert.equal(fields.find((field) => field.nodeId === 'i1')?.fieldValue, '');
 });
 
-await test('选图只增显式身份引用，镜数切点对白动作声音逐字不动且可逆幂等', () => {
+await test('选图确定性编译六字段主体，镜数切点对白动作声音保留且可逆幂等', () => {
   const { project, draft } = fixture(); const before = structuredClone({ project, draft });
   const result = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api });
   const protocol = readH3PromptProtocol(result.draft.prompt)!;
-  assert.deepEqual(protocol.sections, readH3PromptProtocol(originalPrompt)!.sections);
+  assert.deepEqual(protocol.sections, ['subject_definitions', 'summary', 'retention_analysis', 'detailed_description', 'overall_soundscape', 'non_diegetic_music']);
   assert.deepEqual(protocol.shots, readH3PromptProtocol(originalPrompt)!.shots);
   assert.deepEqual(literals(result.draft.prompt), literals(originalPrompt));
-  assert.equal(result.draft.prompt.slice(result.draft.prompt.indexOf('本段0')), originalPrompt.slice(originalPrompt.indexOf('本段0')));
+  assertExecutionSource(result.draft.prompt, originalPrompt);
+  assert.match(result.draft.prompt, /乙 \(S1\) 画内发话/u);
+  assert.match(result.draft.prompt, /甲 \(S2\) 回答/u);
   assert.equal(prepareVideoH3ReferenceDraft(project, result.draft, { backend: 'api', api }).draft.prompt, result.draft.prompt);
   assert.equal(prepareVideoH3ReferenceDraft(project, { ...result.draft, references: [] }, { backend: 'api', api }).draft.prompt, originalPrompt);
   assert.deepEqual({ project, draft }, before);
@@ -105,11 +129,11 @@ await test('中英文纯视觉身份句不含声源号，后镜非语言悲鸣�
       identities: { version: 1, characters: [{ characterId: 'a', name: '甲', speakerToken: '(S1)', referenceAnchor: identity }] } };
     const before = structuredClone({ project, draft });
     const result = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api: cloud() });
-    const association = ' Visual identity reference for 甲: <Picture 3>.';
     assert.equal(result.characterStates.find((entry) => entry.characterId === 'a')?.status, 'bound');
     assert.deepEqual(result.characterStates.find((entry) => entry.characterId === 'a')?.slots, [3]);
-    assert.ok(result.draft.prompt.includes(`${identity}${association}`));
-    assert.equal(result.draft.prompt.replace(association, ''), prompt, 'only the selected picture association is inserted');
+    assertPictureBinding(result.draft.prompt, '甲', [3]);
+    assert.match(result.draft.prompt, /<Subject 1> is 甲 \(S1\)/u);
+    assertExecutionSource(result.draft.prompt, prompt, [identity]);
     assert.deepEqual(literals(result.draft.prompt), literals(prompt), 'the authored cry stays unchanged');
     assert.deepEqual(result.draft.h3ReferenceBinding?.identities, draft.h3ReferenceBinding!.identities);
     assert.deepEqual({ project, draft }, before);
@@ -134,12 +158,11 @@ await test('第五段同类中英文三字段稿沿用Subject元数据，普通�
     assert.deepEqual(result.characterStates.map(({ characterId, status, slots }) => ({ characterId, status, slots })), [
       { characterId: 'a', status: 'bound', slots: [4] }, { characterId: 'b', status: 'bound', slots: [5] },
     ]);
-    const firstUse = ' Visual identity reference for 甲: <Picture 4>.';
-    const secondUse = ' Visual identity reference for 乙: <Picture 5>.';
-    assert.ok(result.draft.prompt.includes(first + firstUse));
-    assert.ok(result.draft.prompt.includes(second + secondUse));
-    assert.equal(result.draft.prompt.replace(firstUse, '').replace(secondUse, ''), prompt);
-    assert.doesNotMatch(result.draft.prompt, /<Subject |\(S\d+\)/u, 'legacy metadata is not injected into the authored body');
+    assertPictureBinding(result.draft.prompt, '甲', [4]);
+    assertPictureBinding(result.draft.prompt, '乙', [5]);
+    assertExecutionSource(result.draft.prompt, prompt, [first, second]);
+    assert.match(result.draft.prompt, /<Subject 1> is 甲/u);
+    assert.match(result.draft.prompt, /<Subject 2> is 乙/u);
     assert.deepEqual(result.draft.h3ReferenceBinding?.identities, metadata);
     assert.equal(result.warnings.some((warning) => warning.includes('锚点已失效')), false);
     assert.deepEqual({ project, draft }, before);
@@ -169,12 +192,12 @@ await test('语义分段沿用冻结人物原名，以同ID当前图片归属绑
   project.characters[0].name = '甲后来修改的名字'; project.characters[1].name = '乙后来修改的名字';
   const result = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api });
   assert.deepEqual(result.warnings, []);
-  assert.match(result.draft.prompt, /甲: <Picture 2>/u);
-  assert.match(result.draft.prompt, /乙: <Picture 3>/u);
+  assertPictureBinding(result.draft.prompt, '甲', [2]);
+  assertPictureBinding(result.draft.prompt, '乙', [3]);
   assert.deepEqual(videoH3ReferenceCharacterIds(project, draft), ['a', 'b']);
   const explicit = { ...draft, references: [{ assetId: 'a-image', role: 'general' as const, characterIds: ['b'] }] };
   assert.deepEqual(videoH3ReferenceCharacterIds(project, explicit), ['b']);
-  assert.match(prepareVideoH3ReferenceDraft(project, explicit, { backend: 'api', api }).draft.prompt, /乙: <Picture 1>/u);
+  assertPictureBinding(prepareVideoH3ReferenceDraft(project, explicit, { backend: 'api', api }).draft.prompt, '乙', [1]);
 });
 
 await test('多人合照与同一人物多图都按明确资产归属，不构造一图一人', () => {
@@ -182,8 +205,8 @@ await test('多人合照与同一人物多图都按明确资产归属，不构�
   project.characters[0].assetIds.push('group', 'a-second'); project.characters[1].assetIds.push('group');
   draft.references = [{ assetId: 'group', role: 'character' }, { assetId: 'a-second', role: 'character' }];
   const result = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api });
-  assert.match(result.draft.prompt, /甲: <Picture 1>, <Picture 2>/u);
-  assert.match(result.draft.prompt, /乙: <Picture 1>/u);
+  assertPictureBinding(result.draft.prompt, '甲', [1, 2]);
+  assertPictureBinding(result.draft.prompt, '乙', [1]);
   assert.equal((result.draft.prompt.match(/Identity:/gu) || []).length, 2);
 });
 
@@ -224,7 +247,7 @@ await test('本段可明确为未归属合照选择多个人物，空选择不�
   const { project, draft } = fixture(); project.assets.push(image('anonymous'));
   draft.references = [{ assetId: 'anonymous', role: 'general', characterIds: ['a', 'b'] }];
   const result = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api });
-  assert.match(result.draft.prompt, /甲: <Picture 1>/u); assert.match(result.draft.prompt, /乙: <Picture 1>/u);
+  assertPictureBinding(result.draft.prompt, '甲', [1]); assertPictureBinding(result.draft.prompt, '乙', [1]);
   draft.references = [{ assetId: 'a-image', role: 'character', characterIds: [] }];
   assert.equal(prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api }).draft.prompt, originalPrompt);
 });
@@ -258,7 +281,7 @@ await test('取消首图保留其他用途与物理槽，新图补回空槽，�
   selection = addVideoReference(selection, { assetId: 'a-second', role: 'general' });
   assert.deepEqual(selection.references.map((reference) => [reference.assetId, reference.role]), [['a-second', 'character'], ['b-image', 'subject']]);
   const result = prepareVideoH3ReferenceDraft(project, { ...draft, ...selection }, { backend: 'api', api: cloud() });
-  assert.match(result.draft.prompt, /甲: <Picture 1>/u); assert.match(result.draft.prompt, /乙: <Picture 2>/u);
+  assertPictureBinding(result.draft.prompt, '甲', [1]); assertPictureBinding(result.draft.prompt, '乙', [2]);
 });
 
 await test('旧稿无metadata、跨项目与人工改稿仅提示；准确唯一的已存定位不复审正文内容', () => {
@@ -276,8 +299,9 @@ await test('旧稿无metadata、跨项目与人工改稿仅提示；准确唯一
   assert.deepEqual(literals(result.draft.prompt), literals(originalPrompt));
   assert.equal(result.characterStates.find((entry) => entry.characterId === 'a')?.status, 'bound', 'the exact existing locator is not rejected by dialogue or section rules');
   assert.equal(result.warnings.some((warning) => warning.includes('锚点已失效')), false);
-  assert.equal(result.draft.prompt.replace(' Visual identity reference for 甲: <Picture 2>.', '')
-    .replace(' Visual identity reference for 乙: <Picture 3>.', ''), originalPrompt);
+  assertExecutionSource(result.draft.prompt, originalPrompt);
+  assert.match(actionBody(result.draft.prompt), /乙 \(S1\) 画内发话 <d>\[Chinese\] 请把地图给我。<\/d>/u);
+  assert.doesNotMatch(result.draft.prompt.split('detailed_description:')[0], /<d>/u);
 });
 
 await test('找不到或重复的准确定位仍待关联，不推断替代位置', () => {
@@ -340,19 +364,24 @@ await test('尾帧组合在最终物理映射时才序列化，Picture/Subject/�
   assert.equal(prepared.issue, undefined); assert.equal(prepared.draft.prompt, originalPrompt);
   const references = videoBatchTailReferences(prepared.draft.references, { mode: 'prepend', index: 0, role: 'first-frame' }, 'tail');
   const result = prepareVideoH3ReferenceDraft(project, { ...prepared.draft, references }, { backend: 'api', api });
-  assert.match(result.draft.prompt, /甲: <Picture 2>/u); assert.match(result.draft.prompt, /乙: <Picture 3>/u);
-  assert.doesNotMatch(result.draft.prompt, /<Subject|\(S3\)/u);
+  assertPictureBinding(result.draft.prompt, '甲', [2]); assertPictureBinding(result.draft.prompt, '乙', [3]);
+  assert.match(result.draft.prompt, /<Subject 1> is 甲 \(S2\)/u);
+  assert.match(result.draft.prompt, /<Subject 2> is 乙 \(S1\)/u);
+  assert.doesNotMatch(result.draft.prompt, /\(S3\)/u);
 });
 
-await test('六字段仅在AI给定Subject身份句后加引用，详细镜头正文和音轨字节保持', () => {
+await test('既有六字段Subject直接连接实际图片，按段首发重编S并保留镜头音轨', () => {
   const { project, draft } = fixture();
   const identity = '<Subject 7> is 甲 (S2), black hair and blue robe.';
   const prompt = `subject_definitions:\n${identity}\nsummary:\nA walk.\nretention_analysis:\n<Subject 7> preserved.\ndetailed_description:\n[Shot 1] <Subject 7> (S2) says <d>[Chinese] 好，我们一起走。</d>.\noverall_soundscape: N/A\nnon_diegetic_music: N/A`;
   draft.prompt = prompt; draft.h3ReferenceBinding = { version: 1, projectId: project.id, basePrompt: prompt, renderedPrompt: prompt,
     identities: { version: 1, characters: [{ characterId: 'a', name: '甲', speakerToken: '(S2)', subjectToken: '<Subject 7>', referenceAnchor: identity }] } };
+  draft.references = draft.references.filter((reference) => reference.assetId !== 'b-image');
   const result = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api });
-  assert.match(result.draft.prompt, /甲: <Picture 2>/u);
-  assert.equal(result.draft.prompt.slice(result.draft.prompt.indexOf('summary:')), prompt.slice(prompt.indexOf('summary:')));
+  assertPictureBinding(result.draft.prompt, '甲', [2]);
+  assert.match(result.draft.prompt, /<Subject 7> is 甲 \(S1\) referenced from <Picture 2>/u);
+  assert.match(result.draft.prompt, /\[Shot 1\] <Subject 7> \(S1\) says/u);
+  assertExecutionSource(result.draft.prompt, prompt, [identity]);
   assert.equal(readH3PromptProtocol(result.draft.prompt)?.sections.length, 6);
 });
 
@@ -364,7 +393,7 @@ await test('已有Picture通过保存manifest按原资产或明确同人物替�
   project.assets.push(image('a-new', 'a')); draft.references[1].assetId = 'a-new';
   const result = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api: cloud() });
   assert.match(result.draft.prompt, /Existing visual source: <Picture 3>/u);
-  assert.match(result.draft.prompt, /甲: <Picture 3>/u);
+  assertPictureBinding(result.draft.prompt, '甲', [3]);
   assert.deepEqual(literals(result.draft.prompt), literals(prompt));
   const invalid = prepareVideoH3ReferenceDraft(project, { ...draft, h3ReferenceBinding: { ...draft.h3ReferenceBinding!, sourcePictures: [] } }, { backend: 'api', api });
   assert.equal(invalid.draft.prompt, prompt);
@@ -383,7 +412,11 @@ await test('场景替图只按唯一location证据绑定真实槽，角色编号
     const before = structuredClone({ project, draft });
     for (const [connection, sceneNumber, personNumber] of [[cloud(), 4, 5], [api, 2, 3]] as const) {
       const result = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api: connection });
-      assert.equal(result.draft.prompt.replace(` Visual identity reference for 甲: <Picture ${personNumber}>.`, ''), scenePrompt(sceneNumber, personNumber, null));
+      assertPictureBinding(result.draft.prompt, '甲', [personNumber]);
+      assert.match(result.draft.prompt, new RegExp(`<Subject 9> is 山门 referenced from <Picture ${sceneNumber}>`, 'u'));
+      assert.match(result.draft.prompt, /<Subject 7> is 剑 defined by the canonical prompt/u);
+      assert.doesNotMatch(result.draft.prompt.split('detailed_description:')[0], /<Picture [789]>/u);
+      assertExecutionSource(result.draft.prompt, scenePrompt(sceneNumber, personNumber, null));
       assert.deepEqual(literals(result.draft.prompt), literals(draft.prompt));
       assert.deepEqual(readH3PromptProtocol(result.draft.prompt)?.sections, readH3PromptProtocol(draft.prompt)?.sections);
       assert.equal(prepareVideoH3ReferenceDraft(project, result.draft, { backend: 'api', api: connection }).draft.prompt, result.draft.prompt, 'repeat serialization is idempotent');
@@ -410,7 +443,9 @@ await test('同location多张替图不擅选；只用默认人物时仍兼容场
   const { project, draft } = sceneFixture();
   draft.references = [{ assetId: 'tail', role: 'first-frame' }, { assetId: 'a-image', role: 'character' }];
   const ordinary = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api });
-  assert.equal(ordinary.draft.prompt.replace(' Visual identity reference for 甲: <Picture 2>.', ''), scenePrompt(1, 2, null));
+  assertPictureBinding(ordinary.draft.prompt, '甲', [2]);
+  assert.match(ordinary.draft.prompt, /<Subject 9> is 山门 referenced from <Picture 1>/u);
+  assertExecutionSource(ordinary.draft.prompt, scenePrompt(1, 2, null));
   project.assets.push({ ...project.assets.find((asset) => asset.id === 'scene-new')!, id: 'scene-new-2' });
   draft.references = [{ assetId: 'tail', role: 'first-frame' }, { assetId: 'scene-new', role: 'scene' }, { assetId: 'scene-new-2', role: 'scene' }];
   const ambiguous = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api });
@@ -487,7 +522,7 @@ await test('批量未来尾帧在入队时即冻结最终Picture绑定，等待�
     ] });
     const task = state.project.generationTasks.find((entry) => entry.id === batch.taskIds[1]) as VideoGenerationTask;
     assert.equal(task.videoJob!.snapshot.draft.prompt, expected);
-    assert.match(expected, /甲: <Picture 2>/u); assert.match(expected, /乙: <Picture 3>/u);
+    assertPictureBinding(expected, '甲', [2]); assertPictureBinding(expected, '乙', [3]);
     assert.equal(task.videoJob!.snapshot.draft.references.length, 3);
     second.references.reverse(); state.project.characters[0].name = '之后改名';
     assert.equal(task.videoJob!.snapshot.draft.prompt, expected);

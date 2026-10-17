@@ -9,6 +9,7 @@ import { createQaProcessHarness, findAvailableTcpPort, waitForCondition } from '
 const { applyOfficialH3Prompt } = await tsImport('../src/officialPrompt.ts', import.meta.url);
 const { videoReferenceCharacterOwners } = await tsImport('../src/videoH3ReferenceBinding.ts', import.meta.url);
 const { assetReferenceEntityOwners } = await tsImport('../src/assetCharacterBinding.ts', import.meta.url);
+const { normalizeState } = await tsImport('../src/storage.ts', import.meta.url);
 
 const root = path.resolve(import.meta.dirname, '..');
 const outputBase = path.join(root, 'output', 'playwright');
@@ -100,7 +101,14 @@ const seed = async (font) => {
   compiled.officialPromptEn = previous.officialPromptEn;
   compiled.officialPromptEnSource = compiled.officialPromptZh;
   project.storyboards = [compiled]; state.projects = [project];
-  await page.evaluate(({ key, state }) => localStorage.setItem(key, JSON.stringify(state)), { key: storageKey, state });
+  if (process.env.QA_SCOPE === 'prop') {
+    state.settings.imageApi.enabled = true;
+    state.settings.imageApi.baseUrl = 'http://127.0.0.1:1/v1';
+    state.settings.imageApi.model = 'synthetic-image-model';
+    state.settings.imageApiProfiles = [];
+    state.settings.activeImageApiProfileId = null;
+  }
+  await page.evaluate(({ key, state }) => localStorage.setItem(key, JSON.stringify(state)), { key: storageKey, state: normalizeState(state) });
 };
 
 const snapshot = async () => {
@@ -164,7 +172,7 @@ const run = async () => {
   for (const spec of [{ width: 1280, height: 800, font: 100 }]) {
     context = await browser.newContext({ viewport: { width: spec.width, height: spec.height } });
     page = await context.newPage(); page.setDefaultTimeout(12_000);
-    page.on('pageerror', (error) => errors.push(error.message));
+    page.on('pageerror', (error) => errors.push(error.stack || error.message));
     page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
     page.on('request', (request) => pendingRequests.set(request.url(), request.method()));
     page.on('requestfinished', (request) => pendingRequests.delete(request.url()));
@@ -192,11 +200,40 @@ const run = async () => {
     await waitForApp();
     await page.waitForFunction((key) => Boolean(localStorage.getItem(key)), storageKey);
     await seed(spec.font); await reloadApp();
+    if (process.env.QA_SCOPE === 'prop') {
+      await page.locator('.sidebar').getByRole('button', { name: '图像工作台', exact: true }).click();
+      await page.getByRole('button', { name: '物品', exact: true }).click();
+      const variants = page.getByRole('group', { name: '选择普通生图画面规格', exact: true });
+      assert.deepEqual(await variants.getByRole('button').allTextContents(), ['特写', '三视图']);
+      await variants.getByRole('button', { name: '三视图', exact: true }).click();
+      assert.ok(await variants.getByRole('button', { name: '三视图', exact: true }).evaluate((button) => button.classList.contains('active')));
+      await page.getByText('同一物品的正面、严格 90° 侧面、背面，横向三等宽排列；保持相同尺寸、材质和状态，完整展示物品。', { exact: true }).waitFor();
+      await page.getByRole('button', { name: '生成三视图并保存', exact: true }).waitFor();
+      await assertReachable(variants.getByRole('button', { name: '三视图', exact: true }), 'three-view button');
+      const file = 'prop-three-view.png';
+      await page.screenshot({ path: path.join(output, file), fullPage: false }); screenshots.push(file);
+      await variants.getByRole('button', { name: '特写', exact: true }).click();
+      assert.ok(await variants.getByRole('button', { name: '特写', exact: true }).evaluate((button) => button.classList.contains('active')));
+      assert.deepEqual(errors, []);
+      results.push({ ...spec, scope: 'prop', options: ['特写', '三视图'], threeViewSelectsAndShowsGuidance: true, closeUpSelectable: true, apiRequests: 0 });
+      fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify({ mockOnly: true, noProductionDataRead: true, results, screenshots, errors }, null, 2));
+      console.log(JSON.stringify(results.at(-1)));
+      await context.close(); context = undefined;
+      continue;
+    }
     const nav = async () => {
       await page.locator('.sidebar').getByRole('button', { name: '资产库', exact: true }).click();
       await page.locator('#asset-card-binding-image').waitFor();
-      const closedDetails = page.locator('.asset-metadata-details:not([open]) > summary');
-      while (await closedDetails.count()) await closedDetails.first().click();
+    };
+    const assertWorkbenchCounts = async (kind, expected) => {
+      await page.locator('.sidebar').getByRole('button', { name: '图像工作台', exact: true }).click();
+      await page.getByRole('button', { name: kind === 'character' ? '人物角色' : kind === 'location' ? '场景' : '物品', exact: true }).click();
+      const entities = page.getByLabel('调用项目实体', { exact: true });
+      for (const [id, count] of expected) {
+        const text = await entities.locator(`option[value="${id}"]`).innerText();
+        assert.ok(text.endsWith(count ? `${count} 张关联图` : '未关联图片'), `current ${kind} association count: ${text}`);
+      }
+      await nav();
     };
     await nav();
     const card = page.locator('#asset-card-binding-image');
@@ -232,12 +269,18 @@ const run = async () => {
     await dialog.getByRole('button', { name: '保存绑定', exact: true }).click();
     await assertStoredBinding('binding-image', 'binding-person-a');
     await card.getByText('人物参考：成年旅人甲', { exact: true }).waitFor();
+    assert.ok(await card.locator('.asset-info > .asset-character-binding-note').isVisible(), 'binding target must be visible while details are collapsed');
+    assert.equal(await card.locator('.asset-metadata-details').getAttribute('open'), null);
+    assert.equal(await bindingButton(card).innerText(), '更改绑定');
+    await assertWorkbenchCounts('character', [['binding-person-a', 2], ['binding-person-b', 0]]);
+    await saveImage(`bound-status-${spec.width}x${spec.height}.png`);
     await reloadApp(); await nav();
     await card.getByText('人物参考：成年旅人甲', { exact: true }).waitFor();
     await openBinding(card); assert.equal(await select.inputValue(), 'binding-person-a');
     await select.selectOption('binding-person-b'); await dialog.getByRole('button', { name: '保存绑定', exact: true }).click();
     await assertStoredBinding('binding-image', 'binding-person-b');
     await card.getByText('人物参考：成年旅人乙', { exact: true }).waitFor();
+    await assertWorkbenchCounts('character', [['binding-person-a', 1], ['binding-person-b', 1]]);
     await openBinding(card); await select.selectOption({ label: '不绑定人物' });
     await dialog.getByRole('button', { name: '保存绑定', exact: true }).click();
     await assertStoredBinding('binding-image', null);
@@ -271,6 +314,7 @@ const run = async () => {
     await dialog.getByRole('button', { name: '保存绑定', exact: true }).click();
     await assertStoredEntityBinding('binding-image', { kind: 'location', entityId: 'binding-location-1' });
     await card.getByText('场景参考：庭院', { exact: true }).waitFor();
+    await assertWorkbenchCounts('location', [['binding-location-0', 0], ['binding-location-1', 1]]);
     await openBinding(card); await choose('prop', 'binding-prop-0');
     await saveImage(`prop-dialog-${spec.width}x${spec.height}.png`);
     await dialog.getByRole('button', { name: '保存绑定', exact: true }).click();
@@ -285,6 +329,8 @@ const run = async () => {
     await dialog.getByRole('button', { name: '保存绑定', exact: true }).click();
     await assertStoredEntityBinding('binding-image', { kind: 'prop', entityId: 'binding-prop-1' });
     await card.getByText('物品参考：红色徽章', { exact: true }).waitFor();
+    await assertWorkbenchCounts('location', [['binding-location-1', 0]]);
+    await assertWorkbenchCounts('prop', [['binding-prop-0', 0], ['binding-prop-1', 1]]);
     await openBinding(card);
     await dialog.getByLabel('绑定物品', { exact: true }).selectOption({ label: '不绑定物品' });
     await dialog.getByRole('button', { name: '保存绑定', exact: true }).click();
@@ -299,6 +345,13 @@ const run = async () => {
     await assertStoredBinding('binding-legacy-image', null);
     await reloadApp(); await nav();
     await legacyCard.getByText('未绑定实体（可直接使用）', { exact: true }).waitFor();
+    await assertWorkbenchCounts('character', [['binding-person-a', 0], ['binding-person-b', 0]]);
+    await page.locator('.sidebar').getByRole('button', { name: '剧情解析', exact: true }).click();
+    await page.getByRole('button', { name: /^实体资料/u }).click();
+    const entityCards = page.locator('.entity-detail-card.character');
+    await entityCards.first().waitFor();
+    assert.equal(await entityCards.getByText('未关联图片', { exact: true }).count(), 2, 'story entity list must also respect explicit unbinding');
+    await nav();
     await card.getByRole('button', { name: '用此图生成视频', exact: true }).click();
     await page.locator('.video-director-view').waitFor();
     assert.equal(await page.locator('.vd-reference-row').count(), 1, 'unbound image must remain usable as a video reference');
@@ -316,7 +369,7 @@ const run = async () => {
     }
     assert.deepEqual(await page.evaluate(() => window.__bindingQaRequests), []);
     assert.deepEqual(errors, []);
-    results.push({ ...spec, bindAndReload: true, changeAndUnbind: true, sceneAndPropBindChangeReloadClear: true, crossTypeCancel: true, legacyUnbindPersists: true, cancelPreservesData: true, unboundUsable: true, bilingualPromptsUnchanged: true, noControlOverlap: true, apiRequests: 0 });
+    results.push({ ...spec, bindAndReload: true, changeAndUnbind: true, sceneAndPropBindChangeReloadClear: true, crossTypeCancel: true, legacyUnbindPersists: true, cancelPreservesData: true, unboundUsable: true, bilingualPromptsUnchanged: true, bindingTargetVisibleWithoutDetails: true, workbenchCountsUseCurrentBindings: true, storyCountsRespectExplicitUnbinding: true, noControlOverlap: true, apiRequests: 0 });
     fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify({ mockOnly: true, noProductionDataRead: true, results, screenshots, errors }, null, 2));
     console.log(JSON.stringify(results.at(-1)));
     await context.close(); context = undefined;

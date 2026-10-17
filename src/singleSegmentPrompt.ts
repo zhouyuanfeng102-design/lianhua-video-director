@@ -264,6 +264,7 @@ export async function generateSingleSegmentPrompt(
     hasHandoffEvidence = false,
     formatOnly = false,
     serializationRepair = false,
+    sourceDocumentTranslation = false,
   ): Promise<string> => {
     assertCurrent();
     if (serializationRepair && stage !== 'convert') consumeRetry(stage);
@@ -332,7 +333,7 @@ export async function generateSingleSegmentPrompt(
       if (!seedance && stage === 'review' && !formatOnly && canReplanStaging) {
         scopedSystem += '\n\n本次仅因用户显式dialogue-repair授权当前段对白排程修复：上面通用保真规则中的“保留镜数与At切点”以本次同步修正后的canonicalPrompt为基准，不锁死需修复的旧AI草稿；用户exact镜数与固定段长始终不变，auto才可调整镜数。仅返回本次约定的canonicalPrompt+h3Prompt+identityBindings+shotSourceIds+shotMetadata完整JSON，不能因通用“只返回正文”提示改成单份H3；完整原话、原说话人、原事件与段间范围仍不变，不借对白修复重新套用导演风格。';
       }
-      if (!seedance && stage !== 'convert') {
+      if (!seedance && stage !== 'convert' && !sourceDocumentTranslation) {
         const languageRule = h3DescriptionLanguageRule(stage === 'translate' ? '英文' : '中文');
         if (!scopedSystem.includes(languageRule)) scopedSystem += `\n\n${languageRule}`;
       }
@@ -353,7 +354,7 @@ export async function generateSingleSegmentPrompt(
           break;
         } catch (error) {
           assertCurrent();
-          if (stage === 'convert' || seedance) throw error;
+          if (stage === 'convert' || seedance || sourceDocumentTranslation) throw error;
           const decision = h3OutputRetryDecision(error, allowance);
           if (!decision.retry) throw error;
           consumeRetry(stage, decision.explanation);
@@ -402,6 +403,10 @@ export async function generateSingleSegmentPrompt(
         ...(('variantOf' in character) ? { variantOf: String((character as typeof character & { variantOf?: string }).variantOf || '') } : {}),
         ...(('transformationType' in character) ? { transformationType: String((character as typeof character & { transformationType?: string }).transformationType || '') } : {}),
       })),
+      ...(!input.sequenceSegmentContext?.contentOverridden && input.sequenceSegmentContext ? {
+        sourceEvents: structuredClone(input.sequenceSegmentContext.segment.semanticSource.events),
+        sourceDialogues: structuredClone(input.sequenceSegmentContext.segment.semanticSource.dialogues),
+      } : {}),
       currentReferences: referenceFacts(currentReferences),
       deliveryMediaMode,
       ...(input.sequenceHandoff ? { sequenceHandoff: input.sequenceHandoff } : {}),
@@ -581,7 +586,6 @@ export async function generateSingleSegmentPrompt(
       assertCurrent();
     }
     try {
-      let translationRequests = 0;
       let englishIdentityBindings: H3IdentityBindings | undefined;
       let englishDeliveryWarnings: string[] = [];
       const english = await translateVideoPromptToEnglish({
@@ -589,13 +593,16 @@ export async function generateSingleSegmentPrompt(
         acceptAiAuthoredContent: true,
         onDeliveryWarnings: (warnings) => { englishDeliveryWarnings = warnings; },
         identityBindings: official.h3IdentityBindings,
+        sourceCharacters: savedOnly ? undefined : identityCharacters,
+        sourceDialogues: !savedOnly && !input.sequenceSegmentContext?.contentOverridden
+          ? input.sequenceSegmentContext?.segment.semanticSource.dialogues : undefined,
+        sourceEvents: !savedOnly && !input.sequenceSegmentContext?.contentOverridden
+          ? input.sequenceSegmentContext?.segment.semanticSource.events : undefined,
         onIdentityBindings: (bindings) => { englishIdentityBindings = bindings; },
         request: (system, user, transport) => {
-          translationRequests += 1;
-          // AI review has its own progress callback; do not overwrite it with
-          // the generic translation stage when sending the second request.
-          return checkedRequest(system, user, 'translate', !reviewWithAi || translationRequests === 1,
-            transport?.includesStagingContext === true, false, transport?.serializationRepair === true);
+          return checkedRequest(system, user, 'translate', true,
+            transport?.includesStagingContext === true, false, transport?.serializationRepair === true,
+            transport?.sourceDocumentTranslation === true);
         },
         clean: input.clean,
         isCurrent: input.isCurrent,

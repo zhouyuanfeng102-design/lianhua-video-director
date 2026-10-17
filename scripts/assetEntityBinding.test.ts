@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {
-  assetReferenceCharacterOwners, assetReferenceEntityOwners, assetReferenceLocationOwners, assetReferencePropOwners,
+  assetReferenceCharacterOwners, assetReferenceEntityImageCounts, assetReferenceEntityOwners, assetReferenceLocationOwners, assetReferencePropOwners,
   bindAssetCharacter, bindAssetEntity,
 } from '../src/assetCharacterBinding';
 import { createInitialState, normalizeState, serializeStateForStorage } from '../src/storage';
@@ -73,6 +73,58 @@ test('旧项目来源和assetIds继续识别；明确绑定覆盖旧来源和旧
   const characterAgain = bindAssetCharacter(rebound, 'free', 'person-b');
   assert.deepEqual(owners(characterAgain), [{ kind: 'character', id: 'person-b' }]);
   assert.deepEqual(owners(bindAssetCharacter(characterAgain, 'free', null)), []);
+});
+
+test('关联图统计覆盖三类实体，显式改绑和解绑实时覆盖旧来源和assetIds且不改写历史', () => {
+  const original = fixture();
+  original.characters[0].assetIds.push('deleted-image', 'legacy-person');
+  const before = structuredClone(original);
+  const initial = assetReferenceEntityImageCounts(original);
+  assert.deepEqual([...initial.character], [['person-a', 1]], 'duplicate list entries and absent assets do not inflate the count');
+  assert.deepEqual([...initial.location], [['location-a', 1]]);
+  assert.deepEqual([...initial.prop], [['prop-a', 1]]);
+  const bound = bindAssetEntity(original, 'free', { kind: 'character', entityId: 'person-a' }, 2);
+  assert.equal(assetReferenceEntityImageCounts(bound).character.get('person-a'), 2, 'binding counts even without an entity assetIds entry');
+  const rebound = bindAssetEntity(bound, 'legacy-person', { kind: 'location', entityId: 'location-b' }, 3);
+  const current = assetReferenceEntityImageCounts(rebound);
+  assert.equal(current.character.get('person-a'), 1, 'rebound historical image no longer counts for its old owner');
+  assert.equal(current.location.get('location-b'), 1);
+  const cleared = bindAssetEntity(bindAssetEntity(rebound, 'free', null, 4), 'legacy-location', null, 5);
+  const remaining = assetReferenceEntityImageCounts(cleared);
+  assert.equal(remaining.character.get('person-a') || 0, 0);
+  assert.equal(remaining.location.get('location-a') || 0, 0, 'explicit clear defeats the old entity assetIds and generation source');
+  assert.equal(remaining.location.get('location-b'), 1);
+  assert.equal(remaining.prop.get('prop-a'), 1);
+  assert.equal(rebound.characters, original.characters);
+  assert.equal(rebound.locations, original.locations);
+  assert.deepEqual(original, before, 'counting and metadata changes preserve the original project and source lists');
+});
+
+test('关联图统计使用种类与精确ID，排除失效、归档、重复ID和非图片', () => {
+  const project = fixture();
+  project.characters = [character('shared-id', '同名人物'), character('other-person', '同名人物'),
+    { ...character('archived', '已归档'), dossier: { archivedIntoCharacterId: 'shared-id' } },
+    character('duplicate-person', '重复甲'), character('duplicate-person', '重复乙')];
+  project.locations = [location('shared-id', '同名场景'), location('duplicate-location', '重复甲'), location('duplicate-location', '重复乙')];
+  project.props = [prop('shared-id', '同名物品'), prop('duplicate-prop', '重复甲'), prop('duplicate-prop', '重复乙')];
+  const bound = (id: string, kind: 'character' | 'location' | 'prop', entityId: string, patch: Partial<ReferenceAsset> = {}) =>
+    image(id, { referenceEntityBinding: { kind, entityId }, ...patch });
+  project.assets = [bound('person', 'character', 'shared-id'), bound('place', 'location', 'shared-id'), bound('item', 'prop', 'shared-id'),
+    bound('stale', 'character', 'missing-person', { sourceEntityKind: 'character', sourceEntityId: 'shared-id' }),
+    bound('archived-image', 'character', 'archived'),
+    bound('duplicate-owner-person', 'character', 'duplicate-person'), bound('duplicate-owner-location', 'location', 'duplicate-location'),
+    bound('duplicate-owner-prop', 'prop', 'duplicate-prop'), bound('duplicate-image', 'character', 'shared-id'),
+    bound('duplicate-image', 'character', 'other-person'),
+    bound('video-type', 'character', 'shared-id', { type: 'video' }),
+    bound('audio-media', 'location', 'shared-id', { mediaType: 'audio' }),
+    bound('video-mime', 'prop', 'shared-id', { mimeType: 'video/mp4' })];
+  project.characters[0].assetIds = ['stale', 'duplicate-image', 'video-type'];
+  const before = structuredClone(project);
+  const counts = assetReferenceEntityImageCounts(project);
+  assert.deepEqual([...counts.character], [['shared-id', 1]], 'same name does not bind another character or revive invalid explicit ownership');
+  assert.deepEqual([...counts.location], [['shared-id', 1]], 'the same ID in another kind has an independent count');
+  assert.deepEqual([...counts.prop], [['shared-id', 1]]);
+  assert.deepEqual(project, before);
 });
 
 test('场景与物品绑定决定视频参考用途，跨类型改绑不会保留旧场景归属', () => {

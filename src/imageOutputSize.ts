@@ -52,7 +52,7 @@ export const normalizeImageOutputSizes = (value: unknown): ImageOutputSizePrefer
 };
 
 export const imageOutputAspectLocked = (variant: ImageVariant): boolean => (
-  ['grid', 'five-view', 'turnaround', 'private-full-body', 'private-five-view', 'private-turnaround', 'private-four-in-one'].includes(variant)
+  ['grid', 'three-view', 'five-view', 'turnaround', 'private-full-body', 'private-five-view', 'private-turnaround', 'private-four-in-one'].includes(variant)
 );
 
 export const normalizePrivateFullBodyOutputSize = (

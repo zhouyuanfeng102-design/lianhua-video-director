@@ -1,9 +1,19 @@
 import type { Character, Location, Prop, ReferenceAsset } from './types';
+import { buildStoryboardReferenceIdentityLines } from './storyboardImageReferenceIdentity';
 
 export interface StoryboardImageReferenceContext {
   characters?: readonly Character[];
   locations?: readonly Location[];
   props?: readonly Prop[];
+  /** Legacy broad source is retained as an opt-in to explicit identity
+   * mapping, but is never inspected for current-frame spatial evidence. */
+  sourcePrompt?: string;
+  /** Only explicit current-frame/frozen-instant text. Never full H3,
+   * conversionSource, background or another moment; empty means unknown. */
+  currentFrameSpatialSource?: string;
+  /** Proven first result from this same boundary batch; never a character
+   * ownership or a camera/position/action source for the tail image. */
+  continuityAssetId?: string;
 }
 
 const REFERENCE_METADATA_START = '【莲华程序参考用途 v1 开始】';
@@ -110,13 +120,21 @@ export const buildStoryboardImagePromptWithReferences = (
     REFERENCE_METADATA_START,
     REFERENCE_METADATA_HEADING,
     ...assetsInActualUploadOrder.map((asset, index) => {
+      if (asset.id === context.continuityAssetId) return `${index + 1}. 本批已成功首图 — 仅作人物外观、场景外观与光线连续参考；人物身份以各自角色参考图为准，不沿用首图镜头、位置、动作、姿态或持物，尾图仍按当前结束时刻取景。`;
       const characters = storyboardReferenceCharacters(asset, context);
       const mapping = characters.length
         ? `人物 ${characters.map((character) => JSON.stringify(character.name)).join('、')} — 身份、外貌与服装设计参考`
         : `${JSON.stringify(asset.name)} — ${storyboardImageReferenceRole(asset, context)}`;
       return `${index + 1}. ${mapping}`;
     }),
-    '参考仅用于上述用途；动作、站位与构图以正文为准。',
+    ...(context.sourcePrompt === undefined && context.currentFrameSpatialSource === undefined ? [] : buildStoryboardReferenceIdentityLines(
+      assetsInActualUploadOrder.flatMap((asset, index) => (asset.id === context.continuityAssetId ? [] : storyboardReferenceCharacters(asset, context))
+        .map((character) => ({ pictureNumber: index + 1, characterId: character.id, name: character.name }))),
+      context.currentFrameSpatialSource, context.characters || [],
+    )),
+    context.sourcePrompt === undefined && context.currentFrameSpatialSource === undefined
+      ? '参考仅用于上述用途；动作、站位与构图以正文为准。'
+      : '参考仅用于上述用途；人物身份对应沿用以上实际图号、角色 ID 与中文原名；有当前帧明确空间原句时按原句对应，不用转换后的姓名或图片排列重分配；没有明确空间原句时不额外分配站位，当前时刻的动作与取景沿用正文。',
     REFERENCE_METADATA_END,
   ].join('\n');
 };

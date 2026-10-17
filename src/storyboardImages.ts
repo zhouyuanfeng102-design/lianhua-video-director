@@ -71,6 +71,8 @@ export interface StoryboardImageRequest extends StoryboardImageFrameMetadata {
   primaryReferenceAssetIds: string[];
   /** Selected-frame and project facts for the text converter; never send directly to an image model. */
   conversionSource: string;
+  /** Authored spatial facts for this exact still only; never the full timed shot. */
+  currentFrameSpatialSource?: string;
   width: number;
   height: number;
   /** Explicit per-batch pixel selection; absent on legacy requests. */
@@ -1552,6 +1554,9 @@ const buildRequest = (
     assetRole: purpose === 'first-frame' ? 'first-frame' : purpose === 'last-frame' ? 'last-frame' : 'composition',
     referenceRole: purpose === 'first-frame' ? 'first-frame' : purpose === 'last-frame' ? 'last-frame' : 'composition',
     imageVariant,
+    // A complete timed shot is not a still-frame spatial instruction. When
+    // planning supplied an explicit still, that exact authored text is safe.
+    currentFrameSpatialSource: customFrame?.imageFrameDescription || '',
     ...(customFrame?.imageFrameBatchId ? { imageFrameBatchId: customFrame.imageFrameBatchId } : {}),
     ...(customFrame?.imageFrameIndex ? {
       imageFrameIndex: customFrame.imageFrameIndex,
@@ -1828,6 +1833,7 @@ export interface StoryboardImageBatchResult<
   status: 'succeeded' | 'failed' | 'cancelled';
   value?: T;
   error?: string;
+  blockedBy?: number;
 }
 
 export interface ExecuteStoryboardImageGenerationInput<T> {
@@ -1900,21 +1906,64 @@ export const runStoryboardImageBatch = async <
   TRequest extends StoryboardImageRequest = StoryboardImageRequest,
 >(
   requests: readonly TRequest[],
-  worker: (request: TRequest, index: number) => Promise<T>,
+  worker: (request: TRequest, index: number, firstResult?: T) => Promise<T>,
   canStart: (request: TRequest, index: number) => boolean = () => true,
 ): Promise<Array<StoryboardImageBatchResult<T, TRequest>>> => {
   if (!requests.length) return [];
-  return Promise.all(requests.map((request, index) => enqueueImageTask(async () => {
-    try {
-      if (!canStart(request, index)) return { request, status: 'cancelled' } as const;
-      return { request, status: 'succeeded', value: await worker(request, index) } as const;
-    } catch (error) {
-      if (isGenerationTaskCancelledError(error)) return { request, status: 'cancelled' } as const;
-      return {
-        request,
-        status: 'failed',
-        error: error instanceof Error ? error.message : String(error || '图像生成失败'),
-      } as const;
-    }
-  })));
+  const pending = new Map<number, Promise<StoryboardImageBatchResult<T, TRequest>>>();
+  const run = (index: number): Promise<StoryboardImageBatchResult<T, TRequest>> => {
+    const existing = pending.get(index);
+    if (existing) return existing;
+    const request = requests[index];
+    const siblings = requests.map((item, itemIndex) => ({ item, itemIndex }))
+      .filter(({ item }) => item.storyboardId === request.storyboardId);
+    const firsts = siblings.filter(({ item }) => item.purpose === 'first-frame');
+    const tails = siblings.filter(({ item }) => item.purpose === 'last-frame');
+    const dependencyIndex = request.purpose === 'last-frame' && firsts.length === 1 && tails.length === 1
+      ? firsts[0].itemIndex : undefined;
+    // Wait before taking a global queue slot, including tail-first input order.
+    const operation = (async (): Promise<StoryboardImageBatchResult<T, TRequest>> => {
+      const dependency = dependencyIndex === undefined ? undefined : await run(dependencyIndex);
+      if (dependency && dependency.status !== 'succeeded') return {
+        request, status: 'cancelled', blockedBy: dependencyIndex,
+        error: '本批首帧未成功保存，尾帧未提交。',
+      };
+      return enqueueImageTask(async () => {
+        try {
+          if (!canStart(request, index)) return { request, status: 'cancelled' } as const;
+          return { request, status: 'succeeded', value: await worker(request, index, dependency?.value) } as const;
+        } catch (error) {
+          if (isGenerationTaskCancelledError(error)) return { request, status: 'cancelled' } as const;
+          return {
+            request,
+            status: 'failed',
+            error: error instanceof Error ? error.message : String(error || '图像生成失败'),
+          } as const;
+        }
+      });
+    })();
+    pending.set(index, operation);
+    return operation;
+  };
+  return Promise.all(requests.map((_request, index) => run(index)));
+};
+
+/** A fresh first result is supplemental continuity, never an identity or pose authority.
+ * Callers add this returned asset to their captured assets without reading React state. */
+export const withStoryboardFirstFrameContinuity = <T extends StoryboardImageRequest>(
+  request: T,
+  firstAsset: ReferenceAsset | undefined,
+): T => {
+  if (request.purpose !== 'last-frame' || !firstAsset
+    || firstAsset.sourceStoryboardId !== request.storyboardId
+    || firstAsset.imageVariant !== 'first-frame'
+    || !hasUsableStoryboardReferencePixels(firstAsset)) return request;
+  return {
+    ...request,
+    referenceAssetIds: uniqueIds([...request.referenceAssetIds, firstAsset.id]),
+    continuityAssetId: firstAsset.id,
+    conversionSource: [request.conversionSource,
+      '本批首图仅补充本段外观材质、光照及环境连续性。人物身份、脸型、发型、发饰和服装设计仍分别以原角色参考图为准；不从首图继承姓名、画面左右、人物位置、机位、景别、朝向、动作或持物。当前尾帧的上述事实完全按本帧原稿，允许原稿有意改变视点。',
+    ].join('\n'),
+  };
 };

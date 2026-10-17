@@ -159,7 +159,7 @@ import type { TailFrameSelectionContext, TailFrameSelectionResult } from "./comp
 import { useVideoWorkbenchController } from "./useVideoWorkbenchController";
 import { VideoWorkbenchView } from "./components/VideoWorkbenchView";
 import { isVideoDirectorImage } from "./videoDirectorDraft";
-import { assetReferenceEntityOwners, bindAssetEntity, isAssetCharacterBindingImage } from "./assetCharacterBinding";
+import { assetReferenceEntityImageCounts, assetReferenceEntityOwners, bindAssetEntity, isAssetCharacterBindingImage } from "./assetCharacterBinding";
 import { directorLookSource } from "./directorLookSource";
 import { normalizeDirectorLookDraft, type DirectorLookDraft } from "./directorLookDraft";
 import { DirectorLookReferenceButton } from "./components/DirectorLookReferenceButton";
@@ -420,6 +420,7 @@ import {
   ordinaryImageVariantConverterRule,
   ordinaryImageVariantNegativePrompt,
   fiveViewCompatibleNegativePrompt,
+  propThreeViewCompatibleNegativePrompt,
   privateImageVariantNegativePrompt,
   privateImageVariantRepairRule,
   imagePromptOutputSpecificationRule,
@@ -464,6 +465,7 @@ import {
   mergeStoryboardReferenceInputs,
   resolveStoryboardImageBinding,
   runStoryboardImageBatch,
+  withStoryboardFirstFrameContinuity,
   samePurposeGeneratedStoryboardAssetIds,
   storyboardImageSourceFingerprint,
   type StoryboardImageBatchMode,
@@ -472,6 +474,7 @@ import {
   type StoryboardImageGenerationRequest,
 } from "./storyboardImages";
 import { buildStoryboardImagePromptWithReferences, refreshStoryboardImageReferenceMetadata } from "./storyboardImageReferences";
+import { currentStoryboardFrameSpatialSource } from "./storyboardImageReferenceIdentity";
 import { supplementStoryboardImageCharacterReferences } from "./storyboardImageCharacterReferences";
 import { completeStoryboardImageReferenceInputs } from "./storyboardImageReferenceCompletion";
 import { storyboardImageBoardLabel } from "./storyboardImageNames";
@@ -8318,6 +8321,7 @@ export default function App() {
               officialPromptEn: ready ? result.officialPromptEn : "",
               officialPromptEnSource: ready ? result.officialPromptEnSource : "",
               h3IdentityBindingsEn: ready ? result.h3IdentityBindingsEn : undefined,
+              h3DeliveryWarningsEn: ready ? result.h3DeliveryWarningsEn : undefined,
               englishPrompt: ready ? result.englishPrompt : "",
               englishPromptSource: ready ? result.englishPromptSource : "",
               officialPromptEnError: error, updatedAt: Date.now(),
@@ -11520,6 +11524,7 @@ function StoryView(ctx: AppContext) {
   const [entityPage, setEntityPage] = useState(1);
   const [scenePage, setScenePage] = useState(1);
   const project = state.project;
+  const entityImageCounts = useMemo(() => assetReferenceEntityImageCounts(project), [project]);
   const storyChapterId = activeChapter(project)?.id || "";
   const storyInputMode = chapterWorkspace(project, storyChapterId).storyInputMode || "text";
   const storyIsComicMode = storyInputMode === "image" && chapterWorkspace(project, storyChapterId).storyImageSourceMode === "comic";
@@ -11927,7 +11932,7 @@ function StoryView(ctx: AppContext) {
                     : entityKind === "location"
                       ? (item as Location).description
                       : (item as Prop).appearance;
-                const assets = item.assetIds.length;
+                const assets = entityImageCounts[entityKind].get(item.id) || 0;
                 return (
                   <button
                     key={item.id}
@@ -11939,7 +11944,7 @@ function StoryView(ctx: AppContext) {
                     <div className="row-between">
                       <strong>{entityKind === "character" ? characterVariantDisplayName(item as Character) || item.name : item.name}</strong>
                       <Badge tone={assets ? "green" : ""}>
-                        {assets ? `${assets} 张图` : "未生图"}
+                        {assets ? `${assets} 张关联图` : "未关联图片"}
                       </Badge>
                     </div>
                     <div>
@@ -14577,8 +14582,12 @@ function DirectorView(ctx: AppContext) {
     preparationTasks = tasks;
       const results = await runStoryboardImageBatch(
         requests,
-        async (request, index) => {
-          const task = { ...tasks[index] };
+        async (sourceRequest, index, firstResult?: ReferenceAsset) => {
+          const request = firstResult ? withStoryboardFirstFrameContinuity(sourceRequest, firstResult) : sourceRequest;
+          const requestContext = firstResult ? { ...projectContext, assets: [firstResult, ...projectContext.assets.filter((asset) => asset.id !== firstResult.id)] } : projectContext;
+          const task = { ...tasks[index], conversionSource: request.conversionSource,
+            referenceAssetIds: [...request.referenceAssetIds],
+            currentFrameSpatialSource: currentStoryboardFrameSpatialSource(request), continuityAssetId: request.continuityAssetId };
           const requestNegativePrompt = requestNegativePrompts[index] || undefined;
           let convertedPrompt = "";
           let imageModelInvoked = false;
@@ -14598,13 +14607,15 @@ function DirectorView(ctx: AppContext) {
                 generationTasks: patchImageGenerationTask(
                   project.generationTasks || [],
                   task.id,
-                  { status: "running", preparationStage: "reference", error: undefined, bindingWarning: undefined },
+                  { status: "running", preparationStage: "reference", error: undefined, bindingWarning: undefined,
+                    conversionSource: task.conversionSource, referenceAssetIds: task.referenceAssetIds,
+                    currentFrameSpatialSource: task.currentFrameSpatialSource, continuityAssetId: task.continuityAssetId },
                 ),
               }),
             ));
             const primaryReferences = await resolveStoryboardReferenceInputs(
               request.primaryReferenceAssetIds,
-              projectContext.assets,
+              requestContext.assets,
               {
                 readManagedImageDataUrl:
                   window.lianhuaDesktop?.readManagedImageDataUrl,
@@ -14615,7 +14626,7 @@ function DirectorView(ctx: AppContext) {
             assertTaskCurrent();
             const resolvedReferences = await resolveStoryboardReferenceInputs(
               request.referenceAssetIds,
-              projectContext.assets,
+              requestContext.assets,
               {
                 readManagedImageDataUrl:
                   window.lianhuaDesktop?.readManagedImageDataUrl,
@@ -14649,7 +14660,7 @@ function DirectorView(ctx: AppContext) {
                 assertTaskCurrent();
                 const sanitized = sanitizeFinalImagePrompt(converted, imagePromptSelection.ruleSet.format);
                 imageTaskStage = "image-reference-load";
-                references = await completeStoryboardImageReferenceInputs(sanitized, references, projectContext, {
+                references = await completeStoryboardImageReferenceInputs(sanitized, references, requestContext, {
                   readManagedImageDataUrl: window.lianhuaDesktop?.readManagedImageDataUrl,
                   downloadImage: window.lianhuaDesktop?.downloadImage,
                 }, referenceImageCache);
@@ -14664,8 +14675,10 @@ function DirectorView(ctx: AppContext) {
                     imageInputMode: task.referenceAssetIds?.length ? "image-to-image" : "text-to-image",
                   })),
                 })));
-                return imageApi.backend === "openai" && imagePromptSelection.ruleSet.format === "natural-language"
-                  ? buildStoryboardImagePromptWithReferences(sanitized, references.referenceAssets, projectContext)
+                return imagePromptSelection.ruleSet.format === "natural-language"
+                  ? buildStoryboardImagePromptWithReferences(sanitized, references.referenceAssets, {
+                    ...requestContext, currentFrameSpatialSource: task.currentFrameSpatialSource, continuityAssetId: task.continuityAssetId,
+                  })
                   : sanitized;
               },
               persistConvertedPrompt: (prompt) => {
@@ -14740,6 +14753,8 @@ function DirectorView(ctx: AppContext) {
               imageFrameCount: request.imageFrameCount,
               imageFrameDescription: request.imageFrameDescription,
               imageFrameTimeSec: request.imageFrameTimeSec,
+              currentFrameSpatialSource: task.currentFrameSpatialSource,
+              continuityAssetId: task.continuityAssetId,
               negativePrompt: requestNegativePrompt,
               ...imagePromptTrace,
               mediaType: "image",
@@ -14832,7 +14847,8 @@ function DirectorView(ctx: AppContext) {
               },
               timestamp,
             ));
-            return asset.id;
+            if (isGenerationTaskRevoked(requestedProjectId, task)) throw new GenerationTaskCancelledError();
+            return asset;
           } catch (error) {
             if (isGenerationTaskCancelledError(error) || isGenerationTaskRevoked(requestedProjectId, task)) {
               throw new GenerationTaskCancelledError();
@@ -14876,6 +14892,13 @@ function DirectorView(ctx: AppContext) {
         },
         (_request, index) => imageBatchTaskIsActive(getCurrentState(), requestedProjectId, tasks[index], true),
       );
+      if (results.some((result) => result.blockedBy !== undefined)) {
+        setBackgroundState((current: AppState) => applyOwnedProjectUpdate(current, requestedProjectId, (project) => ({
+          ...project, generationTasks: results.reduce((currentTasks, result, index) => result.blockedBy !== undefined
+            ? failImagePreparationTasks(currentTasks, [tasks[index]], result.error || "本批首帧未成功保存，尾帧未提交。", true)
+            : currentTasks, project.generationTasks),
+        })));
+      }
       if (isCurrentProjectOperation(requestedProjectId, getCurrentProjectId())) {
         const succeeded = results.filter((item) => item.status === "succeeded").length;
         const failed = results.filter((item) => item.status === "failed").length;
@@ -15874,6 +15897,11 @@ function DirectorView(ctx: AppContext) {
                       <DirectorPromptMoreMenu key={`${state.project.id}:${activeSequencePlan?.id || ""}:${directorResultStoryboard?.id || ""}:${directorPane}:${directorPromptFormat}:${promptLanguage}`}
                         actions={[
                           ...(directorPane === "result" && directorResultStoryboard && directorPromptFormat === "h3" && validOfficialPrompt ? [{
+                            label: "仅重新生成英文", icon: <RefreshCw size={14} />,
+                            title: "从已保存中文重新翻译英文描述，保留中文姓名、对白、镜头和排程。",
+                            disabled: busy || sequenceBatchRunning || Boolean(activeSequenceSegment?.locked && productionMode === "sequence"),
+                            onClick: () => void regenerateStoryboardEnglish(directorResultStoryboard.id),
+                          }, {
                             label: "修复对白与排时", icon: <RefreshCw size={14} />,
                             title: "仅此操作会调用 AI 修复当前段对白和排时，保留段长与原台词，自动保存旧版本；不生成视频。",
                             disabled: busy || sequenceBatchRunning || Boolean(activeSequenceSegment?.locked && productionMode === "sequence"),
@@ -18157,6 +18185,8 @@ function ImageWorkbenchView(ctx: AppContext) {
     setAssetForm(createInheritedAssetForm());
     setAssetFormStyleSource("director");
   }, [state.project.id, setAssetForm]);
+  const entityImageCounts = useMemo(() => assetReferenceEntityImageCounts(state.project), [state.project]);
+  const activeEntityImageCounts = entityImageCounts[assetKind === "grid" ? "character" : assetKind];
   const entities =
     assetKind === "character"
       ? state.project.characters.filter((character) => !character.dossier?.archivedIntoCharacterId)
@@ -19675,12 +19705,16 @@ function ImageWorkbenchView(ctx: AppContext) {
       : "";
     const requestedNegativePrompt = requestedNsfwPrivatePart
       ? privateImageVariantNegativePrompt(requestedImageVariant)
-      : requestedImageVariant === "five-view"
+      : requestedImageVariant === "five-view" || requestedImageVariant === "three-view"
         ? sanitizeFinalImagePrompt(
             [
               ordinaryImageVariantNegativePrompt(requestedImageVariant),
-              fiveViewCompatibleNegativePrompt(imagePromptSelection.ruleSet.negativePrompt),
-              fiveViewCompatibleNegativePrompt(imagePromptSelection.preset.negativePrompt),
+              requestedImageVariant === "three-view"
+                ? propThreeViewCompatibleNegativePrompt(imagePromptSelection.ruleSet.negativePrompt)
+                : fiveViewCompatibleNegativePrompt(imagePromptSelection.ruleSet.negativePrompt),
+              requestedImageVariant === "three-view"
+                ? propThreeViewCompatibleNegativePrompt(imagePromptSelection.preset.negativePrompt)
+                : fiveViewCompatibleNegativePrompt(imagePromptSelection.preset.negativePrompt),
               morphologyNegativePrompt,
               negativePrompt,
             ].filter(Boolean).join(", "),
@@ -20241,8 +20275,12 @@ function ImageWorkbenchView(ctx: AppContext) {
       ));
       preparationTasks = tasks;
       const referenceImageCache = new Map<string, Promise<string>>();
-      const results = await runStoryboardImageBatch(requests, async (request, index) => {
-        const task = { ...tasks[index] };
+      const results = await runStoryboardImageBatch(requests, async (sourceRequest, index, firstResult?: ReferenceAsset) => {
+        const request = firstResult ? withStoryboardFirstFrameContinuity(sourceRequest, firstResult) : sourceRequest;
+        const requestContext = firstResult ? { ...projectContext, assets: [firstResult, ...projectContext.assets.filter((asset) => asset.id !== firstResult.id)] } : projectContext;
+        const task = { ...tasks[index], conversionSource: request.conversionSource,
+          referenceAssetIds: [...request.referenceAssetIds],
+          currentFrameSpatialSource: currentStoryboardFrameSpatialSource(request), continuityAssetId: request.continuityAssetId };
         let convertedPrompt = task.prompt;
         const requestNegativePrompt = requestNegativePrompts[index] || undefined;
         const assertTaskCurrent = () => {
@@ -20262,12 +20300,14 @@ function ImageWorkbenchView(ctx: AppContext) {
                 preparationStage: "reference",
                 error: undefined,
                 bindingWarning: undefined,
+                conversionSource: task.conversionSource, referenceAssetIds: task.referenceAssetIds,
+                currentFrameSpatialSource: task.currentFrameSpatialSource, continuityAssetId: task.continuityAssetId,
               }),
             }),
           ));
           const primaryReferences = await resolveStoryboardReferenceInputs(
             request.primaryReferenceAssetIds,
-            projectContext.assets,
+            requestContext.assets,
             {
               readManagedImageDataUrl: window.lianhuaDesktop?.readManagedImageDataUrl,
               downloadImage: window.lianhuaDesktop?.downloadImage,
@@ -20277,7 +20317,7 @@ function ImageWorkbenchView(ctx: AppContext) {
           assertTaskCurrent();
           const resolvedReferences = await resolveStoryboardReferenceInputs(
             request.referenceAssetIds,
-            projectContext.assets,
+            requestContext.assets,
             {
               readManagedImageDataUrl: window.lianhuaDesktop?.readManagedImageDataUrl,
               downloadImage: window.lianhuaDesktop?.downloadImage,
@@ -20306,7 +20346,7 @@ function ImageWorkbenchView(ctx: AppContext) {
               );
               assertTaskCurrent();
               const sanitized = sanitizeFinalImagePrompt(converted, imagePromptSelection.ruleSet.format);
-              references = await completeStoryboardImageReferenceInputs(sanitized, references, projectContext, {
+              references = await completeStoryboardImageReferenceInputs(sanitized, references, requestContext, {
                 readManagedImageDataUrl: window.lianhuaDesktop?.readManagedImageDataUrl,
                 downloadImage: window.lianhuaDesktop?.downloadImage,
               }, referenceImageCache);
@@ -20321,8 +20361,10 @@ function ImageWorkbenchView(ctx: AppContext) {
                   imageInputMode: task.referenceAssetIds?.length ? "image-to-image" : "text-to-image",
                 })),
               })));
-              return imageApi.backend === "openai" && imagePromptSelection.ruleSet.format === "natural-language"
-                ? buildStoryboardImagePromptWithReferences(sanitized, references.referenceAssets, projectContext)
+              return imagePromptSelection.ruleSet.format === "natural-language"
+                ? buildStoryboardImagePromptWithReferences(sanitized, references.referenceAssets, {
+                  ...requestContext, currentFrameSpatialSource: task.currentFrameSpatialSource, continuityAssetId: task.continuityAssetId,
+                })
                 : sanitized;
             },
             persistConvertedPrompt: (promptValue) => {
@@ -20377,6 +20419,8 @@ function ImageWorkbenchView(ctx: AppContext) {
             prompt: execution.finalPrompt,
             visualAnchor: buildStoryboardImageAssetVisualAnchor(sourceBoard, request, projectContext),
             imageVariant: request.imageVariant,
+            currentFrameSpatialSource: task.currentFrameSpatialSource,
+            continuityAssetId: task.continuityAssetId,
             negativePrompt: requestNegativePrompt,
             imagePromptRuleSetId: request.imagePromptRuleSetId,
             imagePromptRuleSetName: request.imagePromptRuleSetName,
@@ -20459,6 +20503,7 @@ function ImageWorkbenchView(ctx: AppContext) {
               };
             },
           ));
+          if (isGenerationTaskRevoked(requestedProjectId, task)) throw new GenerationTaskCancelledError();
           return asset;
         } catch (error) {
           if (isGenerationTaskCancelledError(error) || isGenerationTaskRevoked(requestedProjectId, task)) {
@@ -20482,6 +20527,13 @@ function ImageWorkbenchView(ctx: AppContext) {
           throw Object.assign(new Error(safeError.message), safeError);
         }
       }, (_request, index) => imageBatchTaskIsActive(getCurrentState(), requestedProjectId, tasks[index], true));
+      if (results.some((result) => result.blockedBy !== undefined)) {
+        setBackgroundState((current: AppState) => applyOwnedProjectUpdate(current, requestedProjectId, (project) => ({
+          ...project, generationTasks: results.reduce((currentTasks, result, index) => result.blockedBy !== undefined
+            ? failImagePreparationTasks(currentTasks, [tasks[index]], result.error || "本批首帧未成功保存，尾帧未提交。", true)
+            : currentTasks, project.generationTasks),
+        })));
+      }
       const failed = results.filter((result) => result.status === "failed").length;
       const succeeded = results.filter((result) => result.status === "succeeded").length;
       const cancelled = results.filter((result) => result.status === "cancelled").length;
@@ -20779,9 +20831,9 @@ function ImageWorkbenchView(ctx: AppContext) {
                           {assetKind === "character"
                             ? characterVariantDisplayName(item as Character) || item.name
                             : item.name} ·{" "}
-                          {item.assetIds.length
-                            ? `${item.assetIds.length} 张资产`
-                            : "未生图"}
+                          {activeEntityImageCounts.get(item.id)
+                            ? `${activeEntityImageCounts.get(item.id)} 张关联图`
+                            : "未关联图片"}
                         </option>
                       ))}
                     </select>
@@ -21177,6 +21229,9 @@ function ImageWorkbenchView(ctx: AppContext) {
                   {assetKind === "location" && ordinaryImageVariant === "landscape" && (
                     <p className="field-hint" role="note">风景场景只生成无人环境，保留建筑、陈设和光线；需要人物与剧情动作时请选择故事快照或分镜首帧。</p>
                   )}
+                  {assetKind === "prop" && ordinaryImageVariant === "three-view" && (
+                    <p className="field-hint" role="note">同一物品的正面、严格 90° 侧面、背面，横向三等宽排列；保持相同尺寸、材质和状态，完整展示物品。</p>
+                  )}
                 </div>
               )}
               {imageGenerationMode === "private" && (
@@ -21285,7 +21340,7 @@ function ImageWorkbenchView(ctx: AppContext) {
                               : activePrivateCharacterField?.label.replace(/外貌$/u, "") || "私密"}${imageVariant === "private-five-view" || imageVariant === "private-turnaround" ? "" : "图"}并保存`
                           : assetKind === "grid"
                             ? "生成 3×3 九宫格并保存"
-                            : `${imageVariant === "five-view" ? "生成五视图并保存" : "生成普通图片并保存"}${imageGenerationCount > 1 ? `（${imageGenerationCount}张）` : ""}`
+                            : `${imageVariant === "five-view" ? "生成五视图并保存" : imageVariant === "three-view" ? "生成三视图并保存" : "生成普通图片并保存"}${imageGenerationCount > 1 ? `（${imageGenerationCount}张）` : ""}`
                         : assetKind === "grid"
                           ? "转换九宫格提示词并保存"
                           : "AI 转换提示词并保存"}
@@ -22023,13 +22078,13 @@ function AssetsView(ctx: AppContext) {
                       aria-label={`选中用于生成视频：${asset.name}`}
                       onChange={(event) => setVideoImageSelection((ids) => event.target.checked ? [...ids, asset.id] : ids.filter((id) => id !== asset.id))} />选中用于生成视频</label>)}
                 <strong title={asset.name}>{asset.name}</strong>
+                {canBindEntity && <small className="asset-character-binding-note">
+                  {referenceEntities.length ? referenceEntities.map(({ kind, entity }) => `${kind === "character" ? "人物" : kind === "location" ? "场景" : "物品"}参考：${kind === "character" ? characterVariantDisplayName(entity as Character) || entity.name : entity.name}`).join("、")
+                    : asset.referenceEntityBinding || asset.characterReferenceId ? "已绑定实体不可用，可重新选择（图片仍可使用）" : "未绑定实体（可直接使用）"}
+                </small>}
                 <details className="asset-metadata-details">
                   <summary>详细信息</summary>
                   <div className="asset-metadata-content">
-                    {canBindEntity && <small className="asset-character-binding-note">
-                      {referenceEntities.length ? referenceEntities.map(({ kind, entity }) => `${kind === "character" ? "人物" : kind === "location" ? "场景" : "物品"}参考：${kind === "character" ? characterVariantDisplayName(entity as Character) || entity.name : entity.name}`).join("、")
-                        : asset.referenceEntityBinding || asset.characterReferenceId ? "已绑定实体不可用，可重新选择（图片仍可使用）" : "未绑定实体（可直接使用）"}
-                    </small>}
                     <small className="asset-chapter-label">{assetChapterLabel(asset)}</small>
                     <small>
                       {asset.mediaType || "image"} · {asset.referenceRole || asset.role} · {asset.tags.join("、")}
@@ -22060,7 +22115,7 @@ function AssetsView(ctx: AppContext) {
                     void desktopBridge()?.saveMedia?.({ relativePath: asset.relativePath, sourceUrl: asset.url, fileName: asset.fileName, mediaType: "video", mimeType: asset.mimeType })
                       .catch((error: unknown) => notify(error instanceof Error ? error.message : "保存视频失败", "error"));
                   }}>保存视频</Button>}
-                  {canBindEntity && <Button small icon={<Link2 size={13} />} title="选择、更换或解除人物、场景、物品绑定" onClick={() => openEntityBinding(asset)}>绑定</Button>}
+                  {canBindEntity && <Button small icon={<Link2 size={13} />} title="选择、更换或解除人物、场景、物品绑定" onClick={() => openEntityBinding(asset)}>{referenceEntities.length ? "更改绑定" : asset.referenceEntityBinding || asset.characterReferenceId ? "修复绑定" : "绑定"}</Button>}
                   {!isVisualAsset && <Button
                     small
                     onClick={() => bindToStoryboard(asset.id)}
@@ -24321,9 +24376,11 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
       };
       // Saved AI prose remains unchanged. Refresh only this version's own
       // attachment table when a legacy non-frozen retry resolves fewer images.
-      if (!directImageRetry && task.assetKind === "storyboard" && imageApi.backend === "openai"
+      if (!directImageRetry && task.assetKind === "storyboard"
         && (task.imagePromptFormat || "natural-language") === "natural-language" && task.prompt.trim()) {
-        const refreshed = refreshStoryboardImageReferenceMetadata(task.prompt, references.referenceAssets, state.project);
+        const refreshed = refreshStoryboardImageReferenceMetadata(task.prompt, references.referenceAssets, {
+          ...state.project, currentFrameSpatialSource: task.currentFrameSpatialSource, continuityAssetId: task.continuityAssetId,
+        });
         if (refreshed !== task.prompt) {
           task.prompt = refreshed;
           convertedPrompt = refreshed;
@@ -24373,8 +24430,11 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
           assertSubmissionCurrent();
           await completeCurrentShotReferences(prompt);
           assertSubmissionCurrent();
-          return promptKind === "storyboard" && imageApi.backend === "openai" && (task.imagePromptFormat || "natural-language") === "natural-language"
-            ? buildStoryboardImagePromptWithReferences(prompt, references.referenceAssets, state.project)
+          return promptKind === "storyboard" && (task.imagePromptFormat || "natural-language") === "natural-language"
+            ? buildStoryboardImagePromptWithReferences(prompt, references.referenceAssets, {
+              ...state.project, currentFrameSpatialSource: source.currentFrameSpatialSource,
+              continuityAssetId: source.continuityAssetId,
+            })
             : prompt;
         },
         persistPrompt: (prompt) => {
@@ -24422,6 +24482,7 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
         imageFrameBatchId: task.imageFrameBatchId,
         imageFrameIndex: task.imageFrameIndex, imageFrameCount: task.imageFrameCount,
         imageFrameDescription: task.imageFrameDescription, imageFrameTimeSec: task.imageFrameTimeSec,
+        currentFrameSpatialSource: task.currentFrameSpatialSource, continuityAssetId: task.continuityAssetId,
         referenceScope: task.referenceScope,
         nsfwPrivatePart: task.nsfwPrivatePart,
         sourceStoryboardId: task.sourceStoryboardId, sourceShotId: task.sourceShotId, sourceEntityId: task.sourceEntityId,

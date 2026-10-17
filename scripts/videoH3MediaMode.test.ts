@@ -37,42 +37,59 @@ assert.ok(mismatch.warnings.some((warning) => /可直接生成/u.test(warning)))
 assert.equal(prepareVideoH3ReferenceDraft(project, { ...draft, reuseTaskId: 'frozen-history' }, context).issue, undefined, 'old retries retain their snapshot');
 
 const before = structuredClone({ draft, project }); let calls = 0;
-const updated = await refreshVideoH3MediaModeDraft({ project, draft, context, request: async (system, user) => {
-  calls++; assert.match(system, /不重新导演/u); assert.match(system, /普通多参考槽仅表示构图参考/u);
-  const data = JSON.parse(user); assert.equal(data.actualReferences.length, 6);
-  assert.equal(data.actualReferences[5].pictureNumber, 6); assert.equal(data.mode, 'full-reference');
-  assert.equal(data.boundarySemantics, 'composition-reference');
-  return JSON.stringify({ h3Prompt: rewritten, identityBindings: { version: 1, characters: [] } });
+const legacyUpdated = await refreshVideoH3MediaModeDraft({ project, draft, context, request: async () => {
+  calls++; return JSON.stringify({ h3Prompt: rewritten });
 } });
-assert.equal(calls, 1); assert.deepEqual({ draft, project }, before);
+assert.equal(calls, 0, 'unknown legacy identities do not trigger an AI rewrite');
+assert.equal(legacyUpdated.prompt, original); assert.equal(legacyUpdated.h3MediaModeUpdate, undefined);
+assert.deepEqual({ draft, project }, before);
+const identityA = 'Identity: A (S5), black hair and blue robe.';
+const identityB = 'Identity: B, white robe.';
+const trustedSource = original.replace('[Shot 1] ', `[Shot 1] ${identityA} ${identityB} `).replace('<d>', 'A (S5) shouts <d>');
+const trustedProject = structuredClone(project);
+trustedProject.characters = ['A', 'B'].map((name, index) => ({ id: name, name, assetIds: [`image-${index + 2}`], gender: '', race: '', apparentAge: '', appearance: '', outfit: '', signatureProps: '', personality: '', motionHabits: '', anchor: '', negativeContinuity: '' }));
+for (const [index, name] of ['A', 'B'].entries()) trustedProject.assets[index + 2].referenceEntityBinding = { kind: 'character', entityId: name };
+// The two other pictures remain general references, without invented people.
+const trustedDraft: VideoGenerationDraft = { ...draft, prompt: trustedSource,
+  references: draft.references.map((reference, index) => index > 3 ? { ...reference, role: 'general' } : reference),
+  h3ReferenceBinding: { version: 1, projectId: project.id, basePrompt: trustedSource, renderedPrompt: trustedSource,
+    identities: { version: 1, characters: [
+      { characterId: 'A', name: 'A', speakerToken: '(S5)', referenceAnchor: identityA },
+      { characterId: 'B', name: 'B', referenceAnchor: identityB },
+    ] } } };
+const updated = await refreshVideoH3MediaModeDraft({ project: trustedProject, draft: trustedDraft, context, request: async () => {
+  calls++; throw new Error('deterministic reference compilation must not call AI');
+} });
+assert.equal(calls, 0);
 assert.equal(updated.h3MediaMode?.mode, 'full-reference'); assert.equal(updated.h3MediaMode?.authoredMode, 'full-reference');
-assert.equal(updated.h3MediaModeUpdate?.sourcePrompt, original); assert.deepEqual(updated.parameters, draft.parameters);
-assert.equal(prepareVideoH3ReferenceDraft(project, updated, context).issue, undefined);
-
+assert.equal(updated.h3MediaModeUpdate?.sourcePrompt, trustedSource); assert.deepEqual(updated.parameters, draft.parameters);
+assert.match(updated.prompt, /<Subject 1> is A \(S1\) referenced from <Picture 3>/u);
+assert.match(updated.prompt, /<Subject 2> is B referenced from <Picture 4>/u);
+assert.match(updated.prompt, /summary:\n\[reference generation\]/u);
+assert.match(updated.prompt, /<Picture 1> is the opening composition reference/u);
+assert.match(updated.prompt, /<Picture 2> is the ending composition reference/u);
+assert.deepEqual(readExistingH3PromptProtocol(updated.prompt)?.shots, readExistingH3PromptProtocol(trustedSource)?.shots);
+assert.deepEqual(updated.prompt.match(/<d>[\s\S]*?<\/d>/gu), trustedSource.match(/<d>[\s\S]*?<\/d>/gu));
+assert.ok(updated.prompt.includes('runs toward <Subject 2> B and strikes once.'));
+assert.ok(updated.prompt.includes('falls; the troops continue charging.'));
+assert.equal(updated.prompt.slice(updated.prompt.indexOf('overall_soundscape:')), original.slice(original.indexOf('overall_soundscape:')));
+assert.equal(prepareVideoH3ReferenceDraft(trustedProject, updated, context).issue, undefined);
 const untimedSource = 'integrated_multimodal_description:\n[Shot 1] A approaches B. <d>[Chinese] 前进！</d>\n[Shot 2] Continue from the previous shot. From 12.20 to 12.90 seconds, B raises a hand.\n[Shot 3] B lowers the hand and the troops keep charging.\noverall_soundscape: Footsteps.\nnon_diegetic_music: N/A';
 for (const savedSource of [untimedSource, untimedSource.replace('[Shot 3] ', '[Shot 3] At 00:13.000 ')]) {
   const savedDraft: VideoGenerationDraft = { ...draft, prompt: savedSource, parameters: { ...draft.parameters, duration: 15 },
     h3ReferenceBinding: { ...draft.h3ReferenceBinding!, basePrompt: savedSource, renderedPrompt: savedSource } };
-  const savedReply = rewritten.slice(0, rewritten.indexOf('detailed_description:'))
-    + savedSource.replace('integrated_multimodal_description:', 'detailed_description:');
   const savedBefore = structuredClone(savedDraft);
   let savedCalls = 0;
   assert.equal(readH3PromptProtocol(savedSource), undefined);
   assert.equal(videoH3MediaModeContract(savedDraft, context).authoredMode, 'integrated');
-  const savedUpdate = await refreshVideoH3MediaModeDraft({ project, draft: savedDraft, context, request: async (system, user) => {
-    savedCalls++;
-    const data = JSON.parse(user);
-    assert.equal(data.sourcePrompt, savedSource);
-    assert.deepEqual(data.existingShotProtocol, readExistingH3PromptProtocol(savedSource)!.shots);
-    assert.match(system, /cut=null表示原稿没有At切点/u);
-    assert.match(system, /不从From\/从…到等动作区间或旧分镜推断/u);
-    return JSON.stringify({ h3Prompt: savedReply, identityBindings: { version: 1, characters: [] } });
+  const savedUpdate = await refreshVideoH3MediaModeDraft({ project, draft: savedDraft, context, request: async () => {
+    savedCalls++; throw new Error('legacy prose must not be rewritten');
   } });
-  assert.equal(savedCalls, 1, 'saved untimed prose still uses the single explicit reference-update request');
-  assert.equal(savedUpdate.prompt, savedReply);
+  assert.equal(savedCalls, 0, 'saved untimed prose stays compatible without a reference-update request');
+  assert.equal(savedUpdate.prompt, savedSource);
   assert.deepEqual(savedDraft, savedBefore, 'reference update does not mutate the saved input');
   assert.deepEqual(readExistingH3PromptProtocol(savedUpdate.prompt)!.shots, readExistingH3PromptProtocol(savedSource)!.shots);
-  assert.equal(savedUpdate.h3MediaModeUpdate?.sourcePrompt, savedSource);
+  assert.equal(savedUpdate.h3MediaModeUpdate, undefined);
   assert.equal(prepareVideoH3ReferenceDraft(project, savedUpdate, context).issue, undefined);
   assert.equal(savedUpdate.prompt.slice(savedUpdate.prompt.indexOf('[Shot 1]')), savedSource.slice(savedSource.indexOf('[Shot 1]')),
     'the saved shot body, dialogue, action intervals and sound sections remain verbatim');
@@ -80,44 +97,36 @@ for (const savedSource of [untimedSource, untimedSource.replace('[Shot 3] ', '[S
 let malformedCalls = 0;
 const unreadableSource = original.replace('At 00:02.500', 'At 00:02.5');
 const recoveredSource = await refreshVideoH3MediaModeDraft({ project, draft: { ...draft, prompt: unreadableSource }, context,
-  request: async (_system, user) => {
-    malformedCalls++;
-    const data = JSON.parse(user);
-    assert.equal(data.sourcePrompt, unreadableSource);
-    assert.equal(data.existingShotProtocol, undefined, 'unreadable local shot metadata is optional AI context');
-    return JSON.stringify({ h3Prompt: rewritten });
-  },
+  request: async () => { malformedCalls++; throw new Error('unreadable source stays compatible'); },
 });
-assert.equal(malformedCalls, 1, 'a source the local parser cannot read still reaches the requested AI update');
-assert.equal(recoveredSource.prompt, rewritten);
-assert.equal(recoveredSource.h3MediaModeUpdate?.sourcePrompt, unreadableSource);
+assert.equal(malformedCalls, 0, 'unreadable local shot syntax does not cause an AI request or rejection');
+assert.equal(recoveredSource.prompt, unreadableSource);
+assert.equal(recoveredSource.h3MediaModeUpdate, undefined);
 const audioDraft: VideoGenerationDraft = { ...draft, references: [], audioReferences: [{ bindingId: '["audio-node","audio"]', assetId: 'voice-sample', slotIndex: 2,
   target: { kind: 'voiceover' }, retainMode: 'reference', notes: 'Keep the existing words.' }] };
 const audioProject = { ...project, assets: [...project.assets, { id: 'voice-sample', name: 'Confirmed narrator sample', type: 'audio', role: 'audio', mediaType: 'audio', tags: [], createdAt: 1, updatedAt: 1 } as ReferenceAsset] };
 assert.equal(videoH3MediaModeContract(audioDraft, context).mode, 'full-reference', 'real selected audio requires full-reference even without pictures');
 assert.match(videoH3MediaModeIssue(videoH3MediaModeContract(audioDraft, context))!, /音频/u);
-const audioUpdated = await refreshVideoH3MediaModeDraft({ project: audioProject, draft: audioDraft, context, request: async (system, user) => {
-  const data = JSON.parse(user);
-  assert.deepEqual(data.actualReferences, []); assert.equal(data.audioReferences[0].audioNumber, 3);
-  assert.equal(data.audioReferences[0].name, 'Confirmed narrator sample'); assert.match(data.audioReferences[0].targetName, /voiceover/u);
-  assert.match(system, /subject_definitions[\s\S]*<Audio N>[\s\S]*detailed_description/u);
-  assert.match(system, /不把逐句声源内容移入 overall_soundscape/u);
-  return JSON.stringify({ h3Prompt: rewritten.replace(/<Subject 1>[^\n]+/u, '<Audio 3> is the selected narrator timbre sample.'), identityBindings: { version: 1, characters: [] } });
+let audioCalls = 0;
+const audioUpdated = await refreshVideoH3MediaModeDraft({ project: audioProject, draft: audioDraft, context, request: async () => {
+  audioCalls++; throw new Error('reference update must not invent audio prose');
 } });
-assert.equal(audioUpdated.h3MediaMode?.authoredMode, 'full-reference');
+assert.equal(audioCalls, 0);
+assert.equal(audioUpdated.h3MediaMode?.mode, 'full-reference');
+assert.equal(audioUpdated.h3MediaMode?.authoredMode, 'integrated', 'unknown legacy cast is kept rather than guessed');
 assert.deepEqual(audioUpdated.audioReferences, audioDraft.audioReferences);
-assert.doesNotMatch(audioUpdated.prompt, /integrated_multimodal_description:/u);
+assert.equal(audioUpdated.prompt, original); assert.doesNotMatch(audioUpdated.prompt, /<Audio /u);
 const mappedApi: VideoTaskApiConfig = { ...api, provider: 'runninghub', runningHubImageRoles: draft.references.map((reference) => reference.role),
   requestTemplate: JSON.stringify({ nodeInfoList: [{ nodeId: 'prompt', fieldName: 'value', fieldValue: '' }] }),
   runningHubMappedFields: draft.references.map((_, imageIndex) => ({ nodeId: `image-${imageIndex}`, fieldName: 'image', kind: 'image', imageIndex })) };
 const mappedContext = { backend: 'api' as const, api: mappedApi };
 const mappedIdentity = videoH3MediaModeContract(updated, mappedContext).inputIdentity;
 const mappedUpdated = { ...updated, h3MediaModeUpdate: { ...updated.h3MediaModeUpdate!, inputIdentity: mappedIdentity } };
-assert.equal(prepareVideoH3ReferenceDraft(project, mappedUpdated, mappedContext).issue, undefined);
+assert.equal(prepareVideoH3ReferenceDraft(trustedProject, mappedUpdated, mappedContext).issue, undefined);
 const changedMapping = { ...mappedApi, runningHubMappedFields: mappedApi.runningHubMappedFields!.map((field, index) =>
   index === 0 ? { ...field, nodeId: 'another-image-input' } : field) };
 assert.notEqual(videoH3MediaModeContract(updated, { backend: 'api', api: changedMapping }).inputIdentity, mappedIdentity);
-const changedMappingDraft = prepareVideoH3ReferenceDraft(project, mappedUpdated, { backend: 'api', api: changedMapping });
+const changedMappingDraft = prepareVideoH3ReferenceDraft(trustedProject, mappedUpdated, { backend: 'api', api: changedMapping });
 assert.equal(changedMappingDraft.issue, undefined, 'changed reference wiring remains a warning rather than a content gate');
 assert.ok(changedMappingDraft.warnings.some((warning) => /映射已变化，可直接使用当前稿生成/u.test(warning)));
 assert.notEqual(videoH3MediaModeContract(updated, { backend: 'api', api: { ...mappedApi, runningHubImageRoles: ['scene', ...mappedApi.runningHubImageRoles!.slice(1)] } }).inputIdentity, mappedIdentity);
@@ -129,32 +138,26 @@ assert.equal(videoH3MediaModeContract(updated, { backend: 'api', api: parameterT
   videoH3MediaModeContract(updated, { backend: 'api', api: { ...parameterTemplateApi,
     requestTemplate: JSON.stringify({ nodeInfoList: [{ nodeId: 'steps', fieldName: 'value', fieldValue: 12 }] }) } }).inputIdentity,
   'normal task parameter overrides do not invalidate image protocol updates');
-for (const [label, aiPrompt] of [
-  ['shot timing', rewritten.replace('00:02.500', '00:03.000')],
-  ['dialogue', rewritten.replace('前进！', '快跑！')],
-  ['sound', rewritten.replace('Footsteps.', 'Wind.')],
-  ['sound section spacing', rewritten.replace('\nnon_diegetic_music:', '\n\nnon_diegetic_music:')],
-  ['three-field response', original],
-] as const) {
-  let updateCalls = 0;
-  const aiUpdated = await refreshVideoH3MediaModeDraft({ project, draft, context, request: async () => {
-    updateCalls++;
-    return JSON.stringify({ h3Prompt: aiPrompt });
-  } });
-  assert.equal(aiUpdated.prompt, aiPrompt, `${label}: apply the AI body without local content rejection`);
-  assert.equal(aiUpdated.h3MediaModeUpdate?.sourcePrompt, original);
-  assert.equal(updateCalls, 1, `${label}: no extra review or retry request`);
-}
+let unexpectedCalls = 0;
+const noAiRewrite = await refreshVideoH3MediaModeDraft({ project: trustedProject, draft: trustedDraft, context, request: async () => {
+  unexpectedCalls++; return JSON.stringify({ h3Prompt: rewritten.replace('前进！', '快跑！').replace('Footsteps.', 'Wind.').replace('00:02.500', '00:03.000') });
+} });
+assert.equal(unexpectedCalls, 0, 'reference compilation does not request a candidate, review or retry');
+assert.equal(noAiRewrite.prompt, updated.prompt);
+assert.ok(noAiRewrite.prompt.includes('<d>[Chinese] 前进！</d>'));
+assert.ok(noAiRewrite.prompt.includes('At 00:02.500'));
+assert.ok(noAiRewrite.prompt.includes('overall_soundscape: Footsteps.'));
 const pendingDraft = { ...draft, references: [{ assetId: '__future_tail_binding__', role: 'first-frame' as const }, ...draft.references.slice(2)] };
 const pending = await refreshVideoH3MediaModeDraft({ project, draft: pendingDraft, context,
   request: async () => JSON.stringify({ h3Prompt: rewritten, identityBindings: { version: 1, characters: [] } }) });
 const resolvedPending = prepareVideoH3ReferenceDraft(project, { ...pending,
   references: videoBatchTailReferences(draft.references.slice(2), { mode: 'prepend', index: 0, role: 'first-frame' }, 'actual-reserved-tail') }, context);
 assert.equal(resolvedPending.issue, undefined);
-assert.match(resolvedPending.draft.prompt, /<Picture 1> is the opening composition/u, 'future-tail provenance resolves by its explicitly reserved slot');
+assert.match(resolvedPending.draft.prompt, /<Picture 1> opening composition reference/u, 'future-tail provenance resolves by its explicitly reserved slot');
 const manuallyChanged = await refreshVideoH3MediaModeDraft({ project, draft: { ...draft, prompt: original.replace('strikes once', 'turns away') }, context,
   request: async () => JSON.stringify({ h3Prompt: rewritten.replace('strikes once', 'turns away') }) });
-assert.equal(manuallyChanged.h3MediaModeUpdate?.sourcePrompt, original.replace('strikes once', 'turns away'), 'stale binding cannot claim an edited prompt came from the old saved artifact');
+assert.equal(manuallyChanged.prompt, original.replace('strikes once', 'turns away'));
+assert.equal(manuallyChanged.h3MediaModeUpdate, undefined, 'stale binding cannot claim an edited prompt came from the old saved artifact');
 
 let state = createInitialState(); state.project = structuredClone(project); state.projects = []; state.settings.videoTaskApi = api;
 state.settings.videoExecutionMode = 'concurrent'; state.settings.videoExecutionConcurrency = 2;
@@ -200,4 +203,4 @@ try {
   assert.deepEqual(batchTask.videoJob?.snapshot.draft.parameters, batchDraft.parameters);
   assert.deepEqual(submittedPrompts, [original, original], 'both mock requests use the selected body without AI or local rewriting');
 } finally { engine.dispose(); }
-console.log('PASS H3 reference warnings: AI-owned update content, unreadable saved source, and single/batch mock generation without a local content gate');
+console.log('PASS H3 deterministic reference compilation, zero AI calls, legacy source compatibility, frozen single/batch mock requests');

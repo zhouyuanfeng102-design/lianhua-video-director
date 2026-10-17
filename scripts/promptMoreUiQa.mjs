@@ -10,7 +10,8 @@ import { createQaProcessHarness, findAvailableTcpPort, waitForCondition } from '
 // are pre-saved synthetic artifacts, so no AI or video call is necessary.
 const root = path.resolve(import.meta.dirname, '..');
 const version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
-const output = path.join(root, 'output', 'playwright', `prompt-result-more-${version}`);
+const englishEntryOnly = process.argv.includes('--english-entry-only');
+const output = path.join(root, 'output', 'playwright', `prompt-result-more-${version}${englishEntryOnly ? '-english-entry-only' : ''}`);
 fs.mkdirSync(output, { recursive: true });
 const fixtureRun = spawnSync(process.execPath, ['--import', 'tsx', 'scripts/promptResultMoreFixture.ts', '--emit'], {
   cwd: root, windowsHide: true, encoding: 'utf8', maxBuffer: 8 * 1024 * 1024,
@@ -33,8 +34,10 @@ const install = async (state) => {
   await page.reload({ waitUntil: 'networkidle' }); await enterDirector();
 };
 const choose = async (format, language) => {
-  await page.getByRole('button', { name: format === 'h3' ? 'MiniMax H3' : format === 'seedance' ? 'Seedance 2.5' : '普通原稿', exact: true }).click();
-  await page.getByRole('button', { name: language === 'en' ? 'English' : '中文', exact: true }).click();
+  await page.getByRole('group', { name: '官方提示词格式', exact: true })
+    .getByRole('button', { name: format === 'h3' ? 'MiniMax H3' : format === 'seedance' ? 'Seedance 2.5' : '普通原稿', exact: true }).click();
+  await page.getByRole('group', { name: format === 'h3' ? '提示词语言' : format === 'seedance' ? 'Seedance 提示词语言' : '普通原稿语言', exact: true })
+    .getByRole('button', { name: language === 'en' ? 'English' : '中文', exact: true }).click();
   const body = fixture.texts[format][language][0];
   assert.equal(await page.locator('.director-result-copy pre').innerText(), body);
   return body;
@@ -82,27 +85,36 @@ const run = async () => {
   await page.goto(origin, { waitUntil: 'networkidle' }); await page.locator('.sidebar').waitFor();
   await install(fixture.state);
   await page.locator('.director-result-copy pre').waitFor();
+  await choose('h3', 'en');
+  assert.ok(fixture.state.project.storyboards[0].officialPromptEn, 'the sequence fixture already has completed English');
   assert.equal(await page.getByRole('button', { name: '导出分段 JSON', exact: true, includeHidden: true }).count(), 0);
   assert.equal(await page.getByRole('button', { name: '修复对白与排时', exact: true }).count(), 0);
   assert.equal(await page.getByRole('button', { name: '导出全部分段提示词', exact: true }).count(), 0);
   assert.equal(await page.getByRole('button', { name: '送到视频导演台', exact: true }).isVisible(), true);
   assert.equal(await more().getAttribute('aria-expanded'), 'false');
   await more().click(); await auditMenuBounds();
-  assert.deepEqual(await menu().getByRole('menuitem').allTextContents(), ['修复对白与排时', '导出全部分段提示词']);
+  assert.deepEqual(await menu().getByRole('menuitem').allTextContents(), ['仅重新生成英文', '修复对白与排时', '导出全部分段提示词']);
+  assert.equal(await menu().getByRole('menuitem', { name: '仅重新生成英文', exact: true }).isEnabled(), true,
+    'completed sequence English still exposes an available regenerate-only-English entry');
   await page.screenshot({ path: path.join(output, 'sequence-more-1280x720.png') });
   await page.keyboard.press('Escape'); await menu().waitFor({ state: 'hidden' });
   assert.equal(await more().evaluate((element) => element === document.activeElement), true, 'ESC restores trigger focus');
   await more().press('ArrowDown');
-  await menu().getByRole('menuitem', { name: '修复对白与排时', exact: true }).waitFor();
+  await menu().getByRole('menuitem', { name: '仅重新生成英文', exact: true }).waitFor();
+  assert.equal(await menu().getByRole('menuitem', { name: '仅重新生成英文', exact: true }).evaluate((element) => element === document.activeElement), true);
+  await page.keyboard.press('ArrowDown');
   assert.equal(await menu().getByRole('menuitem', { name: '修复对白与排时', exact: true }).evaluate((element) => element === document.activeElement), true);
   await page.keyboard.press('ArrowDown');
   assert.equal(await menu().getByRole('menuitem', { name: '导出全部分段提示词', exact: true }).evaluate((element) => element === document.activeElement), true);
-  await page.keyboard.press('Home'); await page.keyboard.press('End');
+  await page.keyboard.press('Home');
+  assert.equal(await menu().getByRole('menuitem', { name: '仅重新生成英文', exact: true }).evaluate((element) => element === document.activeElement), true);
+  await page.keyboard.press('End');
   assert.equal(await menu().getByRole('menuitem', { name: '导出全部分段提示词', exact: true }).evaluate((element) => element === document.activeElement), true);
   await page.keyboard.press('Tab'); await menu().waitFor({ state: 'hidden' });
   await more().click(); await page.locator('.director-result-head h2').click(); await menu().waitFor({ state: 'hidden' });
-  checks.push('JSON export is absent; repair/TXT are in More; persistent Send remains visible; pointer, keyboard, ESC, Tab and outside-click behavior pass at 1280x720');
+  checks.push('completed sequence English exposes regenerate-only-English first in More; three-item arrow/Home/End focus, ESC, Tab and outside-click behavior pass at 1280x720');
 
+  if (!englishEntryOnly) {
   for (const format of ['h3', 'seedance', 'ordinary']) for (const language of ['zh', 'en']) {
     const body = await choose(format, language);
     const content = await exportTxt(`${format}-${language}`);
@@ -135,20 +147,36 @@ const run = async () => {
   for (const format of ['h3', 'seedance', 'ordinary']) for (const language of ['zh', 'en'])
     assert.ok(!missingText.includes(fixture.texts[format][language][1]), 'a missing English artifact cannot borrow another body');
   checks.push('missing second Seedance English remains in the downloaded list as pending, with no fallback or model call');
+  }
 
   const single = structuredClone(fixture.state); single.project.sequencePlans = [];
   single.project.storyboards = [single.project.storyboards[0]];
   for (const field of ['sequencePlanId', 'segmentId', 'segmentIndex', 'segmentCount']) delete single.project.storyboards[0][field];
   single.project.scenes[0].storyboardIds = [single.project.storyboards[0].id]; single.projects = [single.project];
-  await install(single); await more().click(); await auditMenuBounds();
-  assert.deepEqual(await menu().getByRole('menuitem').allTextContents(), ['修复对白与排时'], 'single results keep repair without a whole-plan export action');
+  await install(single); await choose('h3', 'en'); await more().click(); await auditMenuBounds();
+  assert.deepEqual(await menu().getByRole('menuitem').allTextContents(), ['仅重新生成英文', '修复对白与排时'],
+    'completed single English keeps the English-only entry and repair without a whole-plan export action');
+  assert.equal(await menu().getByRole('menuitem', { name: '仅重新生成英文', exact: true }).isEnabled(), true);
   await page.screenshot({ path: path.join(output, 'single-more-1280x720.png') });
   await page.keyboard.press('Escape');
+  assert.equal(await more().evaluate((element) => element === document.activeElement), true, 'single-result ESC restores trigger focus');
+  await more().press('ArrowDown');
+  assert.equal(await menu().getByRole('menuitem', { name: '仅重新生成英文', exact: true }).evaluate((element) => element === document.activeElement), true);
+  await page.keyboard.press('ArrowDown');
+  assert.equal(await menu().getByRole('menuitem', { name: '修复对白与排时', exact: true }).evaluate((element) => element === document.activeElement), true);
+  await page.keyboard.press('Home');
+  assert.equal(await menu().getByRole('menuitem', { name: '仅重新生成英文', exact: true }).evaluate((element) => element === document.activeElement), true);
+  await page.keyboard.press('End');
+  assert.equal(await menu().getByRole('menuitem', { name: '修复对白与排时', exact: true }).evaluate((element) => element === document.activeElement), true);
+  await page.keyboard.press('Tab'); await menu().waitFor({ state: 'hidden' });
+  checks.push('completed single English exposes regenerate-only-English first in More; two-item arrow/Home/End focus, ESC and Tab behavior pass');
   const persisted = await page.evaluate((storageKey) => JSON.parse(localStorage.getItem(storageKey)), storageKey);
   assert.equal(persisted.project.generationTasks.length, 0, 'the QA never creates a generation task');
+  for (const field of ['finalPrompt', 'englishPrompt', 'officialPromptZh', 'officialPromptEn', 'officialPromptSource'])
+    assert.deepEqual(persisted.project.storyboards[0][field], single.project.storyboards[0][field], `menu navigation preserves saved ${field}`);
   assert.deepEqual(blockedRequests, [], 'menu/export/source navigation do not attempt model or external requests');
   assert.deepEqual(errors, [], `production browser errors: ${errors.join('; ')}`);
-  fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify({ passed: true, version, productionPreview: true, isolatedBrowserStorage: true,
+  fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify({ passed: true, version, englishEntryOnly, productionPreview: true, isolatedBrowserStorage: true,
     textCalls: 0, realVideoRequests: 0, createdTasks: 0, checks, blockedRequests, errors }, null, 2));
   console.log(`Prompt More production UI checks passed: ${path.join(output, 'report.json')}`);
 };

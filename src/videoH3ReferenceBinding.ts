@@ -11,6 +11,7 @@ import { prepareVideoSeedanceReferenceDraft } from './videoSeedanceReferenceBind
 import { videoSeedanceReferencePlan } from './videoSeedanceReferencePlan';
 import { videoH3MediaModeContract, videoH3MediaModeIssue } from './videoH3MediaMode';
 import { assetReferenceLocationOwners } from './assetCharacterBinding';
+import { renderH3ReferenceExecution, type H3ReferenceExecutionCharacter } from './h3ReferenceExecution';
 export { collectVideoPictureReferenceNumbers } from './videoPictureReferences';
 export { videoReferenceCharacterOwners, videoReferenceCharacterBindingWarning } from './videoReferenceCharacters';
 
@@ -33,6 +34,9 @@ export interface VideoH3ReferenceBinding {
   identityBindingWarning?: string;
   /** Actual result of rendering this exact request, retained by frozen retries. */
   characterStates?: VideoH3CharacterReferenceState[];
+  /** Request-local Subject/Picture/voice rendering; source identities stay paired with basePrompt. */
+  executionIdentities?: H3IdentityBindings;
+  executionCharacters?: H3ReferenceExecutionCharacter[];
 }
 
 export type VideoH3CharacterReferenceState = VideoCharacterReferenceState;
@@ -539,13 +543,29 @@ const prepareVideoH3ReferenceDraftInternal = (
     ...pictureSourceIssues,
     '旧 H3 图片清单只能对应部分引用，本次保留当前提示词，可直接生成，也可主动更新本段参考说明。',
   ]);
+  const executionIdentities: H3IdentityBindings = { ...binding.identities,
+    ...(binding.identities.events ? { events: binding.identities.events.map((event) => {
+      let referenceAnchor = event.referenceAnchor;
+      if (referenceAnchor) for (const edit of videoPictureReferenceEdits(referenceAnchor, pictureNumbers).sort((left, right) => right.start - left.start)) {
+        referenceAnchor = referenceAnchor.slice(0, edit.start) + edit.text + referenceAnchor.slice(edit.end);
+      }
+      return { ...event, ...(referenceAnchor !== undefined ? { referenceAnchor } : {}) };
+    }) } : {}) };
+  const execution = !pictureSourceIssues.length && plan.numbers && !identityIssues.length && characterPictures.size > 0
+    && [...characterPictures.keys()].every((id) => identities.some((identity) => identity.characterId === id))
+    && videoH3MediaModeContract(draft, context).mode === 'full-reference'
+    ? renderH3ReferenceExecution({ prompt, identities: executionIdentities, characterPictures,
+      language: binding.sourceLanguage || draft.source?.language,
+      pictureUses: draft.references.map((reference, index) => ({ number: plan.numbers![index], role: reference.role })) }) : undefined;
+  if (execution) prompt = execution.prompt;
   return { draft: { ...draft, prompt,
     ...(!draft.reuseTaskId && !draft.h3ReferenceBinding && draft.source && draft.source.language === undefined
       && binding.sourceLanguage === 'en' && sourceBoard.length === 1
       && binding.basePrompt === sourceBoard[0].officialPromptEn
       && sourceBoard[0].officialPromptEnSource === sourceBoard[0].officialPromptZh
       ? { source: { ...draft.source, language: 'en' as const } } : {}),
-    h3ReferenceBinding: { ...binding, renderedPrompt: prompt, characterStates: structuredClone(characterStates) }, h3ReferenceWarnings: unique(warnings) }, warnings: unique(warnings), characterStates };
+    h3ReferenceBinding: { ...binding, renderedPrompt: prompt, characterStates: structuredClone(characterStates),
+      executionIdentities: execution?.identities, executionCharacters: execution?.characters }, h3ReferenceWarnings: unique(warnings) }, warnings: unique(warnings), characterStates };
 };
 
 /** The mode is determined after the final selected slots have been resolved.

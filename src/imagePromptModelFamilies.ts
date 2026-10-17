@@ -1,5 +1,6 @@
 import type { ImagePromptCategoryPreset, ImagePromptRuleSet } from './imagePromptRules';
 import { DIRECTED_ACTION_RELATION_RULE, IMAGE_STORY_SPATIAL_STATE_RULE } from './spatialContinuityRules';
+import { withPropImageSpecificationPreset, withPropImageSpecificationRule } from './imagePropPromptRules';
 
 export const GOOGLE_NANO_BANANA_RULE_ID = 'image-rule-google-nano-banana';
 export const GROK_IMAGINE_RULE_ID = 'image-rule-grok-imagine';
@@ -196,7 +197,7 @@ const spatialFamilyText = (value: string): string => value
   .replace('先明确一个实际角色的身份与当前形态，再描述本次取景可见的轮廓、服装、表情、姿态、材质和光线。', '先按本次规格确定取景与可见面，再绑定同一角色身份、当前形态与可见轮廓、服装、姿态、材质和光线。')
   .replace('再逐格描述一个时刻的事件、机位、实际主体和动作关系。', '逐格先冻结事件阶段与世界关系，再采用对应机位和裁切，最后写实际可见主体、身份与动作关系。');
 
-export const MODEL_FAMILY_CATEGORY_PRESETS: ImagePromptCategoryPreset[] = LEGACY_MODEL_FAMILY_CATEGORY_PRESETS_V19.map((preset) => {
+export const LEGACY_MODEL_FAMILY_CATEGORY_PRESETS_V20: ImagePromptCategoryPreset[] = LEGACY_MODEL_FAMILY_CATEGORY_PRESETS_V19.map((preset) => {
   const narrative = ['storyboard', 'grid', 'location'].includes(preset.assetKind);
   const multiCharacter = preset.assetKind === 'character' && preset.id.includes('multi-person');
   const systemPrompt = spatialFamilyText(preset.systemPrompt);
@@ -212,7 +213,7 @@ export const MODEL_FAMILY_CATEGORY_PRESETS: ImagePromptCategoryPreset[] = LEGACY
   };
 });
 
-export const MODEL_FAMILY_RULE_SETS: ImagePromptRuleSet[] = LEGACY_MODEL_FAMILY_RULE_SETS_V19.map((rule) => ({
+export const LEGACY_MODEL_FAMILY_RULE_SETS_V20: ImagePromptRuleSet[] = LEGACY_MODEL_FAMILY_RULE_SETS_V19.map((rule) => ({
   ...rule,
   categoryPresetIds: [...rule.categoryPresetIds],
   defaultPresetByAssetKind: { ...rule.defaultPresetByAssetKind },
@@ -220,6 +221,9 @@ export const MODEL_FAMILY_RULE_SETS: ImagePromptRuleSet[] = LEGACY_MODEL_FAMILY_
   outputRules: [rule.outputRules, `仅在当前画面要求剧情或多人空间关系时：${MODEL_FAMILY_SPATIAL_OUTPUT_RULE}`].join('\n'),
   version: '1.1.0',
 }));
+
+export const MODEL_FAMILY_CATEGORY_PRESETS: ImagePromptCategoryPreset[] = LEGACY_MODEL_FAMILY_CATEGORY_PRESETS_V20.map(withPropImageSpecificationPreset);
+export const MODEL_FAMILY_RULE_SETS: ImagePromptRuleSet[] = LEGACY_MODEL_FAMILY_RULE_SETS_V20.map(withPropImageSpecificationRule);
 
 const normalizedModelName = (model: string): string => model.trim().toLowerCase().replace(/[\s_]+/gu, '-');
 

@@ -38,6 +38,11 @@ export type ImageGenerationTaskPatch = Partial<Pick<
   | 'imagePromptPresetName'
   | 'imagePromptPresetVersion'
   | 'imagePromptFormat'
+  | 'conversionSource'
+  | 'referenceAssetIds'
+  | 'referenceAssetSnapshots'
+  | 'currentFrameSpatialSource'
+  | 'continuityAssetId'
 >>;
 
 export type ImageGenerationTaskSettlement = ImageGenerationTaskPatch & {

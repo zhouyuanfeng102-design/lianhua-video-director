@@ -18,6 +18,15 @@ const bindings = (identity = anchor): H3IdentityBindings => ({ version: 1, chara
 const people = [{ id: 'adult-a', name: '成年甲' }];
 const codes = (body: string, metadata = bindings()) => getH3IdentityBindingIssues(body, metadata).map((issue) => issue.code);
 const envelope = (body: string, metadata: H3IdentityBindings | undefined = bindings()) => JSON.stringify({ h3Prompt: body, ...(metadata ? { identityBindings: metadata } : {}) });
+const translatedDescription = (text: string): string => text
+  .replaceAll('身份：', 'Identity: ').replaceAll('，黑发，蓝外套。', ', dark hair, blue coat.')
+  .replaceAll('蓝外套。', 'blue coat.');
+const slotsResponse = (user: string): string => {
+  const data = JSON.parse(user) as { sourcePrompt: string; slots: Array<{ id: string; sourceText: string }> };
+  assert.equal(typeof data.sourcePrompt, 'string');
+  assert.ok(Array.isArray(data.slots));
+  return JSON.stringify({ slots: data.slots.map((slot) => ({ id: slot.id, text: translatedDescription(slot.sourceText) })) });
+};
 let count = 0;
 const test = async (name: string, run: () => void | Promise<void>) => { await run(); count += 1; console.log(`PASS ${name}`); };
 
@@ -93,25 +102,30 @@ await test('duplicate character IDs remain ambiguous without imposing token or l
   assert.match(h3IdentityBindingRetentionIssue(bindings(), { version: 1, characters: [] })!, /不能清空/u);
 });
 
-await test('translation repairs a Chinese metadata / English body mismatch through the existing request', async () => {
+await test('translation renders its final identity anchor from the same description slots in one request', async () => {
   let requests = 0; let saved: H3IdentityBindings | undefined;
   const translated = await translateVideoPromptToEnglish({ sourcePrompt: prompt(), identityBindings: bindings(), clean: (value) => value,
     onIdentityBindings: (value) => { saved = value; },
     request: async (_system, user, transport) => {
       requests += 1;
-      if (requests === 1) return envelope(prompt(englishAnchor));
-      assert.equal(transport?.serializationRepair, true); assert.match(user, /anchor-missing/u);
-      return envelope(prompt(englishAnchor), bindings(englishAnchor));
+      assert.equal(JSON.parse(user).sourcePrompt, prompt());
+      assert.notEqual(transport?.serializationRepair, true, 'source-owned metadata needs no repair request');
+      return slotsResponse(user);
     } });
-  assert.equal(requests, 2); assert.equal(translated, prompt(englishAnchor)); assert.deepEqual(saved, bindings(englishAnchor));
+  assert.equal(requests, 1); assert.equal(translated, prompt(englishAnchor)); assert.deepEqual(saved, bindings(englishAnchor));
+  assert.ok(translated.includes(saved!.characters[0].referenceAnchor));
 });
 
-await test('translation cannot discard or empty metadata to evade the shared three-retry budget', async () => {
+await test('model-owned body or empty metadata fields cannot discard the source-owned identity pair', async () => {
   for (const response of [prompt(englishAnchor), envelope(prompt(englishAnchor), { version: 1, characters: [] })]) {
-    let requests = 0; let saved = false;
-    await assert.rejects(translateVideoPromptToEnglish({ sourcePrompt: prompt(), identityBindings: bindings(), clean: (value) => value,
-      onIdentityBindings: () => { saved = true; }, request: async () => { requests += 1; return response; } }), /3次/u);
-    assert.equal(requests, 4); assert.equal(saved, false);
+    let requests = 0; let saved: H3IdentityBindings | undefined; let warnings: string[] = [];
+    const translated = await translateVideoPromptToEnglish({ sourcePrompt: prompt(), identityBindings: bindings(), clean: (value) => value,
+      onIdentityBindings: (value) => { saved = value; }, onDeliveryWarnings: (value) => { warnings = value; },
+      request: async () => { requests += 1; return response; } });
+    assert.equal(requests, 1, 'missing description slots do not cause serialization retries');
+    assert.equal(translated, prompt(), 'missing slots retain their complete source text and original dialogue');
+    assert.deepEqual(saved, bindings(), 'metadata returned outside slots has no authority over source IDs, names or anchors');
+    assert.ok(warnings.length > 0, 'the untranslated source fragments remain visible as a delivery warning');
   }
 });
 
@@ -162,22 +176,22 @@ const quietBindings = (value = quietAnchor): H3IdentityBindings => ({ version: 1
 const official = applyOfficialH3Prompt(board, context);
 const zh = official.officialPromptZh!.replace('[Shot 1]', `[Shot 1] ${quietAnchor}`);
 const quietEnglishAnchor = 'Identity: 成年甲, dark hair, blue coat.';
-const en = zh.replace(quietAnchor, quietEnglishAnchor);
+const en = translatedDescription(zh);
 
 await test('Chinese AI body and metadata are applied without local anchor repair requests', async () => {
   let reviews = 0; let translations = 0;
-  const aiChinese = official.officialPromptZh!;
+  const aiChinese = zh;
   const result = await generateSingleSegmentPrompt({ board: official, context, purpose: 'dialogue-repair', clean: (value) => value,
-    request: async (_system, _user, stage) => {
+    request: async (_system, user, stage) => {
       if (stage === 'review') {
         reviews += 1;
         return JSON.stringify({ canonicalPrompt: canonical, h3Prompt: aiChinese, identityBindings: quietBindings(),
           characterParticipation: { version: 1, characters: [{ characterId: character.id, name: character.name,
             presence: 'visible', shotIndex: 1, evidence: '成年甲', speaking: false }] }, shotSourceIds: [['s1']] });
       }
-      translations += 1; return envelope(en, quietBindings(quietEnglishAnchor));
+      translations += 1; return slotsResponse(user);
     } });
-  assert.equal(reviews, 1); assert.equal(translations, 2);
+  assert.equal(reviews, 1); assert.equal(translations, 1);
   assert.equal(result.officialPromptZh, aiChinese); assert.equal(result.officialPromptEn, en);
   assert.equal(result.officialPromptEnSource, aiChinese);
   assert.deepEqual(result.h3IdentityBindings, quietBindings()); assert.deepEqual(result.h3IdentityBindingsEn, quietBindings(quietEnglishAnchor));
@@ -202,11 +216,12 @@ await test('continuity applies the AI identity envelope without a local metadata
         reviews += 1; assert.match(`${system}\n${user}`, /candidateIdentityBindings/u);
         return envelope(zh, sequence.h3IdentityBindings);
       }
-      translations += 1; return envelope(en, quietBindings(quietEnglishAnchor));
+      translations += 1; return slotsResponse(user);
     } });
-  assert.equal(reviews, 1); assert.equal(translations, 2);
+  assert.equal(reviews, 1); assert.equal(translations, 1);
   assert.equal(result.officialPromptZh, zh); assert.deepEqual(result.h3IdentityBindings, sequence.h3IdentityBindings);
-  assert.equal(result.officialPromptEn, en); assert.deepEqual(result.h3IdentityBindingsEn, quietBindings(quietEnglishAnchor));
+  assert.equal(result.officialPromptEn, en); assert.deepEqual(result.h3IdentityBindingsEn, sequence.h3IdentityBindings);
+  assert.ok(result.h3DeliveryWarningsEn?.some((warning) => warning.includes('未定位')));
   assert.equal(sequence.h3IdentityBindings.characters[0].referenceAnchor, '身份：成年甲，过期旧句。');
   assert.ok(result.sequencePromptHandoff);
 });
@@ -225,13 +240,14 @@ await test('reference refresh saves the AI envelope directly and keeps the exist
         assert.match(`${system}\n${user}`, /candidateIdentityBindings/u);
         return envelope(zh, aiBindings);
       }
-      translations += 1; return envelope(en, quietBindings(quietEnglishAnchor));
+      translations += 1; return slotsResponse(user);
     } });
-  assert.equal(conversions, 1); assert.equal(reviews, 1); assert.equal(translations, 2);
+  assert.equal(conversions, 1); assert.equal(reviews, 1); assert.equal(translations, 1);
   assert.equal(result.officialPromptZh, zh); assert.deepEqual(result.h3IdentityBindings, aiBindings);
   assert.equal(saved.h3IdentityBindings.characters[0].referenceAnchor, '身份：成年甲，旧参考定位句。');
   assert.equal(result.officialPromptEn, en);
-  assert.deepEqual(result.h3IdentityBindingsEn, quietBindings(quietEnglishAnchor));
+  assert.deepEqual(result.h3IdentityBindingsEn, aiBindings);
+  assert.ok(result.h3DeliveryWarningsEn?.some((warning) => warning.includes('未定位')));
 });
 
 console.log(`H3 identity delivery: ${count} synthetic offline cases passed`);

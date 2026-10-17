@@ -64,6 +64,27 @@ const localPrefix = (source: string, quote: PromptQuoteSpan, previousEnd: number
   const clauses = between.split(/[\n；;]/u).filter((part) => part.trim());
   return clauses.slice(-1)[0]?.trim() || '';
 };
+
+/** Exact quoted words explicitly printed/displayed in the scene. Ordinary
+ * quoted descriptions and names are not evidence of visible lettering. */
+export const getPromptVisibleTextSpans = (source: string): PromptQuoteSpan[] => {
+  const quotes = getPromptQuoteSpans(source);
+  return quotes.filter((quote, index) => {
+    const prefix = localPrefix(source, quote, quotes[index - 1]?.end || 0);
+    // Reuse the inscription/non-speech vocabulary without changing dialogue
+    // classification or treating every title/name/description as a sign.
+    const physicalMedium = /(?:墙|纸|信封|信件|书页|书本|卷轴|石碑|墓碑|木板|黑板|白板|招牌|标牌|牌匾|路牌|标签|屏幕|显示屏|字幕|门上|门板|瓶身|衣服|衣物|旗帜)[^，,。！？!?；;\n]*$/u.test(prefix)
+      || /\b(?:wall|paper|page|book|letter|envelope|sign|label|screen|display|monitor|board|banner|flag|bottle|shirt|inscription|(?:printed|written)\s+text)\b[^,.;!?\n]*$/iu.test(prefix);
+    const inscription = physicalMedium && NON_SPEECH_PREFIX.test(prefix)
+      && /(?:写着|刻着|印着|写有|刻有|\b(?:printed|written)(?:\s+(?:as|with|text))?)\s*[:：]?\s*$/iu.test(prefix);
+    const display = /(?:标牌|招牌|路牌|告示牌|牌匾|门牌|碑文|屏幕|显示屏|电子屏|显示器|标签(?:上|中)?)[^，,。！？!?；;\n]*(?:显示(?:着|为)?|写(?:着|有)|刻(?:着|有)|印(?:着|有)|标注(?:为)?|呈现|(?:文字|字样|内容|标题)(?:是|为)?)\s*[:：]?\s*$/u.test(prefix)
+      || /(?:标牌|招牌|路牌|告示牌|牌匾|门牌|碑文|屏幕|显示屏|电子屏|显示器|标签)(?:上|中|内)?\s*[:：]\s*$/u.test(prefix)
+      || /(?:字幕|画面(?:中|上)?文字)\s*[:：]?\s*$/u.test(prefix)
+      || /\b(?:sign|label|screen|display|monitor|caption|inscription)\s+(?:reads?|says?|shows?|displays?|contains?|is\s+printed\s+with)\s*[:：]?\s*$/iu.test(prefix)
+      || /\b(?:on[- ]screen\s+(?:text|caption)|subtitle|caption)\s*[:：]\s*$/iu.test(prefix);
+    return inscription || display;
+  });
+};
 const relativeTime = (prefix: string): number | undefined => {
   const marked = Array.from(prefix.matchAll(/(?:第\s*|\b(?:at|from|starting\s+at|beginning\s+at)\s+)(\d+(?:\.\d+)?)\s*(?:seconds?|s|秒)/giu)).slice(-1)[0];
   const bareEnglish = Array.from(prefix.matchAll(/\b(\d+(?:\.\d+)?)\s*(?:seconds?|s)\b/giu)).slice(-1)[0];

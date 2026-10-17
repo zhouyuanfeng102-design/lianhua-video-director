@@ -1,4 +1,4 @@
-import type { H3IdentityBindings } from './types';
+import type { H3IdentityBindings, H3IdentityEventBinding } from './types';
 
 export const h3Record = (value: unknown): value is Record<string, unknown> => value !== null
   && typeof value === 'object' && !Array.isArray(value)
@@ -73,6 +73,24 @@ export const H3_METADATA_SCHEMA_RULE = [
   '一一沿用来源且状态不变时，数组中对应项才可为null；整份shotMetadata必须为数组。必填对象、数组不能用空字符串替代；只有明确无法定位时才省略坐标，不用字符串或错误枚举替代所需类型。',
 ].join('\n');
 
+/** Optional source-role metadata is copied when readable, never an acceptance gate. */
+export const copyH3IdentityEventBindings = (value: unknown): H3IdentityEventBinding[] | undefined => {
+  if (!Array.isArray(value)) return undefined;
+  return value.flatMap((item): H3IdentityEventBinding[] => {
+    if (!h3Record(item) || typeof item.eventId !== 'string') return [];
+    const entry: H3IdentityEventBinding = { eventId: item.eventId };
+    if (item.kind === 'action' || item.kind === 'dialogue') entry.kind = item.kind;
+    for (const key of ['referenceAnchor', 'dialogueId', 'actorCharacterId', 'speakerCharacterId'] as const) {
+      if (typeof item[key] === 'string') entry[key] = item[key];
+    }
+    for (const key of ['targetCharacterIds', 'listenerCharacterIds', 'addressedCharacterIds'] as const) {
+      const ids = item[key];
+      if (Array.isArray(ids) && ids.every((id) => typeof id === 'string')) entry[key] = [...ids];
+    }
+    return [entry];
+  });
+};
+
 /** Compatibility is representational only; no IDs, voices, or anchors are inferred. */
 export const inspectH3IdentityBindings = (value: unknown): {
   value?: H3IdentityBindings; issues: H3DeliveryFieldIssue[];
@@ -107,7 +125,9 @@ export const inspectH3IdentityBindings = (value: unknown): {
     }
     if (before === issues.length) characters.push({
       characterId: item.characterId as string, name: item.name as string, referenceAnchor: item.referenceAnchor as string, ...tokens,
+      ...(typeof item.relationship === 'string' ? { relationship: item.relationship } : {}),
     });
   });
-  return issues.length ? { issues } : { value: { version: 1, characters }, issues };
+  const events = copyH3IdentityEventBindings(value.events);
+  return issues.length ? { issues } : { value: { version: 1, characters, ...(events ? { events } : {}) }, issues };
 };

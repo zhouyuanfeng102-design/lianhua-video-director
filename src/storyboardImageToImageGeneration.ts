@@ -13,9 +13,10 @@ import { assertValidFinalImagePrompt, buildImagePromptConverterSystemPrompt, gpt
 import { buildImagePromptIdentityContext } from './imagePromptIdentityContext';
 import { getSafeErrorDiagnostics } from './errorDiagnostics';
 import { defaultStoryboardImageOutputSize, resolveStoryboardImageOutputSize } from './storyboardImageOutputSize';
-import { runStoryboardImageBatch, type StoryboardImageBatchLifecycle, type StoryboardReferenceImageLoader } from './storyboardImages';
+import { runStoryboardImageBatch, withStoryboardFirstFrameContinuity, type StoryboardImageBatchLifecycle, type StoryboardReferenceImageLoader } from './storyboardImages';
 import { assertDirectStoryboardImageApiSupport, buildDirectStoryboardImageBatchRequests, directStoryboardImageSourceFingerprint, normalizeStoryboardImageToImageSettings, resolveDirectStoryboardReferenceImages, type DirectStoryboardImagePromptConversion } from './storyboardImageToImage';
 import { buildStoryboardImagePromptWithReferences } from './storyboardImageReferences';
+import { currentStoryboardFrameSpatialSource } from './storyboardImageReferenceIdentity';
 import { supplementStoryboardImageCharacterReferences } from './storyboardImageCharacterReferences';
 import { requestStoryboardImageFramePlan, validateStoryboardImagePlanCount, type StoryboardImageFramePlan } from './storyboardImagePlan';
 import { withDirectImageRegenerationSnapshot } from './imageAssetRegenerationSnapshot';
@@ -246,7 +247,7 @@ export const generateDirectStoryboardImages = async (
     if (imagePromptConverterRules) imagePromptConverterRules += `\n\n${imagePromptOutputSpecificationRule({ width: size.width, height: size.height, aspectRatio: size.resolutionPlan?.logicalAspectRatio || board.aspectRatio, resolution: size.resolutionPlan?.tier }, 'storyboard-frame')}`;
     if (directPromptConversion) directPromptConversion = { ...directPromptConversion, converterSystemPrompt: imagePromptConverterRules, negativePrompt };
     const projectContext = {
-      includeReferenceMetadata: api.backend === 'openai' && selectedPromptFormat === 'natural-language',
+      includeReferenceMetadata: selectedPromptFormat === 'natural-language',
       characters: cloneImageBatchConfig(initial.project.characters.filter((character) => !character.dossier?.archivedIntoCharacterId)), locations: cloneImageBatchConfig(initial.project.locations),
       props: cloneImageBatchConfig(initial.project.props), scenes: cloneImageBatchConfig(initial.project.scenes),
       // Top-level copies freeze image locators/immutable pixel strings without
@@ -367,6 +368,7 @@ export const generateDirectStoryboardImages = async (
       imageFrameBatchId: request.purpose === 'storyboard-shot' ? batchId : undefined,
       imageFrameIndex: request.imageFrameIndex, imageFrameCount: request.imageFrameCount,
       imageFrameDescription: request.imageFrameDescription, imageFrameTimeSec: request.imageFrameTimeSec,
+      currentFrameSpatialSource: currentStoryboardFrameSpatialSource(request),
       imageGenerationMode: 'image-to-image',
       prompt: directPromptConversion && request.directPromptSource !== 'current-image-prompt' ? '' : request.directPrompt,
       imagePromptFormat: selectedPromptFormat,
@@ -383,7 +385,15 @@ export const generateDirectStoryboardImages = async (
     })));
     tasks = preparedTasks;
     failureDetail = { stage: 'image-generation', context: imageErrorContext };
-    const results = await runStoryboardImageBatch(requests, async (request, index) => {
+    const results = await runStoryboardImageBatch(requests, async (originalRequest, index, firstResult?: ReferenceAsset) => {
+      const request = withStoryboardFirstFrameContinuity(originalRequest, firstResult);
+      const continuityAssetId = firstResult && request.continuityAssetId === firstResult.id
+        ? firstResult.id : undefined;
+      if (continuityAssetId && !projectContext.assets.some((asset) => asset.id === continuityAssetId)) {
+        // The queue hands over this batch's saved result. Keep it in the captured
+        // asset pool rather than consulting later live project selections.
+        projectContext.assets.push(firstResult!);
+      }
       let task = tasks[index];
       const assertActive = () => {
         if (!ctx.lifecycle.canSubmit(lease) || !imageBatchTaskIsActive(ctx.getState(), projectId, task)) throw new GenerationTaskCancelledError();
@@ -391,11 +401,31 @@ export const generateDirectStoryboardImages = async (
       let taskFailureStage: DirectStoryboardImageErrorDetail['stage'] = 'image-reference-load';
       try {
         assertActive();
-        task = { ...task, status: 'running', error: undefined };
+        assertDirectStoryboardImageApiSupport(api, request.referenceAssetIds.length);
+        if (continuityAssetId && firstResult?.managed && !snapshots.has(firstResult.id)) {
+          snapshots.set(firstResult.id, createImageReferenceAssetSnapshot(firstResult));
+        }
+        task = { ...task, status: 'running', error: undefined,
+          conversionSource: request.conversionSource, referenceAssetIds: [...request.referenceAssetIds],
+          referenceAssetSnapshots: request.referenceAssetIds.flatMap((id) => snapshots.has(id) ? [snapshots.get(id)!] : []),
+          currentFrameSpatialSource: currentStoryboardFrameSpatialSource(request), continuityAssetId,
+        };
         tasks[index] = task;
         ctx.updateBackground((state) => applyOwnedProjectUpdate(state, projectId, (project) => ({
-          ...project, generationTasks: patchImageGenerationTask(project.generationTasks, task.id, { status: 'running', error: undefined }),
+          ...project, generationTasks: patchImageGenerationTask(project.generationTasks, task.id, {
+            status: 'running', error: undefined, conversionSource: task.conversionSource,
+            referenceAssetIds: task.referenceAssetIds, referenceAssetSnapshots: task.referenceAssetSnapshots,
+            currentFrameSpatialSource: task.currentFrameSpatialSource, continuityAssetId,
+          }),
         })));
+        const inputSnapshots: ImageReferenceAssetSnapshot[] = [];
+        for (const id of request.referenceAssetIds) inputSnapshots.push(await freezeReference(id, assertActive));
+        if (inputSnapshots.length !== task.referenceAssetSnapshots?.length) {
+          task = { ...task, referenceAssetSnapshots: inputSnapshots }; tasks[index] = task;
+          ctx.updateBackground((state) => applyOwnedProjectUpdate(state, projectId, (project) => ({
+            ...project, generationTasks: patchImageGenerationTask(project.generationTasks, task.id, { referenceAssetSnapshots: inputSnapshots }),
+          })));
+        }
         const referenceImageCache = new Map<string, Promise<string>>();
         await resolveDirectStoryboardReferenceImages(task.referenceAssetIds!, imageReferenceSnapshotAssets(task.referenceAssetSnapshots), ctx.loader, referenceImageCache);
         assertActive();
@@ -424,10 +454,15 @@ export const generateDirectStoryboardImages = async (
         task = {
           ...task,
           prompt: projectContext.includeReferenceMetadata
-            ? buildStoryboardImagePromptWithReferences(finalPrompt, orderedAssets, projectContext) : finalPrompt,
+            ? buildStoryboardImagePromptWithReferences(finalPrompt, orderedAssets, {
+              ...projectContext, currentFrameSpatialSource: task.currentFrameSpatialSource, continuityAssetId,
+            }) : finalPrompt,
           referenceAssetIds, referenceAssetSnapshots,
           preparationStage: undefined,
-          ...(addedReferenceCount ? { bindingWarning: `已按本张人物补充 ${addedReferenceCount} 张角色参考图，共 ${referenceAssetIds.length} 张；公共参考图顺序保持不变。` } : {}),
+          bindingWarning: [
+            addedReferenceCount ? `已按本张人物补充 ${addedReferenceCount} 张角色参考图，共 ${referenceAssetIds.length} 张；公共参考图顺序保持不变。` : '',
+            continuityAssetId ? '已附本批成功首图，仅作外观、环境与光线连续参考；角色身份仍以角色图为准。' : '',
+          ].filter(Boolean).join('；') || undefined,
         };
         tasks[index] = task;
         ctx.updateBackground((state) => applyOwnedProjectUpdate(state, projectId, (project) => ({
@@ -457,6 +492,7 @@ export const generateDirectStoryboardImages = async (
           sourceStoryboardId: board.id, sourceShotId: request.shotId, imageVariant: task.imageVariant,
           imageFrameBatchId: task.imageFrameBatchId, imageFrameIndex: task.imageFrameIndex,
           imageFrameCount: task.imageFrameCount, imageFrameDescription: task.imageFrameDescription, imageFrameTimeSec: task.imageFrameTimeSec,
+          currentFrameSpatialSource: task.currentFrameSpatialSource, continuityAssetId: task.continuityAssetId,
           prompt: task.prompt, negativePrompt: task.negativePrompt, imageBackend: task.backend, imagePromptRuleSetId: task.imagePromptRuleSetId,
           imagePromptRuleSetName: task.imagePromptRuleSetName,
           imagePromptRuleSetVersion: task.imagePromptRuleSetVersion, imagePromptPresetId: task.imagePromptPresetId,
@@ -475,7 +511,7 @@ export const generateDirectStoryboardImages = async (
             bindingWarning: [task.bindingWarning, imageReturnedSizeWarning(task, actual)].filter(Boolean).join('；') || undefined,
           }, timestamp, projectId),
         })));
-        return asset.id;
+        return asset;
       } catch (error) {
         if (isGenerationTaskCancelledError(error) || isGenerationTaskRevoked(projectId, task)) {
           ctx.updateBackground((state) => applyOwnedProjectUpdate(state, projectId, (project) => ({
@@ -500,10 +536,10 @@ export const generateDirectStoryboardImages = async (
         throw new Error(message);
       }
     }, (_request, index) => ctx.lifecycle.canSubmit(lease) && imageBatchTaskIsActive(ctx.getState(), projectId, tasks[index], true));
-    const cancelledTasks = results.flatMap((result, index) => result.status === 'cancelled' ? [tasks[index]] : []);
-    if (cancelledTasks.length) ctx.updateBackground((state) => applyOwnedProjectUpdate(state, projectId, (project) => ({
-      ...project, generationTasks: failImagePreparationTasks(project.generationTasks, cancelledTasks,
-        '任务已取消或已失效，未继续调用生成接口。', true),
+    const cancelled = results.flatMap((result, index) => result.status === 'cancelled' ? [{ task: tasks[index], result }] : []);
+    if (cancelled.length) ctx.updateBackground((state) => applyOwnedProjectUpdate(state, projectId, (project) => ({
+      ...project, generationTasks: cancelled.reduce((current, entry) => failImagePreparationTasks(current, [entry.task],
+        entry.result.error || '任务已取消或已失效，未继续调用生成接口。', true), project.generationTasks),
     })));
     const count = (status: 'succeeded' | 'failed' | 'cancelled') => results.filter((item) => item.status === status).length;
     announce(`分镜图生图完成：成功 ${count('succeeded')}，失败 ${count('failed')}，取消 ${count('cancelled')}。${count('failed') ? '具体原因已记录在生成任务中。' : ''}`, count('failed') ? 'error' : 'normal');

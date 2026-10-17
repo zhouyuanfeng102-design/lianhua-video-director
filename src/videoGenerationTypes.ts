@@ -124,6 +124,8 @@ export interface VideoGenerationDraft {
   backend: VideoGenerationBackend;
   source?: VideoPromptSource;
   references: VideoImageReference[];
+  /** Defaults copied from a saved segment, so replacing them never consumes a manual override. */
+  automaticStoryboardFrames?: { storyboardId: string; firstFrameAssetId?: string; lastFrameAssetId?: string };
   audioReferences?: VideoAudioReference[];
   /** Explicit 'none' prevents project presets being restored after clearing. */
   audioSelectionMode?: 'project' | 'override' | 'none';

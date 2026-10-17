@@ -287,11 +287,13 @@ try {
     const expectedCount = mode === 'custom-count' ? 3 : 2;
     assert.equal(conversions, expectedCount, `${mode} adds no conversion calls while completing identity references`);
     assert.equal(perFrameCharacters.calls.length, expectedCount);
+    const firstId = perFrameCharacters.imageTasks().find((task) => task.imageVariant === 'first-frame')?.resultAssetId;
     assert.deepEqual(perFrameCharacters.imageTasks().map((task) => task.referenceAssetIds),
-      Array.from({ length: expectedCount }, (_, index) => ['b', 'a', index % 2 ? 'elf-reference' : 'summer-reference']),
+      Array.from({ length: expectedCount }, (_, index) => ['b', 'a', ...(mode === 'boundary-frames' && index === 1 ? [firstId] : []), index % 2 ? 'elf-reference' : 'summer-reference']),
       `${mode} attaches only the named characters in each final still`);
-    assert.ok(perFrameCharacters.imageTasks().every((task) => task.status === 'succeeded'
-      && task.referenceAssetSnapshots?.length === 3 && /补充 1 张角色参考图，共 3 张/u.test(task.bindingWarning || '')));
+    assert.ok(perFrameCharacters.imageTasks().every((task, index) => task.status === 'succeeded'
+      && task.referenceAssetSnapshots?.length === (mode === 'boundary-frames' && index === 1 ? 4 : 3)
+      && /补充 1 张角色参考图，共 [34] 张/u.test(task.bindingWarning || '')));
     assert.equal(perFrameCharacters.stores.filter((entry) => entry.fileName?.includes('图生图参考')).length, 4,
       'public and repeated character references are frozen only once within a batch');
     if (planning) assert.equal(planning.calls.length, 1);
@@ -453,7 +455,19 @@ try {
 
   const boundaries = fixture();
   const beforeBoundaries = JSON.stringify(boundaries.getState().project.storyboards[0]);
-  await bounded(boundaries.run({ mode: 'boundary-frames' }));
+  const firstStarted = deferred(); const releaseFirst = deferred();
+  const originalBoundaryGenerate = boundaries.ctx.generateImage!;
+  let boundaryGenerationCount = 0;
+  boundaries.ctx.generateImage = async (...args) => {
+    if (++boundaryGenerationCount === 1) { firstStarted.resolve(); await releaseFirst.promise; }
+    return originalBoundaryGenerate(...args);
+  };
+  const boundaryRun = boundaries.run({ mode: 'boundary-frames' });
+  await bounded(firstStarted.promise);
+  assert.equal(boundaries.conversions.length, 1, 'tail waits for the successful saved first result before conversion or image submission');
+  assert.equal(boundaries.imageTasks().find((task) => task.imageVariant === 'last-frame')?.status, 'queued');
+  releaseFirst.resolve();
+  await bounded(boundaryRun);
   assert.equal(boundaries.calls.length, 2, 'the existing first/last-frame button converts each boundary with the selected rules');
   assert.equal(boundaries.conversions.length, 2);
   assert.match(boundaries.conversions[0].source, /视频首帧.*第一镜的开始/u);
@@ -461,12 +475,63 @@ try {
   assert.ok(boundaries.calls.every((call, index) => call.input.prompt.includes(boundaries.conversions[index].prompt)));
   assert.ok(boundaries.calls.every((call) => !/帧位要求：|本张是视频首帧|本张是视频尾帧|首帧取景：|尾帧取景：/u.test(call.input.prompt)),
     'local boundary production instructions become converter input instead of being used as the final image prompt');
-  assert.deepEqual(boundaries.calls.map((call) => call.input.referenceImages), [[pngB, pngA], [pngB, pngA]]);
+  assert.deepEqual(boundaries.calls.map((call) => call.input.referenceImages), [[pngB, pngA], [pngB, pngA, pngA]]);
+  const boundaryFirstTask = boundaries.imageTasks().find((task) => task.imageVariant === 'first-frame')!;
+  const boundaryTailTask = boundaries.imageTasks().find((task) => task.imageVariant === 'last-frame')!;
+  assert.equal(boundaryTailTask.continuityAssetId, boundaryFirstTask.resultAssetId);
+  assert.equal(boundaryTailTask.referenceAssetSnapshots?.[2].id, boundaryFirstTask.resultAssetId, 'tail freezes the same-batch first locator in actual input order');
+  assert.match(boundaries.calls[1].input.prompt, /3\. 本批已成功首图 — 仅作人物外观、场景外观与光线连续参考/u);
+  assert.equal(boundaryTailTask.currentFrameSpatialSource, '', 'an ordinary timed boundary shot supplies no guessed exact-frame space');
   assert.deepEqual(boundaries.imageTasks().map((task) => [task.sourceShotId, task.imageVariant]), [['shot-1', 'first-frame'], ['shot-4', 'last-frame']]);
   const boundaryAssets = boundaries.getState().project.assets.filter((asset) => asset.source === 'generated');
   assert.deepEqual(new Set(boundaryAssets.map((asset) => `${asset.type}:${asset.role}:${asset.imageVariant}`)),
     new Set(['first-frame:first-frame:first-frame', 'last-frame:last-frame:last-frame']));
   assert.equal(JSON.stringify(boundaries.getState().project.storyboards[0]), beforeBoundaries, 'boundary output metadata does not rewrite H3 or video frame bindings');
+  const boundaryResultOnly = { ...boundaries.getState().project, generationTasks: [] };
+  const recoveredTail = resolveImageAssetRegenerationTask(boundaryAssets.find((asset) => asset.imageVariant === 'last-frame')!, boundaryResultOnly, boundaries.getState().settings.imageApi)!;
+  assert.equal(recoveredTail.continuityAssetId, boundaryFirstTask.resultAssetId);
+  assert.deepEqual(recoveredTail.referenceAssetIds, boundaryTailTask.referenceAssetIds, 'asset-only replay retains the frozen first result rather than finding a new first image');
+
+  const tailReferenceFailure = fixture();
+  const originalTailRead = tailReferenceFailure.ctx.loader.readManagedImageDataUrl!;
+  const originalTailGenerate = tailReferenceFailure.ctx.generateImage!;
+  let savedFirstReady = false;
+  tailReferenceFailure.ctx.generateImage = async (...args) => {
+    const output = await originalTailGenerate(...args); savedFirstReady = true; return output;
+  };
+  tailReferenceFailure.ctx.loader.readManagedImageDataUrl = async (payload) => {
+    if (savedFirstReady) throw new Error('本批尾图参考读取暂时失败');
+    return originalTailRead(payload);
+  };
+  await bounded(tailReferenceFailure.run({ mode: 'boundary-frames' }));
+  const failedTailTask = tailReferenceFailure.imageTasks().find((task) => task.imageVariant === 'last-frame')!;
+  const savedFirstTask = tailReferenceFailure.imageTasks().find((task) => task.imageVariant === 'first-frame')!;
+  assert.equal(tailReferenceFailure.calls.length, 1);
+  assert.equal(failedTailTask.status, 'failed');
+  assert.equal(failedTailTask.continuityAssetId, savedFirstTask.resultAssetId);
+  assert.equal(failedTailTask.referenceAssetSnapshots?.[2].id, savedFirstTask.resultAssetId,
+    'a failed tail reference read retains the intended first snapshot instead of silently replaying without it');
+  assert.deepEqual(resolveImageRegenerationSource(failedTailTask, tailReferenceFailure.getState().project).referenceAssetIds,
+    failedTailTask.referenceAssetIds);
+
+  const comfyNatural = fixture();
+  addCharacterReferences(comfyNatural);
+  comfyNatural.mutate((state) => ({ ...state, settings: { ...state.settings,
+    imagePromptRuleSetIdByBackend: { ...state.settings.imagePromptRuleSetIdByBackend, comfyui: 'image-rule-openai-gpt-image' },
+    imageApi: { ...state.settings.imageApi, backend: 'comfyui', workflowJson: JSON.stringify({
+      first: { inputs: { image: '__REFERENCE_IMAGE_1__' }, class_type: 'CustomReferenceLoader' },
+      second: { inputs: { image: '__REFERENCE_IMAGE_2__' }, class_type: 'CustomReferenceLoader' },
+      firstAdapter: { inputs: { image: ['first', 0] }, class_type: 'IPAdapterAdvanced' },
+      secondAdapter: { inputs: { image: ['second', 0], model: ['firstAdapter', 0] }, class_type: 'IPAdapterAdvanced' },
+      sampler: { inputs: { model: ['secondAdapter', 0] }, class_type: 'KSampler' },
+      output: { inputs: { images: ['sampler', 0] }, class_type: 'SaveImage' },
+    }) },
+  } }));
+  await bounded(comfyNatural.run({ mode: 'selected-shots', shotIds: ['shot-2'] }));
+  assert.equal(comfyNatural.calls.length, 1, comfyNatural.notices.map((notice) => notice.message).join('; '));
+  assert.match(comfyNatural.calls[0].input.prompt, /图片 2 → 角色 ID "lead" → 中文原名 "阿莲"/u,
+    'supported multi-reference natural-language transports share final identity mapping');
+  assert.equal(comfyNatural.conversions.length, 1, 'changing the natural-language transport adds no converter call');
 
   const draft = fixture();
   draft.mutate((state) => updateStoryboardImageToImageSettings(state, draft.projectId, 'board-2', {
@@ -604,7 +669,9 @@ try {
   assert.equal(planner.calls[0].api.model, 'frozen-text-model');
   const planInput = JSON.parse(planner.calls[0].user);
   assert.equal(planInput.requestedImageCount, 5);
-  assert.equal(planInput.source.officialPromptZh, originalCustomH3);
+  assert.equal(planInput.source.contentSource, 'confirmed-h3');
+  assert.ok(planInput.source.confirmedH3.shots.every((shot: string) => originalCustomH3?.includes(shot)),
+    'the existing confirmed-H3 transport keeps the captured source shot text');
   assert.equal(planInput.source.shots.length, 4);
   assert.equal(JSON.stringify(planInput).includes('data:image/'), false);
   assert.ok(custom.calls.every((call) => call.api.model === 'fixture-image-model' && call.input.width === 4096 && call.input.height === 2304));
@@ -805,7 +872,10 @@ try {
   emptyConversion.ctx.convertPrompt = async () => '   ';
   await bounded(emptyConversion.run({ mode: 'boundary-frames' }));
   assert.equal(emptyConversion.calls.length, 0, 'an empty ordinary converter result blocks image submission instead of falling back to local framing rules');
-  assert.ok(emptyConversion.imageTasks().every((task) => task.status === 'failed' && /提示词为空/u.test(task.error || '')));
+  assert.equal(emptyConversion.imageTasks()[0].status, 'failed');
+  assert.match(emptyConversion.imageTasks()[0].error || '', /提示词为空/u);
+  assert.equal(emptyConversion.imageTasks()[1].status, 'cancelled');
+  assert.match(emptyConversion.imageTasks()[1].error || '', /本批首帧未成功保存/u);
   assert.ok(emptyConversion.reportDetails.every((detail) => detail?.stage === 'image-prompt-convert'));
 
   for (const echoFormat of ['raw', 'json', 'url'] as const) {

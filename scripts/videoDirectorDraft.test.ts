@@ -381,4 +381,34 @@ assert.equal(initialVideoBatchPromptFormat(preparedBatch, 'seedance'), 'seedance
 const onlyOrdinary = { ...project, storyboards: [{ ...board, targetModelId: 'custom', officialPromptZh: undefined, officialPromptEn: undefined }] };
 assert.equal(videoPromptChoices(onlyOrdinary, undefined, 'h3').length, 0, 'missing H3 never falls back to an ordinary prompt');
 assert.equal(videoPromptChoices(onlyOrdinary, undefined, 'ordinary')[0]?.prompt, board.finalPrompt, 'ordinary remains available only when explicitly requested');
-console.log('videoDirectorDraft: H3 defaults, preserved prepared selections, prompt selection, missing-reference original previews, explicit references and snapshot tests passed');
+const frameProject = structuredClone(project);
+const boardA = { ...board, firstFrameAssetId: 'a-first', lastFrameAssetId: 'a-last' };
+const boardB = { ...board, id: 'frame-board-b', segmentId: 'frame-segment-b', firstFrameAssetId: 'b-first', lastFrameAssetId: 'b-last' };
+frameProject.storyboards = [boardA, boardB];
+frameProject.assets.push(...['a-first', 'b-first', 'manual-first', 'b-revised-first'].map((id) => asset(id, { type: 'first-frame', role: 'first-frame', referenceRole: 'first-frame' })),
+  ...['a-last', 'b-last'].map((id) => asset(id, { type: 'last-frame', role: 'last-frame', referenceRole: 'last-frame' })));
+const frameChoiceA = { ...chinese, storyboardId: boardA.id };
+const frameChoiceB = { ...chinese, storyboardId: boardB.id };
+const frameBefore = structuredClone(frameProject);
+const frameA = applyVideoPromptChoice(empty, frameChoiceA, frameProject, true);
+const frameB = applyVideoPromptChoice(frameA, frameChoiceB, frameProject, true);
+assert.deepEqual(frameB.references.filter((reference) => ['first-frame', 'last-frame'].includes(reference.role)).map((reference) => reference.assetId),
+  ['b-first', 'b-last'], 'switching segments replaces old frame inputs instead of carrying conflicting openings');
+assert.equal(frameB.references.findIndex((reference) => reference.assetId === 'b-first'), frameA.references.findIndex((reference) => reference.assetId === 'a-first'));
+assert.ok(frameB.references.some((reference) => reference.assetId === 'character' && reference.role === 'character'));
+const manualFrame = addVideoDraftAssets({ ...frameB, reuseTaskId: 'frozen-task' }, ['manual-first'], frameProject.assets);
+assert.equal(manualFrame.reuseTaskId, undefined, 'same-count frame replacement releases the frozen task');
+assert.equal(manualFrame.references.filter((reference) => reference.role === 'first-frame').length, 1);
+assert.ok(!manualFrame.references.some((reference) => reference.assetId === 'b-first'));
+const manualEnglish = applyVideoPromptChoice(manualFrame, { ...frameChoiceB, language: 'en' }, frameProject, true);
+assert.equal(manualEnglish.references.find((reference) => reference.role === 'first-frame')?.assetId, 'manual-first',
+  'same-segment language changes preserve the explicit opening override');
+const revisedProject = { ...frameProject, storyboards: [boardA, { ...boardB, firstFrameAssetId: 'b-revised-first' }] };
+const revised = applyVideoPromptChoice(frameB, frameChoiceB, revisedProject, true);
+assert.equal(revised.references.find((reference) => reference.role === 'first-frame')?.assetId, 'b-revised-first', 'known copied defaults follow an updated current-segment binding');
+assert.equal(applyVideoPromptChoice(manualEnglish, frameChoiceB, revisedProject, true).references.find((reference) => reference.role === 'first-frame')?.assetId,
+  'manual-first', 'updating a storyboard binding does not erase an explicit same-segment opening');
+const noFrames = applyVideoPromptChoice(frameA, frameChoiceB, frameProject, false);
+assert.ok(!noFrames.references.some((reference) => ['first-frame', 'last-frame'].includes(reference.role)), 'switching without automatic references clears prior-segment frame uses');
+assert.deepEqual(frameProject, frameBefore, 'frame selection does not mutate source storyboards, images or old task snapshots');
+console.log('videoDirectorDraft: prompt selection, per-segment frame replacement, explicit overrides, physical slots and frozen snapshots passed');

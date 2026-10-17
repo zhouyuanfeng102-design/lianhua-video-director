@@ -10,6 +10,7 @@ import { normalizeCanonicalDialogueQuotes } from '../src/dialogueCoverage';
 import { applyOfficialH3Prompt, hasCurrentOfficialH3Prompt, type OfficialH3ProjectContext } from '../src/officialPrompt';
 import { sourceContentHash } from '../src/sourceIntegrity';
 import { semanticSegmentStoryContent, type SemanticSegmentSourceContext } from '../src/semanticSequencePlan';
+import { TextModelResponseError } from '../src/services/llm';
 import type { Character, ConverterPreset, H3IdentityBindings, PromptCharacterParticipation, ReferenceAsset, Storyboard, VideoSegment, VideoSequencePlan, VideoShot } from '../src/types';
 
 const hero: Character = {
@@ -74,10 +75,22 @@ const longBoard: Storyboard = {
 const conversionDraft: Storyboard = { ...longBoard, sourceStoryContent: content, globalLock: shortBoard.globalLock, sourceSceneSnapshots: [], shots };
 const converter: ConverterPreset = { id: 'converter', name: '通用转换器', workflow: 'all', inputMode: 'all', scope: 'video', enabled: true, version: 'test', systemPrompt: '将剧情转换为可见视频动作。', outputRules: '保留六字段与镜头边界。', updatedAt: 1 };
 const clean = (value: string) => value.trim();
-// The simulated AI owns name/dialogue fidelity. Production now receives its
-// unmasked English directly and must not restore a destructive mock response.
-const mockEnglish = (value: string) => value.split(/(旅人|阿青|林沐|先开门。)/u)
+// The model translates description slots; source-owned names, dialogue and structure are assembled locally.
+interface TranslationDocumentRequest {
+  sourcePrompt: string;
+  slots: Array<{ id: string; sourceText: string; before: string; after: string }>;
+}
+const readTranslationDocument = (value: string): TranslationDocumentRequest => {
+  const data = JSON.parse(value) as TranslationDocumentRequest;
+  assert.equal(typeof data.sourcePrompt, 'string');
+  assert.ok(Array.isArray(data.slots));
+  return data;
+};
+const mockDescription = (value: string) => value.split(/(旅人|阿青|林沐|先开门。)/u)
   .map((part) => /^(?:旅人|阿青|林沐|先开门。)$/u.test(part) ? part : part.replace(/[\p{Script=Han}]+/gu, ' translated ')).join('');
+const mockEnglish = (value: string): string => JSON.stringify({
+  slots: readTranslationDocument(value).slots.map((slot) => ({ id: slot.id, text: mockDescription(slot.sourceText) })),
+});
 const jsonBlock = (value: string, tag: string) => JSON.parse(value.match(new RegExp(`<${tag}>\\s*([\\s\\S]*?)\\s*</${tag}>`, 'u'))![1]);
 const before = JSON.stringify({ shortBoard, longBoard, conversionDraft, context });
 const outputs: Storyboard[] = [];
@@ -483,7 +496,7 @@ for (const route of ['confirmed-slice', 'converted-gap', 'draft-gap'] as const) 
     request: async (system, user, stage) => {
       stages.push(stage);
       if (stage === 'convert') return invalidTimelinePrompt;
-      if (stage === 'translate') return mockEnglish(outputs[0].officialPromptZh!);
+      if (stage === 'translate') return mockEnglish(user);
       const data = jsonBlock(user, 'video_staging_review_data');
       assert.equal(data.taskAuthority, 'preserve-confirmed-schedule', 'format delivery preserves the source schedule');
       assert.ok(!system.includes('VIDEO_AI_SHOT_COVERAGE_V'), 'downstream delivery never receives autonomous shot coverage rules');
@@ -497,7 +510,7 @@ for (const route of ['confirmed-slice', 'converted-gap', 'draft-gap'] as const) 
         shotSourceIds: sourceBoard.shots.map((shot) => [shot.id]) });
     },
   });
-  assert.deepEqual(stages, [...(route === 'confirmed-slice' ? [] : ['convert']), 'review', 'translate', 'translate']);
+  assert.deepEqual(stages, [...(route === 'confirmed-slice' ? [] : ['convert']), 'review', 'translate']);
   assert.equal(repaired.officialPromptZh, outputs[0].officialPromptZh);
   assert.equal(repaired.officialPromptEnError, '');
   assert.equal(JSON.stringify(sourceBoard), snapshot);
@@ -518,24 +531,29 @@ assert.equal(noH3Calls, 2);
 // English-only must not touch conversion config or image data at all.
 const unreadableContext = Object.defineProperty({}, 'assets', { get: () => { throw new Error('English-only read image data'); } }) as OfficialH3ProjectContext;
 for (const characters of [7254, 19281, 25000]) {
-  const baseEnglish = outputs[0].officialPromptEn!;
   const tail = 'END_MUST_NOT_BE_TRUNCATED';
-  const expected = `${baseEnglish}\n${'x'.repeat(characters - baseEnglish.length - 1 - tail.length)}${tail}`;
+  const padding = `\n${'x'.repeat(characters)}${tail}`;
   let translationCalls = 0;
   const englishOnly = { board: outputs[0], context: unreadableContext, clean, mode: 'translate-english' as const,
-    request: async (system: string, _user: string, stage: SingleSegmentPromptStage) => {
+    request: async (system: string, user: string, stage: SingleSegmentPromptStage) => {
       translationCalls += 1;
       assert.equal(stage, 'translate');
       assert.doesNotMatch(system, /7000|字符(?:上限|预算)\s*(?:为|是|[:：=])?\s*\d+|(?:不得超过|最多|精简到|截断到)\s*\d+\s*字符|h3_translation_units/u);
-      return expected;
+      assert.match(system, /只翻译slots的sourceText/u);
+      assert.doesNotMatch(system, /H3_DESCRIPTION_LANGUAGE_/u, 'slot translation is not asked to write a complete H3 body');
+      const data = readTranslationDocument(user);
+      assert.equal(data.sourcePrompt, outputs[0].officialPromptZh);
+      const response = JSON.parse(mockEnglish(user));
+      response.slots[response.slots.length - 1].text += padding;
+      return JSON.stringify(response);
     },
   };
   Object.defineProperty(englishOnly, 'converter', { get: () => { throw new Error('English-only read converter'); } });
   const translated = await generateSingleSegmentPrompt(englishOnly);
   assert.equal(translationCalls, 1);
-  assert.equal(translated.officialPromptEn, expected);
   assert.equal(translated.officialPromptEnError, '');
-  assert.equal(translated.officialPromptEn!.length, characters);
+  assert.ok(translated.officialPromptEn!.includes(padding), 'large model-authored description slots are not truncated');
+  assert.ok(translated.officialPromptEn!.length >= characters);
   for (const key of ['targetOutput', 'officialPromptZh', 'officialPromptSource', 'shots', 'promptTrace', 'promptPlan', 'finalPrompt'] as const) {
     assert.deepEqual(translated[key], outputs[0][key], `long English-only recovery cannot mutate ${key}`);
   }
@@ -545,48 +563,64 @@ const aiReviewSnapshot = JSON.stringify(aiReviewBoard);
 const aiReviewRequests: Array<{ system: string; user: string; stage: SingleSegmentPromptStage }> = [];
 const aiReviewStages: SingleSegmentPromptStage[] = [];
 const aiReviewProgress: number[] = [];
-const reviewedEnglish = aiReviewBoard.officialPromptEn!.replaceAll('旅人', 'Traveler');
 const reviewed = await generateSingleSegmentPrompt({
   board: aiReviewBoard, context: unreadableContext, mode: 'translate-english', reviewWithAi: true,
-  clean: () => { throw new Error('AI reviewed English must not be cleaned or rewritten locally'); },
+  clean: () => { throw new Error('H3 description delivery must not enter body cleanup'); },
   onStage: (stage) => aiReviewStages.push(stage),
   onAiTranslationReview: () => aiReviewProgress.push(aiReviewRequests.length),
   request: async (system, user, stage) => {
     aiReviewRequests.push({ system, user, stage });
-    if (aiReviewRequests.length === 1) return 'Traveler opened the door. This initial draft is incomplete.';
-    const reviewData = jsonBlock(user, 'review_data');
-    assert.equal(reviewData.sourcePrompt, aiReviewBoard.officialPromptZh);
-    assert.equal(reviewData.candidateEnglishPrompt, 'Traveler opened the door. This initial draft is incomplete.');
-    return reviewedEnglish;
+    assert.match(system, /只翻译slots的sourceText/u);
+    assert.doesNotMatch(system, /H3_DESCRIPTION_LANGUAGE_/u);
+    assert.equal(readTranslationDocument(user).sourcePrompt, aiReviewBoard.officialPromptZh);
+    return mockEnglish(user);
   },
 });
-assert.deepEqual(aiReviewStages, ['translate'], 'a second generic translation notice must not overwrite the dedicated AI review progress');
-assert.deepEqual(aiReviewRequests.map((call) => call.stage), ['translate', 'translate']);
-assert.deepEqual(aiReviewProgress, [1], 'the live caller can distinguish AI review progress');
-assert.equal(aiReviewRequests[0].user, aiReviewBoard.officialPromptZh, 'the shared pipeline must forward the unmasked source');
+assert.deepEqual(aiReviewStages, ['translate']);
+assert.deepEqual(aiReviewRequests.map((call) => call.stage), ['translate'], 'legacy review flags do not add another English call');
+assert.deepEqual(aiReviewProgress, [], 'no nonexistent English review is announced');
 assert.match(aiReviewRequests[0].user, /旅人/u);
 assert.doesNotMatch(aiReviewRequests[0].user, /__LH_/u);
-assert.equal(reviewed.officialPromptEn, reviewedEnglish);
-assert.equal(reviewed.englishPrompt, reviewedEnglish);
+assert.ok(reviewed.officialPromptEn?.includes('旅人'), 'canonical Chinese names survive English-only generation');
+assert.equal(reviewed.englishPrompt, reviewed.officialPromptEn);
 assert.equal(reviewed.officialPromptEnError, '');
 assert.equal(reviewed.officialPromptEnSource, aiReviewBoard.officialPromptZh);
-assert.equal(JSON.stringify(aiReviewBoard), aiReviewSnapshot, 'AI review may not mutate saved results before the caller commits');
+for (const key of ['targetOutput', 'officialPromptZh', 'officialPromptSource', 'shots', 'promptTrace', 'promptPlan', 'finalPrompt'] as const) {
+  assert.deepEqual(reviewed[key], aiReviewBoard[key], `English-only translation cannot mutate ${key}`);
+}
+assert.equal(JSON.stringify(aiReviewBoard), aiReviewSnapshot, 'translation does not mutate saved results before the caller commits');
 
-let failingReviewCalls = 0;
-const reviewFailed = await generateSingleSegmentPrompt({
+let failingTranslationCalls = 0;
+const translationFailed = await generateSingleSegmentPrompt({
   board: aiReviewBoard, context: unreadableContext, mode: 'translate-english', reviewWithAi: true, clean,
-  request: async () => {
-    failingReviewCalls += 1;
-    if (failingReviewCalls === 2) throw new Error('AI review API unavailable');
-    return 'An incomplete candidate.';
-  },
+  request: async () => { failingTranslationCalls += 1; throw new Error('English slot API unavailable'); },
 });
-assert.equal(failingReviewCalls, 2);
-assert.equal(reviewFailed.officialPromptEnError, '');
-assert.equal(reviewFailed.officialPromptEn, 'An incomplete candidate.', 'an unavailable reviewer must not discard the AI translation already received');
-assert.ok(reviewFailed.h3DeliveryWarningsEn?.some((warning) => warning.includes('复核未完成')),
-  'the retained candidate must be marked as awaiting review, rather than falsely reported as reviewed');
-assert.equal(JSON.stringify(aiReviewBoard), aiReviewSnapshot, 'transport failure leaves the stored input untouched for the UI atomic commit guard');
+assert.equal(failingTranslationCalls, 1, 'an unavailable translation API must not trigger paid retries');
+assert.match(translationFailed.officialPromptEnError!, /English slot API unavailable/u);
+assert.equal(translationFailed.officialPromptEn, aiReviewBoard.officialPromptEn, 'an English-only failure retains the previously usable English body');
+assert.equal(translationFailed.officialPromptEnSource, aiReviewBoard.officialPromptEnSource);
+assert.deepEqual(translationFailed.h3IdentityBindingsEn, aiReviewBoard.h3IdentityBindingsEn);
+assert.equal(JSON.stringify(aiReviewBoard), aiReviewSnapshot, 'failed transport leaves the stored input untouched');
+
+// A configured output budget must not revive the old paid H3 capacity-recovery loop for slots.
+{
+  let requests = 0;
+  const failed = await generateSingleSegmentPrompt({
+    board: aiReviewBoard, context: unreadableContext, mode: 'translate-english', reviewWithAi: true,
+    maxOutputTokens: 1024, clean,
+    request: async (_system, _user, stage) => {
+      requests += 1;
+      assert.equal(stage, 'translate');
+      throw new TextModelResponseError('length', 'Fixture: English description output reached the configured token limit.');
+    },
+  });
+  assert.equal(requests, 1, 'a source-document length error cannot increase the output budget and repeat the paid request');
+  assert.match(failed.officialPromptEnError!, /configured token limit/u);
+  assert.equal(failed.officialPromptEn, aiReviewBoard.officialPromptEn);
+  assert.equal(failed.officialPromptEnSource, aiReviewBoard.officialPromptEnSource);
+  assert.deepEqual(failed.h3IdentityBindingsEn, aiReviewBoard.h3IdentityBindingsEn);
+  assert.equal(JSON.stringify(aiReviewBoard), aiReviewSnapshot, 'the previously usable saved English pair remains untouched');
+}
 
 const semanticRawSegment: SemanticSegmentSourceContext['segment'] = {
   title: '门廊交接', content: '旅人压住门板，接过钥匙后合上木门。', summary: '开门和钥匙交接',
@@ -609,6 +643,7 @@ const semanticInput: SemanticSegmentSourceContext = {
   },
   creativeDirection: { cameraTerms: [], lightingTerms: [], extraRequirement: '' }, characterContinuity: [],
 };
+const { creativeDirection: _planningPreferences, ...semanticExpressionInput } = semanticInput;
 assert.ok(!semanticInput.segment.content.includes('先开门。'), 'regression fixture must keep dialogue only in the assigned source records');
 for (const { purpose, formatRepair } of [
   { purpose: 'initial' as const, formatRepair: false },
@@ -633,13 +668,16 @@ for (const { purpose, formatRepair } of [
     sourceStoryContent: semanticInput.segment.content, reviewWithAi: true, clean,
     request: async (system, user, stage) => {
       stages.push(stage);
-      if (stage !== 'convert') assertH3DescriptionLanguage(system, stage === 'review' ? '中文' : '英文');
+      if (stage === 'review') assertH3DescriptionLanguage(system, '中文');
       if (stage === 'translate') {
         assert.ok(!user.includes('<semantic_segment_source_data>'), 'translation does not receive a fresh semantic assignment');
         assert.ok(system.includes('STORY_CAUSALITY_TRANSLATION_V1'));
         assert.ok(!user.includes('随后二人前往庭院。'), 'English translates the approved Chinese, not fresh outside events');
         assert.match(system, /以已确认的 sourcePrompt|保真已确认中文sourcePrompt/u);
-        return candidateIdentityBindings ? JSON.stringify({ h3Prompt: candidateChinese, identityBindings: candidateIdentityBindings }) : candidateChinese;
+        assert.equal(readTranslationDocument(user).sourcePrompt,
+          formatRepair ? candidateChinese.replace('overall_soundscape:', 'invalid_soundscape:') : candidateChinese,
+          'English translates the actual accepted Chinese body without silently repairing its structure');
+        return mockEnglish(user);
       }
       assert.match(system, /同一次发话/u);
       assert.ok(system.includes('STORY_UNDERSTANDING_CONTEXT_V1'));
@@ -647,7 +685,8 @@ for (const { purpose, formatRepair } of [
       assert.doesNotMatch(system, /也不提供全片原文/u);
       assert.match(system, /没有对应历史逐字证据就省略坐标并标记sourceLocationStatus=unlocated/u);
       assert.match(system, /不能把generationStoryContent附加对白记录的位置冒充保存原文位置/u);
-      assert.deepEqual(jsonBlock(user, 'semantic_segment_source_data').sequenceSegmentContext, semanticInput);
+      assert.deepEqual(jsonBlock(user, 'semantic_segment_source_data').sequenceSegmentContext, semanticExpressionInput,
+        'adopted semantic evidence is preserved without reapplying planning preferences downstream');
       if (stage === 'convert') {
         assert.equal(jsonBlock(user, 'video_conversion_data').sourceStoryContent, semanticInput.generationStoryContent);
         return convertedCanonical;
@@ -672,7 +711,8 @@ for (const { purpose, formatRepair } of [
       assert.equal(data.shots[0].sourceStart, 0);
       assert.equal(data.shots[0].sourceEnd, 7);
       assert.equal(data.segmentScope.savedSegmentSourceStoryContent.slice(data.shots[0].sourceStart, data.shots[0].sourceEnd), data.shots[0].sourceExcerpt);
-      candidateChinese = data.candidatePrompt;
+      if (!data.candidatePrompt) assert.equal(data.candidateState, 'canonical-awaiting-h3-delivery');
+      candidateChinese = data.candidatePrompt || outputs[0].officialPromptZh!;
       if (purpose === 'reference-refresh') {
         assert.equal(data.taskAuthority, 'preserve-confirmed-schedule');
         assert.equal(data.revisionScope, 'reference-refresh-non-audio-only');
@@ -699,7 +739,7 @@ for (const { purpose, formatRepair } of [
   });
   assert.deepEqual(stages, [
     ...(purpose === 'dialogue-repair' ? [] : ['convert']), 'review',
-    'translate', 'translate',
+    'translate',
   ], 'local format differences must not add another check, review or repair request');
   if (formatRepair) assert.ok(generated.officialPromptZh?.includes('invalid_soundscape:'),
     'the AI review result is preserved instead of being rewritten or rejected by the local protocol checker');
@@ -713,4 +753,4 @@ for (const { purpose, formatRepair } of [
   assert.equal(JSON.stringify(sourceBoard), sourceSnapshot, 'request preparation never rewrites existing saved prompts');
 }
 
-console.log('single-segment short/long shared prompt and AI translation review checks passed');
+console.log('single-segment Chinese delivery and single-request English document checks passed');

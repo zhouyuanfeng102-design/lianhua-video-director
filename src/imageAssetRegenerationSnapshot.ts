@@ -82,5 +82,6 @@ export const withDirectImageRegenerationSnapshot = (asset: ReferenceAsset, task:
     sourceStoryboardId: task.sourceStoryboardId, sourceShotId: task.sourceShotId,
     imageFrameBatchId: task.imageFrameBatchId, imageFrameIndex: task.imageFrameIndex,
     imageFrameCount: task.imageFrameCount, imageFrameDescription: task.imageFrameDescription, imageFrameTimeSec: task.imageFrameTimeSec,
+    currentFrameSpatialSource: task.currentFrameSpatialSource, continuityAssetId: task.continuityAssetId,
   };
 };

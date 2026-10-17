@@ -26,6 +26,8 @@ import type { GenerationTask, ImageApiConfig, ImageGenerationTask, ImageReferenc
 type RegenerationSource = {
   conversionSource: string;
   conversionIdentityContext?: string;
+  currentFrameSpatialSource?: string;
+  continuityAssetId?: string;
   converterSystemPrompt: string;
   referenceAssetIds: string[];
   primaryReferenceAssetIds: string[];
@@ -191,6 +193,7 @@ export const resolveImageAssetRegenerationTask = (
       regenerationRootTaskId: snapshot.regenerationRootTaskId, regenerationBaseName: snapshot.regenerationBaseName,
       imageFrameBatchId: asset.imageFrameBatchId, imageFrameIndex: asset.imageFrameIndex, imageFrameCount: asset.imageFrameCount,
       imageFrameDescription: asset.imageFrameDescription, imageFrameTimeSec: asset.imageFrameTimeSec,
+      currentFrameSpatialSource: asset.currentFrameSpatialSource, continuityAssetId: asset.continuityAssetId,
       resultAssetId: asset.id, resultUrl: asset.url, createdAt: asset.createdAt, updatedAt: asset.updatedAt,
     };
   }
@@ -224,7 +227,9 @@ export const resolveImageAssetRegenerationTask = (
       ? privateImageVariantNegativePrompt(imageVariant)
       : isLandscapeImageRequest(assetKind, imageVariant)
         ? landscapeRegenerationNegativePrompt(asset.negativePrompt)
-        : ordinaryImageVariantNegativePrompt(imageVariant) || asset.negativePrompt,
+        : imageVariant === 'three-view'
+          ? asset.negativePrompt || ordinaryImageVariantNegativePrompt(imageVariant)
+          : ordinaryImageVariantNegativePrompt(imageVariant) || asset.negativePrompt,
     width: resolvedSize.width,
     height: resolvedSize.height,
     ...(typeof requestSize?.sizeOverride === 'boolean' ? { sizeOverride: requestSize.sizeOverride } : {}),
@@ -234,6 +239,7 @@ export const resolveImageAssetRegenerationTask = (
     imageFrameBatchId: asset.imageFrameBatchId,
     imageFrameIndex: asset.imageFrameIndex, imageFrameCount: asset.imageFrameCount,
     imageFrameDescription: asset.imageFrameDescription, imageFrameTimeSec: asset.imageFrameTimeSec,
+    currentFrameSpatialSource: asset.currentFrameSpatialSource, continuityAssetId: asset.continuityAssetId,
     referenceScope: privateAsset ? 'nsfw-private-profile' : asset.referenceScope,
     nsfwPrivatePart: privatePart,
     imagePromptRuleSetId: asset.imagePromptRuleSetId, imagePromptRuleSetVersion: asset.imagePromptRuleSetVersion,
@@ -307,6 +313,8 @@ export const prepareCurrentShotImageRegenerationTask = (
     prompt: '',
     converterSystemPrompt: '',
     conversionSource: request.conversionSource,
+    currentFrameSpatialSource: request.currentFrameSpatialSource || request.imageFrameDescription || '',
+    continuityAssetId: frozenReferenceTask ? task.continuityAssetId : undefined,
     conversionIdentityContext: buildImagePromptIdentityContext(project, [], storyboard),
     referenceAssetIds: frozenReferenceTask ? cleanIdList(task.referenceAssetIds) : [...request.referenceAssetIds],
     primaryReferenceAssetIds: frozenReferenceTask ? cleanIdList(task.primaryReferenceAssetIds) : [...request.primaryReferenceAssetIds],
@@ -355,6 +363,8 @@ const snapshotSource = (task: ImageGenerationTask): RegenerationSource | null =>
     conversionSource: typeof task.conversionSource === 'string' ? task.conversionSource : '',
     ...(typeof task.conversionIdentityContext === 'string'
       ? { conversionIdentityContext: task.conversionIdentityContext } : {}),
+    ...(typeof task.currentFrameSpatialSource === 'string' ? { currentFrameSpatialSource: task.currentFrameSpatialSource } : {}),
+    ...(typeof task.continuityAssetId === 'string' ? { continuityAssetId: task.continuityAssetId } : {}),
     converterSystemPrompt: typeof task.converterSystemPrompt === 'string' ? task.converterSystemPrompt : '',
     referenceAssetIds: cleanIdList(task.referenceAssetIds),
     primaryReferenceAssetIds: cleanIdList(task.primaryReferenceAssetIds),
@@ -437,6 +447,7 @@ const landscapeRegenerationNegativePrompt = (negativePrompt?: string): string =>
 const regenerationNegativePrompt = (task: ImageGenerationTask): string | undefined => {
   if (task.assetKind === 'custom') return task.negativePrompt;
   if (isNsfwPrivateImageTask(task)) return privateImageVariantNegativePrompt(task.imageVariant);
+  if (task.imageVariant === 'three-view') return task.negativePrompt || ordinaryImageVariantNegativePrompt(task.imageVariant);
   const variantNegative = ordinaryImageVariantNegativePrompt(task.imageVariant);
   if (isLandscapeImageRequest(task.assetKind, task.imageVariant)) {
     return landscapeRegenerationNegativePrompt(task.negativePrompt);
@@ -472,6 +483,7 @@ export const resolveImageRegenerationSource = (
       referenceAssetIds: cleanIdList(task.referenceAssetIds),
       primaryReferenceAssetIds: cleanIdList(task.primaryReferenceAssetIds),
       referenceAssetSnapshots: snapshots,
+      currentFrameSpatialSource: task.currentFrameSpatialSource, continuityAssetId: task.continuityAssetId,
     };
   }
   const saved = snapshotSource(task);
@@ -686,6 +698,8 @@ export const buildImageRegenerationTask = (
     conversionSource: input.source.conversionSource,
     ...(typeof input.source.conversionIdentityContext === 'string'
       ? { conversionIdentityContext: input.source.conversionIdentityContext } : {}),
+    ...(typeof input.source.currentFrameSpatialSource === 'string' ? { currentFrameSpatialSource: input.source.currentFrameSpatialSource } : {}),
+    ...(typeof input.source.continuityAssetId === 'string' ? { continuityAssetId: input.source.continuityAssetId } : {}),
     converterSystemPrompt: input.source.converterSystemPrompt,
     referenceAssetIds: [...input.source.referenceAssetIds],
     primaryReferenceAssetIds: [...input.source.primaryReferenceAssetIds],

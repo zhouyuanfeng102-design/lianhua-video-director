@@ -13,6 +13,8 @@ import { characterVariantDisplayName } from './characterVariants';
 import { normalizeFemaleCharacterVocabularyRecord } from './characterVocabulary';
 import { IMAGE_STORY_SPATIAL_STATE_RULE } from './spatialContinuityRules';
 import { normalizeAssetReferenceEntityBinding } from './assetCharacterBinding';
+import { PROP_THREE_VIEW_CANVAS as THREE_VIEW_CANVAS, PROP_THREE_VIEW_LAYOUT_RULE, PROP_THREE_VIEW_NEGATIVE_PROMPT } from './imagePropSpecification';
+export { PROP_THREE_VIEW_LAYOUT_RULE, PROP_THREE_VIEW_NEGATIVE_PROMPT } from './imagePropSpecification';
 
 export type ImageAssetKind = 'character' | 'location' | 'prop' | 'grid';
 export type ImageEntityKind = Exclude<ImageAssetKind, 'grid'>;
@@ -711,6 +713,8 @@ export const imagePromptOutputSpecificationRule = (
     ? '本次仍只绘制一个指定部位的连续近景或微距画面，保留裁切与部位占画面比例；指定部位只出现一次，邻近结构只作方位锚点，不拉远补全身或另开窗口。'
     : variant === 'private-full-body' || variant === 'full-body'
       ? '本次仍是一个完整主体的单幅全身图，头到脚或对应物种端点完整入画，身体比例与主体相对画面高度保持自然。'
+      : variant === 'three-view'
+        ? '本次仍是同一物品的三视图参考板：恰好三个等宽区域，从左到右为正面、严格90度侧面、背面；各区域完整展示同一状态的物品，保持统一尺度、基线与结构比例。'
       : variant === 'five-view' || variant === 'private-five-view'
         ? '本次仍是同一人物的五区域参考板：左侧上下两头肩特写，右侧三个指定角度全身；固定区域、顺序与各区取景保持。'
         : variant === 'turnaround' || variant === 'private-turnaround'
@@ -737,6 +741,12 @@ const PRIVATE_FULL_BODY_CANVAS = { width: 1024, height: 1536 } as const;
 const FOUR_VIEW_CANVAS = { width: 1536, height: 1024 } as const;
 const FIVE_VIEW_CANVAS = { width: 1536, height: 1024 } as const;
 const LANDSCAPE_CANVAS = { width: 1536, height: 1024 } as const;
+
+export const propThreeViewCompatibleNegativePrompt = (value: string | undefined): string => (value || '')
+  .split(/[,，;；]/u)
+  .map((part) => part.trim())
+  .filter((part) => part && !/^(?:duplicate(?:d)? objects?|multiple objects?|multiple views?|contact sheet|collage|panels?|split screen|triptych|three views?|three[-\s]?view|多(?:个|件)物(?:品|件)|重复物(?:品|件)|多视图|三视图|拼图|分屏)$/iu.test(part))
+  .join(', ');
 
 /** Shared by initial generation, conversion and retries. The two portraits
  * intentionally use a different framing/scale from the three full bodies. */
@@ -927,6 +937,12 @@ const IMAGE_VARIANT_SPECS: Readonly<Record<ImageVariant, ImageVariantGenerationS
     direction: '物品近距离特写，材质和磨损细节清楚。',
     canvas: SQUARE_CANVAS,
   },
+  'three-view': {
+    id: 'three-view',
+    label: '三视图',
+    direction: PROP_THREE_VIEW_LAYOUT_RULE,
+    canvas: THREE_VIEW_CANVAS,
+  },
   'private-close-up': {
     id: 'private-close-up',
     label: '私密部位特写',
@@ -950,7 +966,7 @@ const IMAGE_VARIANT_SPECS: Readonly<Record<ImageVariant, ImageVariantGenerationS
 export const IMAGE_VARIANT_OPTIONS: Readonly<Record<ImageAssetKind, readonly ImageVariant[]>> = {
   character: ['portrait', 'half-body', 'full-body', 'five-view'],
   location: ['landscape', 'snapshot', 'first-frame'],
-  prop: ['icon', 'close-up', 'showcase'],
+  prop: ['close-up', 'three-view'],
   grid: ['grid'],
 };
 
@@ -975,6 +991,9 @@ export const ordinaryImageVariantConverterRule = (
     imageVariantLayoutForOutput(rule, outputSpecification), imagePromptOutputSpecificationRule(outputSpecification, variant),
   ].filter(Boolean).join('\n');
   if (variant === 'landscape') return withOutputSpecification(IMAGE_PROMPT_LANDSCAPE_SCOPE_CONTRACT);
+  if (variant === 'three-view') {
+    return withOutputSpecification(`当前目标是物品三视图参考板，三视图要求优先于旧预设中的单件单画面或禁止重复物品的宽泛措辞。${PROP_THREE_VIEW_LAYOUT_RULE}最终正文完整落实三个区域、顺序、各自视角和设计一致性；自然语言连贯表达，SD/NAI使用等价结构标签，不添加人物角色段。`);
+  }
   if (variant === 'snapshot' || variant === 'first-frame' || variant === 'last-frame'
     || variant === 'storyboard-frame' || variant === 'grid') {
     return withOutputSpecification([IMAGE_VARIANT_SPECS[variant].direction, IMAGE_STORY_SPATIAL_STATE_RULE].join('\n'));
@@ -994,6 +1013,8 @@ export const ordinaryImageVariantConverterRule = (
 export const ordinaryImageVariantNegativePrompt = (variant: ImageVariant): string => (
   variant === 'landscape'
     ? LANDSCAPE_IMAGE_NEGATIVE_PROMPT
+    : variant === 'three-view'
+    ? PROP_THREE_VIEW_NEGATIVE_PROMPT
     : variant === 'five-view'
     ? FIVE_VIEW_NEGATIVE_PROMPT
     : variant === 'full-body'

@@ -195,7 +195,7 @@ export interface Prop {
 
 export type AssetType = 'character' | 'location' | 'prop' | 'grid' | 'reference' | 'first-frame' | 'last-frame' | 'video' | 'audio' | 'clay-render';
 export type AssetRole = 'character' | 'scene' | 'prop' | 'grid' | 'style' | 'first-frame' | 'last-frame' | 'motion' | 'audio' | 'composition';
-export type ImageVariant = 'portrait' | 'half-body' | 'full-body' | 'five-view' | 'turnaround' | 'reference' | 'landscape' | 'snapshot' | 'first-frame' | 'last-frame' | 'storyboard-frame' | 'icon' | 'close-up' | 'showcase' | 'grid' | 'private-full-body' | 'private-five-view' | 'private-turnaround' | 'private-four-in-one' | 'private-close-up';
+export type ImageVariant = 'portrait' | 'half-body' | 'full-body' | 'five-view' | 'turnaround' | 'reference' | 'landscape' | 'snapshot' | 'first-frame' | 'last-frame' | 'storyboard-frame' | 'icon' | 'close-up' | 'three-view' | 'showcase' | 'grid' | 'private-full-body' | 'private-five-view' | 'private-turnaround' | 'private-four-in-one' | 'private-close-up';
 
 /** Media metadata introduced in schema v4. Optional so v1-v3 projects remain readable. */
 export type ReferenceMediaType = 'image' | 'video' | 'audio' | 'clay-render';
@@ -214,6 +214,20 @@ export interface AudioCue {
   notes?: string;
 }
 
+/** Explicit roles in an already authored action or utterance; never inferred from titles. */
+export interface H3IdentityEventBinding {
+  eventId: string;
+  kind?: 'action' | 'dialogue';
+  /** Exact event-body excerpt; excludes section, Shot and cut markers. */
+  referenceAnchor?: string;
+  dialogueId?: string;
+  actorCharacterId?: string;
+  targetCharacterIds?: string[];
+  speakerCharacterId?: string;
+  listenerCharacterIds?: string[];
+  addressedCharacterIds?: string[];
+}
+
 /** AI-authored visual identity anchors. They are metadata, never extra H3 sections. */
 export interface H3IdentityBindings {
   version: 1;
@@ -222,9 +236,13 @@ export interface H3IdentityBindings {
     name: string;
     subjectToken?: string;
     speakerToken?: string;
+    /** Existing narrative relationships or forms of address, never inferred from names. */
+    relationship?: string;
     /** Exact, unique, standalone identity sentence in the paired H3 prompt. */
     referenceAnchor: string;
   }>;
+  /** Optional explicit source roles paired with this exact H3; absent in historical data. */
+  events?: H3IdentityEventBinding[];
 }
 
 export type CharacterPresence = 'visible' | 'offscreen' | 'mentioned';
@@ -376,6 +394,11 @@ export interface StoryboardImageFrameMetadata {
   imageFrameCount?: number;
   /** Frozen AI-selected single moment, retained for regeneration and stale-result checks. */
   imageFrameDescription?: string;
+  /** Explicit evidence for this frozen instant only; never reconstructed from
+   * a whole shot, future action or a neighbouring frame. */
+  currentFrameSpatialSource?: string;
+  /** Same-batch successful first image used only for appearance continuity. */
+  continuityAssetId?: string;
   /** Optional AI-selected second on the current segment's local timeline. */
   imageFrameTimeSec?: number;
 }
@@ -704,6 +727,8 @@ export interface SemanticEventCausality {
   certainty: 'explicit' | 'context-supported' | 'unknown';
   actorCharacterId?: string;
   targetCharacterId?: string;
+  /** Explicit multiple targets; the historical single target remains independently readable. */
+  targetCharacterIds?: string[];
 }
 
 /** An adopted visual description retains its actual pre-conversion source. */
@@ -729,7 +754,19 @@ export interface SemanticSegmentSource {
   /** IDs may recur across segments for different phases of one long event. */
   events: Array<{ id: string; description: string; phase?: string; causality?: SemanticEventCausality }>;
   /** IDs may recur for an explicitly continuous utterance, never a local replay. */
-  dialogues: Array<{ id: string; speaker: string; text: string; language?: string; continuation?: string }>;
+  dialogues: Array<{
+    id: string;
+    speaker: string;
+    text: string;
+    /** Explicit source character identity; absent for unknown and historical speakers. */
+    speakerCharacterId?: string;
+    /** Confirmed listeners; tracked independently from forms of address. */
+    listenerCharacterIds?: string[];
+    /** Confirmed targets of a form of address, never the speaker inferred from that address. */
+    addressedCharacterIds?: string[];
+    language?: string;
+    continuation?: string;
+  }>;
   /** AI-selected adopted staging for this segment, never original evidence. */
   battleStaging?: import('./battleScenePlanning').BattleSceneStaging[];
   /** Model-authored world and event phases shared with adjacent segments. */

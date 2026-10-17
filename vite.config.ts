@@ -171,6 +171,9 @@ export default defineConfig({
             'storyboardImageToImage.css',
           ].some((file) => normalized.endsWith(`/src/${file}`))) return 'image-to-image';
           if (normalized.endsWith('/src/components/VideoWorkbenchView.tsx') || normalized.endsWith('/src/useVideoWorkbenchController.ts')) return 'video-workbench';
+          // Both image generation and rule catalogs read these constants while
+          // initializing. A dependency-free chunk prevents a new back edge.
+          if (normalized.endsWith('/src/imagePropSpecification.ts')) return 'image-prop-specification';
           // Image variant/entity helpers and safe result retry snapshots depend
           // only on pure helpers and generation contracts, never storage or
           // renderer state. Keep their shared eager layer together so storage's
@@ -187,6 +190,7 @@ export default defineConfig({
             // The rule catalog eagerly reads these family definitions; keep
             // them together instead of falling back to the domain cycle.
             'imagePromptModelFamilies.ts',
+            'imagePropPromptRules.ts',
             'modelProfiles.ts', 'novelai.ts', 'nsfwPrivateAssets.ts', 'nsfwPromptRules.ts', 'promptConstraints.ts',
             'semanticEvents.ts', 'sourceIntegrity.ts', 'masterTimeline.ts', 'storyboardSubject.ts', 'storyPacing.ts', 'promptDialogueLanguage.ts', 'promptTranslation.ts',
             'userFacingError.ts', 'videoConversionRules.ts', 'visualStyles.ts', 'seedancePrompt.ts',

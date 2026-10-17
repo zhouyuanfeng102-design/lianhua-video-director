@@ -1,7 +1,7 @@
 import type { H3IdentityBindings, PromptCharacterParticipation } from './types';
 import { characterParticipationCoverageIssues, characterParticipationIssues, inspectCharacterParticipation } from './characterParticipation';
 import { readH3StagingShotMetadata, type H3StagingShotMetadata } from './h3StagingMetadata';
-import { H3DeliveryValidationError, H3IdentityMetadataError, H3_IDENTITY_SCHEMA_RULE, h3FieldIssue, inspectH3IdentityBindings, type H3DeliveryFieldIssue } from './h3DeliverySchema';
+import { H3DeliveryValidationError, H3IdentityMetadataError, H3_IDENTITY_SCHEMA_RULE, copyH3IdentityEventBindings, h3FieldIssue, inspectH3IdentityBindings, type H3DeliveryFieldIssue } from './h3DeliverySchema';
 
 const record = (value: unknown): value is Record<string, unknown> => value !== null
   && typeof value === 'object' && !Array.isArray(value)
@@ -110,7 +110,10 @@ const readAiAuthoredEnvelope = (value: Record<string, unknown>): H3DeliveryEnvel
         if (entry) characters.push(entry);
         else warnings.push(`第 ${index + 1} 项人物身份绑定数据无法读取，已跳过该项，参考图关联待完善。`);
       });
-      if (!metadata.characters.length || characters.length) delivery.identityBindings = { version: 1, characters };
+      if (!metadata.characters.length || characters.length) {
+        const events = copyH3IdentityEventBindings(metadata.events);
+        delivery.identityBindings = { version: 1, characters, ...(events ? { events } : {}) };
+      }
     }
   }
   if (value.characterParticipation !== undefined) {
@@ -276,7 +279,9 @@ export const createH3IdentityDeliveryReader = (
 
 export const H3_IDENTITY_BINDINGS_RULE = [
   H3_IDENTITY_SCHEMA_RULE,
-  'identityBindings是交付元数据，不是H3正文中的新section。返回version:1和characters数组；每项为characterId、原名name、可选subjectToken（只复用正文已有<Subject N>）、可选speakerToken（本段实际发声者的稳定(Sn)）、referenceAnchor。characterId必须来自提供的characterIdentityFacts，不按姓名猜测ID；无绑定资料的临时人物不虚构资产ID。',
+  'identityBindings是交付元数据，不是H3正文中的新section。返回version:1和characters数组；每项为characterId、原名name、可选subjectToken（只复用正文已有<Subject N>）、可选speakerToken（本段实际发声者的稳定(Sn)）、可选relationship、referenceAnchor。characterId必须来自提供的characterIdentityFacts，不按姓名猜测ID；无绑定资料的临时人物不虚构资产ID。relationship仅简记输入已有明确人物关系与称呼对象，未知时省略，不从称谓或近邻句推断关系。',
+  '人物原名是稳定身份锚点：name及中文原名在中文稿、英文稿和各镜正文中保持原字，不翻译、音译或以“师父/师姐”等关系称谓替代不同人物。依据已给出的明确关系区分谁说话、谁听话和台词中谁被称呼；称呼对象不是说话人，同一人物换镜、换语言或被不同人称呼仍沿用同一characterId及已声明Subject/声源。',
+  '在本次已有生成中同时给出可选identityBindings.events，逐项沿用已知源事件或对白的eventId；每项可有kind（action/dialogue）、dialogueId、referenceAnchor、actorCharacterId、targetCharacterIds、speakerCharacterId、listenerCharacterIds、addressedCharacterIds。referenceAnchor逐字引用本次H3中唯一对应的动作或发话正文片段，可包含已有动作区间和<d>，不包含section、[Shot]或At切点。动作的actor/target与对白的speaker/listener/addressed分别关联输入已有characterId，动作实施者不得从说话人、称呼对象或邻近人物反推；未知字段省略。元数据只记录本次已有动作与对白，不新增事件、镜头、时间或发话。',
   'referenceAnchor必须逐字等于h3Prompt中仅出现一次的一条独立、简短纯视觉身份定义句。full-reference把这句写在subject_definitions内；三字段把这句自然写在该人物首次实际出现或发声的[Shot N]正文内，不限首镜，不放在镜头标记之前，不增section。后镜、远景、背影或静默人物同样不能遗漏，身份定义不是强迫人物提前入画。该句可包含完整姓名、已有Subject与S编号及必要外貌，但不包含Picture标签、动作、对白、口型、剧情结果、[Shot]标记或任何时间片段，不把整镜正文当锚点。可用自然句“Identity: 姓名 (S1), ... .”，不要新增identity:章节。人物实际行动和逐句发话另写在各镜正文。',
   '只给实际发声人物speakerToken，静默人物仍可有视觉身份锚点但不能因主角或有参考图而分配声音。同一人物跨镜speakerToken不变，且与每句<d>紧邻的完整姓名/声源一致；人物不同形态按给定characterId分别对应，不把形态资产按基础姓名合并。identityBindings只定位既有视觉身份，不重复朗读人物名字。',
   '交付前将每项referenceAnchor逐字对照本次最终h3Prompt，必须恰好出现一次且与已声明的Subject/声源编号一致；中文元数据不能配英文正文，后续翻译、衔接、参考更新或协议修复改动身份句时同步返回新的完整identityBindings。不能只改正文后沿用旧锚点，也不能省略、清空或删除已提供人物记录来消除绑定错误。',

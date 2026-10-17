@@ -85,6 +85,23 @@ export const assetReferenceEntityOwners = (project: Project, asset: ReferenceAss
   ];
 };
 
+/** Current image associations are derived from binding authority, not the
+ * immutable entity asset lists. Invalid or duplicated records count nowhere. */
+export const assetReferenceEntityImageCounts = (
+  project: Project,
+): Record<AssetReferenceEntityBinding['kind'], Map<string, number>> => {
+  const counts = { character: new Map<string, number>(), location: new Map<string, number>(), prop: new Map<string, number>() };
+  const visitedAssetIds = new Set<string>();
+  for (const asset of project.assets) {
+    if (visitedAssetIds.has(asset.id)) continue;
+    visitedAssetIds.add(asset.id);
+    for (const { kind, entity } of assetReferenceEntityOwners(project, asset)) {
+      counts[kind].set(entity.id, (counts[kind].get(entity.id) || 0) + 1);
+    }
+  }
+  return counts;
+};
+
 export const assetReferenceCharacterOwners = (project: Project, asset: ReferenceAsset): Character[] => (
   assetReferenceEntityOwners(project, asset).flatMap((owner) => owner.kind === 'character' ? [owner.entity] : [])
 );

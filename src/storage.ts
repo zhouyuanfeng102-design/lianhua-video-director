@@ -1576,6 +1576,7 @@ const imageTaskVariants = new Set([
   'storyboard-frame',
   'icon',
   'close-up',
+  'three-view',
   'showcase',
   'grid',
   'private-full-body',
@@ -1635,6 +1636,7 @@ const normalizeImagePromptPresetSelections = (
     scene: 'location',
     environment: 'location',
     prop: 'prop',
+    'three-view': 'prop',
     item: 'prop',
     storyboard: 'storyboard',
     shot: 'storyboard',
@@ -1688,6 +1690,9 @@ const normalizeStoryboardImageFrameMetadata = (value: Partial<Record<keyof Story
   imageFrameCount: normalizeStoryboardImageCount(value.imageFrameCount),
   imageFrameDescription: typeof value.imageFrameDescription === 'string' && value.imageFrameDescription.trim()
     ? value.imageFrameDescription : undefined,
+  currentFrameSpatialSource: typeof value.currentFrameSpatialSource === 'string'
+    ? value.currentFrameSpatialSource : undefined,
+  continuityAssetId: typeof value.continuityAssetId === 'string' ? value.continuityAssetId : undefined,
   imageFrameTimeSec: typeof value.imageFrameTimeSec === 'number' && Number.isFinite(value.imageFrameTimeSec)
     ? value.imageFrameTimeSec : undefined,
 });

@@ -252,7 +252,8 @@ const readEventCausality = (value: unknown, label: string): SemanticEventCausali
   return { actor: value.actor as string, target: value.target as string, action: value.action as string,
     result: value.result as string, evidence: value.evidence as string, certainty: value.certainty as SemanticEventCausality['certainty'],
     ...(typeof value.actorCharacterId === 'string' ? { actorCharacterId: value.actorCharacterId } : {}),
-    ...(typeof value.targetCharacterId === 'string' ? { targetCharacterId: value.targetCharacterId } : {}) };
+    ...(typeof value.targetCharacterId === 'string' ? { targetCharacterId: value.targetCharacterId } : {}),
+    ...(stringList(value.targetCharacterIds) ? { targetCharacterIds: [...value.targetCharacterIds] } : {}) };
 };
 
 const readSemanticSource = (value: unknown, label: string, sourceLength?: number): SemanticSegmentSource => {
@@ -285,6 +286,9 @@ const readSemanticSource = (value: unknown, label: string, sourceLength?: number
       throw new SemanticSequenceTechnicalError([`${label}.dialogues[${index}] 字段格式无效`]);
     }
     return { id: item.id, speaker: item.speaker, text: item.text,
+      ...(typeof item.speakerCharacterId === 'string' ? { speakerCharacterId: item.speakerCharacterId } : {}),
+      ...(stringList(item.listenerCharacterIds) ? { listenerCharacterIds: [...item.listenerCharacterIds] } : {}),
+      ...(stringList(item.addressedCharacterIds) ? { addressedCharacterIds: [...item.addressedCharacterIds] } : {}),
       ...(typeof item.language === 'string' ? { language: item.language } : {}),
       ...(typeof item.continuation === 'string' ? { continuation: item.continuation } : {}) };
   });

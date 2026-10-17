@@ -10,11 +10,12 @@ import { VIDEO_ACTING_CAMERA_TRANSLATION_RULE } from '../src/videoActingCameraRu
 import { withVideoActionChoreographyScope } from '../src/videoActionChoreographyRules';
 import { SPATIAL_COORDINATE_RULE, SPATIAL_TRANSLATION_RULE } from '../src/spatialContinuityRules';
 import { requestTextModel } from '../src/services/llm';
-import type { TextApiConfig } from '../src/types';
+import type { H3IdentityBindings, TextApiConfig } from '../src/types';
 import {
   translateVideoPromptToEnglish,
   VIDEO_PROMPT_ENGLISH_AI_REVIEW_SYSTEM_PROMPT,
   VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT,
+  VIDEO_PROMPT_ENGLISH_DOCUMENT_TRANSLATION_SYSTEM_PROMPT,
   VIDEO_PROMPT_ENGLISH_TRANSLATION_SYSTEM_PROMPT,
 } from '../src/promptTranslation';
 
@@ -49,7 +50,7 @@ assert.equal(
 );
 assert.match(
   receivedSystemPrompt,
-  /只翻译语言，不改写剧情，不添加或删除镜头/u,
+  /保留原有镜数、切点、姓名、因果、对白、字段和参考关系，不在翻译阶段重新导演/u,
   'the model must be told to translate without changing the storyboard structure',
 );
 assert.match(receivedSystemPrompt, /不把“无”、N\/A、安静背景或声音间隙扩写成连续底噪/u);
@@ -521,9 +522,25 @@ for (const [sourceCue, englishCue] of [
     'translation must accept natural near-silence without strengthening or synthesizing foley');
 }
 
-// Live AI mode must send the actual full source and make a second real request.
-// Literal name counts, romanization, quote style and timestamps do not become
-// a new local acceptance gate after the configured model has reviewed them.
+// Live H3 translation sends the complete source as context, and the model returns descriptions only.
+interface DocumentTranslationRequest {
+  sourcePrompt: string;
+  characters: Array<{ characterId: string; name: string; speakerToken?: string }>;
+  utterances: Array<{ text: string; speakerCharacterId?: string; speakerToken?: string }>;
+  slots: Array<{ id: string; sourceText: string; before: string; after: string }>;
+}
+const readDocumentTranslationRequest = (user: string, expectedSource: string): DocumentTranslationRequest => {
+  const data = JSON.parse(user) as DocumentTranslationRequest;
+  assert.equal(data.sourcePrompt, expectedSource, 'the full source remains available as read-only context');
+  assert.ok(Array.isArray(data.characters) && Array.isArray(data.utterances));
+  assert.ok(data.slots.length > 0);
+  assert.ok(data.slots.every((slot) => typeof slot.before === 'string' && typeof slot.after === 'string'));
+  return data;
+};
+const descriptionSlotsResponse = (data: DocumentTranslationRequest, translate: (text: string) => string = (text) => text): string => (
+  JSON.stringify({ slots: data.slots.map((slot) => ({ id: slot.id, text: translate(slot.sourceText) })) })
+);
+const sourceDialogue = (prompt: string): string[] => Array.from(prompt.matchAll(/<d>[\s\S]*?<\/d>|“[^”]*”/gu), (match) => match[0]);
 const aiSource = [
   'subject_definitions:',
   '<Subject 1> is 林沐 referenced from <Picture 1>: 男性剑客。',
@@ -537,177 +554,166 @@ const aiSource = [
   'non_diegetic_music: N/A',
   `完整原稿尾段：${'末段动作与原稿对白继续保留。'.repeat(2200)}TAIL_OF_COMPLETE_SOURCE`,
 ].join('\n');
-const aiCandidate = [
-  'subject_definitions:',
-  '<Subject 1> is Lin Mu referenced from <Picture 1>: a swordsman.',
-  'detailed_description: [Shot 1] The swordsman blocks a sword.',
-  'The initial draft omitted the second shot and incorrectly translated the spoken words.',
-  `全文候选尾段：${'UNTOUCHED_ENGLISH_DRAFT '.repeat(1200)}TAIL_OF_COMPLETE_DRAFT`,
-].join('\n');
-for (const reviewedName of ['林沐', 'Lin Mu']) {
-  const reviewedEnglish = [
-    'subject_definitions:',
-    `<Subject 1> is ${reviewedName} referenced from <Picture 1>: a male swordsman.`,
-    '<Subject 2> is 小师姐 referenced from <Picture 2>: a cultivator in cyan robes.',
-    'summary: A sparring exchange on the practice ground.',
-    'retention_analysis: <Subject 1> and <Subject 2> fully_preserved.',
-    'detailed_description:',
-    `[Shot 1] <Subject 1> blocks <Subject 2>'s blade. At 1 second, ${reviewedName} says 「师姐，接招。」`,
-    '[Shot 2] At 00:05.000, <Subject 2> lowers her sword, then 小师姐 says 「再来一次。」 at 1 second.',
-    'overall_soundscape: A brief clash of blades.',
-    'non_diegetic_music: N/A',
-  ].join('\n');
-  const aiRequests: Array<{ system: string; user: string }> = [];
-  const progressCalls: number[] = [];
-  const aiResult = await translateVideoPromptToEnglish({
-    sourcePrompt: aiSource,
-    reviewWithAi: true,
-    isCurrent: () => true,
-    onReview: () => progressCalls.push(aiRequests.length),
-    clean: () => { throw new Error('AI-reviewed text must not pass through a local content cleaner'); },
+for (const flags of [{ reviewWithAi: true }, { acceptAiAuthoredContent: true }]) {
+  let calls = 0;
+  let reviews = 0;
+  const result = await translateVideoPromptToEnglish({
+    sourcePrompt: aiSource, ...flags,
+    onReview: () => { reviews += 1; },
+    clean: () => { throw new Error('document assembly must not enter the legacy body cleaner'); },
     request: async (system, user) => {
-      aiRequests.push({ system, user });
-      return aiRequests.length === 1 ? aiCandidate : reviewedEnglish;
+      calls += 1;
+      assert.ok(system.includes(VIDEO_PROMPT_ENGLISH_DOCUMENT_TRANSLATION_SYSTEM_PROMPT.split('\n')
+        .find((line) => line.startsWith('本次翻译采用来源文档'))!));
+      assert.match(system, /只翻译slots的sourceText.*英文描述片段/u, 'the model translates slots rather than authoring an H3 body');
+      const data = readDocumentTranslationRequest(user, aiSource);
+      assert.match(data.sourcePrompt, /TAIL_OF_COMPLETE_SOURCE$/u, 'long source context is not cut off');
+      return descriptionSlotsResponse(data, (text) => text.replace('男性剑客', 'male swordsman').replace('青衣修士', 'cyan-robed cultivator'));
     },
   });
-  assert.equal(aiRequests.length, 2, 'the model, not a regex, must receive a separate review/repair call');
-  assert.deepEqual(progressCalls, [1], 'review progress is reported between translation and actual review');
-  assert.equal(aiRequests[0].system, withVideoActionChoreographyScope(`${VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT}\n\n${H3_CLIP_TIME_RULE}\n本次只返回完整提示词正文，不返回JSON。\n\n${h3DescriptionLanguageRule('英文')}`, 'translation'));
-  assertH3DescriptionLanguage(aiRequests[0].system, '英文');
-  assert.equal(aiRequests[0].user, aiSource, 'translation must receive every original character, name and dialogue');
-  assert.match(aiRequests[0].user, /林沐说：“师姐，接招。”/u);
-  assert.doesNotMatch(aiRequests[0].user, /__LH_/u, 'live requests must not hide names or dialogue in placeholders');
-  assert.equal(aiRequests[1].system, withVideoActionChoreographyScope(`${VIDEO_PROMPT_ENGLISH_AI_REVIEW_SYSTEM_PROMPT}\n本次只返回完整提示词正文，不返回JSON。\n\n${h3DescriptionLanguageRule('英文')}`, 'translation'));
-  assertH3DescriptionLanguage(aiRequests[1].system, '英文');
-  assert.ok(aiRequests[1].system.includes(H3_FINAL_BODY_FORMAT_RULE), 'H3 English review receives the final-body format contract');
-  const reviewData = JSON.parse(aiRequests[1].user.match(/<review_data>\n([\s\S]+)\n<\/review_data>/u)![1]);
-  assert.deepEqual(reviewData, { sourcePrompt: aiSource, candidateEnglishPrompt: aiCandidate },
-    'the second API request must contain the full unmasked source and untouched first AI result, without a character cap');
-  assert.match(reviewData.sourcePrompt, /TAIL_OF_COMPLETE_SOURCE$/u);
-  assert.match(reviewData.candidateEnglishPrompt, /TAIL_OF_COMPLETE_DRAFT$/u);
-  assert.match(aiRequests[1].system, /主体与姓名、身份与指代、动作及因果、摄影与运镜、时间戳与切点、字段顺序、镜头数量/u);
-  assert.match(aiRequests[1].system, /逐句核对全部对白的原字、原语言、说话人、顺序、所属镜头与相对时刻/u);
-  assert.match(aiRequests[1].system, /在本次回复中自行修复并再次对照完整原稿校验/u);
-  assert.ok(aiRequests.every((call) => call.system.includes(AUDIO_TRANSLATION_SCOPE_RULE)));
-  assert.ok(aiRequests.every((call) => !call.system.includes(AUDIO_PROMPT_RULE)));
-  assert.equal(aiResult, reviewedEnglish, 'the AI-authored reviewed body is accepted exactly, even if name counts or transliteration differ');
-  assert.match(aiResult, /「师姐，接招。」/u, 'dialogue is authored by the reviewing API, not restored from local tokens');
+  assert.equal(calls, 1, 'H3 flags select one description translation request without review or retry');
+  assert.equal(reviews, 0, 'a legacy review flag must not start or announce a second H3 request');
+  assert.deepEqual(readH3PromptProtocol(result), readH3PromptProtocol(aiSource));
+  assert.deepEqual(sourceDialogue(result), sourceDialogue(aiSource));
+  assert.ok(result.includes('male swordsman') && result.includes('cyan-robed cultivator'));
+  assert.ok(result.includes('林沐') && result.includes('小师姐') && result.includes('TAIL_OF_COMPLETE_SOURCE'));
+  assert.doesNotMatch(result, /Lin Mu|__LH_/u);
 }
 
-// Identity metadata is not permission to speak. These mocked regressions
-// exercise the existing two-call translation/review boundary, not a local
-// speech classifier or name-removal pass.
-const silentIdentitySource = [
+// The actual H3 entry point must retain the two delivery identities lost in the reported third segment.
+const speakerAnchors = [
+  '林沐 (S1) 是青年男性人族，黑发。',
+  '叶清碧 (S2) 是25岁女性人族，青白长袍。',
+  '祈凌霜 (S3) 是19岁女性人族，明快长袍。',
+];
+const speakerBindings: H3IdentityBindings = { version: 1, characters: [
+  { characterId: 'lin-mu', name: '林沐', speakerToken: '(S1)', referenceAnchor: speakerAnchors[0] },
+  { characterId: 'ye-qingbi', name: '叶清碧', speakerToken: '(S2)', referenceAnchor: speakerAnchors[1] },
+  { characterId: 'qi-lingshuang', name: '祈凌霜', speakerToken: '(S3)', referenceAnchor: speakerAnchors[2] },
+] };
+const speakerSource = [
   'integrated_multimodal_description:',
-  '[Shot 1] 第10段，15秒。<Picture 1>决定尾帧构图，<Picture 2>为林沐，<Picture 3>为祈凌霜，<Picture 4>为叶清碧；后三张只锁定人物身份。三人安静地互相看一眼，保留自然微笑。台词：无；从0秒到15秒结束均无讲话、无旁白、无说话口型。',
-  'overall_soundscape: 无。',
+  '[Shot 1] 林沐居中，叶清碧和祈凌霜在原侧。',
+  ...speakerAnchors,
+  '1.50—2.55秒，叶清碧 (S2，女性发声身份，自然发声) 面向林沐提醒：<d>[Chinese] 吃东西时慢一些。</d>',
+  '2.75—3.45秒，林沐 (S1，男性发声身份，自然发声) 向叶清碧致谢：<d>[Chinese] 多谢师傅。</d>',
+  '[Shot 2] At 00:06.200, 祈凌霜 (S3，女性发声身份，自然发声) 先看叶清碧，再向林沐发问：<d>[Chinese] 师傅不也一样吗？</d>',
+  'overall_soundscape: N/A',
   'non_diegetic_music: N/A',
 ].join('\n');
-const silentIdentityFinal = [
-  'integrated_multimodal_description:',
-  '[Shot 1] Segment 10 lasts 15 seconds. <Picture 1> fixes the tail-frame composition; <Picture 2> identifies 林沐, <Picture 3> identifies 祈凌霜, and <Picture 4> identifies 叶清碧. The latter three images fix visual identities only, not spoken words. All three exchange a quiet glance and smile naturally. From 0s through the end at 15s, no one speaks, calls names, murmurs or narrates; there is no speech articulation, including in the final seconds.',
-  'overall_soundscape: None.',
-  'non_diegetic_music: N/A',
-].join('\n');
-const silentIdentityCandidate = silentIdentityFinal.replace(
-  'From 0s through the end at 15s, no one speaks, calls names, murmurs or narrates; there is no speech articulation, including in the final seconds.',
-  'Dialogue: none. At 13s a voice calls <d>[Chinese] 林沐，祈凌霜，叶清碧。</d> as all three move their lips.',
-);
-const authoredNameSource = [
-  'subject_definitions:',
-  '<Subject 1> is 林沐 referenced from <Picture 1>: 男性同伴。',
-  '<Subject 2> is 祈凌霜 referenced from <Picture 2>: 女性同伴。',
-  'summary: 祈凌霜叫住林沐。',
-  'retention_analysis: <Subject 1> and <Subject 2> fully_preserved.',
-  'detailed_description:',
-  '[Shot 1] 15秒。第2s祈凌霜(S1)喊<d>[Chinese] 林沐！</d>，林沐停步听她，不代说；此句之后两人不再说话。',
-  'overall_soundscape: 只有这句原话和原定停步声。',
-  'non_diegetic_music: N/A',
-].join('\n');
-const authoredNameFinal = [
-  'subject_definitions:',
-  '<Subject 1> is 林沐 referenced from <Picture 1>: a male companion.',
-  '<Subject 2> is 祈凌霜 referenced from <Picture 2>: a female companion.',
-  'summary: 祈凌霜 calls 林沐 to stop.',
-  'retention_analysis: <Subject 1> and <Subject 2> fully_preserved.',
-  'detailed_description:',
-  '[Shot 1] The shot lasts 15 seconds. At 2s 祈凌霜 (S1) calls <d>[Chinese] 林沐！</d>; 林沐 stops and listens without speaking or mouthing her words. Neither speaks again after this authored line.',
-  'overall_soundscape: Only the authored call and the planned stopping footstep.',
-  'non_diegetic_music: N/A',
-].join('\n');
-const nonverbalSource = [
-  'integrated_multimodal_description:',
-  '[Shot 1] 15秒。林沐听见叶清碧在第2s短促轻笑；祈凌霜在第4s轻咳一声，三人随后自然微笑。台词：无，0到15秒无说话、无旁白；保留笑与咳嗽的非说话口部动作，不冻结表情。',
-  'overall_soundscape: 第2s轻笑，第4s轻咳，除此之外无声。',
-  'non_diegetic_music: N/A',
-].join('\n');
-const nonverbalFinal = [
-  'integrated_multimodal_description:',
-  '[Shot 1] The shot lasts 15 seconds. 林沐 hears 叶清碧 give a brief soft laugh at 2s; 祈凌霜 gives a light cough at 4s, and all three then smile naturally. There is no speech or narration from 0s through 15s. Keep the natural non-speaking mouth movements of the laugh, cough and smiles; expressions are not frozen.',
-  'overall_soundscape: The brief laugh at 2s and cough at 4s only; no speech.',
-  'non_diegetic_music: N/A',
-].join('\n');
-const mixedSpeechSource = [
-  'integrated_multimodal_description:',
-  '[Shot 1] 第1s祈凌霜(S1)说<d>[Chinese] 等我一下。</d>，林沐只点头倾听。',
-  '[Shot 2] At 00:07.000, 林沐与祈凌霜站定，叶清碧自然微笑；本镜台词：无，从7秒切入到15秒结束三人均不说话、无旁白、无说话口型。',
-  'overall_soundscape: 只保留首镜第1s原话，第二镜无声。',
-  'non_diegetic_music: N/A',
-].join('\n');
-const mixedSpeechFinal = [
-  'integrated_multimodal_description:',
-  '[Shot 1] At 1s 祈凌霜 (S1) says <d>[Chinese] 等我一下。</d>; 林沐 only nods and listens.',
-  '[Shot 2] At 00:07.000, 林沐 and 祈凌霜 stand still as 叶清碧 smiles naturally. This shot has no dialogue: from its start at 7s through the segment end at 15s, no one speaks or narrates and no one articulates speech.',
-  'overall_soundscape: Only the authored line at 1s in the first shot; no sound in the second shot.',
-  'non_diegetic_music: N/A',
-].join('\n');
-for (const scenario of [
-  { label: 'three silent visual identities are not spoken at the end', source: silentIdentitySource, candidate: silentIdentityCandidate, final: silentIdentityFinal },
-  { label: 'authored name-calling remains verbatim with its original speaker', source: authoredNameSource, candidate: authoredNameFinal.replace('<d>[Chinese] 林沐！</d>', '<d>[English] Lin Mu!</d>'), final: authoredNameFinal },
-  { label: 'no-dialogue does not mute nonverbal sounds or freeze faces', source: nonverbalSource, candidate: nonverbalFinal.replace('The brief laugh at 2s and cough at 4s only; no speech.', 'Mute the entire audio track and keep every mouth permanently shut.'), final: nonverbalFinal },
-  { label: 'a silent later shot does not erase the first shot dialogue', source: mixedSpeechSource, candidate: mixedSpeechFinal.replace('<d>[Chinese] 等我一下。</d>', 'nothing; all shots are silent'), final: mixedSpeechFinal },
-]) {
-  const calls: Array<{ system: string; user: string }> = [];
-  const stagingContext = {
-    characterProfiles: [
-      { name: '林沐', role: '仅作为人物资料；不是可说词句' },
-      { name: '祈凌霜', role: '仅作为人物资料；不是可说词句' },
-      { name: '叶清碧', role: '仅作为人物资料；不是可说词句' },
-    ],
-  };
+for (const flags of [{}, { reviewWithAi: true, acceptAiAuthoredContent: true }]) {
+  let calls = 0;
+  let deliveredBindings: H3IdentityBindings | undefined;
   const result = await translateVideoPromptToEnglish({
-    sourcePrompt: scenario.source, reviewWithAi: true, stagingContext,
-    clean: () => { throw new Error('speech-scope repair must remain AI-authored, without name deletion or local cleanup'); },
-    request: async (system, user) => {
-      calls.push({ system, user });
-      assert.equal(system.split(DIALOGUE_DELIVERY_RULE).length - 1, 1,
-        'existing translation and review each carry the shared contract once');
-      assert.ok(system.includes(VISUAL_IDENTITY_SPEECH_SCOPE_RULE));
-      assert.ok(system.includes(NO_DIALOGUE_PERFORMANCE_RULE));
-      assert.match(system, /不弱化成murmur\/chatter、含混交谈或自由说话/u);
-      if (calls.length === 1) {
-        assert.equal(user, scenario.source, 'the complete unmasked source is sent to AI');
-        return scenario.candidate;
-      }
-      assert.equal(calls.length, 2, 'there is no newly added review or retry for speech semantics');
-      const data = JSON.parse(user.match(/<review_data>\n([\s\S]+)\n<\/review_data>/u)![1]);
-      assert.equal(data.sourcePrompt, scenario.source);
-      assert.equal(data.candidateEnglishPrompt, scenario.candidate,
-        'even a mistaken spoken-name list is delivered intact to the existing AI reviewer');
-      assert.deepEqual(data.stagingContext, stagingContext, 'identity metadata remains available without becoming dialogue');
-      return scenario.final;
+    sourcePrompt: speakerSource, identityBindings: speakerBindings, ...flags,
+    onIdentityBindings: (bindings) => { deliveredBindings = bindings; },
+    clean: () => { throw new Error('paired H3 output does not use the generic cleaner'); },
+    request: async (_system, user) => {
+      calls += 1;
+      const data = readDocumentTranslationRequest(user, speakerSource);
+      assert.deepEqual(data.characters.map((character) => character.name), ['林沐', '叶清碧', '祈凌霜']);
+      assert.equal(data.utterances.find((utterance) => utterance.text.includes('师傅不也一样吗'))?.speakerCharacterId, 'qi-lingshuang');
+      assert.doesNotMatch(data.slots.map((slot) => slot.sourceText).join('\n'), /林沐|叶清碧|祈凌霜|多谢师傅|[（(]S\b/u);
+      return descriptionSlotsResponse(data, (text) => text.replace('女性人族', 'female human')
+        .replace('青年男性人族', 'young male human').replace('女性发声身份', 'female vocal identity')
+        .replace('男性发声身份', 'male vocal identity').replace('自然发声', 'natural delivery'));
     },
   });
-  assert.equal(calls.length, 2, scenario.label);
-  assert.equal(result, scenario.final, 'only the complete AI-reviewed output is returned; no local semantic edits');
-  assert.deepEqual(readH3PromptProtocol(result), readH3PromptProtocol(scenario.source),
-    'both H3 structures preserve sections, reference tags, shot count and cut points');
+  assert.equal(calls, 1);
+  assert.deepEqual(readH3PromptProtocol(result), readH3PromptProtocol(speakerSource));
+  assert.deepEqual(sourceDialogue(result), sourceDialogue(speakerSource));
+  assert.match(result, /1\.50—2\.55[^\n]*叶清碧[^\n]*S2[^\n]*female vocal identity/u);
+  assert.match(result, /2\.75—3\.45[^\n]*林沐[^\n]*S1[^\n]*male vocal identity/u);
+  assert.ok(result.includes('[Shot 2] At 00:06.200'));
+  assert.doesNotMatch(result, /Qi Lingxue|Qi Ling霜|Lin Mu|Ye Qingbi/u);
+  assert.ok(deliveredBindings);
+  for (const binding of deliveredBindings.characters) {
+    assert.ok(result.includes(binding.referenceAnchor), 'persisted anchors come from this rendered body');
+    assert.ok(binding.referenceAnchor.includes(binding.name));
+    assert.ok(binding.referenceAnchor.includes('human'));
+  }
 }
-assert.ok(silentIdentityFinal.includes('林沐') && silentIdentityFinal.includes('祈凌霜') && silentIdentityFinal.includes('叶清碧'));
-assert.doesNotMatch(silentIdentityFinal, /<d>/u, 'silent identity metadata does not need a dialogue tag');
-assert.ok(authoredNameFinal.includes('祈凌霜 (S1) calls <d>[Chinese] 林沐！</d>'));
-assert.ok(nonverbalFinal.includes('brief laugh at 2s and cough at 4s'));
-assert.ok(mixedSpeechFinal.includes('<d>[Chinese] 等我一下。</d>'));
+
+// Silent identity references, nonverbal sounds and authored name-calling retain their distinct scopes.
+for (const scenario of [
+  {
+    label: 'visual identities never become a spoken list',
+    source: 'integrated_multimodal_description:\n[Shot 1] 林沐、祈凌霜、叶清碧互相微笑。台词：无；0到15秒无讲话、无旁白、无说话口型。\noverall_soundscape: N/A\nnon_diegetic_music: N/A',
+    speech: [],
+  },
+  {
+    label: 'authored name-calling remains in its original language',
+    source: 'integrated_multimodal_description:\n[Shot 1] 第2s祈凌霜(S1)喊<d>[Chinese] 林沐！</d>，林沐停步。\noverall_soundscape: N/A\nnon_diegetic_music: N/A',
+    speech: ['<d>[Chinese] 林沐！</d>'],
+  },
+  {
+    label: 'nonverbal sounds do not acquire dialogue',
+    source: 'integrated_multimodal_description:\n[Shot 1] 第2s叶清碧轻笑，第4s祈凌霜轻咳。台词：无；0到15秒无旁白，保留自然表情。\noverall_soundscape: 轻笑与轻咳。\nnon_diegetic_music: N/A',
+    speech: [],
+  },
+  {
+    label: 'a later silent shot does not erase the authored line',
+    source: 'integrated_multimodal_description:\n[Shot 1] 祈凌霜(S1)说<d>[Chinese] 等我一下。</d>\n[Shot 2] At 00:07.000, 三人安静站定，不再讲话。\noverall_soundscape: N/A\nnon_diegetic_music: N/A',
+    speech: ['<d>[Chinese] 等我一下。</d>'],
+  },
+]) {
+  let calls = 0;
+  const result = await translateVideoPromptToEnglish({
+    sourcePrompt: scenario.source, reviewWithAi: true,
+    clean: () => { throw new Error('source-owned dialogue never uses body cleanup'); },
+    request: async (system, user) => {
+      calls += 1;
+      assert.ok(system.includes(VISUAL_IDENTITY_SPEECH_SCOPE_RULE));
+      assert.ok(system.includes(NO_DIALOGUE_PERFORMANCE_RULE));
+      assert.equal(system.split(DIALOGUE_DELIVERY_RULE).length - 1, 1);
+      return descriptionSlotsResponse(readDocumentTranslationRequest(user, scenario.source), (text) => text
+        .replaceAll('轻笑', 'soft laugh').replaceAll('轻咳', 'light cough'));
+    },
+  });
+  assert.equal(calls, 1, scenario.label);
+  assert.deepEqual(sourceDialogue(result), scenario.speech, scenario.label);
+  assert.deepEqual(readH3PromptProtocol(result), readH3PromptProtocol(scenario.source));
+  if (scenario.label.startsWith('nonverbal')) assert.ok(result.includes('soft laugh') && result.includes('light cough'));
+}
+
+// An incomplete H3 slot response keeps source descriptions and all dialogue without a second call.
+{
+  let calls = 0;
+  let warnings: string[] = [];
+  assert.equal(await translateVideoPromptToEnglish({
+    sourcePrompt: speakerSource, identityBindings: speakerBindings, reviewWithAi: true,
+    onDeliveryWarnings: (value) => { warnings = value; },
+    clean: (value) => value,
+    request: async () => { calls += 1; return JSON.stringify({ slots: [] }); },
+  }), speakerSource);
+  assert.equal(calls, 1);
+  assert.ok(warnings.length > 0);
+}
+for (const failure of [new Error('H3 description transport failed'), Object.assign(new Error('cancelled'), { name: 'AbortError' })]) {
+  let calls = 0;
+  await assert.rejects(translateVideoPromptToEnglish({
+    sourcePrompt: speakerSource, identityBindings: speakerBindings, reviewWithAi: true,
+    clean: (value) => value,
+    request: async () => { calls += 1; throw failure; },
+  }), (error: unknown) => error === failure);
+  assert.equal(calls, 1, 'a failed H3 request never starts review or paid retries');
+}
+for (const staleAt of ['initial', 'response'] as const) {
+  let current = staleAt !== 'initial';
+  let calls = 0;
+  await assert.rejects(translateVideoPromptToEnglish({
+    sourcePrompt: speakerSource, identityBindings: speakerBindings, reviewWithAi: true,
+    isCurrent: () => current,
+    onReview: () => { throw new Error('the H3 document path must not announce a review'); },
+    clean: (value) => value,
+    request: async (_system, user) => {
+      calls += 1;
+      current = false;
+      return descriptionSlotsResponse(readDocumentTranslationRequest(user, speakerSource));
+    },
+  }), (error: unknown) => error instanceof Error && error.name === 'AbortError');
+  assert.equal(calls, staleAt === 'initial' ? 0 : 1, 'a stale H3 segment cannot be delivered or trigger another request');
+}
 for (const system of [VIDEO_PROMPT_ENGLISH_TRANSLATION_SYSTEM_PROMPT, VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT, VIDEO_PROMPT_ENGLISH_AI_REVIEW_SYSTEM_PROMPT]) {
   assert.ok(system.includes(VISUAL_IDENTITY_SPEECH_SCOPE_RULE));
   assert.ok(system.includes(NO_DIALOGUE_PERFORMANCE_RULE));
@@ -733,8 +739,7 @@ for (const system of [VIDEO_PROMPT_ENGLISH_TRANSLATION_SYSTEM_PROMPT, VIDEO_PROM
     'ordinary six-field review does not receive the H3 section-writing contract');
 }
 
-// Direct translation callers receive the same wardrobe-scope contract as
-// singleSegmentPrompt, including a same-API H3 protocol-repair request.
+// H3 description slots keep the confirmed wardrobe facts within the one existing translation call.
 {
   const wardrobeSource = [
     'integrated_multimodal_description: [Shot 1] 两位成年同伴已按剧情换上绿色外套，在门口短暂亲吻；林舟隔着外套扶住林澜手臂，衣着与遮挡保持。',
@@ -743,47 +748,30 @@ for (const system of [VIDEO_PROMPT_ENGLISH_TRANSLATION_SYSTEM_PROMPT, VIDEO_PROM
   ].join('\n');
   const stagingContext = {
     segmentScope: { segmentIndex: 3, savedSegmentSourceStoryContent: '两人已经换上绿色外套后走到门口。' },
-    savedContinuityEvidence: { entryState: '绿色外套，衣扣系好', exitState: '绿色外套仍完整' },
     ordinaryOutfitBaseline: '更早的人物资料记载蓝色外套；不覆盖已发生的换装',
   };
-  const delivered = [
-    'integrated_multimodal_description: [Shot 1] The two adults, already wearing the green coats from the story, briefly kiss at the doorway. Lin Zhou holds Lin Lan by the arm over the coat; both coats stay closed.',
-    'overall_soundscape: N/A',
-    'non_diegetic_music: N/A',
-  ].join('\n');
   let requests = 0;
   const result = await translateVideoPromptToEnglish({
     sourcePrompt: wardrobeSource, stagingContext, reviewWithAi: true,
-    clean: () => { throw new Error('wardrobe repair must remain AI-authored'); },
+    clean: () => { throw new Error('H3 document rendering does not rewrite wardrobe facts'); },
     request: async (system, user) => {
       requests += 1;
-      assert.equal(system.split(VIDEO_WARDROBE_SCOPE_RULE).length - 1, 1, 'every translation/review/format repair carries the scope contract once');
-      if (requests === 1) {
-        assert.equal(user, wardrobeSource);
-        assert.match(system, /原文明示的换装也不能被人物资料的旧 outfit 覆盖/u);
-        return 'A candidate with the wrong coat color.';
-      }
-      if (requests === 2) {
-        const data = JSON.parse(user.match(/<review_data>\n([\s\S]+)\n<\/review_data>/u)![1]);
-        assert.equal(data.sourcePrompt, wardrobeSource);
-        assert.deepEqual(data.stagingContext, stagingContext);
-        return 'The two adults remain in their green coats, but this reply accidentally omitted the H3 scaffold.';
-      }
-      const data = JSON.parse(user.match(/<h3_format_repair_data>\n([\s\S]+)\n<\/h3_format_repair_data>/u)![1]);
-      assert.equal(data.sourceContext.sourcePrompt, wardrobeSource);
-      assert.deepEqual(data.sourceContext.stagingContext, stagingContext);
-      return delivered;
+      assert.equal(system.split(VIDEO_WARDROBE_SCOPE_RULE).length - 1, 1);
+      assert.match(system, /原文明示的换装也不能被人物资料的旧 outfit 覆盖/u);
+      return descriptionSlotsResponse(readDocumentTranslationRequest(user, wardrobeSource),
+        (text) => text.replaceAll('绿色外套', 'green coats'));
     },
   });
-  assert.equal(requests, 3);
-  assert.equal(result, delivered, 'the same AI provides the final wardrobe wording and H3 structure without local edits');
+  assert.equal(requests, 1, 'wardrobe fidelity does not add a review or H3 format retry');
+  assert.ok(result.includes('green coats'));
+  assert.doesNotMatch(result, /蓝色外套|blue coat/u);
+  assert.deepEqual(readH3PromptProtocol(result), readH3PromptProtocol(wardrobeSource));
   for (const system of [VIDEO_PROMPT_ENGLISH_TRANSLATION_SYSTEM_PROMPT, VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT, VIDEO_PROMPT_ENGLISH_AI_REVIEW_SYSTEM_PROMPT]) {
-    assert.ok(system.includes(VIDEO_WARDROBE_SCOPE_RULE), 'legacy and live entry points keep the same wardrobe fidelity rule');
+    assert.ok(system.includes(VIDEO_WARDROBE_SCOPE_RULE));
   }
 }
 
-// A direct caller's H3 repair must retain the confirmed spatial mapping too;
-// it does not have generateSingleSegmentPrompt's request wrapper to add it.
+// Translation keeps the adopted spatial facts and original camera cuts; the slot contract does not re-direct.
 {
   const spatialSource = [
     'subject_definitions:',
@@ -798,62 +786,28 @@ for (const system of [VIDEO_PROMPT_ENGLISH_TRANSLATION_SYSTEM_PROMPT, VIDEO_PROM
     'overall_soundscape: N/A',
     'non_diegetic_music: N/A',
   ].join('\n');
-  const finalEnglish = [
-    'subject_definitions:',
-    '<Subject 1> is 沈衡 referenced from <Picture 1>: an adult companion in a grey coat.',
-    '<Subject 2> is 陆青 referenced from <Picture 2>: an adult companion in a green coat.',
-    '<Subject 3> is 顾白 referenced from <Picture 3>: an adult companion in a white coat.',
-    'summary: Three companions sit before the north wall as 陆青 passes a wooden box to 沈衡.',
-    'retention_analysis: <Subject 1>, <Subject 2>, <Subject 3> fully_preserved.',
-    'detailed_description:',
-    '[Shot 1] All three face south; the camera looks north from the south side. 顾白 is screen-left, 沈衡 center and 陆青 screen-right. 陆青 sits on 沈衡\'s own left and extends the box with 陆青\'s right hand toward 沈衡\'s left hand. 沈衡 (S1) says <d>[Chinese] 谢谢。</d> while the other two listen silently.',
-    '[Shot 2] At 00:07.000, The same south-side viewpoint tightens onto 沈衡 at screen-left and 陆青 at screen-right. 顾白 remains in the original western seat, off-screen left, and is not added to this close view. 沈衡 receives the box with 沈衡\'s left hand.',
-    'overall_soundscape: N/A',
-    'non_diegetic_music: N/A',
-  ].join('\n');
-  const mistakenCandidate = finalEnglish
-    .replace('on 沈衡\'s own left', 'at screen-left')
-    .replace('off-screen left, and is not added to this close view', 'visible at the left edge of this close view');
-  const proseOnlyReview = finalEnglish.slice(finalEnglish.indexOf('[Shot 1]'), finalEnglish.indexOf('overall_soundscape:')).trim();
   let requests = 0;
   const translated = await translateVideoPromptToEnglish({
     sourcePrompt: spatialSource, reviewWithAi: true,
     stagingContext: { originalPlan: '旧草稿把陆青写在画面左，顾白写在近景边缘；只作旧证据。' },
-    clean: () => { throw new Error('spatial repair must remain AI-authored'); },
+    clean: () => { throw new Error('H3 spatial facts do not pass through local semantic rewriting'); },
     request: async (system, user) => {
       requests += 1;
-      assertH3DescriptionLanguage(system, '英文');
+      assert.match(system, /只翻译slots的sourceText.*英文描述片段/u, 'the model translates slots rather than authoring an H3 body');
       assert.equal(system.split(VIDEO_ACTING_CAMERA_TRANSLATION_RULE).length - 1, 1);
-      assert.equal(system.split(SPATIAL_TRANSLATION_RULE).length - 1, 1,
-        'translation, review and standalone format retry all carry complete spatial fidelity');
-      assert.equal(system.includes(SPATIAL_COORDINATE_RULE), false,
-        'English stages cannot independently select positions or cameras');
-      if (requests === 1) {
-        assert.equal(user, spatialSource);
-        return mistakenCandidate;
-      }
-      if (requests === 2) {
-        const data = JSON.parse(user.match(/<review_data>\n([\s\S]+)\n<\/review_data>/u)![1]);
-        assert.equal(data.sourcePrompt, spatialSource);
-        assert.equal(data.candidateEnglishPrompt, mistakenCandidate,
-          'ambiguous own-side wording and an extra visible person reach AI unmodified');
-        return proseOnlyReview;
-      }
-      assert.equal(requests, 3, 'only the existing H3 format retry is needed');
-      const data = JSON.parse(user.match(/<h3_format_repair_data>\n([\s\S]+)\n<\/h3_format_repair_data>/u)![1]);
-      assert.equal(data.sourceContext.sourcePrompt, spatialSource);
-      assert.equal(data.candidatePrompt, proseOnlyReview);
-      return finalEnglish;
+      assert.equal(system.split(SPATIAL_TRANSLATION_RULE).length - 1, 1);
+      assert.equal(system.includes(SPATIAL_COORDINATE_RULE), false);
+      return descriptionSlotsResponse(readDocumentTranslationRequest(user, spatialSource), (text) => text
+        .replaceAll('自身左侧', 'own left').replaceAll('画外左侧', 'off-screen left')
+        .replaceAll('没有进入这幅近景', 'is not added to this close view'));
     },
   });
-  assert.equal(requests, 3);
-  assert.equal(translated, finalEnglish, 'the repaired model body is delivered without local side replacement');
-  assert.deepEqual(readH3PromptProtocol(translated), readH3PromptProtocol(spatialSource),
-    'sections, Subject/Picture identities, Shot markers and At cuts remain unchanged');
-  assert.ok(translated.includes("on 沈衡's own left"));
-  assert.ok(translated.includes('陆青 screen-right'));
-  assert.ok(translated.includes('off-screen left'));
+  assert.equal(requests, 1, 'spatial fidelity uses the same one translation request');
+  assert.deepEqual(readH3PromptProtocol(translated), readH3PromptProtocol(spatialSource));
+  assert.ok(translated.includes('own left') && translated.includes('off-screen left'));
+  assert.ok(translated.includes('is not added to this close view'));
   assert.ok(translated.includes('<d>[Chinese] 谢谢。</d>'));
+  assert.ok(translated.includes('[Shot 2] At 00:07.000'));
 }
 
 let emptyDraftCalls = 0;
@@ -879,12 +833,14 @@ for (const finalResponse of ['', ' \n\t ']) {
   assert.equal(aiCalls, 2);
 }
 
+const ordinaryAiSource = '林沐抬手。';
+const ordinaryAiCandidate = 'Lin Mu raises his hand.';
 for (const failAt of [1, 2]) {
   for (const failure of [new Error('text API network failed'), Object.assign(new Error('cancelled'), { name: 'AbortError' })]) {
     let aiCalls = 0;
     await assert.rejects(translateVideoPromptToEnglish({
-      sourcePrompt: aiSource, reviewWithAi: true, clean: (value) => value,
-      request: async () => { aiCalls += 1; if (aiCalls === failAt) throw failure; return aiCandidate; },
+      sourcePrompt: ordinaryAiSource, reviewWithAi: true, clean: (value) => value,
+      request: async () => { aiCalls += 1; if (aiCalls === failAt) throw failure; return ordinaryAiCandidate; },
     }), (error: unknown) => error === failure, 'API failures must propagate, never fallback to unreviewed text');
     assert.equal(aiCalls, failAt, 'API errors and cancellation cannot trigger extra paid calls');
   }
@@ -894,13 +850,13 @@ for (const staleAt of ['initial', 'translation', 'review-callback', 'review-resp
   let current = staleAt !== 'initial';
   let aiCalls = 0;
   await assert.rejects(translateVideoPromptToEnglish({
-    sourcePrompt: aiSource, reviewWithAi: true, clean: (value) => value,
+    sourcePrompt: ordinaryAiSource, reviewWithAi: true, clean: (value) => value,
     isCurrent: () => current,
     onReview: () => { if (staleAt === 'review-callback') current = false; },
     request: async () => {
       aiCalls += 1;
       if (staleAt === 'translation' || (staleAt === 'review-response' && aiCalls === 2)) current = false;
-      return aiCandidate;
+      return ordinaryAiCandidate;
     },
   }), (error: unknown) => error instanceof Error && error.name === 'AbortError');
   assert.equal(aiCalls, staleAt === 'initial' ? 0 : staleAt === 'review-response' ? 2 : 1,
@@ -930,6 +886,7 @@ const transportConfig: TextApiConfig = {
 };
 const transportCandidate = 'Lin Mu raises his hand and says, “Try again.”';
 const transportFinal = '林沐 raises his hand and says, “再来一次。”';
+let h3TransportCalls = 0;
 try {
   Object.defineProperty(globalThis, 'window', {
     configurable: true, writable: true,
@@ -943,6 +900,14 @@ try {
         assert.equal(body.max_tokens, transportConfig.maxTokens);
         assert.equal(body.temperature, transportConfig.temperature);
         const user = body.messages.find((message: { role: string }) => message.role === 'user').content;
+        if (user.startsWith('{')) {
+          h3TransportCalls += 1;
+          const data = readDocumentTranslationRequest(user, speakerSource);
+          return { status: 200, body: JSON.stringify({ choices: [{ message: {
+            content: descriptionSlotsResponse(data, (text) => text.replace('女性人族', 'female human')
+              .replace('青年男性人族', 'young male human')),
+          } }] }) };
+        }
         if (transportCalls.length === 1) assert.equal(user, '林沐抬手说：“再来一次。”');
         else {
           const data = JSON.parse(user.match(/<review_data>\n([\s\S]+)\n<\/review_data>/u)![1]);
@@ -961,9 +926,19 @@ try {
   });
   assert.equal(transportCalls.length, 2, 'translation and repair both traverse the configured API transport');
   assert.equal(result, transportFinal, 'only the reviewing API output is accepted');
+  const h3Result = await translateVideoPromptToEnglish({
+    sourcePrompt: speakerSource, identityBindings: speakerBindings, reviewWithAi: true, acceptAiAuthoredContent: true,
+    clean: (value) => value,
+    request: (system, user) => requestTextModel(transportConfig, system, user),
+  });
+  assert.equal(h3TransportCalls, 1, 'the live H3 slot request traverses the configured API exactly once');
+  assert.equal(transportCalls.length, 3);
+  assert.deepEqual(readH3PromptProtocol(h3Result), readH3PromptProtocol(speakerSource));
+  assert.deepEqual(sourceDialogue(h3Result), sourceDialogue(speakerSource));
+  assert.ok(h3Result.includes('叶清碧 (S2') && h3Result.includes('林沐 (S1'));
 } finally {
   if (originalWindow) Object.defineProperty(globalThis, 'window', originalWindow);
   else Reflect.deleteProperty(globalThis, 'window');
 }
 
-console.log('prompt translation and same-API review/repair tests passed');
+console.log('prompt translation: H3 single-request document and ordinary review contracts passed');

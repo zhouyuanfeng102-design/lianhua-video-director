@@ -2,7 +2,7 @@ import type { AppSettings, Project, ReferenceAsset, ReferenceRole, Storyboard, S
 import type { VideoGenerationDraft, VideoGenerationRuntime, VideoImageReference, VideoPromptFormat } from './videoGenerationTypes';
 import { sourceContentHash } from './sourceIntegrity';
 import { hasCurrentSeedancePrompt } from './seedanceSource';
-import { addVideoReference, moveVideoReference, removeVideoReference, videoReferenceSelection } from './videoReferenceSlots';
+import { addVideoReference, moveVideoReference, removeVideoReference, videoReferenceSelection, videoReferenceSlotIndex } from './videoReferenceSlots';
 import { hasCurrentOfficialH3EnglishPrompt, hasCurrentOfficialH3Prompt, isOfficialH3TargetId, officialH3MissingReferenceNotice } from './officialPrompt';
 import { officialH3ContextForStoryboard } from './officialH3Context';
 import { videoH3BindingForPrompt } from './videoH3ReferenceBinding';
@@ -229,10 +229,18 @@ export const addVideoDraftAssets = (
   for (const assetId of assetIds) {
     if (selection.references.some((reference) => reference.assetId === assetId)) continue;
     const asset = assets.find((candidate) => candidate.id === assetId);
-    if (asset && isVideoDirectorImage(asset)) selection = addVideoReference(selection, { assetId, role: videoImageRole(asset) });
+    if (asset && isVideoDirectorImage(asset)) {
+      const role = videoImageRole(asset);
+      if (role === 'first-frame' || role === 'last-frame') {
+        for (const previous of selection.references.filter((reference) => reference.role === role)) {
+          selection = removeVideoReference(selection, previous.assetId);
+        }
+      }
+      selection = addVideoReference(selection, { assetId, role });
+    }
   }
   return { ...draft, ...selection,
-    ...(selection.references.length !== draft.references.length ? { reuseTaskId: undefined } : {}) };
+    ...(JSON.stringify(selection.references) !== JSON.stringify(draft.references) ? { reuseTaskId: undefined } : {}) };
 };
 
 export const applyVideoReferenceRoleOverrides = (
@@ -255,6 +263,7 @@ const addScopedVideoDraftAssets = (
   assetIds: readonly string[],
   assets: readonly ReferenceAsset[],
   scopedPrivateAssetIds: ReadonlySet<string>,
+  boundaryRoles: ReadonlyMap<string, ReferenceRole> = new Map(),
 ): VideoGenerationDraft => {
   let selection = videoReferenceSelection(draft.references, draft.referenceSlotRoles);
   for (const assetId of assetIds) {
@@ -262,9 +271,59 @@ const addScopedVideoDraftAssets = (
     const asset = assets.find((candidate) => candidate.id === assetId);
     if (!asset || !isVideoDirectorVisualAsset(asset)) continue;
     if (isNsfwPrivateProfileAsset(asset) && !scopedPrivateAssetIds.has(asset.id)) continue;
-    selection = addVideoReference(selection, { assetId, role: videoImageRole(asset) });
+    const role = boundaryRoles.get(assetId) || videoImageRole(asset);
+    if (['first-frame', 'last-frame'].includes(role)
+      && selection.references.some((reference) => reference.role === role)) continue;
+    selection = addVideoReference(selection, { assetId, role });
+    selection = videoReferenceSelection(selection.references.map((reference) => reference.assetId === assetId
+      ? { ...reference, role } : reference), selection.referenceSlotRoles);
   }
   return { ...draft, ...selection };
+};
+
+/** Boundary selections belong to their segment. Same-segment manual choices
+ * survive language/format changes; switching segments does not carry them as
+ * the next segment's opening. Physical slots remain stable for replacements. */
+const prepareStoryboardFrames = (draft: VideoGenerationDraft, board: Storyboard, includeReferences: boolean, assets: readonly ReferenceAsset[]): VideoGenerationDraft => {
+  const switched = Boolean(draft.source?.storyboardId && draft.source.storyboardId !== board.id);
+  const automatic = draft.automaticStoryboardFrames;
+  const desired = new Map<ReferenceRole, string | undefined>([
+    ['first-frame', board.firstFrameAssetId], ['last-frame', board.lastFrameAssetId],
+  ]);
+  let selection = videoReferenceSelection(draft.references, draft.referenceSlotRoles);
+  const removedSlots: Array<{ slot: number; role: ReferenceRole }> = [];
+  for (const [index, reference] of draft.references.entries()) {
+    if (!desired.has(reference.role)) continue;
+    const copiedId = reference.role === 'first-frame' ? automatic?.firstFrameAssetId : automatic?.lastFrameAssetId;
+    const staleDefault = includeReferences && automatic?.storyboardId === board.id
+      && copiedId === reference.assetId && desired.get(reference.role) !== reference.assetId;
+    if (!switched && !staleDefault) continue;
+    removedSlots.push({ slot: videoReferenceSlotIndex(reference, index), role: reference.role });
+    selection = removeVideoReference(selection, reference.assetId);
+  }
+  // Fill vacated frame slots before ordinary defaults, which must not inherit
+  // a remembered first/last-frame use merely because that slot is empty.
+  if (includeReferences) for (const { slot, role } of removedSlots) {
+    const assetId = desired.get(role);
+    if (!assetId || !assets.some((asset) => asset.id === assetId && isVideoDirectorVisualAsset(asset))
+      || selection.references.some((reference) => reference.assetId === assetId || reference.role === role)) continue;
+    const positioned = selection.references.map((reference, index) => ({ ...reference, slotIndex: videoReferenceSlotIndex(reference, index) }));
+    positioned.push({ assetId, role, slotIndex: slot });
+    positioned.sort((left, right) => left.slotIndex - right.slotIndex);
+    selection = videoReferenceSelection(positioned.map((reference, index) => {
+      if (reference.slotIndex !== index) return reference;
+      const { slotIndex: _slot, ...dense } = reference;
+      return dense;
+    }), selection.referenceSlotRoles);
+  }
+  // Empty frame slots with no replacement are no longer defaults for this
+  // segment. Keep all occupied roles and unrelated user slot choices.
+  for (const { slot } of removedSlots) {
+    if (!selection.references.some((reference, index) => videoReferenceSlotIndex(reference, index) === slot)) {
+      selection.referenceSlotRoles![slot] = 'general';
+    }
+  }
+  return { ...draft, ...selection, ...(switched ? { automaticStoryboardFrames: undefined } : {}) };
 };
 
 const hasCustomStoryboardFrameSlot = (image: StoryboardImageFrameMetadata): boolean => (
@@ -305,7 +364,7 @@ export const applyVideoPromptChoice = (
   if (!board) return draft;
   const label = `${choice.label}${choice.segmentIndex ? ` · 第 ${choice.segmentIndex} 段` : ''}`;
   const next: VideoGenerationDraft = {
-    ...draft, name: label, prompt: choice.prompt, reuseTaskId: undefined, h3ReferenceBinding: undefined, seedanceReferenceBinding: undefined,
+    ...prepareStoryboardFrames(draft, board, includeReferences, project.assets), name: label, prompt: choice.prompt, reuseTaskId: undefined, h3ReferenceBinding: undefined, seedanceReferenceBinding: undefined,
     h3MediaMode: undefined, h3MediaModeUpdate: undefined,
     source: {
       chapterId: chapterIdForStoryboard(project, board),
@@ -354,6 +413,10 @@ export const applyVideoPromptChoice = (
     referenceIds,
     project.assets,
     scopedPrivateAssetIds,
+    new Map<string, ReferenceRole>([
+      ...(board.firstFrameAssetId ? [[board.firstFrameAssetId, 'first-frame'] as const] : []),
+      ...(board.lastFrameAssetId ? [[board.lastFrameAssetId, 'last-frame'] as const] : []),
+    ]),
   );
   // Explicit storyboard boundary bindings are copied as-is; other references keep their own role.
   withReferences.references = withReferences.references.map((reference) => (
@@ -378,6 +441,13 @@ export const applyVideoPromptChoice = (
     withReferences.references,
     withReferences.referenceSlotRoles,
   ).referenceSlotRoles;
+  withReferences.automaticStoryboardFrames = {
+    storyboardId: board.id,
+    ...(withReferences.references.some((reference) => reference.assetId === board.firstFrameAssetId && reference.role === 'first-frame')
+      ? { firstFrameAssetId: board.firstFrameAssetId } : {}),
+    ...(withReferences.references.some((reference) => reference.assetId === board.lastFrameAssetId && reference.role === 'last-frame')
+      ? { lastFrameAssetId: board.lastFrameAssetId } : {}),
+  };
   return choice.promptFormat === 'seedance' ? withReferences : addDefaultVideoCharacterReferences(project, withReferences);
 };
 

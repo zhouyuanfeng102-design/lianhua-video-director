@@ -232,12 +232,14 @@ export const renderVideoAudioDraft = (project: Project, draft: VideoGenerationDr
       ...(draft.source ? { source: { ...draft.source, promptFingerprint: sourceContentHash(basePrompt) } } : {}) }
     : draft.audioReferences?.length || draft.audioSelectionMode === 'none' ? { ...draft, audioReferences: [] } : draft;
   const english = draft.source?.language === 'en';
-  const identities = draft.h3ReferenceBinding?.identities.characters || [];
+  const h3Binding = draft.h3ReferenceBinding;
+  const identities = (basePrompt === h3Binding?.renderedPrompt ? h3Binding.executionIdentities : undefined)?.characters
+    || h3Binding?.identities.characters || [];
   const entries = references.map((reference) => {
     const targetCharacterId = reference.target.kind === 'character' ? reference.target.characterId : undefined;
     const identity = targetCharacterId ? identities.find((entry) => entry.characterId === targetCharacterId) : undefined;
     const target = audioLiteral(videoAudioTargetLabel(project, reference.target));
-    const speaker = identity?.speakerToken ? ` (${identity.speakerToken})` : '';
+    const speaker = identity?.speakerToken ? ` (${identity.speakerToken.replace(/^[（(]|[）)]$/gu, '')})` : '';
     const mode = reference.retainMode;
     const use = `${audioUse(mode, english)}${reference.notes?.trim() ? ` ${audioLiteral(reference.notes)}` : ''}`;
     return { reference, target, speaker, use, character: targetCharacterId ? project.characters.find((entry) => entry.id === targetCharacterId) : undefined, identity };

@@ -1,7 +1,9 @@
 import {
   MOSE_JIANGHU_PRIVATE_IMAGE_PROMPT_RULE,
 } from './nsfwPromptRules';
-import { FULL_BODY_LAYOUT_RULE, imagePromptOutputSpecificationRule, type ImagePromptOutputSpecification } from './imageGeneration';
+import { FULL_BODY_LAYOUT_RULE, ordinaryImageVariantConverterRule, imagePromptOutputSpecificationRule, type ImagePromptOutputSpecification } from './imageGeneration';
+import { withPropImageSpecificationPreset, withPropImageSpecificationRule } from './imagePropPromptRules';
+export { IMAGE_PROMPT_PROP_SPECIFICATION_RULE } from './imagePropSpecification';
 import type { ImageVariant } from './types';
 import { IMAGE_PROMPT_LANDSCAPE_SCOPE_CONTRACT, isLandscapeImageRequest } from './imageLocationScope';
 import {
@@ -13,9 +15,10 @@ import {
 } from './spatialContinuityRules';
 import {
   GOOGLE_NANO_BANANA_RULE_ID, GROK_IMAGINE_RULE_ID,
-  MODEL_FAMILY_CATEGORY_PRESETS, MODEL_FAMILY_RULE_SETS, MODEL_FAMILY_FIVE_VIEW_PRESET_IDS,
+  MODEL_FAMILY_FIVE_VIEW_PRESET_IDS,
   MODEL_FAMILY_SOURCE_SPATIAL_RULE, MODEL_FAMILY_SPATIAL_OUTPUT_RULE,
   LEGACY_MODEL_FAMILY_CATEGORY_PRESETS_V19, LEGACY_MODEL_FAMILY_RULE_SETS_V19,
+  LEGACY_MODEL_FAMILY_CATEGORY_PRESETS_V20, LEGACY_MODEL_FAMILY_RULE_SETS_V20,
   isGoogleNanoBananaImageModel, isGrokImagineImageModel,
 } from './imagePromptModelFamilies';
 /** Exact prior runtime identity blocks; recognize only in request copies. */
@@ -118,7 +121,7 @@ export interface SanitizedImagePromptSections {
 }
 
 export const IMAGE_PROMPT_RULES_SCHEMA_VERSION = 1;
-export const IMAGE_PROMPT_RULE_CATALOG_VERSION = 20;
+export const IMAGE_PROMPT_RULE_CATALOG_VERSION = 21;
 const GPT_IMAGE_RULE_ID = 'image-rule-openai-gpt-image';
 const KREA_RULE_ID = 'image-rule-krea-2';
 const COMFYUI_RULE_ID = 'image-rule-comfyui';
@@ -141,6 +144,7 @@ const PRIVATE_MULTI_REGION_LAYOUT_CATALOG_VERSION = 17;
 const GOOGLE_GROK_MODEL_CATALOG_VERSION = 18;
 const IMAGE_RESOLUTION_LAYOUT_CATALOG_VERSION = 19;
 const STORY_SPATIAL_STATE_CATALOG_VERSION = 20;
+const PROP_THREE_VIEW_CATALOG_VERSION = 21;
 const NOVELAI_RULE_ID = 'image-rule-novelai';
 
 export const NOVELAI_IMAGE_PRESET_IDS = {
@@ -799,10 +803,10 @@ const nextSpatialRuleVersion = (version: string): string => {
   return `${major + (minor === 9 ? 1 : 0)}.${minor === 9 ? 0 : minor + 1}.0`;
 };
 
-const currentModelFamilyPresets = new Map(MODEL_FAMILY_CATEGORY_PRESETS.map((preset) => [preset.id, preset]));
-const currentModelFamilyRules = new Map(MODEL_FAMILY_RULE_SETS.map((rule) => [rule.id, rule]));
+const currentModelFamilyPresets = new Map(LEGACY_MODEL_FAMILY_CATEGORY_PRESETS_V20.map((preset) => [preset.id, preset]));
+const currentModelFamilyRules = new Map(LEGACY_MODEL_FAMILY_RULE_SETS_V20.map((rule) => [rule.id, rule]));
 
-export const BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS: readonly ImagePromptCategoryPreset[] = LEGACY_IMAGE_PROMPT_CATEGORY_PRESETS_V19.map((preset) => {
+export const LEGACY_IMAGE_PROMPT_CATEGORY_PRESETS_V20: readonly ImagePromptCategoryPreset[] = LEGACY_IMAGE_PROMPT_CATEGORY_PRESETS_V19.map((preset) => {
   const familyPreset = currentModelFamilyPresets.get(preset.id);
   if (familyPreset) return { ...familyPreset };
   const narrative = ['storyboard', 'grid', 'location'].includes(preset.assetKind);
@@ -825,7 +829,7 @@ export const BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS: readonly ImagePromptCategor
   };
 });
 
-export const BUILT_IN_IMAGE_PROMPT_RULE_SETS: readonly ImagePromptRuleSet[] = LEGACY_IMAGE_PROMPT_RULE_SETS_V19.map((rule) => {
+export const LEGACY_IMAGE_PROMPT_RULE_SETS_V20: readonly ImagePromptRuleSet[] = LEGACY_IMAGE_PROMPT_RULE_SETS_V19.map((rule) => {
   const familyRule = currentModelFamilyRules.get(rule.id);
   if (familyRule) return { ...familyRule, categoryPresetIds: [...familyRule.categoryPresetIds], defaultPresetByAssetKind: { ...familyRule.defaultPresetByAssetKind } };
   return {
@@ -837,6 +841,9 @@ export const BUILT_IN_IMAGE_PROMPT_RULE_SETS: readonly ImagePromptRuleSet[] = LE
     version: nextSpatialRuleVersion(rule.version),
   };
 });
+
+export const BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS: readonly ImagePromptCategoryPreset[] = LEGACY_IMAGE_PROMPT_CATEGORY_PRESETS_V20.map(withPropImageSpecificationPreset);
+export const BUILT_IN_IMAGE_PROMPT_RULE_SETS: readonly ImagePromptRuleSet[] = LEGACY_IMAGE_PROMPT_RULE_SETS_V20.map(withPropImageSpecificationRule);
 
 const BUILT_IN_DEFAULT_RULE_SET_BY_BACKEND: Readonly<Partial<Record<ImagePromptBackend, string>>> = {
   all: 'image-rule-generic',
@@ -916,6 +923,7 @@ const normalizeAssetKind = (value: unknown): ImagePromptAssetKind | undefined =>
     scene: 'location',
     environment: 'location',
     prop: 'prop',
+    'three-view': 'prop',
     item: 'prop',
     object: 'prop',
     storyboard: 'storyboard',
@@ -1788,14 +1796,14 @@ const migrateCatalog19ImagePromptRulesState = (value: unknown): ImagePromptRules
   return state;
 };
 
-export const migrateImagePromptRulesState = (value: unknown): ImagePromptRulesState => {
+const migrateCatalog20ImagePromptRulesState = (value: unknown): ImagePromptRulesState => {
   const normalized = normalizeImagePromptRulesState(value);
-  if ((normalized.catalogVersion || 0) >= IMAGE_PROMPT_RULE_CATALOG_VERSION) return normalized;
+  if ((normalized.catalogVersion || 0) >= STORY_SPATIAL_STATE_CATALOG_VERSION) return normalized;
   const state = migrateCatalog19ImagePromptRulesState(normalized);
   const legacyRules = new Map(LEGACY_IMAGE_PROMPT_RULE_SETS_V19.map((rule) => [rule.id, rule]));
   const legacyPresets = new Map(LEGACY_IMAGE_PROMPT_CATEGORY_PRESETS_V19.map((preset) => [preset.id, preset]));
-  const currentRules = new Map(BUILT_IN_IMAGE_PROMPT_RULE_SETS.map((rule) => [rule.id, rule]));
-  const currentPresets = new Map(BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS.map((preset) => [preset.id, preset]));
+  const currentRules = new Map(LEGACY_IMAGE_PROMPT_RULE_SETS_V20.map((rule) => [rule.id, rule]));
+  const currentPresets = new Map(LEGACY_IMAGE_PROMPT_CATEGORY_PRESETS_V20.map((preset) => [preset.id, preset]));
   return {
     ...state,
     catalogVersion: STORY_SPATIAL_STATE_CATALOG_VERSION,
@@ -1814,6 +1822,29 @@ export const migrateImagePromptRulesState = (value: unknown): ImagePromptRulesSt
       return legacy && current && isUnchangedFactoryPreset({ ...preset, enabled: true }, legacy)
         ? { ...cloneCategoryPreset(current), enabled: preset.enabled }
         : preset;
+    }),
+  };
+};
+
+export const migrateImagePromptRulesState = (value: unknown): ImagePromptRulesState => {
+  const normalized = normalizeImagePromptRulesState(value);
+  if ((normalized.catalogVersion || 0) >= PROP_THREE_VIEW_CATALOG_VERSION) return normalized;
+  const state = migrateCatalog20ImagePromptRulesState(normalized);
+  const legacyRules = new Map(LEGACY_IMAGE_PROMPT_RULE_SETS_V20.map((rule) => [rule.id, rule]));
+  const legacyPresets = new Map(LEGACY_IMAGE_PROMPT_CATEGORY_PRESETS_V20.map((preset) => [preset.id, preset]));
+  const currentRules = new Map(BUILT_IN_IMAGE_PROMPT_RULE_SETS.map((rule) => [rule.id, rule]));
+  const currentPresets = new Map(BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS.map((preset) => [preset.id, preset]));
+  return {
+    ...state, catalogVersion: PROP_THREE_VIEW_CATALOG_VERSION,
+    ruleSets: state.ruleSets.map((rule) => {
+      const legacy = legacyRules.get(rule.id); const current = currentRules.get(rule.id);
+      return legacy && current && isUnchangedFactoryRule({ ...rule, enabled: true }, legacy)
+        ? { ...cloneRuleSet(current), enabled: rule.enabled } : rule;
+    }),
+    categoryPresets: state.categoryPresets.map((preset) => {
+      const legacy = legacyPresets.get(preset.id); const current = currentPresets.get(preset.id);
+      return legacy && current && isUnchangedFactoryPreset({ ...preset, enabled: true }, legacy)
+        ? { ...cloneCategoryPreset(current), enabled: preset.enabled } : preset;
     }),
   };
 };
@@ -2204,6 +2235,8 @@ export const buildImagePromptConverterSystemPrompt = (
 ): string => {
   const landscape = isLandscapeImageRequest(selection.assetKind, imageVariant);
   const narrative = isNarrativeImageRequest(selection.assetKind, imageVariant);
+  const propThreeViewRule = imageVariant === 'three-view' && selection.assetKind === 'prop'
+    ? ordinaryImageVariantConverterRule(imageVariant, outputSpecification) : '';
   const selectedRules = [
     '<image_prompt_rule_set>',
     selection.ruleSet.systemPrompt,
@@ -2234,6 +2267,7 @@ export const buildImagePromptConverterSystemPrompt = (
   // knee-up, or half-body” cannot win by appearing later in the instruction
   // stack.  This is request-time only; saved presets are not rewritten.
   imageVariant === 'full-body' ? IMAGE_PROMPT_FULL_BODY_LAYOUT_CONTRACT : '',
+  propThreeViewRule && !extraRules.includes(propThreeViewRule) ? propThreeViewRule : '',
   imagePromptNeedsProportionContract(selection, imageVariant)
     ? IMAGE_PROMPT_PROPORTION_CONTRACT
     : '',

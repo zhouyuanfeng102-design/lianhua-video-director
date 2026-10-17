@@ -2544,7 +2544,7 @@ test('catalog twenty updates complete untouched factory values and protects edit
   const task = { converterSystemPrompt: 'FROZEN_V19_RULE', prompt: 'FROZEN_DISTANCE_TEXT', conversionSource: '甲距门四米，乙在门外。' };
   const before = structuredClone(legacy);
   const migrated = migrateImagePromptRulesState({ ...legacy, generationTasks: [task] });
-  assert.equal(migrated.catalogVersion, 20);
+  assert.equal(migrated.catalogVersion, IMAGE_PROMPT_RULE_CATALOG_VERSION);
   assert.deepEqual(migrated.ruleSets, BUILT_IN_IMAGE_PROMPT_RULE_SETS);
   assert.deepEqual(migrated.categoryPresets, BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS);
   assert.deepEqual(migrated.defaultRuleSetByBackend, legacy.defaultRuleSetByBackend);
@@ -2583,7 +2583,7 @@ test('catalog twenty updates complete untouched factory values and protects edit
   assert.equal(disabled.ruleSets[0].systemPrompt, BUILT_IN_IMAGE_PROMPT_RULE_SETS.find((rule) => rule.id === originalRule.id)!.systemPrompt);
   assert.equal(disabled.categoryPresets[0].systemPrompt, BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS.find((preset) => preset.id === originalPreset.id)!.systemPrompt);
   const empty = { ...legacy, ruleSets: [], categoryPresets: [], defaultRuleSetByBackend: {} };
-  assert.deepEqual(migrateImagePromptRulesState(empty), { ...empty, catalogVersion: 20 });
+  assert.deepEqual(migrateImagePromptRulesState(empty), { ...empty, catalogVersion: IMAGE_PROMPT_RULE_CATALOG_VERSION });
 });
 
 test('every active image rule keeps source distance endpoints and every narrative preset preserves action space', () => {
