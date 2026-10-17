@@ -115,6 +115,7 @@ export default defineConfig({
             'videoTaskErrorDiagnostics.ts',
             'sequenceDurationContract.ts',
             'semanticSequencePlan.ts',
+            'sceneStaging.ts',
             'storyPacingEstimate.ts',
             'sourceContentHash.ts',
             'imageTaskPreparation.ts',

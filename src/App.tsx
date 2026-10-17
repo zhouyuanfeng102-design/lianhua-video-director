@@ -1,6 +1,8 @@
 import { askChapterEntityResolutions, applyChapterEntityResolutions } from "./components/ChapterEntityConflictDialog";
 import { chapterContentForEntity } from "./chapters";
 import { imageTaskRuleMetadata } from "./imageTaskRuleMetadata";
+import { imageTaskReferenceNames } from "./imageTaskReferences";
+import { AutoFitTaskMetadata } from "./components/AutoFitTaskMetadata";
 import { CustomImageWorkbenchPanel } from "./components/CustomImageWorkbenchPanel";
 import { ImagePromptReverseReferencePreview, ImagePromptReverseResultView } from "./components/ImagePromptReverseResult";
 import { retryImagePromptReverse, stopImagePromptReverse, imagePromptReverseStatusLabel } from "./imagePromptReverse";
@@ -10324,6 +10326,10 @@ export default function App() {
         </div>
       </aside>
       <main className={`main${view === "director" ? " main-director-compact" : ""}`}>
+        <p className="workflow-hint" role="note" aria-label="推荐使用流程">
+          <strong>推荐流程：</strong>
+          API 设置 → 剧情解析（提取人物、场景、物品）→ 图像工作台（完善人物资料、生成参考图）→ 提示词导演台（生成视频提示词）→ 视频导演台（生成视频）
+        </p>
         <header className="topbar">
           <div className="crumb">
             <div>
@@ -25057,6 +25063,7 @@ function GenerationTasksView(ctx: AppContext) {
     const promptConfig = imageTaskRuleMetadata(task, state.imagePromptRules, resultAsset);
     const variantLabel = getImageVariantGenerationSpec(task.imageVariant)?.label || task.imageVariant;
     const inputMode = imageTaskGenerationMode(task);
+    const referenceNames = inputMode === "image-to-image" ? imageTaskReferenceNames(task, state.project.assets) : [];
     const canRegenerate = (task.assetKind === "custom" && task.customImageInput
       ? task.status !== "queued" && task.status !== "running" && !tasks.some(candidate => candidate.kind === "image"
         && imageRegenerationRootId(candidate) === imageRegenerationRootId(task)
@@ -25075,7 +25082,7 @@ function GenerationTasksView(ctx: AppContext) {
                 loading="lazy"
               />
             )}
-            <div className="job-card-copy">
+            <div className="job-card-copy image-task-summary-copy">
               <div className="row wrap">
                 <Badge tone="violet">图像</Badge>
                 <Badge tone={task.status === "succeeded" ? "green" : task.status === "failed" ? "pink" : "violet"}>
@@ -25084,21 +25091,25 @@ function GenerationTasksView(ctx: AppContext) {
                 <strong>{task.name}</strong>
                 <span className={`badge ${inputMode === 'image-to-image' ? 'green' : inputMode === 'text-to-image' ? 'violet' : ''}`} aria-label={`「${task.name}」的生图方式`} title={inputMode ? '依据本次任务保存的图片输入显示' : '该任务没有保存足够的图片输入信息，无法确定生图方式'}>{imageTaskGenerationModeLabel(inputMode)}</span>
               </div>
-              <div className="field-hint task-chapter-label">{taskChapterLabel(task)}</div>
-              {task.preparationStage && (task.status === "queued" || task.status === "running") && <div className="field-hint" role="status">
-                正在{imagePreparationStageLabel(task.preparationStage)}{task.status === "queued" ? "，完成后进入图片队列" : ""}。
-              </div>}
-              <div className="field-hint">
-                {imageAssetKindLabel(task.assetKind)} · {variantLabel} · 请求 {task.width}×{task.height}{resultAsset?.imageRequestSize && resultAsset.width && resultAsset.height ? ` · 实际 ${resultAsset.width}×${resultAsset.height}` : ''} · {task.model || task.backend} · {new Date(task.updatedAt).toLocaleString()}
-              </div>
-              <div className="field-hint image-task-prompt-config" aria-label="本次生图规则与预设">
-                <span title={promptConfig.rule.title}><strong>生图规则：</strong>{promptConfig.rule.text}</span>
-                <span title={promptConfig.preset.title}><strong>分类预设：</strong>{promptConfig.preset.text}</span>
-              </div>
-              {task.imageGenerationMode === "image-to-image" && <div className="field-hint">
-                原始参考图 {task.referenceAssetSnapshots?.length || 0} 张：{task.referenceAssetSnapshots?.map((asset) => asset.name).join("、") || "快照缺失"}
-                {task.sourceShotId && ` · 镜头 ${state.project.storyboards.find((board) => board.id === task.sourceStoryboardId)?.shots.find((shot) => shot.id === task.sourceShotId)?.index || task.sourceShotId}`}
-              </div>}
+              <AutoFitTaskMetadata>
+                <div className="field-hint task-chapter-label">{taskChapterLabel(task)}</div>
+                {task.preparationStage && (task.status === "queued" || task.status === "running") && <div className="field-hint" role="status">
+                  正在{imagePreparationStageLabel(task.preparationStage)}{task.status === "queued" ? "，完成后进入图片队列" : ""}。
+                </div>}
+                <div className="field-hint">
+                  {imageAssetKindLabel(task.assetKind)} · {variantLabel} · 请求 {task.width}×{task.height}{resultAsset?.imageRequestSize && resultAsset.width && resultAsset.height ? ` · 实际 ${resultAsset.width}×${resultAsset.height}` : ''} · {task.model || task.backend} · {new Date(task.updatedAt).toLocaleString()}
+                </div>
+                <div className="field-hint image-task-prompt-config" aria-label="本次生图规则与预设">
+                  <span title={promptConfig.rule.title}><strong>生图规则：</strong>{promptConfig.rule.text}</span>
+                  <span title={promptConfig.preset.title}><strong>分类预设：</strong>{promptConfig.preset.text}</span>
+                </div>
+                {inputMode === "image-to-image" && <div className="field-hint image-task-reference-list" aria-label="本次任务参考图"
+                  title={referenceNames.length ? referenceNames.map((name, index) => `${index + 1}. ${name}`).join("\n") : "本次任务未保存参考图名称，无法还原具体图片"}>
+                  <strong>参考图{referenceNames.length ? `（${referenceNames.length} 张）` : ""}：</strong>
+                  {referenceNames.length ? referenceNames.map((name, index) => `${index + 1}. ${name}`).join("；") : "参考图名称未记录"}
+                  {task.sourceShotId && ` · 镜头 ${state.project.storyboards.find((board) => board.id === task.sourceStoryboardId)?.shots.find((shot) => shot.id === task.sourceShotId)?.index || task.sourceShotId}`}
+                </div>}
+              </AutoFitTaskMetadata>
             </div>
           </div>
           <div className="image-task-prompt-panel">

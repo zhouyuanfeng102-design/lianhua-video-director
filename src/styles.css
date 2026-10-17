@@ -215,6 +215,20 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); box-shadow: 0 0 10px var(--green); }
 
 .main { flex: 1; min-width: 0; height: 100vh; display: flex; flex-direction: column; }
+.workflow-hint {
+  flex: 0 0 auto;
+  min-width: 0;
+  margin: 0;
+  padding: 5px 12px 3px;
+  background: var(--panel);
+  color: var(--danger);
+  font-size: calc(12px * var(--ui-font-scale, 1));
+  font-weight: 400;
+  line-height: 1.5;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.workflow-hint strong { font-weight: 600; }
 .topbar {
   min-height: 50px; height: auto; padding: 4px 12px; border-bottom: 1px solid var(--line);
   display: flex; align-items: center; justify-content: space-between; gap: 20px;
@@ -720,6 +734,12 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
 .image-task-prompt-config > span { min-width: 0; max-width: 100%; overflow-wrap: anywhere; }
 .image-task-prompt-config strong { color: var(--muted); font-weight: 600; }
 .image-job-summary { min-width: 0; display: flex; align-items: flex-start; gap: 9px; }
+.image-task-summary-copy { flex: 1; height: 128px; grid-template-rows: auto minmax(0, 1fr); }
+.image-task-metadata { min-width: 0; min-height: 0; overflow: auto; scrollbar-width: thin; color: var(--faint); }
+.image-task-metadata-content { display: grid; gap: 4px; font-size: calc(9px * var(--ui-font-scale, 1)); line-height: 1.45; overflow-wrap: anywhere; }
+.image-task-metadata-content .field-hint { font-size: inherit; line-height: inherit; }
+.image-task-reference-list strong { font-weight: 600; }
+.image-task-metadata:focus-visible { outline: 2px solid var(--pink); outline-offset: -2px; }
 .image-job-preview { width: 56px; height: 56px; flex: 0 0 56px; border-radius: 7px; border: 1px solid var(--line); object-fit: cover; background: #f6f7f9; }
 .regeneratable-image-task { container-type: inline-size; }
 .regeneratable-image-task > .job-card-header { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(220px, 1fr) auto; gap: 10px 14px; }

@@ -4,13 +4,13 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的 Windows 桌面工作台。
 
-当前版本：**2.5.2** · 2026-10-16 · Windows 64 位 · 便携运行
+当前版本：**2.5.3** · 2026-10-17 · Windows 64 位 · 便携运行
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows 便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-2.5.2.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-2.5.3.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
 1. 下载上面的 EXE，放在可写入的文件夹里，双击运行，无需安装 Node.js。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
@@ -32,13 +32,13 @@
 - **自定义生图+反推图片提示词**：输入要求生成图片，或复用上传/资产库参考图，通过视觉 API 反推可复制的提示词与人物、物品、场景、风格详情。反推同步显示在聊天和资料任务，支持后台执行、停止、重试及项目保存恢复；原有生图支持原文直发或规则转换，结果自动入库。
 - **项目与资产管理**：管理图片、视频和音频，保存项目包、备份资料并导出提示词。
 
-## 最新更新 · v2.5.2
+## 最新更新 · v2.5.3
 
-- 连续场面先确定人物关系、朝向、动作路径和末态，切段、切镜继承同一事件。
-- 摄影观察已采用的行动，分镜图先确定时刻和取景，再展开实际可见的身份细节。
-- 收窄转换、H3和英文的重新导演权限，不新增内容校验、审核调用或自动重试，保留旧项目与历史稿。
+- 生成任务中的图生图显示携带的参考图编号与名称，优先读取任务保存的历史快照。
+- 旧记录按保存的参考图 ID 回查名称，已删除图片或缺失记录明确标记，避免误用当前分镜绑定。
+- 保持图片任务卡片高度，元数据字号按内容自适应缩小；超长内容可在局部滚动，并悬停查看完整名称。
 
-[查看本版完整说明](docs/releases/发布说明-2.5.2.md) · [历史版本归档](docs/releases/README.md)
+[查看本版完整说明](docs/releases/发布说明-2.5.3.md) · [历史版本归档](docs/releases/README.md)
 
 ## 从源码运行
 
