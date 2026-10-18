@@ -9,6 +9,8 @@ import { videoReferenceCharacterOwners, videoReferenceCharacterBindingWarning, t
 import { maskVideoPictureReferenceLiterals as maskReferenceLiterals, videoPictureReferencePattern as pictureReferencePattern } from './videoPictureReferences';
 import { prepareVideoSeedanceReferenceDraft } from './videoSeedanceReferenceBinding';
 import { videoSeedanceReferencePlan } from './videoSeedanceReferencePlan';
+import { renderVideoSeedanceSpecification } from './videoSeedanceSpecification';
+import { sourceContentHash } from './sourceContentHash';
 import { videoH3MediaModeContract, videoH3MediaModeIssue } from './videoH3MediaMode';
 import { assetReferenceLocationOwners } from './assetCharacterBinding';
 import { renderH3ReferenceExecution, type H3ReferenceExecutionCharacter } from './h3ReferenceExecution';
@@ -574,6 +576,17 @@ export const prepareVideoH3ReferenceDraft = (
   project: Project, draft: VideoGenerationDraft, context: VideoH3ReferenceContext,
 ): PreparedVideoH3ReferenceDraft => {
   const prepared = prepareVideoH3ReferenceDraftInternal(project, draft, context);
+  if (!draft.reuseTaskId && draft.source?.promptFormat === 'seedance') {
+    const specification = renderVideoSeedanceSpecification(prepared.draft.prompt, draft.parameters, context.api);
+    const trusted = prepared.draft.seedanceReferenceBinding;
+    const prompt = trusted ? specification.prompt : prepared.draft.prompt;
+    const warnings = unique([...prepared.warnings, ...specification.warnings,
+      ...(!trusted && specification.prompt !== prompt ? ['本次参数与手动稿的视频规格不一致，原文已保留，请核对分辨率与画幅。'] : [])]);
+    return { ...prepared, warnings, draft: { ...prepared.draft, prompt, h3ReferenceWarnings: warnings,
+      ...(trusted ? { seedanceReferenceBinding: { ...trusted, renderedPrompt: prompt } } : {}),
+      ...(prepared.draft.source ? { source: { ...prepared.draft.source, promptFingerprint: sourceContentHash(prompt) } } : {}),
+    } };
+  }
   if (draft.reuseTaskId || draft.source?.promptFormat === 'seedance' || draft.source?.promptFormat === 'ordinary'
     || !isH3(prepared.draft.prompt)) return prepared;
   const h3MediaMode = videoH3MediaModeContract(prepared.draft, context);

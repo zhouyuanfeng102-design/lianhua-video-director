@@ -8,6 +8,7 @@ import { characterVariantDisplayName } from './characterVariants';
 import { videoMiddleFrameOrdinal, videoReferenceSlotIndex } from './videoReferenceSlots';
 import { videoReferenceCharacterBindingWarning, videoReferenceCharacterOwners, type VideoCharacterReferenceState } from './videoReferenceCharacters';
 import { readSeedanceSections } from './seedanceSections';
+import { cleanSeedanceReferenceClaims } from './seedanceReferenceClaims';
 
 interface SeedanceSourceReference {
   token: string;
@@ -182,34 +183,32 @@ export const prepareVideoSeedanceReferenceDraft = (
   const noSourceAndNoImages = !binding?.references.length && !draft.references.length;
   if (canAssociate && section && !noSourceAndNoImages) {
     const body = basePrompt.slice(section.start, section.end);
-    const bodyMasked = masked.slice(section.start, section.end);
-    const nonImages = (binding?.references || []).some((entry) => !imageNumber(entry.token)) || [...bodyMasked.matchAll(tokenPattern())].some((match) => !imageNumber(match[0]));
-    const hasLiterals = body !== bodyMasked;
     const bodyEdits = edits.filter((edit) => edit.start >= section.start && edit.end <= section.end);
     const newline = basePrompt.includes('\r\n') ? '\r\n' : '\n';
     const selectedBody = lines.length ? [ ...lines,
       language === 'en' ? 'Use these images only for their stated visual purposes. Keep the existing timeline, appearances, actions and dialogue.'
         : '以上图片仅按所述用途参考，出场、动作、衣着变化与对白沿用原时间轴。',
     ].join(newline) : language === 'en' ? 'No images are selected for this request.' : '本次未选择图片参考素材。';
-    // An empty manifest describes what was available when the text was
-    // authored, not whether its reference section contains story facts.
-    // Preserve that section regardless of quotation marks, and scope any old
-    // no-material statement to authoring time so it cannot contradict this
-    // request's explicitly selected images.
-    const preservedEmptySource = !binding?.references.length;
-    const replacement = preservedEmptySource
-      ? [
+    // A reference section can mix outdated input declarations with story facts.
+    // Remove only proven conflicting declarations from this request copy; the
+    // original source, quoted text and unrelated story facts remain intact.
+    // Existing image-entry labels are replaced by the single current image list.
+    // Keep every word after their colon as unnumbered authored prose: a reference
+    // entry may also contain scene or action facts absent from the manifest.
+    const declarationEdits = [...masked.slice(section.start, section.end).matchAll(/(^|[\r\n。;；])[ \t]*(@(?:Image\s+\d+|(?:图片|图)\s*\d+))[ \t]*[:：][ \t]*/gmu)]
+      .map((match): TextEdit => ({ start: match.index! + match[0].indexOf(match[2]), end: match.index! + match[0].length, text: '' }));
+    const preservationEdits = bodyEdits.map((edit) => ({ ...edit, start: edit.start - section.start, end: edit.end - section.start }))
+      .filter((edit) => !declarationEdits.some((declaration) => edit.start >= declaration.start && edit.end <= declaration.end));
+    const remappedBody = applyEdits(body, [...preservationEdits, ...declarationEdits]);
+    const currentBody = cleanSeedanceReferenceClaims(remappedBody, {
+      hasImages: draft.references.length > 0, hasAudio: false,
+    }).text;
+    const replacement = [
         section.inline ? '' : newline,
-        language === 'en'
-          ? 'Reference notes at original authoring time: statements that no reference material was supplied or used describe that earlier state only. This request uses the image list below; retain the original character, setting and action facts.'
-          : '原稿写作时的素材说明：其中未提供或不使用参考素材的陈述仅描述原稿写作时的状态。本次采用下方图片清单，原有人物、场景与动作设定继续保留。',
-        newline, body, body.endsWith(newline + newline) ? '' : newline + newline,
-        language === 'en' ? 'Reference images for this request (this list takes precedence):' : '本次提交的参考图片（以此清单为准）：',
+        ...(currentBody.trim() ? [currentBody.trim(), newline, newline] : []),
+        language === 'en' ? 'Reference images for this request:' : '本次提交的参考图片：',
         newline, selectedBody, newline, newline,
-      ].join('')
-      : nonImages || hasLiterals
-      ? `${applyEdits(body, bodyEdits.map((edit) => ({ ...edit, start: edit.start - section.start, end: edit.end - section.start })))}${body.endsWith(newline + newline) ? '' : newline + newline}${selectedBody}${newline}${newline}`
-      : `${section.inline ? '' : newline}${selectedBody}${newline}${newline}`;
+      ].join('');
     for (let index = edits.length - 1; index >= 0; index -= 1) if (edits[index].start >= section.start && edits[index].end <= section.end) edits.splice(index, 1);
     edits.push({ start: section.start, end: section.end, text: replacement });
   }

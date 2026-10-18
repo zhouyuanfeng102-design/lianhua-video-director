@@ -300,6 +300,7 @@ test('Seedance audio uses @Audio inside the existing reference chapter with reve
   assert.equal(renderVideoAudioDraft(p, first, api).prompt, first.prompt);
   assert.equal(first.prompt.match(/@Audio 1/gu)?.length, 1); assert.equal(first.prompt.match(/@Audio 3/gu)?.length, 1);
   assert.doesNotMatch(first.prompt, /<Audio /u); assert.doesNotMatch(first.prompt, /未绑定外部/u);
+  assert.ok(first.prompt.includes('所有人物沿用原设定。'), 'removing the old no-media clause must preserve adjacent story facts');
   assert.deepEqual(first.prompt.match(/^### .+$/gmu), original.match(/^### .+$/gmu));
   assert.equal(first.prompt.split('### 主体连续性')[1], original.split('### 主体连续性')[1]);
   assert.match(first.prompt.split('### 主体连续性')[0], /@Audio 1[\s\S]*@Audio 3/u);

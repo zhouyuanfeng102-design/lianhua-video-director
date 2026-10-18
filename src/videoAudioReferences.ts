@@ -4,6 +4,7 @@ import type { AudioRetainMode, FrozenVideoAudioReference, ProjectVoicePresets, V
 import { sourceContentHash } from './sourceIntegrity';
 import { videoAudioCapability } from './videoAudioCapabilities';
 import { maskVideoPictureReferenceLiterals } from './videoPictureReferences';
+import { cleanSeedanceReferenceClaims } from './seedanceReferenceClaims';
 
 export const audioRetainModes: ReadonlyArray<{ id: AudioRetainMode; label: string }> = [
   { id: 'reference', label: '参考音色，使用本段台词' },
@@ -224,6 +225,7 @@ export const prepareVideoAudioDraft = (project: Project, draft: VideoGenerationD
 
 /** Re-render a frozen selection after image rebinding; never resolve current project presets. */
 export const renderVideoAudioDraft = (project: Project, draft: VideoGenerationDraft, _api?: AudioApi): VideoGenerationDraft => {
+  if (draft.reuseTaskId) return draft;
   const references = draft.audioReferences || [];
   const previous = draft.audioReferenceBinding;
   const basePrompt = stripVideoAudioPromptBinding(draft.prompt, previous);
@@ -278,9 +280,11 @@ export const renderVideoAudioDraft = (project: Project, draft: VideoGenerationDr
     if (section) {
       const lines = entries.map(({ reference, target, use }) => `@Audio ${reference.slotIndex + 1}${english ? ': ' : '：'}${target}; ${reference.retainMode}: ${use}`);
       const sectionBody = basePrompt.slice(section.start, section.end);
-      const empty = /^[ \t]*(?:-[ \t]*)?(?:本段未绑定外部图像、视频或音频媒体素材。[^\r\n]*|No (?:external )?(?:images?,?\s*videos?[^\r\n]*|reference (?:media|materials)[^\r\n]*))[ \t]*$/imu.exec(sectionBody);
-      insertions.push(empty ? { at: section.start + empty.index, replacedText: empty[0], text: lines.join(newline) }
-        : { at: section.start, text: `${newline}${lines.join(newline)}${newline}` });
+      const current = cleanSeedanceReferenceClaims(sectionBody, { hasImages: draft.references.length > 0, hasAudio: true });
+      // Record the exact replacement so clearing the voice selection restores
+      // the image-bound draft, including authored scene facts and quotations.
+      insertions.push({ at: section.start, replacedText: sectionBody,
+        text: `${newline}${lines.join(newline)}${newline}${current.text}${current.text.endsWith(newline) ? '' : newline}` });
     }
   } else {
     // Unstructured, non-H3 drafts keep the legacy single audio-note convention.

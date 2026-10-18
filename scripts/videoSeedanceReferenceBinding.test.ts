@@ -8,6 +8,7 @@ import { videoBatchTailReferences } from '../src/videoBatch';
 import { maskVideoPictureReferenceLiterals } from '../src/videoPictureReferences';
 import { sourceContentHash } from '../src/sourceContentHash';
 import { readSeedanceSections } from '../src/seedanceSections';
+import { findSeedanceReferenceConflicts } from '../src/seedanceReferenceClaims';
 import type { Character, Project, ReferenceAsset, Storyboard, VideoGenerationTask, VideoTaskApiConfig } from '../src/types';
 import type { VideoGenerationDesktop, VideoGenerationDraft, VideoImageReference } from '../src/videoGenerationTypes';
 
@@ -80,6 +81,10 @@ const assertStoryPreserved = (prompt: string, original: string) => {
     assert.ok(prompt.includes(value), `source prose was unexpectedly changed: ${value}`);
   }
 };
+const assertCurrentReferenceClaims = (prompt: string) => {
+  assert.deepEqual(findSeedanceReferenceConflicts(section(prompt), { hasImages: true, hasAudio: false }), [], 'selected images cannot coexist with a current no-images or text-only directive');
+  assert.doesNotMatch(prompt, /原稿写作时的素材说明|Reference notes at original authoring time/u);
+};
 
 await test('空manifest手选两张明确人物图，职责/状态与提交编号一致', () => {
   const { project, draft } = fixture(); const before = structuredClone({ project, draft });
@@ -87,9 +92,9 @@ await test('空manifest手选两张明确人物图，职责/状态与提交编�
   const result = prepare(project, draft); const references = section(result.draft.prompt);
   assert.deepEqual(tokens(references), ['@Image 1', '@Image 2']);
   assert.match(references, /夏提雅/u); assert.match(references, /亚乌拉/u); assert.match(references, /身份|外观|identity/iu);
-  assert.ok(references.includes(section(zh).trimStart()), 'an empty manifest does not authorize deleting the original reference prose');
-  assert.match(references, /未提供或不使用参考素材的陈述仅描述原稿写作时的状态/u);
-  assert.match(references, /本次提交的参考图片（以此清单为准）/u);
+  assertCurrentReferenceClaims(result.draft.prompt);
+  assert.doesNotMatch(references, /referenceManifest|不使用参考素材|不依据未提供/u);
+  assert.match(references, /本次提交的参考图片：/u);
   assert.equal(stateFor(result, 'red').status, 'bound'); assert.deepEqual(stateFor(result, 'red').slots, [1]);
   assert.equal(stateFor(result, 'white').status, 'bound'); assert.deepEqual(stateFor(result, 'white').slots, [2]);
   assert.equal(result.draft.source?.promptFingerprint, sourceContentHash(result.draft.prompt));
@@ -141,10 +146,27 @@ await test('空manifest参考段没有引号也保留原有空间和动作事实
       : 'The camp is in a forest clearing beside a giant tree; the light pattern is only a projection, not an activated power.';
     const prompt = original.replace(language === 'zh' ? '\n主体连续性' : '\nSubject continuity', `${fact}\n${language === 'zh' ? '主体连续性' : 'Subject continuity'}`);
     const { project, draft } = fixture(prompt, language); const result = prepare(project, draft);
-    assert.ok(section(result.draft.prompt).includes(section(prompt).trimStart()), 'unquoted reference prose is preserved byte for byte after the heading delimiter');
+    assertCurrentReferenceClaims(result.draft.prompt);
     assert.ok(result.draft.prompt.includes(fact)); assertStoryPreserved(result.draft.prompt, prompt);
     assert.equal(stateFor(result, 'red').status, 'bound'); assert.equal(stateFor(result, 'white').status, 'bound');
     assert.deepEqual(result.warnings, []);
+  }
+});
+
+await test('已有manifest同样清理旧无图声明，参考章节中的剧情事实不因有无引号丢失', () => {
+  for (const fact of ['营地位于巨树旁的森林空地；光纹只是投影，能力尚未发动。', '营地按“巨树旁的森林空地”建立空间；光纹只是投影，能力尚未发动。']) {
+    const prompt = zh.replace('参考素材与职责：', '参考素材与职责：@Image 1：夏提雅身份参考。').replace('\n主体连续性', `${fact}\n主体连续性`);
+    const { project, board, draft } = fixture(prompt);
+    board.seedance25Output!.referenceManifest = [{ id: 'portrait-red', token: '@Image 1', responsibility: '夏提雅身份参考' }];
+    const result = prepare(project, { ...draft, references: [...refs()].reverse() });
+    assertCurrentReferenceClaims(result.draft.prompt);
+    assert.doesNotMatch(section(result.draft.prompt), /referenceManifest|不使用参考素材|不依据未提供/u);
+    assert.ok(result.draft.prompt.includes(fact));
+    assert.ok(result.draft.prompt.includes('夏提雅身份参考。'));
+    assert.deepEqual(tokens(section(result.draft.prompt)), ['@Image 1', '@Image 2'], 'current reference list owns the only image-entry ordinals');
+    assert.deepEqual(stateFor(result, 'red').slots, [2]);
+    assertStoryPreserved(result.draft.prompt, prompt);
+    assert.equal(prepare(project, result.draft).draft.prompt, result.draft.prompt);
   }
 });
 
@@ -232,9 +254,11 @@ await test('空参考章节含引号或对白时保留事实并按本次图片�
       ? original.replace('不使用参考素材，也不依据未提供的图像像素补充画面细节。', '不使用参考素材，也不依据未提供的图像像素补充画面细节。营地按“巨树旁的森林空地”建立空间；光纹只是投影，能力尚未发动。备注：“@Image 99 只是屏幕文字，不可改字。”')
       : original.replace('do not use reference material.', 'do not use reference material. Establish the camp as “a forest clearing beside a giant tree”; the light pattern is only a projection, not an activated power. Note: “@Image 99 is literal screen text and must remain unchanged.”');
     const { project, draft } = fixture(prompt, language); const result = prepare(project, draft);
-    assert.ok(section(result.draft.prompt).includes(section(prompt).trimStart()), 'all authored reference facts and protected quotations survive exactly');
-    assert.match(result.draft.prompt, /原稿写作时的素材说明|Reference notes at original authoring time/u);
-    assert.match(result.draft.prompt, /本次提交的参考图片（以此清单为准）|Reference images for this request \(this list takes precedence\)/u);
+    assertCurrentReferenceClaims(result.draft.prompt);
+    const fact = language === 'zh' ? '营地按“巨树旁的森林空地”建立空间；光纹只是投影，能力尚未发动。备注：“@Image 99 只是屏幕文字，不可改字。”'
+      : 'Establish the camp as “a forest clearing beside a giant tree”; the light pattern is only a projection, not an activated power. Note: “@Image 99 is literal screen text and must remain unchanged.”';
+    assert.ok(result.draft.prompt.includes(fact), 'authored reference facts and protected quotations survive exactly');
+    assert.match(result.draft.prompt, /本次提交的参考图片：|Reference images for this request:/u);
     assert.deepEqual(tokens(section(result.draft.prompt)), ['@Image 1', '@Image 2'], 'a quoted media token remains literal, not an image binding');
     assert.equal(stateFor(result, 'red').status, 'bound'); assert.equal(stateFor(result, 'white').status, 'bound');
     assert.deepEqual(result.warnings, []); assert.equal(result.issue, undefined);
@@ -277,7 +301,8 @@ await test('空manifest九图选择中四个人物槽正确关联，旧待关联
     assert.equal(stateFor(result, id).status, 'bound'); assert.deepEqual(stateFor(result, id).slots, [index + 6]);
   }
   assert.deepEqual(tokens(section(result.draft.prompt)), Array.from({ length: 9 }, (_, index) => `@Image ${index + 1}`));
-  assert.ok(result.draft.prompt.includes(section(prompt))); assertStoryPreserved(result.draft.prompt, prompt);
+  assertCurrentReferenceClaims(result.draft.prompt);
+  assert.ok(result.draft.prompt.includes('营地按“巨树旁的森林空地”建立空间。')); assertStoryPreserved(result.draft.prompt, prompt);
   assert.deepEqual({ project, legacyDraft }, before, 'source projects and restored drafts are never mutated');
 });
 

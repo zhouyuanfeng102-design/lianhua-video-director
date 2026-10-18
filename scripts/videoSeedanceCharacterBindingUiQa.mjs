@@ -80,7 +80,14 @@ export async function runSeedanceCharacterBindingAssertions(page, outputDirector
   const fixture = await page.evaluate(() => ({ names: window.__seedanceCharacterBindingQa.names, imageNames: window.__seedanceCharacterBindingQa.imageNames, roles: window.__seedanceCharacterBindingQa.roles, promptZh: window.__seedanceCharacterBindingQa.promptZh }));
   const assertPreserved = (prompt) => {
     assert.equal(prompt.slice(prompt.indexOf('主体连续性：')), fixture.promptZh.slice(fixture.promptZh.indexOf('主体连续性：')), 'all subject descriptions, summary, actions, time ranges, exact dialogue and constraints remain byte-for-byte authored');
-    for (const literal of ['“清晨开放的石砖庭院”', '“欢迎来到庭院”', '“@Image 77”']) assert.ok(prompt.includes(literal), `quoted literal ${literal} remains authored`);
+    for (const fact of ['庭院按“清晨开放的石砖庭院”建立空间。', '门牌保留字样“欢迎来到庭院”，不作为对白；墙上的“@Image 77”也是原场景文字。']) assert.ok(prompt.includes(fact), `reference-section story fact ${fact} remains authored`);
+  };
+  const assertCurrentReferences = (prompt) => {
+    assert.doesNotMatch(prompt, /原稿写作时的素材说明|未提供或不使用参考素材的陈述/u, 'execution prompts do not contain historical authoring explanations');
+    assert.doesNotMatch(prompt, /本次未提供图片、视频或音频参考素材|全部人物、道具与场景均以文字设定为执行依据/u, 'selected images replace obsolete no-media and text-only execution claims');
+    assert.equal(prompt.split('本次提交的参考图片：').length, 2, 'exactly one current reference list is rendered');
+    assert.deepEqual([...prompt.matchAll(/^@Image (\d+)：/gmu)].map((match) => Number(match[1])), [1, 2, 3, 4, 5, 6, 7, 8, 9], 'the nine submitted images appear once each in request order');
+    assertPreserved(prompt);
   };
   const assertBindings = async (dialog, expectedSlots = [6, 7, 8, 9]) => {
     const hint = dialog.getByRole('note', { name: '本段涉及人物', exact: true });
@@ -98,6 +105,7 @@ export async function runSeedanceCharacterBindingAssertions(page, outputDirector
     assert.equal(input.items.length, 1);
     const draft = input.items[0].draft;
     assert.equal(draft.source.promptFormat, 'seedance'); assert.equal(draft.prompt, preview, 'mock submit and inspected preview use the same complete prompt');
+    assert.equal(draft.parameters.resolution, '720p', 'the explicit batch resolution reaches the submitted draft');
     assert.deepEqual(draft.references.map((reference) => reference.assetId), imageIds);
     assert.deepEqual(draft.references.map((reference) => reference.role), fixture.roles);
     const serialized = await page.evaluate(async (value) => {
@@ -107,12 +115,15 @@ export async function runSeedanceCharacterBindingAssertions(page, outputDirector
       return { urls, body: buildVideoApiBody(api, value, urls) };
     }, draft);
     assert.equal(serialized.body.prompt, preview); assert.deepEqual(serialized.body.images, serialized.urls, 'the actual API serializer keeps exactly the inspected image order');
+    assert.equal(serialized.body.resolution, '720p', 'the request serializer keeps the selected resolution');
+    assert.match(preview, /^视频规格：[^\n]*分辨率720p/u, 'the execution specification matches the selected resolution');
+    assert.doesNotMatch(preview.split('\n')[0], /2K/u, 'the previous source resolution does not contradict the current request');
     assert.equal(serialized.body.first_frame_image, serialized.urls[0]); assert.equal(serialized.body.last_frame_image, serialized.urls[4]);
     for (const [index, id] of imageIds.entries()) {
       const name = fixture.imageNames[Number(id.split('-').at(-1)) - 1];
       assert.ok(preview.split('\n').some((line) => line.startsWith(`@Image ${index + 1}：`) && line.includes(name)), `submitted image ${index + 1} names its corresponding asset`);
     }
-    assertPreserved(preview);
+    assertCurrentReferences(preview);
   };
   const submit = async () => {
     const before = await page.evaluate(() => window.__seedanceCharacterBindingQa.submissions.length);
@@ -124,6 +135,7 @@ export async function runSeedanceCharacterBindingAssertions(page, outputDirector
   };
 
   assert.equal(await currentPrompt(), fixture.promptZh, 'opening an unbound text-only Seedance draft leaves its saved source unchanged');
+  await page.getByLabel('批量视频分辨率', { exact: true }).fill('720p');
   let picker = await openPicker();
   assert.equal(await picker.locator('.vd-segment-character-chip').count(), 4, 'four characters visible even before selecting images');
   for (const name of fixture.imageNames) await picker.getByRole('button', { name: `选择图片 ${name}`, exact: true }).click();
@@ -131,10 +143,10 @@ export async function runSeedanceCharacterBindingAssertions(page, outputDirector
   await picker.getByRole('tab', { name: '槽位用途', exact: true }).click();
   for (const [index, role] of fixture.roles.entries()) assert.equal(await picker.getByLabel(`第 1 段图片槽 ${index + 1} 用途`, { exact: true }).inputValue(), role);
   await picker.getByRole('button', { name: '使用本段图片', exact: true }).click(); await picker.waitFor({ state: 'hidden' });
-  const firstPreview = await currentPrompt(); assertPreserved(firstPreview);
-  assert.match(firstPreview, /原稿写作时的素材说明/u); assert.match(firstPreview, /本次提交的参考图片（以此清单为准）/u);
+  const firstPreview = await currentPrompt(); assertCurrentReferences(firstPreview);
+  await capture('nine-images-current-reference-preview-720p');
   await submit(); await assertSubmission(firstPreview, Array.from({ length: 9 }, (_, index) => `scb-image-${index + 1}`));
-  stages.push('four-character-roster-nine-bound-images-preview-and-real-request-serializer-agree');
+  stages.push('four-character-roster-nine-bound-images-remove-stale-claims-and-720p-preview-matches-real-request-serializer');
 
   picker = await openPicker(); await picker.getByRole('button', { name: `取消选择图片 ${fixture.imageNames[5]}`, exact: true }).click();
   await picker.getByRole('button', { name: '关闭', exact: true }).click(); await picker.waitFor({ state: 'hidden' });
@@ -148,8 +160,7 @@ export async function runSeedanceCharacterBindingAssertions(page, outputDirector
   await assertBindings(picker, [7, 6, 8, 9]); await capture('reordered-character-slots');
   await picker.getByRole('button', { name: '使用本段图片', exact: true }).click(); await picker.waitFor({ state: 'hidden' });
   const reorderedPreview = await currentPrompt();
-  assert.notEqual(reorderedPreview, firstPreview); assertPreserved(reorderedPreview);
-  assert.equal(reorderedPreview.split('本次提交的参考图片（以此清单为准）').length, 2, 'repeated selection regenerates one current list from the original, never accumulates lists');
+  assert.notEqual(reorderedPreview, firstPreview); assertCurrentReferences(reorderedPreview);
   await submit(); await assertSubmission(reorderedPreview, ['scb-image-1', 'scb-image-2', 'scb-image-3', 'scb-image-4', 'scb-image-5', 'scb-image-7', 'scb-image-6', 'scb-image-8', 'scb-image-9']);
   assert.equal(await page.evaluate(() => JSON.stringify(window.__seedanceCharacterBindingQa.project) === window.__seedanceCharacterBindingQa.originalProject), true, 'source storyboard, source prompt, assets and character identities are never mutated by selection, cancel, reorder or mock submit');
   stages.push('reordering-images-updates-character-tokens-preview-and-submitted-array-without-source-mutation');
