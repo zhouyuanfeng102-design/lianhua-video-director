@@ -58,6 +58,14 @@ export const VIDEO_PHYSICAL_DISTANCE_RULE = [
 
 export const VIDEO_INTERACTION_RULES = [VIDEO_INTERACTION_DIRECTION_RULE, VIDEO_PHYSICAL_DISTANCE_RULE].join('\n\n');
 
+/** Planning and H3 share the distinction; preservation keeps the adopted
+ * performance and does not gain authority to re-stage the source story. */
+export const VIDEO_STORY_PERFORMANCE_SEPARATION_RULE = [
+  '将同一事件的原文依据、实际可见表演、真实声音分开交付：观察、认知、背景关系和未揭示信息保留在sourceExcerpt或sourceFact；action/performance/visualDescription写已经采用的可见动作与注意变化；dialogue或speech只容纳原文实际发话及明确授权旁白、心声。原事实与可见表达通过同一镜/事件来源关联，不为画面执行删除原事实。',
+  '原文只有“环视后没有看见某人”时，用现有环视、目光落点、停顿和回应表达观察，认知说明留在来源，观察者保持本段原定的非发话状态；不将背景说明写成一串等待视频模型朗读的动作句，不补不存在的入画人物、解释性闪回、旁白或含混口述。原文明示的台词、心声与旁白照原性质保留，不按心理词表删句、不全局禁旁白。',
+  '新规划在原剧情和授权范围内完成可见表达；转换、英译、换图只传递已经采纳的动作与声音，不重新安排摄影、切点、人物出场或增加动作。原始认知描述不是让人物开口的命令，静默观察也不是全程冻脸或静音，真实动作声和非说话表情继续保留。',
+].join('\n');
+
 export const VIDEO_INTERACTION_TRANSLATION_RULE = "翻译保真已采用的具名交互双方、动作对象、身体/头部朝向、视线目标、发力与支撑、同步进退、接触/落空、实体路径、末态及画内/画外关系。faces the opponent与faces the camera、主动退让与受力倒飞、旁侧掠过与穿透分别按源稿表达；摄影机关注或移动只翻译其观察关系。对话保持原话、原语种、唯一声源和听者状态，不从旧资料补动作、距离、转身、摄影或结局。";
 
 /** Exact first-party request blocks only; saved prose and custom additions are

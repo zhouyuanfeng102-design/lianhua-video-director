@@ -1,4 +1,4 @@
-import type { Character, H3IdentityBindings, Location, Project, ReferenceAsset, ReferenceRole, VideoTaskApiConfig } from './types';
+import type { Character, H3IdentityBindings, H3PerformancePlan, Location, Project, ReferenceAsset, ReferenceRole, VideoTaskApiConfig } from './types';
 import type { VideoGenerationDraft, VideoImageReference } from './videoGenerationTypes';
 import type { VideoReferenceUsageContext } from './videoReferenceUsage';
 import { videoMiddleFrameOrdinal, videoReferenceSlotIndex } from './videoReferenceSlots';
@@ -545,7 +545,26 @@ const prepareVideoH3ReferenceDraftInternal = (
     ...pictureSourceIssues,
     '旧 H3 图片清单只能对应部分引用，本次保留当前提示词，可直接生成，也可主动更新本段参考说明。',
   ]);
+  const remapPictures = (source: string): string => videoPictureReferenceEdits(source, pictureNumbers)
+    .sort((left, right) => right.start - left.start)
+    .reduce((text, edit) => text.slice(0, edit.start) + edit.text + text.slice(edit.end), source);
+  const remapOptional = (source: string | undefined): string | undefined => source === undefined ? undefined : remapPictures(source);
+  const performance = binding.identities.performance;
+  const executionPerformance: H3PerformancePlan | undefined = performance ? { ...performance,
+    preamble: remapOptional(performance.preamble), summary: remapOptional(performance.summary),
+    retentionAnalysis: remapOptional(performance.retentionAnalysis),
+    overallSoundscape: remapPictures(performance.overallSoundscape), nonDiegeticMusic: remapPictures(performance.nonDiegeticMusic),
+    characters: performance.characters?.map((entry) => ({ ...entry,
+      visualDescription: remapPictures(entry.visualDescription), voiceDescription: remapOptional(entry.voiceDescription) })),
+    shots: performance.shots.map((shot) => ({ ...shot, visualDescription: remapPictures(shot.visualDescription),
+      events: shot.events.map((event) => event.kind === 'visual' ? { ...event,
+        description: remapPictures(event.description), soundDescription: remapOptional(event.soundDescription) }
+        : { ...event, delivery: remapOptional(event.delivery), speakerAction: remapOptional(event.speakerAction),
+          ...(event.kind === 'vocal' ? { vocalDescription: remapPictures(event.vocalDescription) } : {}),
+          reactions: event.reactions?.map((reaction) => ({ ...reaction, description: remapPictures(reaction.description) })) }) })),
+  } : undefined;
   const executionIdentities: H3IdentityBindings = { ...binding.identities,
+    ...(executionPerformance ? { performance: executionPerformance } : {}),
     ...(binding.identities.events ? { events: binding.identities.events.map((event) => {
       let referenceAnchor = event.referenceAnchor;
       if (referenceAnchor) for (const edit of videoPictureReferenceEdits(referenceAnchor, pictureNumbers).sort((left, right) => right.start - left.start)) {
@@ -553,10 +572,13 @@ const prepareVideoH3ReferenceDraftInternal = (
       }
       return { ...event, ...(referenceAnchor !== undefined ? { referenceAnchor } : {}) };
     }) } : {}) };
-  const execution = !pictureSourceIssues.length && plan.numbers && !identityIssues.length && characterPictures.size > 0
+  const executionMode = videoH3MediaModeContract(draft, context).mode;
+  const execution = !pictureSourceIssues.length && plan.numbers && !identityIssues.length
+    && (Boolean(executionPerformance) || characterPictures.size > 0)
     && [...characterPictures.keys()].every((id) => identities.some((identity) => identity.characterId === id))
-    && videoH3MediaModeContract(draft, context).mode === 'full-reference'
+    && (Boolean(executionPerformance) || executionMode === 'full-reference')
     ? renderH3ReferenceExecution({ prompt, identities: executionIdentities, characterPictures,
+      mode: executionMode === 'full-reference' ? 'full-reference' : 'integrated',
       language: binding.sourceLanguage || draft.source?.language,
       pictureUses: draft.references.map((reference, index) => ({ number: plan.numbers![index], role: reference.role })) }) : undefined;
   if (execution) prompt = execution.prompt;

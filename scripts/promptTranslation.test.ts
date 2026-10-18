@@ -565,7 +565,7 @@ for (const flags of [{ reviewWithAi: true }, { acceptAiAuthoredContent: true }])
       calls += 1;
       assert.ok(system.includes(VIDEO_PROMPT_ENGLISH_DOCUMENT_TRANSLATION_SYSTEM_PROMPT.split('\n')
         .find((line) => line.startsWith('本次翻译采用来源文档'))!));
-      assert.match(system, /只翻译slots的sourceText.*英文描述片段/u, 'the model translates slots rather than authoring an H3 body');
+      assert.match(system, /只翻译slots的sourceText.*完整英文描述单元/u, 'the model translates slots rather than authoring an H3 body');
       const data = readDocumentTranslationRequest(user, aiSource);
       assert.match(data.sourcePrompt, /TAIL_OF_COMPLETE_SOURCE$/u, 'long source context is not cut off');
       return descriptionSlotsResponse(data, (text) => text.replace('男性剑客', 'male swordsman').replace('青衣修士', 'cyan-robed cultivator'));
@@ -793,7 +793,7 @@ for (const system of [VIDEO_PROMPT_ENGLISH_TRANSLATION_SYSTEM_PROMPT, VIDEO_PROM
     clean: () => { throw new Error('H3 spatial facts do not pass through local semantic rewriting'); },
     request: async (system, user) => {
       requests += 1;
-      assert.match(system, /只翻译slots的sourceText.*英文描述片段/u, 'the model translates slots rather than authoring an H3 body');
+      assert.match(system, /只翻译slots的sourceText.*完整英文描述单元/u, 'the model translates slots rather than authoring an H3 body');
       assert.equal(system.split(VIDEO_ACTING_CAMERA_TRANSLATION_RULE).length - 1, 1);
       assert.equal(system.split(SPATIAL_TRANSLATION_RULE).length - 1, 1);
       assert.equal(system.includes(SPATIAL_COORDINATE_RULE), false);
@@ -941,4 +941,47 @@ try {
   else Reflect.deleteProperty(globalThis, 'window');
 }
 
-console.log('prompt translation: H3 single-request document and ordinary review contracts passed');
+// The production H3 entry point carries the saved performance into that same
+// one request; source facts and fixed speech roles cannot be written by it.
+{
+  const exactWords = '没错，我们的君王是为了支配你们而来的，下跪低头吧。';
+  const savedSource = `integrated_multimodal_description:\n[Shot 1] 夏提雅(S1)对贝里尤洛说<d>[Chinese] ${exactWords}</d>\noverall_soundscape: N/A\nnon_diegetic_music: N/A`;
+  const bindings: H3IdentityBindings = { version: 1, characters: [
+    { characterId: 'shalltear', name: '夏提雅', referenceAnchor: '夏提雅。' },
+    { characterId: 'king', name: '贝里尤洛', referenceAnchor: '贝里尤洛。' },
+  ], performance: { version: 1, timeBase: 'clip', descriptionLanguage: 'zh', shots: [{ shotIndex: 1, startSec: 0,
+    visualDescription: '中景保持原站位。', events: [
+      { kind: 'visual', eventId: 'observe', sourceFact: '没有看见戴骷髅头盔的家伙。', description: '目光扫过场地。', silentCharacterIds: ['king'] },
+      { kind: 'speech', eventId: 'declare', dialogueId: 'b1-d12', text: exactWords, language: 'Chinese',
+        startSec: 10.6, endSec: 14.4, channel: 'on-screen', speakerCharacterIds: ['shalltear'], listenerCharacterIds: ['king'],
+        delivery: '平静而明确。', reactions: [{ characterId: 'king', description: '沉默注视红铠。', presence: 'visible' }] },
+    ] }], overallSoundscape: 'N/A', nonDiegeticMusic: 'N/A' } };
+  let calls = 0;
+  let delivered: H3IdentityBindings | undefined;
+  const translated = await translateVideoPromptToEnglish({ sourcePrompt: savedSource, identityBindings: bindings,
+    acceptAiAuthoredContent: true, reviewWithAi: true, clean: (value) => value,
+    onReview: () => { throw new Error('performance translation has no second review'); },
+    onIdentityBindings: (value) => { delivered = value; },
+    request: async (_system, user, transport) => {
+      calls += 1;
+      assert.equal(transport?.sourceDocumentTranslation, true);
+      const data = JSON.parse(user);
+      assert.deepEqual(data.performanceContext.shots[0].events[1].speakerCharacterIds, ['shalltear']);
+      assert.equal(data.performanceContext.shots[0].events[1].text, exactWords);
+      assert.ok(data.slots.some((slot: { role: string; ownerCharacterIds?: string[] }) => slot.role === 'listener-reaction' && slot.ownerCharacterIds?.[0] === 'king'));
+      assert.doesNotMatch(JSON.stringify(data.slots), /下跪低头|骷髅头盔/u);
+      assert.doesNotMatch(JSON.stringify(data.performanceContext), /骷髅头盔/u);
+      return descriptionSlotsResponse(data, (text) => text.replaceAll('中景保持原站位。', 'The medium shot retains the positions.')
+        .replaceAll('目光扫过场地。', 'His gaze scans the ground.').replaceAll('平静而明确。', 'Calm and definite.')
+        .replaceAll('沉默注视红铠。', 'Watches the red armor silently.'));
+    },
+  });
+  assert.equal(calls, 1);
+  assert.match(translated, /From 10\.60 to 14\.40 seconds[^\n]*夏提雅 \(S1\) speaks on-screen to 贝里尤洛: <d>\[Chinese\] 没错/u);
+  assert.match(translated, /贝里尤洛[^\n]*Watches the red armor silently/u);
+  assert.doesNotMatch(translated, /骷髅头盔|贝里尤洛 \(S\d+\)/u);
+  assert.equal(delivered?.performance?.descriptionLanguage, 'en');
+  assert.equal(delivered?.events?.find((event) => event.dialogueId === 'b1-d12')?.speakerCharacterId, 'shalltear');
+}
+
+console.log('prompt translation: one-request complete-unit and performance translation contracts passed');

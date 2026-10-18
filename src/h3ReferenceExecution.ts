@@ -1,6 +1,7 @@
 import type { H3IdentityBindings, ReferenceRole } from './types';
 import { buildPromptTranslationDocument } from './promptTranslationDocument';
 import { maskVideoPictureReferenceLiterals } from './videoPictureReferences';
+import { renderH3PerformancePlan } from './h3PerformancePlan';
 
 type Identity = H3IdentityBindings['characters'][number];
 type Event = NonNullable<H3IdentityBindings['events']>[number];
@@ -25,6 +26,7 @@ export interface H3ReferenceExecutionInput {
   characterPictures: ReadonlyMap<string, readonly number[]>;
   pictureUses?: ReadonlyArray<{ number: number; role: ReferenceRole }>;
   language?: 'zh' | 'en';
+  mode?: 'integrated' | 'full-reference';
 }
 
 const escaped = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
@@ -78,6 +80,28 @@ const renderVoiceTokens = (source: string, tokens: ReadonlyMap<string, string>):
   for (const match of mask(source).matchAll(/[（(][ \t]*[SＳ][0-9０-９]+(?:[ \t]*[,，][ \t]*[SＳ][0-9０-９]+)*(?=[ \t]*[）),，])/gu)) {
     const text = match[0].replace(/[SＳ][0-9０-９]+/gu, (token) => tokens.get(voiceKey(token) || '') || token);
     if (text !== match[0]) edits.push({ start: match.index!, end: match.index! + match[0].length, text });
+  }
+  return applyEdits(source, edits);
+};
+
+/** A proven identity anchor owns its own declaration. A missing voice on a
+ * silent identity must not leave a stale token that aliases another speaker
+ * after the remaining sources are numbered. Literal dialogue is never edited. */
+const clearSilentIdentityVoices = (
+  source: string, identities: H3IdentityBindings, characters: readonly H3ReferenceExecutionCharacter[],
+): string => {
+  const visible = mask(source);
+  const edits: Edit[] = [];
+  for (const entry of identities.characters) {
+    if (characters.find((character) => character.characterId === entry.characterId)?.speakerToken) continue;
+    const at = uniqueAnchorStart(source, entry.referenceAnchor);
+    if (at < 0) continue;
+    const anchor = visible.slice(at, at + entry.referenceAnchor.length);
+    const pattern = new RegExp(`${escaped(entry.name)}([ \\t]*[（(][ \\t]*[SＳ][0-9０-９]+[ \\t]*[）)])`, 'gu');
+    for (const match of anchor.matchAll(pattern)) {
+      const start = at + match.index! + entry.name.length;
+      edits.push({ start, end: start + match[1].length, text: '' });
+    }
   }
   return applyEdits(source, edits);
 };
@@ -219,6 +243,50 @@ const renderRetention = (source: string, characters: readonly H3ReferenceExecuti
 export const renderH3ReferenceExecution = (input: H3ReferenceExecutionInput): H3ReferenceExecutionResult | undefined => {
   const { identities } = input;
   let prompt = input.prompt;
+  if (identities.performance) {
+    const sections = sectionsOf(prompt);
+    const originalDefinitions = sections.find((section) => section.name === 'subject_definitions')?.body || '';
+    const uses = new Set((input.pictureUses || []).map((entry) => entry.number));
+    const characterAudio = new Map<string, number[]>();
+    for (const entry of identities.characters) {
+      const definition = originalDefinitions.split(/\r?\n/u).find((line) => entry.subjectToken
+        ? line.trimStart().startsWith(`${entry.subjectToken} `) : entry.referenceAnchor && line.includes(entry.referenceAnchor));
+      const numbers = [...(definition || entry.referenceAnchor).matchAll(/<Audio\s+(\d+)>/gu)].map((match) => Number(match[1]));
+      if (numbers.length) characterAudio.set(entry.characterId, unique(numbers));
+    }
+    const voiceOnlyLines = new Set<string>();
+    for (const entry of identities.performance.characters || []) {
+      if (!entry.name || identities.characters.some((character) => character.characterId === entry.characterId)) continue;
+      const declaration = new RegExp(`^(?:Voice identity|声音身份): ${escaped(entry.name)} \\(S\\d+\\)(?=[,.。 ，]|$)`, 'u');
+      for (const line of originalDefinitions.split(/\r?\n/u)) if (declaration.test(line.trim())) {
+        voiceOnlyLines.add(line);
+        const numbers = [...line.matchAll(/<Audio\s+(\d+)>/gu)].map((match) => Number(match[1]));
+        if (numbers.length) characterAudio.set(entry.characterId, unique(numbers));
+      }
+    }
+    // The adopted plan owns character definitions and the complete performance.
+    // Retain only separately authored scene/prop definitions from the envelope.
+    const extraDefinitions = originalDefinitions.split(/\r?\n/u).filter((line) => {
+      if (voiceOnlyLines.has(line)) return false;
+      if (identities.characters.some((entry) => entry.subjectToken
+        ? line.trimStart().startsWith(`${entry.subjectToken} `)
+        : entry.referenceAnchor && line.includes(entry.referenceAnchor))) return false;
+      const picture = /^\s*<Picture\s+(\d+)>\s+(?:is the|用于)\s/u.exec(line);
+      return !picture || !uses.has(Number(picture[1]));
+    }).join('\n').trim();
+    const rendered = renderH3PerformancePlan({ plan: identities.performance, characters: identities.characters,
+      language: input.language || identities.performance.descriptionLanguage || 'zh',
+      mode: input.mode || 'full-reference', characterPictures: input.characterPictures, characterAudio, pictureUses: input.pictureUses,
+      subjectDefinitions: extraDefinitions,
+      summary: identities.performance.summary ?? sections.find((section) => section.name === 'summary')?.body.trim(),
+      retentionAnalysis: identities.performance.retentionAnalysis ?? sections.find((section) => section.name === 'retention_analysis')?.body.trim(),
+    });
+    return { prompt: rendered.prompt, identities: { ...identities, characters: rendered.characters,
+      events: rendered.events, performance: rendered.plan },
+    characters: rendered.characters.flatMap((entry) => entry.subjectToken ? [{ characterId: entry.characterId,
+      name: entry.name, subjectToken: entry.subjectToken, ...(entry.speakerToken ? { speakerToken: entry.speakerToken } : {}),
+      pictureNumbers: [...(input.characterPictures.get(entry.characterId) || [])] }] : []) };
+  }
   if (!identities.characters.length) return undefined;
   const previousAssociations: Edit[] = [];
   for (const entry of identities.characters) {
@@ -317,10 +385,11 @@ export const renderH3ReferenceExecution = (input: H3ReferenceExecutionInput): H3
     const source = pictures ? ` referenced from ${pictures}` : ' defined by the authored prompt';
     const definition = `${character.subjectToken} is ${entry.name}${character.speakerToken ? ` ${character.speakerToken}` : ''}${source}${pureAnchor ? `: ${pureAnchor}` : '.'}`;
     if (range) definitionEdits.push({ ...range, text: definition }); else extraDefinitions.push(definition);
-    renderedIdentities.push({ ...entry, subjectToken: character.subjectToken,
+    const { speakerToken: _previousSpeaker, ...identityWithoutVoice } = entry;
+    renderedIdentities.push({ ...identityWithoutVoice, subjectToken: character.subjectToken,
       ...(character.speakerToken ? { speakerToken: character.speakerToken } : {}), referenceAnchor: definition });
   }
-  let body = applyEdits(detailed.body, bodyEdits);
+  let body = clearSilentIdentityVoices(applyEdits(detailed.body, bodyEdits), identities, characters);
   // Remove only our old generated identity association, never authored payloads.
   const legacyEdits: Edit[] = [];
   for (const entry of identities.characters) {

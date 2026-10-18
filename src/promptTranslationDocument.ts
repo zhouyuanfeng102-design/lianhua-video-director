@@ -1,5 +1,6 @@
-import type { H3IdentityBindings, H3IdentityEventBinding, SemanticSegmentSource } from './types';
+import type { H3IdentityBindings, H3IdentityEventBinding, H3PerformancePlan, SemanticSegmentSource } from './types';
 import { getPromptVisibleTextSpans } from './promptDialogueLanguage';
+import { renderH3PerformancePlan } from './h3PerformancePlan';
 
 export interface PromptTranslationSourceCharacter {
   id: string;
@@ -34,11 +35,16 @@ export interface PromptTranslationSlot extends SourceRange {
   /** Read-only surrounding source; these strings are never returned for translation. */
   before: string;
   after: string;
-  /** Translate every slot in this complete line together, not as isolated words. */
+  /** One complete paragraph or one owned performance description, never gaps between names/numbers. */
   groupId: string;
   groupSourceText: string;
   /** Explicit source events covering this fragment; no roles are inferred from prose. */
   eventIds?: string[];
+  /** Source-owned literals embedded in this complete unit, not separate translation fragments. */
+  protectedText?: Array<{ token: string; text: string; kind: PromptTranslationLiteral['literalKind'] }>;
+  /** Explicit owner of a delivery/action/reaction; a description cannot reassign this role. */
+  ownerCharacterIds?: string[];
+  role?: string;
 }
 
 export interface PromptTranslationGroup extends SourceRange {
@@ -89,6 +95,11 @@ export interface PromptTranslationDocument {
   identityBindings?: H3IdentityBindings;
   identityAnchors: PromptTranslationIdentityAnchor[];
   eventAnchors: PromptTranslationEventAnchor[];
+  performancePlan?: H3PerformancePlan;
+  performanceFields?: Array<{ slotId: string; path: Array<string | number> }>;
+  performanceDefinitionAtoms?: Array<PromptTranslationLiteral | PromptTranslationSlot>;
+  performanceCharacterPictures?: Array<[string, number[]]>;
+  performanceCharacterAudio?: Array<[string, number[]]>;
 }
 
 export interface BuildPromptTranslationDocumentInput {
@@ -169,6 +180,11 @@ const buildCharacters = (input: BuildPromptTranslationDocumentInput): PromptTran
       ...(binding.speakerToken ? { speakerToken: binding.speakerToken } : {}),
       ...(binding.relationship || existing?.relationship ? { relationship: binding.relationship || existing?.relationship } : {}) });
   }
+  for (const character of input.identityBindings?.performance?.characters || []) {
+    if (character.name && !characters.has(character.characterId)) characters.set(character.characterId, {
+      characterId: character.characterId, name: character.name, aliases: [],
+    });
+  }
   return [...characters.values()];
 };
 
@@ -247,6 +263,98 @@ const explicitSpeaker = (
   return tokenAtEnd ? { speakerToken: tokenAtEnd } : {};
 };
 
+/** New deliveries translate owned descriptions, then render the event again.
+ * The original narrative body is never spliced into the translated event. */
+const withPerformanceTranslation = (
+  document: PromptTranslationDocument, sourcePlan: H3PerformancePlan,
+): PromptTranslationDocument => {
+  const plan = structuredClone(sourcePlan);
+  const fields: NonNullable<PromptTranslationDocument['performanceFields']> = [];
+  const slots: PromptTranslationSlot[] = [];
+  const add = (path: Array<string | number>, value: string | undefined, role: string, ownerCharacterIds?: string[], eventId?: string): void => {
+    if (!value?.trim() || value.trim() === 'N/A') return;
+    // The same complete-unit literal format is used for descriptions. It does
+    // not expose the fixed speech skeleton to the translator.
+    const prose = buildPromptTranslationDocument({ sourcePrompt: value,
+      sourceCharacters: document.characters.map((entry) => ({ id: entry.characterId, name: entry.name, aliases: entry.aliases })) });
+    const protectedText: NonNullable<PromptTranslationSlot['protectedText']> = [];
+    const keep = (text: string, kind: PromptTranslationLiteral['literalKind']): string => {
+      const token = `__H3_KEEP_${String(protectedText.length + 1).padStart(4, '0')}__`;
+      protectedText.push({ token, text, kind });
+      return token;
+    };
+    const sourceText = prose.atoms.map((atom) => {
+      if (atom.kind === 'literal') return atom.literalKind === 'layout' ? atom.text : keep(atom.text, atom.literalKind);
+      const replacements = new Map((atom.protectedText || []).map((literal) => [literal.token, keep(literal.text, literal.kind)]));
+      return atom.sourceText.replace(/__H3_[A-Z_]+_\d+__/gu, (token) => replacements.get(token) || token);
+    }).join('');
+    const id = `performance.${path.join('.')}`;
+    slots.push({ kind: 'slot', id, sourceText, sourceStart: 0, sourceEnd: value.length,
+      before: '', after: '', groupId: id, groupSourceText: value, protectedText, role,
+      ...(ownerCharacterIds ? { ownerCharacterIds } : {}), ...(eventId ? { eventIds: [eventId] } : {}) });
+    fields.push({ slotId: id, path });
+  };
+  add(['preamble'], plan.preamble, 'visual-preamble');
+  plan.characters?.forEach((character, index) => {
+    add(['characters', index, 'visualDescription'], character.visualDescription, 'visual-identity', [character.characterId]);
+    add(['characters', index, 'voiceDescription'], character.voiceDescription, 'voice-identity', [character.characterId]);
+  });
+  plan.shots.forEach((shot, shotIndex) => {
+    add(['shots', shotIndex, 'visualDescription'], shot.visualDescription, 'shot-visual');
+    shot.events.forEach((event, eventIndex) => {
+      const path = ['shots', shotIndex, 'events', eventIndex];
+      if (event.kind === 'visual') {
+        add([...path, 'description'], event.description, 'visual-performance', undefined, event.eventId);
+        add([...path, 'soundDescription'], event.soundDescription, 'local-sound', undefined, event.eventId);
+      } else {
+        add([...path, 'delivery'], event.delivery, 'speaker-delivery', event.speakerCharacterIds, event.eventId);
+        add([...path, 'speakerAction'], event.speakerAction, 'speaker-action', event.speakerCharacterIds, event.eventId);
+        if (event.kind === 'vocal') add([...path, 'vocalDescription'], event.vocalDescription, 'non-verbal-voice', event.speakerCharacterIds, event.eventId);
+        event.reactions?.forEach((reaction, index) => add([...path, 'reactions', index, 'description'], reaction.description,
+          'listener-reaction', [reaction.characterId], event.eventId));
+      }
+      // sourceFact, exact speech, roles, channels, clocks and IDs are not fields
+      // that a description response can overwrite.
+    });
+  });
+  add(['summary'], plan.summary, 'summary');
+  add(['retentionAnalysis'], plan.retentionAnalysis, 'retention-analysis');
+  add(['overallSoundscape'], plan.overallSoundscape, 'global-soundscape');
+  add(['nonDiegeticMusic'], plan.nonDiegeticMusic, 'music');
+  const definitionStart = document.sourcePrompt.match(/^subject_definitions:[\t ]*/mu);
+  const start = definitionStart?.index === undefined ? -1 : definitionStart.index + definitionStart[0].length;
+  const sectionEnd = start < 0 ? -1 : document.sourcePrompt.slice(start).search(/^summary:/mu);
+  const allDefinitionAtoms = start >= 0 && sectionEnd >= 0
+    ? document.atoms.filter((atom) => atom.sourceStart >= start && atom.sourceEnd <= start + sectionEnd) : [];
+  const characterPictures: Array<[string, number[]]> = [];
+  const characterAudio: Array<[string, number[]]> = [];
+  const characterDefinitionLines = new Set<string>();
+  const definitionLines = start >= 0 && sectionEnd >= 0 ? document.sourcePrompt.slice(start, start + sectionEnd).split(/\r?\n/u) : [];
+  for (const character of document.characters) {
+    // Voice-only sources need no visual Subject. Match only the renderer's
+    // explicit declaration for a unique name in this saved plan; unrelated
+    // legacy voices and narrative name mentions remain extra definitions.
+    const namedVoice = plan.characters?.filter((entry) => entry.name === character.name);
+    const voiceDeclaration = namedVoice?.length === 1 && namedVoice[0].characterId === character.characterId
+      ? new RegExp(`^\\s*(?:Voice identity|声音身份):\\s*${escapePattern(character.name)}\\s+\\(S\\d+\\)(?=\\s|[,，.:：。]|$)`, 'u') : undefined;
+    const lines = definitionLines.filter((value) => (character.subjectToken && value.trimStart().startsWith(`${character.subjectToken} `))
+      || voiceDeclaration?.test(value));
+    if (!lines.length) continue;
+    lines.forEach((line) => characterDefinitionLines.add(line));
+    const pictures = [...new Set(lines.flatMap((line) => [...line.matchAll(/<Picture\s+(\d+)>/gu)].map((match) => Number(match[1]))))];
+    if (pictures.length) characterPictures.push([character.characterId, pictures]);
+    const audio = [...new Set(lines.flatMap((line) => [...line.matchAll(/<Audio\s+(\d+)>/gu)].map((match) => Number(match[1]))))];
+    if (audio.length) characterAudio.push([character.characterId, audio]);
+  }
+  const definitionAtoms = allDefinitionAtoms.filter((atom) => atom.kind === 'literal'
+    ? atom.literalKind === 'layout' : !characterDefinitionLines.has(atom.groupSourceText));
+  for (const atom of definitionAtoms) if (atom.kind === 'slot') slots.push(atom);
+  return { ...document, slots, groups: slots.map((slot) => ({ id: slot.groupId, sourceStart: slot.sourceStart,
+    sourceEnd: slot.sourceEnd, sourceText: slot.groupSourceText, slotIds: [slot.id] })),
+  performancePlan: plan, performanceFields: fields, performanceDefinitionAtoms: definitionAtoms,
+  performanceCharacterPictures: characterPictures, performanceCharacterAudio: characterAudio };
+};
+
 /** Build a source-ordered translation document. No model output participates in its literals. */
 export const buildPromptTranslationDocument = (input: BuildPromptTranslationDocumentInput): PromptTranslationDocument => {
   const source = input.sourcePrompt;
@@ -318,63 +426,62 @@ export const buildPromptTranslationDocument = (input: BuildPromptTranslationDocu
   const atoms: PromptTranslationDocument['atoms'] = [];
   const slots: PromptTranslationSlot[] = [];
   const groups: PromptTranslationGroup[] = [];
-  const lineRanges: SourceRange[] = [];
-  let lineStart = 0;
-  for (const match of source.matchAll(/\r\n|\r|\n/gu)) if (!insideOpaque(match.index!, match.index! + match[0].length)) {
-    lineRanges.push({ sourceStart: lineStart, sourceEnd: match.index! });
-    lineStart = match.index! + match[0].length;
-  }
-  lineRanges.push({ sourceStart: lineStart, sourceEnd: source.length });
-  const groupFor = (start: number): PromptTranslationGroup => {
-    const range = lineRanges.find((line) => line.sourceStart <= start && start <= line.sourceEnd) || { sourceStart: start, sourceEnd: source.length };
-    const existing = groups.find((group) => group.sourceStart === range.sourceStart && group.sourceEnd === range.sourceEnd);
-    if (existing) return existing;
-    const group: PromptTranslationGroup = { ...range, id: `group-${String(groups.length + 1).padStart(4, '0')}`,
-      sourceText: source.slice(range.sourceStart, range.sourceEnd), slotIds: [] };
-    groups.push(group);
-    return group;
-  };
-  const anchorBoundaries = [...new Set([...identityAnchors, ...eventAnchors].flatMap((range) => [range.sourceStart, range.sourceEnd]))];
-  const appendGap = (start: number, end: number): void => {
-    const boundaries = [start, ...anchorBoundaries.filter((at) => at > start && at < end).sort((left, right) => left - right), end];
-    for (let index = 0; index < boundaries.length - 1; index += 1) {
-      const begin = boundaries[index];
-      const finish = boundaries[index + 1];
-      const gap = source.slice(begin, finish);
-      // Newlines stay source layout; punctuation-only gaps need no model work.
-      let cursor = begin;
-      for (const line of gap.split(/(\r\n|\r|\n)/u)) {
-        const leading = line.match(/^\s*/u)?.[0] || '';
-        const trailing = line.slice(leading.length).match(/\s*$/u)?.[0] || '';
-        const body = line.slice(leading.length, line.length - trailing.length);
-        if (leading) atoms.push({ kind: 'literal', sourceStart: cursor, sourceEnd: cursor + leading.length, text: leading, literalKind: 'layout' });
-        const bodyStart = cursor + leading.length;
-        if (body) {
-          if (/[\p{L}]/u.test(body)) {
-            const group = groupFor(bodyStart);
-            const slot: PromptTranslationSlot = { kind: 'slot', id: `slot-${String(slots.length + 1).padStart(4, '0')}`,
-              sourceStart: bodyStart, sourceEnd: bodyStart + body.length, sourceText: body,
-              before: source.slice(Math.max(0, bodyStart - 100), bodyStart), after: source.slice(bodyStart + body.length, bodyStart + body.length + 100),
-              groupId: group.id, groupSourceText: group.sourceText,
-              ...(eventAnchors.some((event) => event.sourceStart < bodyStart + body.length && event.sourceEnd > bodyStart)
-                ? { eventIds: eventAnchors.filter((event) => event.sourceStart < bodyStart + body.length && event.sourceEnd > bodyStart).map((event) => event.eventId) } : {}) };
-            group.slotIds.push(slot.id);
-            slots.push(slot); atoms.push(slot);
-          } else atoms.push({ kind: 'literal', sourceStart: bodyStart, sourceEnd: bodyStart + body.length, text: body, literalKind: 'layout' });
-        }
-        if (trailing) atoms.push({ kind: 'literal', sourceStart: bodyStart + body.length, sourceEnd: cursor + line.length, text: trailing, literalKind: 'layout' });
-        cursor += line.length;
+  const appendUnit = (begin: number, end: number): void => {
+    const original = source.slice(begin, end);
+    // Only the existing protocol prefix and whitespace stay outside a unit.
+    // Entity, number and dialogue positions stay INSIDE its complete grammar.
+    const prefix = original.match(/^(?:[ \t]*(?:(?:subject_definitions|summary|retention_analysis|detailed_description|integrated_multimodal_description|overall_soundscape|non_diegetic_music)[\t ]*:[\t ]*)?)(?:\[Shot[\t ]*\d+\][\t ]*(?:At\s+\d{2}:\d{2}(?:\.\d+)?[,，]?[\t ]*)?)?/u)?.[0] || '';
+    const content = original.slice(prefix.length);
+    const trailing = content.match(/\s*$/u)?.[0] || '';
+    const body = content.slice(0, content.length - trailing.length);
+    const bodyStart = begin + prefix.length;
+    if (prefix) atoms.push({ kind: 'literal', sourceStart: begin, sourceEnd: bodyStart, text: prefix, literalKind: 'protocol' });
+    if (body) {
+      const groupId = `group-${String(groups.length + 1).padStart(4, '0')}`;
+      const id = `unit-${String(slots.length + 1).padStart(4, '0')}`;
+      const ranges = selected.filter((range) => range.sourceStart >= bodyStart && range.sourceEnd <= bodyStart + body.length);
+      const protectedText = ranges.map((range, index) => ({
+        token: `__H3_${range.literalKind.toUpperCase().replace(/-/gu, '_')}_${String(index + 1).padStart(4, '0')}__`,
+        text: range.text, kind: range.literalKind,
+      }));
+      let sourceText = '';
+      let cursor = bodyStart;
+      ranges.forEach((range, index) => {
+        sourceText += source.slice(cursor, range.sourceStart) + protectedText[index].token;
+        cursor = range.sourceEnd;
+      });
+      sourceText += source.slice(cursor, bodyStart + body.length);
+      // Protocol-only/empty descriptions such as N/A have no translation work.
+      if (!/[\p{L}]/u.test(ranges.reduce((text, _range, index) => text.replace(protectedText[index].token, ''), sourceText))) {
+        atoms.push({ kind: 'literal', sourceStart: bodyStart, sourceEnd: bodyStart + body.length, text: body, literalKind: 'protocol' });
+      } else {
+        const slot: PromptTranslationSlot = { kind: 'slot', id, sourceStart: bodyStart, sourceEnd: bodyStart + body.length,
+          sourceText, before: prefix, after: trailing, groupId, groupSourceText: original,
+          protectedText,
+          ...(eventAnchors.some((event) => event.sourceStart < bodyStart + body.length && event.sourceEnd > bodyStart)
+            ? { eventIds: eventAnchors.filter((event) => event.sourceStart < bodyStart + body.length && event.sourceEnd > bodyStart).map((event) => event.eventId) } : {}) };
+        slots.push(slot); atoms.push(slot);
+        groups.push({ id: groupId, sourceStart: begin, sourceEnd: end, sourceText: original, slotIds: [id] });
       }
     }
+    if (trailing) atoms.push({ kind: 'literal', sourceStart: end - trailing.length, sourceEnd: end, text: trailing, literalKind: 'layout' });
+  };
+  const appendParagraph = (start: number, end: number): void => {
+    // Some legacy deliveries put several complete Identity declarations on
+    // one line. Keep each declared sentence whole so its translated anchor
+    // cannot expand to include another person's identity.
+    const ends = [...new Set(identityAnchors.filter((anchor) => anchor.sourceStart >= start && anchor.sourceEnd < end
+      && /[。！？.!?]\s*$/u.test(source.slice(anchor.sourceStart, anchor.sourceEnd))).map((anchor) => anchor.sourceEnd))].sort((a, b) => a - b);
+    let cursor = start;
+    for (const boundary of [...ends, end]) { appendUnit(cursor, boundary); cursor = boundary; }
   };
   let cursor = 0;
-  for (const range of selected) {
-    appendGap(cursor, range.sourceStart);
-    const { priority: _priority, ...literal } = range;
-    atoms.push(literal);
-    cursor = range.sourceEnd;
+  for (const match of source.matchAll(/\r\n|\r|\n/gu)) if (!insideOpaque(match.index!, match.index! + match[0].length)) {
+    appendParagraph(cursor, match.index!);
+    atoms.push({ kind: 'literal', sourceStart: match.index!, sourceEnd: match.index! + match[0].length, text: match[0], literalKind: 'layout' });
+    cursor = match.index! + match[0].length;
   }
-  appendGap(cursor, source.length);
+  appendParagraph(cursor, source.length);
   let previousDialogueEnd = 0;
   const usedSourceDialogues = new Set<number>();
   const utterances = opaque.filter((range) => range.dialogue).map((range, index): PromptTranslationUtterance => {
@@ -397,9 +504,10 @@ export const buildPromptTranslationDocument = (input: BuildPromptTranslationDocu
       ...(boundEvent?.listenerCharacterIds || fact?.listenerCharacterIds ? { listenerCharacterIds: [...(boundEvent?.listenerCharacterIds || fact!.listenerCharacterIds!)] } : {}),
       ...(boundEvent?.addressedCharacterIds || fact?.addressedCharacterIds ? { addressedCharacterIds: [...(boundEvent?.addressedCharacterIds || fact!.addressedCharacterIds!)] } : {}) };
   });
-  return { version: 1, sourcePrompt: source, characters, atoms, slots, groups, utterances, events,
+  const document: PromptTranslationDocument = { version: 1, sourcePrompt: source, characters, atoms, slots, groups, utterances, events,
     ...(input.sourceEvents ? { sourceEvents: structuredClone([...input.sourceEvents]) } : {}),
     ...(input.identityBindings ? { identityBindings: structuredClone(input.identityBindings) } : {}), identityAnchors, eventAnchors };
+  return input.identityBindings?.performance ? withPerformanceTranslation(document, input.identityBindings.performance) : document;
 };
 
 const translationValues = (response: unknown): Map<string, string> => {
@@ -417,34 +525,52 @@ const translationValues = (response: unknown): Map<string, string> => {
   return values;
 };
 
-/** Assemble only the requested prose slots; source literals cannot be replaced by a response. */
+/** Assemble complete units or render an owned plan; no prose is translated in gaps between facts. */
 export const renderPromptTranslationDocument = (
   document: PromptTranslationDocument, translations: unknown,
 ): RenderPromptTranslationDocumentResult => {
   const values = translationValues(translations);
   const missing: string[] = [];
-  const rendered = document.atoms.map((atom) => {
+  const renderAtom = (atom: PromptTranslationLiteral | PromptTranslationSlot): string => {
     if (atom.kind === 'literal') return atom.text;
     const value = values.get(atom.id);
-    if (value === undefined) { missing.push(atom.id); return atom.sourceText; }
-    return value;
-  });
-  // Join translated English prose naturally around fixed names/tokens without
-  // changing either the source literals or source-only fallback fragments.
-  document.atoms.forEach((atom, index) => {
-    if (atom.kind !== 'slot' || missing.includes(atom.id)) return;
-    const previous = index > 0 ? rendered[index - 1] : '';
-    const next = rendered[index + 1] || '';
-    if (/[\p{L}\p{N}>\])]$/u.test(previous) && /^[\p{Script=Latin}\p{N}]/u.test(rendered[index])) rendered[index] = ' ' + rendered[index];
-    if (/[\p{Script=Latin}\p{N}]$/u.test(rendered[index]) && /^[\p{L}\p{N}<(@]/u.test(next)) rendered[index] += ' ';
-  });
+    if (value === undefined) missing.push(atom.id);
+    const literals = new Map(atom.protectedText?.map((literal) => [literal.token, literal.text]) || []);
+    return (value ?? atom.sourceText).replace(/__H3_[A-Z_]+_\d+__/gu, (token) => literals.get(token) ?? token);
+  };
+  const warnings = (): string[] => missing.length
+    ? [`英文翻译有 ${missing.length} 个完整描述单元未返回，已保留对应来源描述；原对白和人物绑定保持。`] : [];
+  if (document.performancePlan && document.identityBindings) {
+    const plan = structuredClone(document.performancePlan);
+    for (const field of document.performanceFields || []) {
+      const slot = document.slots.find((entry) => entry.id === field.slotId);
+      if (!slot) continue;
+      let owner = plan as unknown as Record<string | number, unknown>;
+      for (const key of field.path.slice(0, -1)) owner = owner[key] as Record<string | number, unknown>;
+      owner[field.path[field.path.length - 1]] = renderAtom(slot);
+    }
+    const extraDefinitions = (document.performanceDefinitionAtoms || []).map(renderAtom).join('').trim();
+    const fullReference = /^subject_definitions:/mu.test(document.sourcePrompt);
+    const result = renderH3PerformancePlan({ plan, language: 'en', characters: document.identityBindings.characters,
+      mode: fullReference ? 'full-reference' : 'integrated',
+      subjectTokens: new Map(document.characters.filter((entry) => entry.subjectToken).map((entry) => [entry.characterId, entry.subjectToken!])),
+      characterPictures: new Map(document.performanceCharacterPictures || []),
+      characterAudio: new Map(document.performanceCharacterAudio || []),
+      ...(extraDefinitions ? { subjectDefinitions: extraDefinitions } : {}) });
+    return { prompt: result.prompt, identityBindings: { ...structuredClone(document.identityBindings),
+      characters: result.characters, events: result.events, performance: result.plan }, deliveryWarnings: warnings() };
+  }
+  const rendered = document.atoms.map(renderAtom);
   const prompt = rendered.join('');
-  const deliveryWarnings = missing.length ? [`英文翻译有 ${missing.length} 个描述片段未返回，已在原位置保留来源文字；原对白和人物绑定保持。`] : [];
+  const deliveryWarnings = warnings();
   const identityBindings = document.identityBindings ? structuredClone(document.identityBindings) : undefined;
   const renderRange = (anchor: SourceRange): string => document.atoms.map((atom, index) => {
     if (atom.sourceEnd <= anchor.sourceStart || atom.sourceStart >= anchor.sourceEnd) return '';
     if (atom.sourceStart >= anchor.sourceStart && atom.sourceEnd <= anchor.sourceEnd) return rendered[index];
-    return document.sourcePrompt.slice(Math.max(atom.sourceStart, anchor.sourceStart), Math.min(atom.sourceEnd, anchor.sourceEnd));
+    // A legacy anchor may be a subsection of one translated paragraph. Use
+    // that complete translated unit as its exact excerpt, never splice a
+    // Chinese fragment back into the translated sentence.
+    return rendered[index];
   }).join('');
   if (identityBindings) for (const binding of identityBindings.characters) {
     const anchor = document.identityAnchors.find((entry) => entry.characterId === binding.characterId);

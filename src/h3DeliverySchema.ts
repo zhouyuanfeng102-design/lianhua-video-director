@@ -1,4 +1,5 @@
 import type { H3IdentityBindings, H3IdentityEventBinding } from './types';
+import { parseH3PerformancePlan } from './h3PerformancePlan';
 
 export const h3Record = (value: unknown): value is Record<string, unknown> => value !== null
   && typeof value === 'object' && !Array.isArray(value)
@@ -129,5 +130,9 @@ export const inspectH3IdentityBindings = (value: unknown): {
     });
   });
   const events = copyH3IdentityEventBindings(value.events);
-  return issues.length ? { issues } : { value: { version: 1, characters, ...(events ? { events } : {}) }, issues };
+  // An optional performance sidecar is copied as authored data. Unreadable old
+  // ancillary data neither adds a delivery issue nor makes a saved body unusable.
+  const performance = parseH3PerformancePlan(value.performance);
+  return issues.length ? { issues } : { value: { version: 1, characters, ...(events ? { events } : {}),
+    ...(performance ? { performance } : {}) }, issues };
 };

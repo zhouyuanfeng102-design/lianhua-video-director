@@ -1,6 +1,7 @@
 import type { H3IdentityBindings, PromptCharacterParticipation } from './types';
 import { characterParticipationCoverageIssues, characterParticipationIssues, inspectCharacterParticipation } from './characterParticipation';
 import { readH3StagingShotMetadata, type H3StagingShotMetadata } from './h3StagingMetadata';
+import { parseH3PerformancePlan } from './h3PerformancePlan';
 import { H3DeliveryValidationError, H3IdentityMetadataError, H3_IDENTITY_SCHEMA_RULE, copyH3IdentityEventBindings, h3FieldIssue, inspectH3IdentityBindings, type H3DeliveryFieldIssue } from './h3DeliverySchema';
 
 const record = (value: unknown): value is Record<string, unknown> => value !== null
@@ -112,7 +113,9 @@ const readAiAuthoredEnvelope = (value: Record<string, unknown>): H3DeliveryEnvel
       });
       if (!metadata.characters.length || characters.length) {
         const events = copyH3IdentityEventBindings(metadata.events);
-        delivery.identityBindings = { version: 1, characters, ...(events ? { events } : {}) };
+        const performance = parseH3PerformancePlan(metadata.performance);
+        delivery.identityBindings = { version: 1, characters, ...(events ? { events } : {}),
+          ...(performance ? { performance } : {}) };
       }
     }
   }
@@ -285,4 +288,14 @@ export const H3_IDENTITY_BINDINGS_RULE = [
   'referenceAnchor必须逐字等于h3Prompt中仅出现一次的一条独立、简短纯视觉身份定义句。full-reference把这句写在subject_definitions内；三字段把这句自然写在该人物首次实际出现或发声的[Shot N]正文内，不限首镜，不放在镜头标记之前，不增section。后镜、远景、背影或静默人物同样不能遗漏，身份定义不是强迫人物提前入画。该句可包含完整姓名、已有Subject与S编号及必要外貌，但不包含Picture标签、动作、对白、口型、剧情结果、[Shot]标记或任何时间片段，不把整镜正文当锚点。可用自然句“Identity: 姓名 (S1), ... .”，不要新增identity:章节。人物实际行动和逐句发话另写在各镜正文。',
   '只给实际发声人物speakerToken，静默人物仍可有视觉身份锚点但不能因主角或有参考图而分配声音。同一人物跨镜speakerToken不变，且与每句<d>紧邻的完整姓名/声源一致；人物不同形态按给定characterId分别对应，不把形态资产按基础姓名合并。identityBindings只定位既有视觉身份，不重复朗读人物名字。',
   '交付前将每项referenceAnchor逐字对照本次最终h3Prompt，必须恰好出现一次且与已声明的Subject/声源编号一致；中文元数据不能配英文正文，后续翻译、衔接、参考更新或协议修复改动身份句时同步返回新的完整identityBindings。不能只改正文后沿用旧锚点，也不能省略、清空或删除已提供人物记录来消除绑定错误。',
+].join('\n');
+
+/** Part of the existing final delivery response, never a separate review call. */
+export const H3_PERFORMANCE_DELIVERY_RULE = [
+  '在本次同一个交付JSON的identityBindings内同时返回performance。它是与当前中文稿配套的视听执行记录，不是新H3章节，不是审核结果。程序使用该记录直接构造H3正文与声源编号；h3Prompt仍返回完整可读稿以兼容历史交付。已有candidateIdentityBindings.performance时沿用其身份、原话和已确认排程，只修改本次获准部分。',
+  'performance结构：{version:1,timeBase:"shot"或"clip",descriptionLanguage:"zh",characters:[{characterId,name?,presence?:"visible"或"offscreen",visualDescription,voiceDescription?}],shots:[{shotIndex,startSec,visualDescription,events:[]}],overallSoundscape,nonDiegeticMusic,summary?,retentionAnalysis?}。shots.startSec始终是当前15秒等提交片段内切点；events的startSec/endSec服从唯一timeBase。沿用镜内相对发话时间时填写shot，已转为本段绝对时间才填clip，不重复偏移。镜数、切点、摄影、声音的修改权限沿用本次taskAuthority。',
+  '每个事件用稳定eventId关联来源，sourceFact保留原叙述/观察/认知及原文依据；sourceFact不会输出给视频。静默事件kind:"visual"，用description只写当前已采用的可见表演，silentCharacterIds列本次静默人物，必要局部音效写soundDescription。例：观察者环视场地后看回眼前人并皱眉；“确认未见某人”的背景判断留在sourceFact，不再在description、人物介绍、镜头概述或声景里作为一整句可朗读解释重复。不得凭空补被提及人物、闪回或配音，也不机械删除所有心理词；已采用动作完整保留。',
+  '实际发话事件kind:"speech"，字段eventId、dialogueId、speakerCharacterIds（原文明确齐声才多个）、listenerCharacterIds、channel（on-screen/off-screen/voiceover/inner-voice）、startSec/endSec、text（完整原字，不含<d>等标签）、language（如Chinese）、delivery（语气）、speakerAction（只描述发声者动作）、reactions:[{characterId,description,presence:"visible"或"offscreen"}]。说话、口型、声线、听者反应属于这一整组，不能把同一句另复制进visualDescription或visual事件。人物ID仅用给定身份，不按称呼、镜头主角或参考图序号猜人；明确旁白、心声按原授权channel记录，未授权的认知叙述不变speech。',
+  '原文真实的笑、哭、咳等非词汇人声使用kind:"vocal"，沿用speakerCharacterIds/channel/delivery/speakerAction/reactions并用vocalDescription写实际声音，不创造可辨词句。同一句明确跨镜时按已采用切口记录各镜实际词段，dialogueId相同并使用continuesFromPreviousShot/continuesInNextShot，不重复整句、不新造切点。人物静态视觉/声线放在characters，不把身份介绍变发话；静默人物不填speakerToken，程序按实际voice事件统一分配。原文明确的无资产旁白或画外声可用该源发声事件稳定ID作为局部声源ID，在performance.characters记录原有name与presence:offscreen，不虚构项目人物、参考图或画内身体。',
+  'visualDescription写本镜摄影、空间、光影和当前场面，不重复执行events的对白及动作。每个既有动作、真实音效、对白与听者回应都有对应归属，不因结构化丢掉背景、道具、攻击承接、收尾或非说话表情。反应description只描述对应characterId的动作，发话时只有speakerCharacterIds做对应口型；静默不等于冻结表情或整轨静音。overallSoundscape与nonDiegeticMusic保留当前合法声音方案，完整写两个字段；没有相应内容写N/A，不自动添加全局底噪或配乐。',
 ].join('\n');

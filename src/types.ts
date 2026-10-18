@@ -228,6 +228,89 @@ export interface H3IdentityEventBinding {
   addressedCharacterIds?: string[];
 }
 
+/** Source facts and their adopted performance stay paired, but sourceFact is
+ * never serialized into a video instruction. Times have one explicit clock. */
+export interface H3PerformanceEventBase {
+  eventId: string;
+  sourceFact?: string;
+  startSec?: number;
+  endSec?: number;
+}
+
+export interface H3PerformanceReaction {
+  characterId: string;
+  /** A complete action/delivery description belonging only to this character. */
+  description: string;
+  /** Absent preserves ordinary listening without inventing an on-screen body. */
+  presence?: 'visible' | 'offscreen';
+}
+
+export type H3PerformanceChannel = 'on-screen' | 'off-screen' | 'voiceover' | 'inner-voice';
+
+export interface H3PerformanceVisualEvent extends H3PerformanceEventBase {
+  kind: 'visual';
+  description: string;
+  silentCharacterIds?: string[];
+  /** Local sound remains in this event, not a new whole-clip sound bed. */
+  soundDescription?: string;
+}
+
+export interface H3PerformanceVoiceEvent extends H3PerformanceEventBase {
+  speakerCharacterIds: string[];
+  listenerCharacterIds?: string[];
+  channel: H3PerformanceChannel;
+  delivery?: string;
+  /** Describes the active speakers only; never supplies a new speaker subject. */
+  speakerAction?: string;
+  reactions?: H3PerformanceReaction[];
+}
+
+export interface H3PerformanceSpeechEvent extends H3PerformanceVoiceEvent {
+  kind: 'speech';
+  dialogueId: string;
+  /** Exact words for this shot, with no description or protocol tags inside. */
+  text: string;
+  language: string;
+  /** The authored split only; the renderer never invents a cut or repeats words. */
+  continuesFromPreviousShot?: boolean;
+  continuesInNextShot?: boolean;
+}
+
+export interface H3PerformanceVocalEvent extends H3PerformanceVoiceEvent {
+  kind: 'vocal';
+  /** Authored non-verbal voice, not permission to invent dialogue. */
+  vocalDescription: string;
+}
+
+export type H3PerformanceEvent = H3PerformanceVisualEvent | H3PerformanceSpeechEvent | H3PerformanceVocalEvent;
+
+/** Optional v1 sidecar for newly authored H3. Legacy prompts remain readable. */
+export interface H3PerformancePlan {
+  version: 1;
+  timeBase: 'shot' | 'clip';
+  descriptionLanguage?: 'zh' | 'en';
+  preamble?: string;
+  characters?: Array<{
+    characterId: string;
+    /** Stable explicit label for a voice-only source absent from visual cast. */
+    name?: string;
+    presence?: 'visible' | 'offscreen';
+    visualDescription: string;
+    voiceDescription?: string;
+  }>;
+  shots: Array<{
+    shotIndex: number;
+    /** Always measured from the beginning of this submitted clip. */
+    startSec: number;
+    visualDescription: string;
+    events: H3PerformanceEvent[];
+  }>;
+  overallSoundscape: string;
+  nonDiegeticMusic: string;
+  summary?: string;
+  retentionAnalysis?: string;
+}
+
 /** AI-authored visual identity anchors. They are metadata, never extra H3 sections. */
 export interface H3IdentityBindings {
   version: 1;
@@ -243,6 +326,8 @@ export interface H3IdentityBindings {
   }>;
   /** Optional explicit source roles paired with this exact H3; absent in historical data. */
   events?: H3IdentityEventBinding[];
+  /** Explicit performance paired with this exact saved prompt, never a new H3 section. */
+  performance?: H3PerformancePlan;
 }
 
 export type CharacterPresence = 'visible' | 'offscreen' | 'mentioned';

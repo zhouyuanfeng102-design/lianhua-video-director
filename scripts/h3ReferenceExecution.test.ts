@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { renderH3ReferenceExecution } from '../src/h3ReferenceExecution';
+import { renderH3PerformancePlan } from '../src/h3PerformancePlan';
 import { readH3PromptProtocol } from '../src/h3PromptProtocol';
 import { prepareVideoH3ReferenceDraft } from '../src/videoH3ReferenceBinding';
 import { refreshVideoH3MediaModeDraft } from '../src/videoH3MediaMode';
@@ -29,6 +30,23 @@ N/A`;
 const pictures = new Map([['lin', [3]], ['ye', [4]], ['qi', [5]]]);
 const literals = (prompt: string): string[] => [...prompt.matchAll(/<(d|sound)>[\s\S]*?<\/\1>/gu)].map((match) => match[0]);
 const soundTail = (prompt: string): string => prompt.slice(prompt.indexOf('overall_soundscape:'));
+
+await test('静默人物身份句的旧S不与重新排序后的实际说话人共用', () => {
+  const metadata: H3IdentityBindings = { version: 1, characters: identities.characters.map((entry, index) => {
+    if (index !== 1) return { ...entry };
+    const { speakerToken: _voice, ...silent } = entry;
+    return silent;
+  }) };
+  const prompt = `integrated_multimodal_description:\n[Shot 1] ${anchors.join('')}\n林沐 (S1) 说：<d>[Chinese] 久等了。</d>\n祈凌霜 (S3) 问：<d>[Chinese] 你是谁？</d>\noverall_soundscape: N/A\nnon_diegetic_music: N/A`;
+  const result = renderH3ReferenceExecution({ prompt, identities: metadata, characterPictures: pictures, language: 'zh' })!;
+  assert.ok(result);
+  assert.equal(result.characters.find((entry) => entry.characterId === 'ye')?.speakerToken, undefined);
+  assert.equal(result.identities.characters.find((entry) => entry.characterId === 'ye')?.speakerToken, undefined);
+  assert.equal(result.characters.find((entry) => entry.characterId === 'qi')?.speakerToken, '(S2)');
+  assert.doesNotMatch(result.prompt, /叶清碧\s*\(S2\)/u);
+  assert.match(result.prompt, /祈凌霜 \(S2\) 问/u);
+  assert.deepEqual(literals(result.prompt), literals(prompt));
+});
 
 await test('第三段指尖/帕子明确行动者与图/name/Subject/首发S同源，镜头时间对白声音保持', () => {
   const before = structuredClone(identities);
@@ -144,6 +162,50 @@ const fixture = () => {
     h3ReferenceBinding: { version: 1, projectId: project.id, basePrompt: source, renderedPrompt: source, identities: structuredClone(identities) } };
   return { project, draft };
 };
+
+await test('已保存表演换图只更新Picture，时间/原话/静默与冻结请求不变', () => {
+  const { project, draft } = fixture();
+  const rendered = renderH3PerformancePlan({ language: 'zh', characters: identities.characters,
+    plan: { version: 1, timeBase: 'shot', overallSoundscape: '脚步与对白声。', nonDiegeticMusic: 'N/A',
+      characters: identities.characters.map((entry) => ({ characterId: entry.characterId, visualDescription: `${entry.name}沿用已确认外观` })),
+      shots: [{ shotIndex: 1, startSec: 0, visualDescription: '三人保持对峙。', events: [] },
+        { shotIndex: 2, startSec: 6.5, visualDescription: '镜头转向祈凌霜。', events: [
+          { kind: 'visual', eventId: 'look', startSec: 0, endSec: 4, sourceFact: '确认不在场的历史人物',
+            description: '林沐扫视远方，收回目光。', silentCharacterIds: ['lin'] },
+          { kind: 'speech', eventId: 'ask', dialogueId: 'd-ask', speakerCharacterIds: ['qi'], listenerCharacterIds: ['lin', 'ye'],
+            text: '你是谁？', language: 'Chinese', channel: 'on-screen', startSec: 5, endSec: 6.6 },
+        ] }] } });
+  const bound: H3IdentityBindings = { version: 1, characters: rendered.characters, events: rendered.events, performance: rendered.plan };
+  const input: VideoGenerationDraft = { ...draft, prompt: rendered.prompt,
+    h3ReferenceBinding: { ...draft.h3ReferenceBinding!, basePrompt: rendered.prompt, renderedPrompt: rendered.prompt, identities: bound } };
+  const first = prepareVideoH3ReferenceDraft(project, input, { backend: 'api', api }).draft;
+  assert.match(first.prompt, /<Subject 3> 是 祈凌霜 \(S1\)，视觉参考为<Picture 1>/u);
+  assert.match(first.prompt, /本段11\.50–13\.10秒，<Subject 3> 祈凌霜 \(S1\)/u);
+  assert.doesNotMatch(first.prompt, /确认不在场|林沐\s*\(S\d\)|叶清碧\s*\(S\d\)/u);
+  assert.match(first.prompt, /overall_soundscape:\n脚步与对白声。/u);
+  assert.equal(first.h3ReferenceBinding?.executionIdentities?.performance?.timeBase, 'clip');
+  assert.equal(prepareVideoH3ReferenceDraft(project, first, { backend: 'api', api }).draft.prompt, first.prompt);
+  const swapped = prepareVideoH3ReferenceDraft(project, { ...first, references: [...first.references].reverse() }, { backend: 'api', api }).draft;
+  assert.match(swapped.prompt, /<Subject 3> 是 祈凌霜 \(S1\)，视觉参考为<Picture 3>/u);
+  assert.deepEqual(literals(swapped.prompt), literals(first.prompt));
+  assert.equal(swapped.h3ReferenceBinding?.executionIdentities?.performance?.shots[1].events[1].startSec, 11.5);
+  assert.deepEqual(swapped.h3ReferenceBinding?.identities, bound);
+  const frozen = { ...first, reuseTaskId: 'saved-request' };
+  assert.equal(prepareVideoH3ReferenceDraft(project, frozen, { backend: 'api', api }).draft, frozen);
+  const narratorPlan = structuredClone(rendered.plan);
+  narratorPlan.characters!.push({ characterId: 'narrator', name: '叙述者', presence: 'offscreen', visualDescription: '' });
+  narratorPlan.shots[0].events.push({ kind: 'speech', eventId: 'narration', dialogueId: 'd-narration',
+    speakerCharacterIds: ['narrator'], text: '既有旁白。', language: 'Chinese', channel: 'voiceover', startSec: 0, endSec: 1 });
+  const withNarrator = renderH3PerformancePlan({ language: 'zh', mode: 'full-reference', characters: identities.characters,
+    plan: narratorPlan, characterPictures: pictures, characterAudio: new Map([['narrator', [4]], ['qi', [2]]]) });
+  const narratorBindings: H3IdentityBindings = { version: 1, characters: withNarrator.characters,
+    events: withNarrator.events, performance: withNarrator.plan };
+  const again = renderH3ReferenceExecution({ prompt: withNarrator.prompt, identities: narratorBindings,
+    language: 'zh', characterPictures: pictures })!;
+  assert.equal((again.prompt.match(/声音身份: 叙述者/gmu) || []).length, 1);
+  assert.match(again.prompt, /声音身份: 叙述者 \(S1\)[^\n]*<Audio 4>/u);
+  assert.match(again.prompt, /<Subject 3> 是 祈凌霜 \(S2\)[^\n]*<Audio 2>/u);
+});
 
 await test('实际提交选图顺序驱动Picture；重复准备幂等；撤图恢复源稿；任务快照冻结', () => {
   const { project, draft } = fixture(); const before = structuredClone({ project, draft });

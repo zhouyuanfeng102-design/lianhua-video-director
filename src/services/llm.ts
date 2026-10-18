@@ -51,6 +51,7 @@ import {
   type VideoCreativeDirectionInput,
 } from '../videoCreativeDirection';
 import { VIDEO_ACTING_CAMERA_RULES } from '../videoActingCameraRules';
+import { VIDEO_STORY_PERFORMANCE_SEPARATION_RULE } from '../videoInteractionRules';
 import { VIDEO_SCENE_CONTEXT_RULE, type VideoSceneContext } from '../videoSceneContext';
 import { VIDEO_ACTION_CHOREOGRAPHY_RULE, VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE, VIDEO_ACTION_EVENT_REVIEW_RULE } from '../videoActionChoreographyRules';
 import { SPATIAL_COORDINATE_RULE, SPATIAL_CONTINUITY_REVIEW_RULE } from '../spatialContinuityRules';
@@ -4069,6 +4070,7 @@ export const requestShotRecommendation = async (
       VIDEO_SCENE_CONTEXT_RULE,
       VIDEO_ACTION_CHOREOGRAPHY_RULE,
       VIDEO_DIALOGUE_STAGING_RULE,
+      VIDEO_STORY_PERFORMANCE_SEPARATION_RULE,
       VIDEO_WARDROBE_SCOPE_RULE,
       VIDEO_PROMPT_FOCUS_RULE,
       VIDEO_PRIVATE_SCOPE_SELECTION_RULE,
@@ -4163,6 +4165,7 @@ export const requestShotRecommendation = async (
           VIDEO_ACTION_EVENT_REVIEW_RULE,
           STORYBOARD_STABLE_SUBJECT_CONTRACT,
           VIDEO_DIALOGUE_STAGING_RULE,
+          VIDEO_STORY_PERFORMANCE_SEPARATION_RULE,
           VIDEO_WARDROBE_SCOPE_RULE,
           VIDEO_PROMPT_FOCUS_RULE,
           VIDEO_PRIVATE_SCOPE_SELECTION_RULE,
@@ -4298,6 +4301,7 @@ export const requestShotRecommendation = async (
           VIDEO_ACTION_CHOREOGRAPHY_RULE,
           STORYBOARD_STABLE_SUBJECT_CONTRACT,
           VIDEO_DIALOGUE_STAGING_RULE,
+          VIDEO_STORY_PERFORMANCE_SEPARATION_RULE,
           VIDEO_WARDROBE_SCOPE_RULE,
           VIDEO_PROMPT_FOCUS_RULE,
           VIDEO_PRIVATE_SCOPE_SELECTION_RULE,
