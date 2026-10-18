@@ -350,8 +350,12 @@ const prepareVideoH3ReferenceDraftInternal = (
   const referenceProject = videoH3ReferenceProject(project, draft);
   const binding = videoH3BindingForPrompt(project, draft);
   const basePrompt = binding?.basePrompt || draft.prompt;
+  // Saved H3 deliveries can start directly with [Shot 1]. The exact source
+  // binding (or explicit format) identifies H3; headings are only a fallback
+  // for older unlabelled drafts, not a prerequisite for using proven anchors.
+  const h3Prompt = draft.source?.promptFormat === 'h3' || Boolean(binding) || isH3(basePrompt);
   const sourceBoard = referenceProject.storyboards.filter((board) => board.id === draft.source?.storyboardId);
-  const participation = isH3(basePrompt) ? sourceBoard.length === 1
+  const participation = h3Prompt ? sourceBoard.length === 1
     ? resolveStoryboardCharacterParticipation({ ...sourceBoard[0],
       h3IdentityBindings: normalizeH3IdentityBindings(sourceBoard[0].h3IdentityBindings),
       h3IdentityBindingsEn: normalizeH3IdentityBindings(sourceBoard[0].h3IdentityBindingsEn),
@@ -396,7 +400,7 @@ const prepareVideoH3ReferenceDraftInternal = (
   };
   // The selected format takes precedence over headings retained in ordinary
   // drafts; their pictures do not require H3 identity-anchor serialization.
-  if (draft.source?.promptFormat === 'ordinary' || !isH3(draft.prompt)) return unchanged([]);
+  if (draft.source?.promptFormat === 'ordinary' || !h3Prompt) return unchanged([]);
   // A true retry retains its frozen, already-displayed submission. Selecting
   // current images explicitly removes reuseTaskId in the picker.
   if (draft.reuseTaskId) {

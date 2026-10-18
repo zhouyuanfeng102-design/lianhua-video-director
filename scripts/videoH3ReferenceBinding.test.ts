@@ -673,4 +673,149 @@ await test('显式普通稿即使保留H3章节也不进入H3人物绑定，图�
   }
 });
 
+const headerlessH3Fixture = (language: 'zh' | 'en') => {
+  const { project, draft } = fixture();
+  const people = [['a', '甲'], ['b', '乙'], ['c', '丙'], ['d', '丁']] as const;
+  project.characters = people.map(([id, name]) => character(id, name, [`${id}-image`]));
+  project.assets = [
+    { ...image('opening'), type: 'first-frame', role: 'first-frame' },
+    { ...image('ending'), type: 'last-frame', role: 'last-frame' },
+    ...people.map(([id]) => ({ ...image(`${id}-image`, id), characterReferenceId: id,
+      referenceEntityBinding: { kind: 'character' as const, entityId: id } })),
+  ];
+  const metadata = (lang: 'zh' | 'en'): H3IdentityBindings => ({ version: 1, characters: people.map(([id, name], index) => ({
+    characterId: id, name, subjectToken: `<Subject ${index + 1}>`, speakerToken: `(S${index + 1})`,
+    referenceAnchor: lang === 'zh' ? `身份：${name}，保持原有外观${index + 1}。` : `Identity: ${name} retains authored appearance ${index + 1}.`,
+  })) });
+  const prompt = (lang: 'zh' | 'en') => {
+    const anchors = metadata(lang).characters.map((entry) => entry.referenceAnchor);
+    return lang === 'zh'
+      ? `[Shot 1] ${anchors[0]} ${anchors[1]} 甲把地图递给乙。<d>[Chinese] 请拿好地图。</d>\n[Shot 2] At 00:07.500 ${anchors[2]} ${anchors[3]} 丙与丁在门边等候。<sound>既有的脚步声</sound>`
+      : `[Shot 1] ${anchors[0]} ${anchors[1]} 甲 hands the map to 乙. <d>[Chinese] 请拿好地图。</d>\n[Shot 2] At 00:07.500 ${anchors[2]} ${anchors[3]} 丙 and 丁 wait beside the doorway. <sound>The authored footsteps</sound>`;
+  };
+  const board = { id: 'headerless-h3-board', sceneId: project.scenes[0]?.id || '', shots: [], finalPrompt: prompt('zh'),
+    officialPromptZh: prompt('zh'), officialPromptEn: prompt('en'), officialPromptEnSource: prompt('zh'),
+    h3IdentityBindings: metadata('zh'), h3IdentityBindingsEn: metadata('en') } as Project['storyboards'][number];
+  project.storyboards = [board];
+  draft.prompt = prompt(language); draft.parameters = {}; draft.h3ReferenceBinding = undefined;
+  draft.source = { storyboardId: board.id, promptFormat: 'h3', language, segmentIndex: 4 };
+  draft.references = [{ assetId: 'opening', role: 'first-frame', slotIndex: 0 }, { assetId: 'ending', role: 'last-frame', slotIndex: 1 },
+    ...people.map(([id], index) => ({ assetId: `${id}-image`, role: 'character' as const, slotIndex: index + 2 }))];
+  const config = cloud();
+  config.runningHubImageRoles = ['first-frame', 'last-frame', 'character', 'character', 'character', 'character'];
+  config.requestTemplate = JSON.stringify({ nodeInfoList: [{ nodeId: 'p', fieldName: 'value', fieldValue: '' },
+    ...Array.from({ length: 6 }, (_, index) => ({ nodeId: `i${index}`, fieldName: 'image', fieldValue: '' }))] });
+  config.runningHubMappedFields = [{ nodeId: 'p', fieldName: 'value', kind: 'prompt' },
+    ...Array.from({ length: 6 }, (_, imageIndex) => ({ nodeId: `i${imageIndex}`, fieldName: 'image', kind: 'image' as const, imageIndex }))];
+  return { project, draft, board, config, people };
+};
+const withoutHeaderlessPictureBindings = (prompt: string): string => prompt
+  .replace(/ Visual identity reference for [甲乙丙丁]: <Picture \d+>(?:, <Picture \d+>)*\./gu, '');
+
+await test('可信中英文无字段标题H3原稿按锚点关联首尾加四人六个云端槽，调序移除清空仍可逆幂等', () => {
+  for (const language of ['zh', 'en'] as const) {
+    const { project, draft, board, config, people } = headerlessH3Fixture(language);
+    const context = { backend: 'api' as const, api: config };
+    const before = structuredClone({ project, draft }); const savedProject = JSON.stringify(project);
+    const result = prepareVideoH3ReferenceDraft(project, draft, context);
+    for (const [index, [id, name]] of people.entries()) {
+      assert.equal(result.characterStates.find((entry) => entry.characterId === id)?.status, 'bound');
+      assert.deepEqual(result.characterStates.find((entry) => entry.characterId === id)?.slots, [index + 3]);
+      assertPictureBinding(result.draft.prompt, name, [index + 3]);
+    }
+    assert.equal(withoutHeaderlessPictureBindings(result.draft.prompt), draft.prompt, 'only exact-anchor picture references are inserted; all authored text and cuts stay byte-for-byte');
+    assert.deepEqual(literals(result.draft.prompt), literals(draft.prompt));
+    assert.doesNotMatch(result.draft.prompt, /subject_definitions:|overall_soundscape:|non_diegetic_music:|<Subject \d+>|\(S\d+\)/u,
+      'missing field titles and old identity metadata do not authorize new structure or voice content');
+    assert.deepEqual(result.draft.h3ReferenceBinding?.identities, language === 'zh' ? board.h3IdentityBindings : board.h3IdentityBindingsEn);
+    assert.deepEqual(result.draft.references, draft.references);
+    const repeated = prepareVideoH3ReferenceDraft(project, result.draft, context);
+    assert.equal(repeated.draft.prompt, result.draft.prompt); assert.deepEqual(repeated.characterStates, result.characterStates);
+    const body = buildVideoApiBody(config, result.draft, ['opening.png', 'ending.png', 'a.png', 'b.png', 'c.png', 'd.png']);
+    const fields = body.nodeInfoList as Array<{ nodeId: string; fieldValue: string }>;
+    assert.equal(fields.find((field) => field.nodeId === 'p')?.fieldValue, result.draft.prompt);
+    for (const [index, [id]] of people.entries()) assert.equal(fields.find((field) => field.nodeId === `i${index + 2}`)?.fieldValue, `${id}.png`);
+    const reordered = prepareVideoH3ReferenceDraft(project, { ...result.draft, references: [
+      ...result.draft.references.slice(0, 2), ...result.draft.references.slice(2).reverse().map((reference, index) => ({ ...reference, slotIndex: index + 2 })),
+    ] }, context);
+    for (const [index, [id, name]] of people.entries()) {
+      assert.equal(reordered.characterStates.find((entry) => entry.characterId === id)?.status, 'bound');
+      assert.deepEqual(reordered.characterStates.find((entry) => entry.characterId === id)?.slots, [6 - index]);
+      assertPictureBinding(reordered.draft.prompt, name, [6 - index]);
+    }
+    assert.equal(withoutHeaderlessPictureBindings(reordered.draft.prompt), draft.prompt);
+    const removed = prepareVideoH3ReferenceDraft(project, { ...result.draft, references: result.draft.references.filter((reference) => reference.assetId !== 'b-image') }, context);
+    assert.equal(removed.characterStates.find((entry) => entry.characterId === 'b')?.status, 'unselected');
+    assert.doesNotMatch(removed.draft.prompt, /Visual identity reference for 乙:/u);
+    assertPictureBinding(removed.draft.prompt, '甲', [3]); assertPictureBinding(removed.draft.prompt, '丙', [5]); assertPictureBinding(removed.draft.prompt, '丁', [6]);
+    assert.equal(withoutHeaderlessPictureBindings(removed.draft.prompt), draft.prompt);
+    const cleared = prepareVideoH3ReferenceDraft(project, { ...result.draft, references: [] }, context);
+    assert.equal(cleared.draft.prompt, draft.prompt); assert.ok(cleared.characterStates.every((entry) => entry.status === 'unselected'));
+    assert.deepEqual({ project, draft }, before); assert.equal(JSON.stringify(project), savedProject, 'saved bilingual source, identity metadata and asset records remain unchanged');
+  }
+});
+
+await test('无标题稿仅信任真实来源与准确锚点，普通稿无来源手改稿和失效锚点不会误关联', () => {
+  for (const language of ['zh', 'en'] as const) {
+    const { project, draft, config } = headerlessH3Fixture(language);
+    const context = { backend: 'api' as const, api: config };
+    const bound = prepareVideoH3ReferenceDraft(project, draft, context);
+    const skipped = [
+      { ...draft, source: { ...draft.source, promptFormat: 'ordinary' as const } },
+      { ...draft, source: { promptFormat: 'h3' as const, language } },
+      { ...draft, prompt: `${draft.prompt}\n手动改稿内容保留。` },
+      { ...bound.draft, prompt: `${bound.draft.prompt}\n手动改稿内容保留。` },
+    ];
+    for (const candidate of skipped) {
+      const before = structuredClone({ project, candidate });
+      const result = prepareVideoH3ReferenceDraft(project, candidate, context);
+      assert.equal(result.draft.prompt, candidate.prompt);
+      assert.ok(result.characterStates.every((entry) => entry.status !== 'bound'), 'selected pictures do not prove a missing or manually changed source');
+      assert.deepEqual({ project, candidate }, before);
+    }
+    for (const failure of ['missing', 'duplicate'] as const) {
+      const current = headerlessH3Fixture(language);
+      const metadata = language === 'zh' ? current.board.h3IdentityBindings! : current.board.h3IdentityBindingsEn!;
+      const anchor = metadata.characters[0].referenceAnchor;
+      if (failure === 'missing') metadata.characters[0].referenceAnchor = 'This exact identity anchor does not exist in the authored prompt.';
+      else {
+        current.draft.prompt += `\n${anchor}`;
+        if (language === 'zh') current.board.officialPromptZh = current.draft.prompt;
+        else current.board.officialPromptEn = current.draft.prompt;
+      }
+      const before = structuredClone({ project: current.project, draft: current.draft });
+      const result = prepareVideoH3ReferenceDraft(current.project, current.draft, context);
+      assert.equal(result.characterStates.find((entry) => entry.characterId === 'a')?.status, 'pending');
+      assert.doesNotMatch(result.draft.prompt, /Visual identity reference for 甲:/u);
+      for (const id of ['b', 'c', 'd']) assert.equal(result.characterStates.find((entry) => entry.characterId === id)?.status, 'bound');
+      assert.ok(result.warnings.some((warning) => warning.includes('锚点已失效')));
+      assert.equal(withoutHeaderlessPictureBindings(result.draft.prompt), current.draft.prompt);
+      assert.deepEqual({ project: current.project, draft: current.draft }, before);
+    }
+  }
+});
+
+await test('无标题H3冻结重试保留已绑定或历史待关联状态，不按现有分镜重新绑定', () => {
+  for (const language of ['zh', 'en'] as const) {
+    const { project, draft, board, config } = headerlessH3Fixture(language);
+    const context = { backend: 'api' as const, api: config };
+    const result = prepareVideoH3ReferenceDraft(project, draft, context);
+    const boundRetry = { ...result.draft, reuseTaskId: 'frozen-bound-headerless' };
+    const legacyRetry = { ...result.draft, prompt: draft.prompt, reuseTaskId: 'frozen-pending-headerless', h3ReferenceBinding: {
+      ...result.draft.h3ReferenceBinding!, renderedPrompt: draft.prompt,
+      characterStates: result.characterStates.map((entry) => ({ ...entry, status: 'pending' as const, reason: '历史任务保留的待关联状态。' })),
+    } };
+    board.officialPromptZh = '后来改写的中文稿'; board.officialPromptEn = 'A later edited English source';
+    project.characters[0].name = '后来修改的姓名';
+    for (const frozen of [boundRetry, legacyRetry]) {
+      const before = structuredClone({ project, frozen });
+      const retry = prepareVideoH3ReferenceDraft(project, frozen, context);
+      assert.strictEqual(retry.draft, frozen);
+      assert.equal(retry.draft.prompt, frozen.prompt);
+      assert.deepEqual(retry.characterStates, frozen.h3ReferenceBinding!.characterStates);
+      assert.deepEqual({ project, frozen }, before);
+    }
+  }
+});
+
 console.log(`${groups} H3 reference-binding regression groups passed (synthetic inputs, no real API)`);

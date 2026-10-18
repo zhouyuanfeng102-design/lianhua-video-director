@@ -4,13 +4,13 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的 Windows 桌面工作台。
 
-当前版本：**2.6.5** · 2026-10-18 · Windows 64 位 · 便携运行
+当前版本：**2.6.6** · 2026-10-18 · Windows 64 位 · 便携运行
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows 便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-2.6.5.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-2.6.6.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
 1. 下载上面的 EXE，放在可写入的文件夹里，双击运行，无需安装 Node.js。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
@@ -32,14 +32,13 @@
 - **自定义生图+反推图片提示词**：输入要求生成图片，或复用上传/资产库参考图，通过视觉 API 反推可复制的提示词与人物、物品、场景、风格详情。反推同步显示在聊天和资料任务，支持后台执行、停止、重试及项目保存恢复；原有生图支持原文直发或规则转换，结果自动入库。
 - **项目与资产管理**：管理图片、视频和音频，保存项目包、备份资料并导出提示词。
 
-## 最新更新 · v2.6.5
+## 最新更新 · v2.6.6
 
-- H3 新稿分别保存不发声的剧情依据、可见表演和真实发话，减少观察与心理描述被演成口述。
-- 英文按完整描述和发话事件翻译，统一说话人、听者、声线、口型与时间，修复碎片拼接造成的关系错乱。
-- 声源与参考图编号分别处理；仅更新英文使用保存中文配套资料。旧稿和历史冻结任务保留。
-- 沿用原有请求，不新增内容校验、AI 审核、生成拦截或自动重试。已有问题稿需主动重新生成或修复，验证与交付状态见本版说明。
+- 修复直接从 Shot 镜头开始的 H3 稿跳过人物图片关联，造成已选图片仍显示“待关联”的问题。
+- 中英文按已保存的准确身份定位和本次选图槽位同步引用，选图提示与提交正文保持一致。
+- 保留原稿、对白、镜头时间和冻结任务；已有稿件无需重新生成，重新打开选图即可按当前选择计算。
 
-[查看本版完整说明](docs/releases/发布说明-2.6.5.md) · [历史版本归档](docs/releases/README.md)
+[查看本版完整说明](docs/releases/发布说明-2.6.6.md) · [历史版本归档](docs/releases/README.md)
 
 ## 从源码运行
 
