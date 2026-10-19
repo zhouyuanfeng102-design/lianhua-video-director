@@ -1503,13 +1503,13 @@ const directorViewEnd = appSource.indexOf('function StoryboardView', directorVie
 const directorViewSource = appSource.slice(directorViewStart, directorViewEnd);
 assert.match(
   directorViewSource,
-  /activeStoryboard:\s*rootActiveStoryboard/u,
-  'the root board must be renamed before deriving the displayed sequence board',
+  /const\s+activeStoryboard\s*=\s*ctx\.directorStoryboard/u,
+  'the director uses the shared mode-specific selection rather than the generic timeline selection',
 );
 assert.match(
-  directorViewSource,
-  /const\s+activeStoryboard\s*=\s*productionMode\s*===\s*"sequence"/u,
-  'the director result must be derived from the current sequence segment',
+  appSource,
+  /selectDirectorStoryboard\(editorProject,[\s\S]*?sequenceStoryboardId:\s*activeSequenceSegment\?\.storyboardId/u,
+  'the shared director result must use the current sequence segment and chapter scope',
 );
 assert.match(appSource, /导出全部分段提示词/u);
 assert.doesNotMatch(directorViewSource, /导出分段 JSON/u, 'the retired sequence JSON export must not remain in the director UI');

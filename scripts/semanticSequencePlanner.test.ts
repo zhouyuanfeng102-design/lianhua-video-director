@@ -873,8 +873,9 @@ test('fixed 90-second generation sends an explicit six-window contract and saves
   assert.match(prompt(requests[0], 'system'), new RegExp(SEMANTIC_SEQUENCE_PLANNING_TAG));
   const rule = prompt(requests[0], 'system');
   assert.ok(rule.indexOf('T=90秒') < rule.indexOf('你是原文语义分段规划器'), 'fixed budget precedes shared prose');
-  assert.match(rule, /固定模式先排整片、后切窗口/u);
-  assert.match(rule, /全部对白原字、说话人和发话顺序保持/u);
+  assert.match(rule, /AI适配与固定总时长共同采用先排整片、后切窗口/u);
+  assert.match(rule, /完整原话、说话人和发话先后直接嵌入对应动作与反应/u);
+  assert.match(rule, /正文和记录逐句对应，原字、语言、归属与continuation一致/u);
   assert.match(rule, /段界只负责生成窗口/u);
   assert.equal(plan.durationMode, 'fixed');
   assert.equal(plan.requestedTotalDurationSec, 90);

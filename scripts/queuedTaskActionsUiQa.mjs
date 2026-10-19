@@ -8,8 +8,9 @@ import { chromium } from 'playwright';
 // tiles in a fresh browser context. Every provider-shaped request is mocked on
 // loopback. No Electron bridge, production project or credential is available.
 const root = path.resolve(import.meta.dirname, '..');
+const forceStopOnly = process.argv.includes('--force-stop-only');
 const outputBase = path.join(root, 'output', 'playwright');
-const output = path.resolve(process.env.QA_OUTPUT || path.join(outputBase, `queued-task-actions-${Date.now()}`));
+const output = path.resolve(process.env.QA_OUTPUT || path.join(outputBase, `${forceStopOnly ? 'force-stop-image' : 'queued-task-actions'}-${Date.now()}`));
 const relative = path.relative(outputBase, output);
 if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new Error('Queue QA output must stay below output/playwright');
 for (let current = output; current !== root; current = path.dirname(current)) {
@@ -46,6 +47,13 @@ const textContent = (value) => typeof value === 'string' ? value : Array.isArray
 async function install(scenario, holdKind = 'conversion') {
   if (context) await context.close();
   context = await browser.newContext({ viewport: { width: 1366, height: 768 }, serviceWorkers: 'block' });
+  if (scenario === 'custom-force-stop') await context.addInitScript(() => {
+    // Synthetic in-memory save result only; no desktop storage, files or IPC.
+    window.lianhuaDesktop = { storeGeneratedImage: async ({ dataUrl, fileName }) => ({
+      managed: true, url: dataUrl, relativePath: `qa-only/${fileName}`, fileName, checksum: 'qa-synthetic-image',
+      mimeType: 'image/png', sizeBytes: 100,
+    }) };
+  });
   page = await context.newPage(); page.setDefaultTimeout(10_000);
   const qa = currentQa = { scenario, holdKind, held: false, release: undefined, png: '', requests: [], state: undefined };
   page.on('pageerror', (cause) => errors.push({ scenario, message: cause.message }));
@@ -93,11 +101,14 @@ async function install(scenario, holdKind = 'conversion') {
       } else throw new Error(`Unexpected mock route ${url.pathname}`);
       const entry = { scenario, kind, pathname: url.pathname };
       qa.requests.push(entry); requestLog.push(entry);
-      if (kind === qa.holdKind && !qa.held) {
+      const held = kind === qa.holdKind && !qa.held;
+      if (held) {
         qa.held = true;
         await new Promise((resolve) => { qa.release = resolve; });
       }
-      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(response) });
+      await route.fulfill({ contentType: 'application/json', body: JSON.stringify(response) }).catch((cause) => {
+        if (!(held && qa.stopped)) throw cause;
+      });
     } catch (cause) {
       errors.push({ scenario, message: String(cause) });
       await route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":{"message":"Isolated queue mock rejected its input"}}' }).catch(() => {});
@@ -143,7 +154,8 @@ async function install(scenario, holdKind = 'conversion') {
     return canvas.toDataURL('image/png');
   }, { storageKey: key, origin, mockPrefix, scenario, prompt });
   await page.goto(origin, { waitUntil: 'networkidle' });
-  assert.equal(await page.evaluate(() => typeof window.lianhuaDesktop), 'undefined', 'No desktop storage or transport bridge');
+  if (scenario === 'custom-force-stop') assert.deepEqual(await page.evaluate(() => Object.keys(window.lianhuaDesktop)), ['storeGeneratedImage']);
+  else assert.equal(await page.evaluate(() => typeof window.lianhuaDesktop), 'undefined', 'No desktop storage or transport bridge');
   return qa;
 }
 
@@ -323,16 +335,66 @@ async function revokeWholeQueuedBatch() {
   stages.push({ stage: 'whole-queued-batch-immediate-requeue', unrelatedRunningTaskPreserved: true, storyboardBatchLeaseReleasedImmediately: true, cancelledAndDeletedRetryLeasesReleasedImmediately: true, noRevokedWorkSubmitted: true, noResurrectionAfterQueueDrain: true });
 }
 
+async function forceStopRunning(custom = false) {
+  const label = custom ? 'custom-force-stop' : 'ordinary-force-stop';
+  const qa = await install(label, 'image');
+  const openCustom = async () => {
+    await nav('图像工作台');
+    await page.getByRole('button', { name: '自定义生图+反推图片提示词', exact: true }).click();
+  };
+  const sendCustom = async (text) => {
+    await page.getByRole('textbox', { name: '自定义生图要求', exact: true }).fill(text);
+    await page.getByRole('button', { name: '发送并生图', exact: true }).click();
+  };
+  if (custom) { await openCustom(); await sendCustom('隔离测试第一张蓝色方块'); }
+  else await submitWorkbench(3);
+  await until(() => qa.held, `${label} request hangs`);
+  if (custom) await sendCustom('隔离测试第二张蓝色方块');
+  const count = custom ? 2 : 3;
+  await waitTasks(rows => rows.length === count && rows.some(task => task.status === 'running'), `${label} queue established`);
+  const running = (await read()).project.generationTasks.find(task => task.status === 'running');
+  if (!custom) await nav('生成任务');
+  const stop = custom ? page.getByRole('button', { name: '强制停止', exact: true }) : action(running.id, '强制停止');
+  assert.equal(await stop.isEnabled(), true);
+  await capture(`${label}-running`);
+  qa.stopped = true;
+  await stop.click();
+  await waitTasks(rows => rows.find(task => task.id === running.id)?.status === 'cancelled'
+    && rows.filter(task => task.status === 'succeeded').length === count - 1, `${label} remaining queue completes before held reply`);
+  assert.equal(qa.requests.filter(entry => entry.kind === 'image').length, count, 'one submission per requested image');
+  assert.equal((await read()).project.assets.filter(asset => asset.source === 'generated').length, count - 1);
+  await capture(`${label}-stopped-queue-continued`);
+  qa.release();
+  await page.evaluate(async () => { const { enqueueImageTask } = await import('/src/imageTaskQueue.ts'); await enqueueImageTask(async () => undefined); });
+  await page.reload({ waitUntil: 'networkidle' });
+  const persisted = (await read()).project;
+  assert.equal(persisted.generationTasks.find(task => task.id === running.id)?.status, 'cancelled');
+  assert.equal(persisted.assets.filter(asset => asset.source === 'generated').length, count - 1);
+  assert.equal(qa.requests.filter(entry => entry.kind === 'image').length, count, 'restart does not resubmit stopped work');
+  await nav('生成任务');
+  await action(running.id, '删除').click();
+  await waitTasks(rows => !rows.some(task => task.id === running.id), `${label} stopped record can be removed`);
+  assert.equal((await read()).project.assets.filter(asset => asset.source === 'generated').length, count - 1);
+  stages.push({ stage: label, runningImageStopped: true, queueReleasedBeforeProviderReply: true,
+    persistedCancellation: true, stoppedRecordDeletable: true, completedAssetsPreserved: count - 1 });
+}
+
 try {
   await server.listen(); origin = `http://127.0.0.1:${server.httpServer.address().port}`;
   browser = await chromium.launch({ headless: true });
-  await ordinaryAndPrivate(false);
-  await ordinaryAndPrivate(true);
-  await storyboard();
-  await regeneration();
-  await revokeWholeQueuedBatch();
+  if (forceStopOnly) {
+    await forceStopRunning();
+    await forceStopRunning(true);
+  } else {
+    await ordinaryAndPrivate(false);
+    await ordinaryAndPrivate(true);
+    await storyboard();
+    await regeneration();
+    await revokeWholeQueuedBatch();
+  }
   assert.deepEqual(errors, []); assert.deepEqual(blockedRequests, []);
-  const report = { mockOnly: true, freshBrowserContexts: true, realApp: true, noProductionDataRead: true, noDesktopBridge: true, paidRequests: 0, stages, requests: requestLog, errors, blockedRequests, screenshots };
+  const report = { mockOnly: true, freshBrowserContexts: true, realApp: true, noProductionDataRead: true, noRealDesktopBridge: true,
+    inMemoryCustomSaveStub: forceStopOnly, paidRequests: 0, stages, requests: requestLog, errors, blockedRequests, screenshots };
   await fs.writeFile(path.join(output, 'report.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify({ output, stages: stages.length, requests: requestLog.length, paidRequests: 0, errors, blockedRequests }, null, 2));
 } catch (cause) {

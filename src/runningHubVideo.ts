@@ -152,11 +152,16 @@ const normalizeMapping = (raw: unknown): RunningHubVideoMapping => {
     return [{ ...binding, ...(label ? { label } : {}) }];
   }) : undefined;
   const parameters: Record<string, RunningHubVideoInputBinding> = {};
+  const videos = Array.isArray(value.videos) ? value.videos.flatMap((item) => {
+    const binding = normalizeBinding(item); if (!binding) return [];
+    const label = isRecord(item) && typeof item.label === 'string' ? item.label.trim() : '';
+    return [{ ...binding, ...(label ? { label } : {}) }];
+  }) : undefined;
   if (isRecord(value.parameters)) for (const [key, item] of Object.entries(value.parameters)) {
     const binding = normalizeBinding(item); if (binding) Object.defineProperty(parameters, key, { value: binding, enumerable: true, configurable: true, writable: true });
   }
   const imageCount = value.imageCount === null ? null : normalizeBinding(value.imageCount);
-  return { prompt, images, ...(audios !== undefined ? { audios } : {}), ...(imageCount !== undefined ? { imageCount } : {}), ...(Object.keys(parameters).length ? { parameters } : {}) };
+  return { prompt, images, ...(audios !== undefined ? { audios } : {}), ...(videos !== undefined ? { videos } : {}), ...(imageCount !== undefined ? { imageCount } : {}), ...(Object.keys(parameters).length ? { parameters } : {}) };
 };
 
 export const createRunningHubVideoWorkflow = (name = '新建云端工作流'): RunningHubVideoWorkflow => {
@@ -312,12 +317,12 @@ export const validateRunningHubVideoWorkflow = (workflow: RunningHubVideoWorkflo
   });
   if (!workflow.mapping.prompt.length) issues.push('请明确绑定至少一个提示词节点；导入不会擅自猜测节点用途。');
   const assigned = new Set<string>();
-  const check = (binding: RunningHubVideoInputBinding, kind: 'prompt' | 'image' | 'audio' | 'image-count' | 'parameter', label: string) => {
+  const check = (binding: RunningHubVideoInputBinding, kind: 'prompt' | 'image' | 'audio' | 'video' | 'image-count' | 'parameter', label: string) => {
     try {
       const index = nodeIndex(workflow.requestTemplate, binding); const value = raw.nodeInfoList[index].fieldValue;
       const key = JSON.stringify([binding.nodeId, binding.inputName]);
       if (assigned.has(key)) issues.push(`${label} 与其他用途绑定了同一个节点字段，请明确唯一用途。`); assigned.add(key);
-      if ((kind === 'prompt' || kind === 'image' || kind === 'audio') && typeof value !== 'string') issues.push(`${label} 必须映射文本字段，不能覆盖数值、数组或节点连线。`);
+      if ((kind === 'prompt' || kind === 'image' || kind === 'audio' || kind === 'video') && typeof value !== 'string') issues.push(`${label} 必须映射文本字段，不能覆盖数值、数组或节点连线。`);
       if (kind === 'parameter' && !['string', 'number', 'boolean'].includes(typeof value)) issues.push(`${label} 不是可覆盖的简单常量。`);
       if (kind === 'image-count' && !((typeof value === 'number' && Number.isSafeInteger(value) && value >= 0)
         || (typeof value === 'string' && /^\d+$/u.test(value.trim()) && Number.isSafeInteger(Number(value))))) issues.push(`${label} 必须绑定非负整数或整数字符串字段。`);
@@ -326,8 +331,9 @@ export const validateRunningHubVideoWorkflow = (workflow: RunningHubVideoWorkflo
   workflow.mapping.prompt.forEach((binding, index) => check(binding, 'prompt', `提示词 ${index + 1}`));
   workflow.mapping.images.forEach((binding, index) => check(binding, 'image', `参考图 ${index + 1}`));
   (workflow.mapping.audios || []).forEach((binding, index) => check(binding, 'audio', `参考音频 ${index + 1}`));
+  (workflow.mapping.videos || []).forEach((binding, index) => check(binding, 'video', `参考视频 ${index + 1}`));
   for (const [name, binding] of Object.entries(workflow.mapping.parameters || {})) {
-    if (!name.trim() || ['prompt', 'images', 'audios', 'audioReferences', 'references', 'first_image', 'last_image', 'model', 'parameters'].includes(name) || /^(?:image|audio)_\d+$/u.test(name)) issues.push(`参数名称 ${name || '（空）'} 与系统字段冲突。`);
+    if (!name.trim() || ['prompt', 'images', 'audios', 'videos', 'video_references', 'videoReferences', 'audioReferences', 'references', 'first_image', 'last_image', 'model', 'parameters'].includes(name) || /^(?:image|audio|video)_\d+$/u.test(name)) issues.push(`参数名称 ${name || '（空）'} 与系统字段冲突。`);
     check(binding, 'parameter', `参数 ${name}`);
   }
   const imageCount = resolveRunningHubVideoImageProtocol(workflow).imageCount;
@@ -521,6 +527,8 @@ export const compileRunningHubVideoApi = (config: RunningHubVideoConfig, workflo
     ...workflow.mapping.images.map((binding, imageIndex) => ({ nodeId: binding.nodeId, fieldName: binding.inputName, kind: 'image' as const, imageIndex, emptyValue: imageProtocol.emptyImageValues[imageIndex] })),
     ...(workflow.mapping.audios || []).map((binding, audioIndex) => ({ nodeId: binding.nodeId, fieldName: binding.inputName, kind: 'audio' as const, audioIndex,
       originalValue: clone(readRunningHubVideoRequest(requestTemplate).nodeInfoList[nodeIndex(requestTemplate, binding)].fieldValue) })),
+    ...(workflow.mapping.videos || []).map((binding, videoIndex) => ({ nodeId: binding.nodeId, fieldName: binding.inputName, kind: 'video' as const, videoIndex,
+      originalValue: clone(readRunningHubVideoRequest(requestTemplate).nodeInfoList[nodeIndex(requestTemplate, binding)].fieldValue) })),
     ...(imageProtocol.imageCount ? [{ nodeId: imageProtocol.imageCount.nodeId, fieldName: imageProtocol.imageCount.inputName, kind: 'image-count' as const,
       imageCountSource: imageProtocol.imageCountSource,
       ...(imageProtocol.imageCountMode ? { imageCountMode: imageProtocol.imageCountMode } : {}),
@@ -561,10 +569,11 @@ export const compileRunningHubVideoApi = (config: RunningHubVideoConfig, workflo
 export const bindRunningHubVideoRequest = (
   template: string,
   mappedFields: NonNullable<VideoTaskApiConfig['runningHubMappedFields']>,
-  draft: Pick<VideoGenerationDraft, 'prompt' | 'parameters'> & Partial<Pick<VideoGenerationDraft, 'references' | 'audioReferences'>>,
+  draft: Pick<VideoGenerationDraft, 'prompt' | 'parameters'> & Partial<Pick<VideoGenerationDraft, 'references' | 'audioReferences' | 'videoReferences'>>,
   images: string[],
   submitContext?: Pick<VideoTaskApiConfig, 'provider' | 'runningHubAppId' | 'endpoint'>,
   audios: string[] = [],
+  videos: string[] = [],
 ): Record<string, unknown> => {
   assertSafeNumbers(template);
   if (draft.references) {
@@ -635,6 +644,10 @@ export const bindRunningHubVideoRequest = (
       }
       // No selected audio: keep the original compiled value, including "None"
       // and empty strings. Audio slots do not use the image empty-slot protocol.
+    } else if (field.kind === 'video') {
+      const referenceIndex = (draft.videoReferences || []).findIndex((reference) => reference.slotIndex === field.videoIndex && reference.bindingId === key);
+      if (referenceIndex >= 0 && videos[referenceIndex]) node.fieldValue = videos[referenceIndex];
+      // Unselected video fields retain their configured value. Never touch unknown nodes.
     } else if (field.kind === 'image-count') {
       if (++imageCounts > 1) throw new Error('RunningHub 实际图片数量只能绑定一个字段，请核对工作流映射。');
       if (field.imageCountMode === 'prefix' && [...uploadBySlot.keys()].some((slot) => slot >= images.length)) {

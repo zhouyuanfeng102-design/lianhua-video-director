@@ -15,7 +15,7 @@ export const syncRunningHubAudioSlots = (workflow: RunningHubVideoWorkflow): Run
     const audios = [...(workflow.mapping.audios || [])];
     const keys = new Set(audios.map(runningHubAudioBindingId));
     const imageCount = resolveRunningHubVideoImageProtocol(workflow).imageCount;
-    const occupied = new Set([...workflow.mapping.prompt, ...workflow.mapping.images,
+    const occupied = new Set([...workflow.mapping.prompt, ...workflow.mapping.images, ...(workflow.mapping.videos || []),
       ...Object.values(workflow.mapping.parameters || {}), ...(imageCount ? [imageCount] : [])].map(runningHubAudioBindingId));
     for (const node of selectRunningHubVideoFieldChoices(nodes, 'audios', { catalog: workflow.nodeCatalog })) {
       const binding = { nodeId: node.nodeId, inputName: node.fieldName };

@@ -16,6 +16,8 @@ import {
 
 export interface VideoDirectorLaunchRequest {
   id: string;
+  /** Sidebar navigation may prefill only an untouched single-video editor. */
+  onlyIfEmpty?: boolean;
   chapterId?: string;
   storyboardId?: string;
   language?: 'zh' | 'en';
@@ -53,6 +55,7 @@ export interface VideoDirectorBatchDraft {
   promptFormats?: Record<string, VideoPromptFormat>;
   referenceOverrides: Record<string, VideoImageReference[]>;
   audioOverrides?: Record<string, import('./videoAudioTypes').VideoAudioSelectionOverride>;
+  videoOverrides?: Record<string, import('./videoMotionTypes').VideoMotionReference[]>;
   /** Explicit request-only H3 reference updates, keyed by language choice. */
   h3ReferenceUpdates?: Record<string, VideoGenerationDraft>;
   referenceRoleOverrides: Record<string, ReferenceRole[]>;
@@ -123,7 +126,7 @@ export const defaultVideoPromptFormat = (_project: Project, _storyboardId?: stri
 export const hasPreparedVideoBatchDraft = (draft?: VideoDirectorBatchDraft): boolean => Boolean(draft && (
   draft.selectedKeys.length || draft.parameterText.trim() && draft.parameterText.trim() !== '{}'
   || [draft.languages, draft.promptFormats, draft.referenceOverrides, draft.referenceRoleOverrides,
-    draft.audioOverrides, draft.automaticTails, draft.tailCharacterModes].some((entries) => entries && Object.keys(entries).length)
+    draft.audioOverrides, draft.videoOverrides, draft.automaticTails, draft.tailCharacterModes].some((entries) => entries && Object.keys(entries).length)
 ));
 
 /** Preserve prepared selections and retry provenance; empty saved defaults can
@@ -451,6 +454,27 @@ export const applyVideoPromptChoice = (
   return choice.promptFormat === 'seedance' ? withReferences : addDefaultVideoCharacterReferences(project, withReferences);
 };
 
+/** Sidebar entry copies the current saved prompt into an empty chapter editor.
+ * Prepared content and connection/parameter edits keep their existing state. */
+export const prefillEmptyVideoDirectorChapterDraft = (
+  project: Project, chapterId: string | undefined, current: VideoDirectorChapterDraft, request: VideoDirectorLaunchRequest,
+): VideoDirectorChapterDraft => {
+  const draft = current.draft;
+  if (!request.onlyIfEmpty || !request.storyboardId || current.generationMode !== 'single'
+    || draft.prompt.trim() || draft.name.trim() || draft.source || draft.reuseTaskId
+    || draft.references.length || draft.referenceSlotRoles?.length || draft.audioReferences?.length || draft.videoReferences?.length
+    || draft.audioSelectionMode && draft.audioSelectionMode !== 'project'
+    || draft.h3ReferenceBinding || draft.seedanceReferenceBinding || draft.audioReferenceBinding
+    || draft.automaticStoryboardFrames || draft.h3MediaMode || draft.h3MediaModeUpdate) return current;
+  const launchChapterId = chapterIdForVideoLaunch(project, request);
+  if (request.chapterId && request.chapterId !== chapterId || launchChapterId && launchChapterId !== chapterId) return current;
+  const format = request.promptFormat || defaultVideoPromptFormat(project, request.storyboardId);
+  const choice = videoPromptChoices(project, chapterId, format).find((entry) => (
+    entry.storyboardId === request.storyboardId && entry.language === (request.language || 'zh')
+  ));
+  return choice ? { ...current, draft: applyVideoPromptChoice(draft, choice, project, true) } : current;
+};
+
 export const reorderVideoReference = (references: VideoImageReference[], index: number, delta: number): VideoImageReference[] => {
   return moveVideoReference(references, index, delta);
 };
@@ -463,6 +487,8 @@ export const draftFromVideoTask = (task: VideoGenerationTask): VideoGenerationDr
     ...draft, reuseTaskId: task.id, source: draft.source ? { ...draft.source } : undefined,
     references: structuredClone(draft.references),
     audioReferences: draft.audioReferences ? structuredClone(draft.audioReferences) : undefined,
+    videoReferences: draft.videoReferences ? structuredClone(draft.videoReferences) : undefined,
+    videoReferenceBinding: draft.videoReferenceBinding ? structuredClone(draft.videoReferenceBinding) : undefined,
     audioReferenceBinding: draft.audioReferenceBinding ? structuredClone(draft.audioReferenceBinding) : undefined,
     h3ReferenceBinding: draft.h3ReferenceBinding ? structuredClone(draft.h3ReferenceBinding) : undefined,
     seedanceReferenceBinding: draft.seedanceReferenceBinding ? structuredClone(draft.seedanceReferenceBinding) : undefined,

@@ -8,7 +8,7 @@ import { referenceImageMimeType } from '../imageReferenceData';
 import { defaultImageOutputSize, resolveImageOutputSize } from '../imageOutputSize';
 import { resolveWorkbenchImageApi, imageApiChoiceLabel } from '../imageApiSelection';
 import { imageReferenceSnapshotAssets } from '../imageGeneration';
-import { imageGenerationStatusLabel } from '../generationTasks';
+import { cancelQueuedGenerationTask, forceStopImageGenerationTask, forceStopImageTask, imageGenerationStatusLabel, revokeQueuedGenerationTask } from '../generationTasks';
 import { captureCustomImageRule } from '../customImagePrompt';
 import { submitCustomImage, retryCustomImageTask, retryCustomImageSave, type CustomImageGenerationContext } from '../customImageGeneration';
 import { getSafeErrorDiagnostics } from '../errorDiagnostics';
@@ -177,6 +177,25 @@ export function CustomImageWorkbenchPanel({ state, context, onOpenAssets, onMana
     promptInput.current?.focus();
   }
 
+  function stopImage(task: ImageGenerationTask) {
+    const current = context.getState();
+    const owner = current.project.id === projectId ? current.project : current.projects.find(project => project.id === projectId);
+    const live = owner?.generationTasks.find(candidate => candidate.id === task.id);
+    if (!live || live.kind !== 'image' || live.createdAt !== task.createdAt
+      || (live.status !== 'queued' && live.status !== 'running')) return;
+    const running = live.status === 'running';
+    if (running ? !forceStopImageTask(projectId, live) : !revokeQueuedGenerationTask(projectId, live)) return;
+    context.updateBackground(state => applyOwnedProjectUpdate(state, projectId, project => {
+      const candidate = project.generationTasks.find(item => item.id === task.id);
+      if (!candidate || candidate.kind !== 'image' || candidate.createdAt !== task.createdAt) return project;
+      const result = running ? forceStopImageGenerationTask(project.generationTasks, task.id)
+        : cancelQueuedGenerationTask(project.generationTasks, task.id);
+      return { ...project, generationTasks: result.tasks };
+    }));
+    context.notify(running ? '已强制停止此生图任务，队列继续；迟到结果不再保存。服务端可能仍在生成或计费。'
+      : '已取消此排队任务，其他任务继续。');
+  }
+
   async function reverseImage(referenceAssetId: string) {
     if (reverseSubmitBusy || uploadBusy || reverseActive || reverseIssue) return;
     setReversePickerOpen(false);
@@ -292,6 +311,9 @@ export function CustomImageWorkbenchPanel({ state, context, onOpenAssets, onMana
             <div className="row wrap custom-image-result-actions">
               {result && <><button className="btn small" onClick={() => { patchDraft({ referenceAssetIds: [...new Set([...draft.referenceAssetIds, result.id])] }); promptInput.current?.focus(); }}><ImagePlus size={14} />用这张继续改</button>
                 <button className="btn small ghost" onClick={onOpenAssets}><Library size={14} />查看资产</button></>}
+              {active && <button className="btn small danger" onClick={() => stopImage(task)}
+                title={task.status === 'running' ? '立即停止本地等待并释放队列，迟到结果不再保存；服务端可能仍在生成或计费' : '取消排队，保留任务记录'}>
+                <Square size={13} />{task.status === 'running' ? '强制停止' : '取消排队'}</button>}
               {!active && <><button className="btn small" disabled={Boolean(actionBusy) || familyActive} onClick={() => void retry(task)}><RefreshCw size={14} />{task.customImageSavePending ? '重试保存' : task.prompt ? '按原提示词再生成' : '重试规则转换'}</button>
                 <button className="btn small ghost" disabled={Boolean(actionBusy)} onClick={() => edit(task)}>编辑要求</button>
                 {task.customImageInput?.promptMode === 'rules' && <button className="btn small ghost" onClick={() => edit(task, true)}>重新选择规则转换</button>}</>}

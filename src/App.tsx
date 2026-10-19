@@ -132,6 +132,7 @@ import type {
   Workflow,
 } from "./types";
 import { chapterIdForVideoLaunch } from "./videoDirectorDraft";
+import { videoPromptExecutionForStoryboard } from "./videoPromptExecutionSelection";
 import { buildSelectedSequencePromptText } from "./sequencePromptExport";
 import { VideoDirectorView, VideoTaskCard, type VideoDirectorLaunchRequest } from "./components/VideoDirectorView";
 import type { ProjectVoicePresets } from "./videoAudioTypes";
@@ -175,6 +176,7 @@ import { applyVideoApiParameterCapabilities } from "./videoApiParameterSettings"
 import { resolveConfiguredVideoApi } from "./runningHubVideo";
 import { refreshVideoH3MediaModeDraft, videoH3MediaModeContract } from "./videoH3MediaMode";
 import { resolveVideoPromptNavigation } from "./videoPromptNavigation";
+import { selectDirectorStoryboard, selectSingleDirectorStoryboard } from "./directorStoryboardSelection";
 import type { VideoBatchContinuationPlan, VideoPromptFormat, VideoPromptSource } from "./videoGenerationTypes";
 import { videoTaskBatchStatus, type VideoTaskBatchStatus } from "./videoTaskBatchStatus";
 import {
@@ -374,6 +376,8 @@ import {
   autofillGenerationStatusLabel,
   canApplyAutofillResult,
   cancelQueuedGenerationTask,
+  forceStopImageGenerationTask,
+  forceStopImageTask,
   createAutofillGenerationTask,
   createImageGenerationTask,
   GenerationTaskCancelledError,
@@ -433,6 +437,7 @@ import {
 import { activeDirectorWorkflow, activeImageAssetKind, GRID_CREATION_RETIRED_MESSAGE } from "./gridRetirement";
 import { buildVideoCreativeDirection, normalizeVideoCreativeDirection, videoCreativeDirectionForBoard } from "./videoCreativeDirection";
 import { enqueueImageTask } from "./imageTaskQueue";
+import { runImageTask } from "./generationTaskCancellation";
 import { cloneImageBatchConfig, createImageBatchSeeds, enqueueImageBatchMembers, imageBatchMemberApi, imageBatchTaskIsActive, isImageTaskActiveInWorkspace, normalizeImageBatchCount } from "./imageBatch";
 import { captureImageApiSnapshot, imageApiChoiceLabel, imageApiRegenerationSourceIdentity, resolveImageApiForRegeneration, resolveWorkbenchImageApi } from "./imageApiSelection";
 import { assertComfyUIWorkflowCanBindReferenceImages } from "./comfyui";
@@ -611,6 +616,7 @@ import { storyboardRequestApiIdentity, storyboardRequestSourceIdentity } from ".
 
 type NavGroup = "创作工作区" | "视觉资产" | "系统工具";
 type ProductionMode = "single" | "sequence";
+type DirectorPromptSelection = { storyboardId: string; language: "zh" | "en"; promptFormat: VideoPromptFormat };
 type SequenceStage = "plan" | "direct";
 type PlanningBusyState = false | "estimating" | "generating-master" | "segmenting";
 type RuleCenterTab =
@@ -3176,6 +3182,9 @@ export default function App() {
     if (selected || productionMode === "sequence") return selected;
     return editorProject.storyboards[0];
   }, [editorProject.storyboards, activeStoryboardId, productionMode]);
+  const singleDirectorStoryboard = useMemo(() => selectSingleDirectorStoryboard(
+    editorProject, activeStoryboardId, chapterWorkspace(editorProject).directorControls?.activeSingleStoryboardId,
+  ), [editorProject, activeStoryboardId]);
   const activeStoryboardGlobalReferenceAssetIds =
     activeStoryboard?.globalReferenceAssetIds || [];
   const activeStoryboardGlobalReferenceKey =
@@ -4295,7 +4304,7 @@ export default function App() {
         }, { directorSettingsConfirmedFingerprint: liveDirectorSettingsFingerprint, directorSettingsConfirmedAt: Date.now(),
           directorControls: { ...workspace.directorControls, activePlanId: result.id, activeSegmentId: result.segments[0]?.id || "", activeStoryboardId: "",
             productionMode: "sequence", sequenceStage: "plan", durationMode: result.durationMode, segmentationMode: result.segmentationMode,
-            totalDuration: result.requestedTotalDurationSec ?? result.totalDurationSec, totalDurationTouched: true,
+            totalDuration: result.requestedTotalDurationSec ?? result.totalDurationSec, totalDurationTouched: result.durationMode === "fixed",
             durationEstimate: null, estimateConfirmed: false, confirmedSequencePlanFingerprint: "", acknowledgedCompressedPlanFingerprint: "", acceptedSequencePlanMismatchFingerprint: "" },
         }, requestChapterId) };
       });
@@ -4313,7 +4322,7 @@ export default function App() {
       setDurationMode(result.durationMode);
       setSegmentationMode(result.segmentationMode);
       setTotalDuration(result.requestedTotalDurationSec ?? result.totalDurationSec);
-      setTotalDurationTouched(true);
+      setTotalDurationTouched(result.durationMode === "fixed");
       setDurationEstimate(null);
       setEstimateConfirmed(false);
       setConfirmedSequencePlanFingerprint("");
@@ -5788,7 +5797,7 @@ export default function App() {
     });
   }, [projectLibrary]);
 
-  const chapterDirectorControls = { activeSceneId, activeStoryboardId, selectedDirectorSceneIds, directorWorkflow, directorInputMode, durationPreset, customDuration, planningSegmentDurationPreset, planningCustomSegmentDuration, productionMode, sequenceStage, sequenceSettingsOpen, durationMode, totalDuration, totalDurationTouched, segmentationMode, activePlanId, activeSegmentId, confirmedSequencePlanFingerprint, acceptedSequencePlanMismatchFingerprint, acknowledgedCompressedPlanFingerprint, durationEstimate, estimateConfirmed, shotMode, shotCount, pace, generationPromptFormat, aspectRatio, resolution, audioMode, styleId, ruleSetId, converterId, directorStyleId, directorCategory, directorStyleName, directorStyleSummary, cameraTerms, lightingTerms, visualStyle, extraRequirement, selectedAssetIds };
+  const chapterDirectorControls = { activeSceneId, activeStoryboardId, activeSingleStoryboardId: singleDirectorStoryboard?.id || "", selectedDirectorSceneIds, directorWorkflow, directorInputMode, durationPreset, customDuration, planningSegmentDurationPreset, planningCustomSegmentDuration, productionMode, sequenceStage, sequenceSettingsOpen, durationMode, totalDuration, totalDurationTouched, segmentationMode, activePlanId, activeSegmentId, confirmedSequencePlanFingerprint, acceptedSequencePlanMismatchFingerprint, acknowledgedCompressedPlanFingerprint, durationEstimate, estimateConfirmed, shotMode, shotCount, pace, generationPromptFormat, aspectRatio, resolution, audioMode, styleId, ruleSetId, converterId, directorStyleId, directorCategory, directorStyleName, directorStyleSummary, cameraTerms, lightingTerms, visualStyle, extraRequirement, selectedAssetIds };
   const chapterDirectorControlsRef = useRef(chapterDirectorControls);
   chapterDirectorControlsRef.current = chapterDirectorControls;
   const controlsReadyRef = useRef(false);
@@ -7150,14 +7159,15 @@ export default function App() {
     if (sequencePromptRefreshRef.current || hasActiveStoryboardBuild()) return undefined;
     const requestPromptFormat = generationPromptFormatRef.current;
     if (!override?.segment && !override?.fullTimeline) {
-      const saved = stateRef.current.project.storyboards.find((board) => board.id === activeStoryboardId);
+      const saved = selectSingleDirectorStoryboard(chapterScopeProject(stateRef.current.project), activeStoryboardId,
+        chapterWorkspace(stateRef.current.project).directorControls?.activeSingleStoryboardId);
       if (saved && !saved.sourceStale && hasCurrentTextApiConversion(saved)
         && saved.promptGenerationSourceFingerprint === canonicalGenerationFingerprint
         && (requestPromptFormat === 'seedance' || !saved.officialPromptZh || saved.officialPromptEnError)) {
         const context = officialH3ContextForStoryboard(stateRef.current.project, saved);
         const chineseReady = requestPromptFormat === 'seedance' ? hasCurrentSeedancePrompt(stateRef.current.project, saved) : hasCurrentOfficialH3Prompt(saved, context);
         const englishReady = requestPromptFormat === 'seedance' ? hasCurrentSeedancePrompt(stateRef.current.project, saved, 'en') : hasCurrentOfficialH3EnglishPrompt(saved, context);
-        return refreshDerivedTargetPrompt(saved, chineseReady && !englishReady ? 'translate-english' : 'regenerate', undefined, undefined, requestPromptFormat);
+        return refreshDerivedTargetPrompt(saved, chineseReady && !englishReady ? 'translate-english' : chineseReady ? 'action-retiming' : 'regenerate', undefined, undefined, requestPromptFormat);
       }
     }
     const segmentForGeneration = override?.segment;
@@ -7631,6 +7641,8 @@ export default function App() {
         const modelPlan = await requestShotRecommendation(
           state.settings.textApi,
           {
+            executionContext: videoPromptExecutionForStoryboard(state.project, state.settings, undefined,
+              { chapterId: requestChapterId, sequencePlanId: sourcePlanForGeneration?.id }),
             durationSec: duration,
             requiredSegmentDurationSec: fullTimeline
               ? override?.requiredSegmentDurationSec
@@ -8117,6 +8129,7 @@ export default function App() {
       let complete: Storyboard;
       try {
         complete = await generateSingleSegmentPrompt({
+          executionContext: videoPromptExecutionForStoryboard(stateRef.current.project, stateRef.current.settings, convertedCandidate),
           voiceFactScope: 'source-grounded-new-draft',
           targetPromptFormat: requestPromptFormat,
           // The canonical checkpoint has just linked this new board to its
@@ -8298,6 +8311,7 @@ export default function App() {
         : "正在重新生成英文描述；对白按剧情语言保留，不重做中文、镜头或参数。");
       const result = await generateSingleSegmentPrompt({
         reviewWithAi: true,
+        executionContext: videoPromptExecutionForStoryboard(snapshot.project, snapshot.settings, sourceBoard),
         onAiTranslationReview: () => { if (isCurrent()) notify("正在调用同一 API 对照完整中文校验并修复英文，主体与对白交给 AI 复核。"); },
         board: sourceBoard, context, sequenceHandoff: englishHandoff?.context,
         sceneContext: buildVideoSceneContext({ board: sourceBoard, locations: snapshot.project.locations,
@@ -8403,6 +8417,7 @@ export default function App() {
     try {
       notify("正在按新人物资料更新本段提示词；保留剧情、台词和镜头排时，并保存旧稿。");
       const result = await generateSingleSegmentPrompt({ board, context, reviewWithAi: true,
+        executionContext: videoPromptExecutionForStoryboard(snapshot.project, snapshot.settings, board),
         sceneContext: buildVideoSceneContext({ board, locations: snapshot.project.locations,
           scenes: snapshot.project.scenes, assets: snapshot.project.assets,
           references: getSingleSegmentReferences(board, context), chapterId: board.chapterId }),
@@ -8531,7 +8546,7 @@ export default function App() {
 
   const refreshDerivedTargetPrompt = async (
     sourceBoard: Storyboard,
-    mode: "regenerate" | "translate-english" | "continuity-repair" | "dialogue-repair" = "regenerate",
+    mode: "regenerate" | "translate-english" | "continuity-repair" | "dialogue-repair" | "action-retiming" = "regenerate",
     plan?: VideoSequencePlan,
     segment?: VideoSegment,
     format: 'h3' | 'seedance' = 'seedance',
@@ -8611,7 +8626,8 @@ export default function App() {
         if (!versionSaved && mode !== 'translate-english' && (format === 'seedance' ? sourceBoard.seedance25Output : sourceBoard.officialPromptZh)) {
           const history = sourceBoard.revisions || [];
           saved = { ...saved, revisions: [...history, createStoryboardRevision(sourceBoard, history,
-            { reason: format === 'seedance' ? 'pre-seedance-regenerate' : 'pre-regenerate', label: `${label}提示词更新前`, createdAt: now })] };
+            { reason: mode === 'action-retiming' ? 'pre-action-retiming' : format === 'seedance' ? 'pre-seedance-regenerate' : 'pre-regenerate',
+              label: mode === 'action-retiming' ? '动作节奏重排前' : `${label}提示词更新前`, createdAt: now })] };
           versionSaved = true;
         } else if (versionSaved) {
           saved = { ...saved, revisions: current.project.storyboards.find((entry) => entry.id === sourceBoard.id)?.revisions };
@@ -8644,6 +8660,7 @@ export default function App() {
     try {
       const result = await generateSingleSegmentPrompt({
         board: sourceBoard, targetPromptFormat: format,
+        executionContext: videoPromptExecutionForStoryboard(snapshot.project, snapshot.settings, sourceBoard),
         ...(mode === 'regenerate' ? { voiceFactScope: 'source-grounded-new-draft' as const } : {}),
         buildSeedanceInput: (board) => buildOfficialSeedanceInput(stateRef.current.project, board),
         context: officialH3ContextForStoryboard(snapshot.project, sourceBoard),
@@ -8652,7 +8669,7 @@ export default function App() {
         converter: snapshot.converterPresets.find((entry) => entry.id === sourceBoard.converterPresetId && entry.enabled)
           || snapshot.converterPresets.find((entry) => entry.id === converterId && entry.enabled),
         ruleSet: snapshot.ruleSets.find((entry) => entry.id === sourceBoard.ruleSetId),
-        purpose: mode === 'continuity-repair' ? 'continuity-repair' : mode === 'dialogue-repair' ? 'dialogue-repair' : undefined,
+        purpose: mode === 'action-retiming' ? 'action-retiming' : mode === 'continuity-repair' ? 'continuity-repair' : mode === 'dialogue-repair' ? 'dialogue-repair' : undefined,
         mode: mode === 'translate-english' ? 'translate-english' : 'generate',
         skipConversion: mode !== 'continuity-repair' && mode !== 'dialogue-repair',
         reviewWithAi: true, clean: cleanVideoPrompt, isCurrent,
@@ -8663,7 +8680,8 @@ export default function App() {
             ? format === 'seedance' ? 'seedance-english-prompt' : 'sequence-english-prompt'
             : format === 'seedance' ? 'seedance-chinese-prompt' : 'sequence-official-prompt-refresh';
           if (isCurrent()) notify(stage === 'translate' ? `${label}中文已保存，正在生成英文。`
-            : stage === 'convert' ? '正在修复当前段公共分镜衔接。' : `正在编写${label}中文提示词。`);
+            : mode === 'action-retiming' ? '正在重排当前段动作节奏，保留全部动作、次数、对白和段长。'
+              : stage === 'convert' ? '正在修复当前段公共分镜衔接。' : `正在编写${label}中文提示词。`);
         },
         request: async (system, user, _stage, transport) => {
           runtimeFailureDetail = undefined;
@@ -8707,6 +8725,8 @@ export default function App() {
     mode: "regenerate" | "translate-english" | "continuity-repair" | "dialogue-repair" = "regenerate",
     format: 'h3' | 'seedance' = generationPromptFormatRef.current,
   ): Promise<boolean> => {
+    if (mode === 'regenerate' && (format === 'h3' ? sourceBoard.officialPromptZh : sourceBoard.seedance25Output?.promptZh)?.trim())
+      return Boolean(await refreshDerivedTargetPrompt(sourceBoard, 'action-retiming', plan, segment, format));
     if (format === 'seedance' || mode === 'regenerate' && !sourceBoard.officialPromptZh && hasCurrentTextApiConversion(sourceBoard))
       return Boolean(await refreshDerivedTargetPrompt(sourceBoard, mode, plan, segment, format));
     if (sequencePromptRefreshRef.current || busy || hasActiveStoryboardBuild()) return false;
@@ -9004,6 +9024,17 @@ export default function App() {
       return;
     }
     await refreshSequenceSegmentOfficialPrompt(plan, segment, board, officialH3ContextForStoryboard(project, board), "regenerate");
+  };
+
+  const regenerateTargetStoryboardPrompt = async (boardId: string, format: 'h3' | 'seedance'): Promise<void> => {
+    const project = stateRef.current.project;
+    const board = project.storyboards.find((entry) => entry.id === boardId);
+    if (!board) return;
+    const plan = project.sequencePlans.find((entry) => entry.id === board.sequencePlanId);
+    const segment = plan?.segments.find((entry) => entry.id === board.segmentId && entry.storyboardId === board.id);
+    if (segment?.locked) { notify("当前视频段已锁定，请先解锁后再重新生成。", "error"); return; }
+    if (plan && segment) await refreshSequenceSegmentOfficialPrompt(plan, segment, board, officialH3ContextForStoryboard(project, board), 'regenerate', format);
+    else await refreshDerivedTargetPrompt(board, 'action-retiming', undefined, undefined, format);
   };
 
   const repairStoryboardDialogue = async (boardId: string): Promise<void> => {
@@ -9741,6 +9772,18 @@ export default function App() {
   const [assetLibrarySection, setAssetLibrarySection] = useState<"image" | "video" | "audio">("image");
   const [videoAssetStoryboardFilter, setVideoAssetStoryboardFilter] = useState("");
   const [promptSourceRequest, setPromptSourceRequest] = useState<{ id: string; storyboardId: string; language: "zh" | "en"; promptFormat?: VideoPromptFormat }>();
+  const [directorPromptSelection, setDirectorPromptSelection] = useState<DirectorPromptSelection>();
+  const directorStoryboard = selectDirectorStoryboard(editorProject, {
+    mode: productionMode, selectedId: activeStoryboardId,
+    rememberedSingleId: singleDirectorStoryboard?.id,
+    sequenceStoryboardId: activeSequenceSegment?.storyboardId,
+    sourceStoryboardId: promptSourceRequest?.storyboardId,
+  });
+  const selectDirectorMode = (mode: ProductionMode) => {
+    setPromptSourceRequest(undefined);
+    setActiveStoryboardId(mode === "single" ? singleDirectorStoryboard?.id || "" : activeSequenceSegment?.storyboardId || "");
+    setProductionMode(mode);
+  };
   const [openVideoSettings, setOpenVideoSettings] = useState(false);
   useEffect(() => { setVideoLaunchRequest(undefined); setAssetLibrarySection("image"); setVideoAssetStoryboardFilter(""); setPromptSourceRequest(undefined); }, [state.project.id]);
   const videoController = useVideoGenerationController({ state, setState: setBackgroundState, getCurrentProjectId, getCurrentState, ready: desktopStateReady, notify });
@@ -9854,6 +9897,9 @@ export default function App() {
     setView("assets");
   };
   const appContext = {
+    directorStoryboard,
+    selectDirectorMode,
+    setDirectorPromptSelection,
     openPromptSource,
     openRelatedVideos,
     promptSourceRequest,
@@ -10074,6 +10120,7 @@ export default function App() {
     generationPromptFormat,
     setGenerationPromptFormat,
     regenerateStoryboardEnglish,
+    regenerateTargetStoryboardPrompt,
     assetSearch,
     setAssetSearch,
     ruleTab,
@@ -10282,6 +10329,13 @@ export default function App() {
                       key={item.key}
                       className={`nav-item nav-${item.key} ${view === item.key ? "active" : ""}`}
                       onClick={() => {
+                        if (item.key === "video") {
+                          const displayed = directorPromptSelection?.storyboardId === directorStoryboard?.id ? directorPromptSelection : undefined;
+                          openVideoDirector({ chapterId: currentChapterId, storyboardId: directorStoryboard?.id,
+                            language: displayed?.language || "zh", promptFormat: displayed?.promptFormat || generationPromptFormat,
+                            onlyIfEmpty: true });
+                          return;
+                        }
                         if (item.key === "assets") { setAssetLibrarySection("image"); setVideoAssetStoryboardFilter(""); }
                         if (item.key === "settings") setOpenVideoSettings(false);
                         setView(item.key);
@@ -11127,6 +11181,9 @@ type BackgroundStateDispatch = (
 ) => void;
 
 interface AppContext {
+  directorStoryboard: Storyboard | undefined;
+  selectDirectorMode: (mode: ProductionMode) => void;
+  setDirectorPromptSelection: React.Dispatch<React.SetStateAction<DirectorPromptSelection | undefined>>;
   openPromptSource: (storyboardId: string, source?: VideoPromptSource) => void;
   openRelatedVideos: (storyboardId: string) => void;
   promptSourceRequest?: { id: string; storyboardId: string; language: "zh" | "en"; promptFormat?: VideoPromptFormat };
@@ -11365,6 +11422,7 @@ interface AppContext {
     override?: StoryboardGenerationOverride,
   ) => Promise<Storyboard | undefined>;
   regenerateStoryboardEnglish: (boardId: string) => Promise<void>;
+  regenerateTargetStoryboardPrompt: (boardId: string, format: 'h3' | 'seedance') => Promise<void>;
   assetSearch: string;
   setAssetSearch: React.Dispatch<React.SetStateAction<string>>;
   ruleTab: RuleCenterTab;
@@ -13542,7 +13600,6 @@ function DirectorView(ctx: AppContext) {
     visualStyle,
     extraRequirement,
     setExtraRequirement,
-    activeStoryboard: rootActiveStoryboard,
     getCurrentWorkspaceIdentity,
     getCurrentStoryboardOperationIdentity,
     getCurrentDirectorLookNavigationRevision,
@@ -13558,13 +13615,7 @@ function DirectorView(ctx: AppContext) {
   const visibleDurationPreset = editingSequenceSegmentDuration
     ? planningSegmentDurationPreset
     : durationPreset;
-  const activeStoryboard = productionMode === "sequence"
-    ? activeSequenceSegment?.storyboardId
-      ? state.project.storyboards.find(
-          (board: Storyboard) => board.id === activeSequenceSegment.storyboardId,
-        )
-      : undefined
-      : rootActiveStoryboard;
+  const activeStoryboard = ctx.directorStoryboard;
   const directorResultStoryboard = activeStoryboard;
   const activeSequenceHasRealResult = Boolean(
     productionMode === "sequence"
@@ -13841,6 +13892,11 @@ function DirectorView(ctx: AppContext) {
       ? directorResultStoryboard.officialPromptEn || ""
       : "";
   const [directorPromptFormat, setDirectorPromptFormat] = useState<VideoPromptFormat>(generationPromptFormat);
+  useEffect(() => {
+    const next = directorResultStoryboard ? { storyboardId: directorResultStoryboard.id, language: promptLanguage, promptFormat: directorPromptFormat } : undefined;
+    ctx.setDirectorPromptSelection((current) => current?.storyboardId === next?.storyboardId
+      && current?.language === next?.language && current?.promptFormat === next?.promptFormat ? current : next);
+  }, [directorResultStoryboard?.id, promptLanguage, directorPromptFormat, ctx.setDirectorPromptSelection]);
   const validOrdinaryEnglishPrompt = directorResultStoryboard?.englishPromptSource === directorResultStoryboard?.finalPrompt
     && !getVideoPromptInstructionLeak(directorResultStoryboard?.englishPrompt || "")
     ? directorResultStoryboard?.englishPrompt || "" : "";
@@ -13914,7 +13970,12 @@ function DirectorView(ctx: AppContext) {
   };
   const generateSeedanceOfficialPrompt = async (): Promise<void> => {
     if (!directorResultStoryboard || !seedancePromptInput?.canonicalPrompt.trim() || seedancePromptBusy || busy || sequenceBatchRunning) return;
+    if (directorResultStoryboard.seedance25Output?.promptZh?.trim()) {
+      await ctx.regenerateTargetStoryboardPrompt(directorResultStoryboard.id, 'seedance');
+      return;
+    }
     const requestInput = structuredClone(seedancePromptInput);
+    requestInput.executionContext = videoPromptExecutionForStoryboard(state.project, state.settings, directorResultStoryboard);
     let requestIdentity = seedanceLiveSaveIdentity(getCurrentState().project.storyboards.find((board) => board.id === directorResultStoryboard.id) || directorResultStoryboard);
     const requestFingerprint = getOfficialSeedanceSourceFingerprint(requestInput);
     const isCurrent = () => isSeedanceSaveCurrent(requestIdentity, requestFingerprint);
@@ -14654,6 +14715,7 @@ function DirectorView(ctx: AppContext) {
             }
           };
           try {
+            return await runImageTask(requestedProjectId, task, async (signal) => {
             assertTaskCurrent();
             setBackgroundState((current: AppState) => applyOwnedProjectUpdate(
               current,
@@ -14712,6 +14774,8 @@ function DirectorView(ctx: AppContext) {
                   imagePromptSelection.ruleSet.format,
                   imagePromptConverterRules,
                   task.conversionIdentityContext,
+                  undefined,
+                  signal,
                 );
                 assertTaskCurrent();
                 const sanitized = sanitizeFinalImagePrompt(converted, imagePromptSelection.ruleSet.format);
@@ -14759,13 +14823,14 @@ function DirectorView(ctx: AppContext) {
                 setBackgroundState((current: AppState) => applyOwnedProjectUpdate(current, requestedProjectId, (project) => ({
                   ...project, generationTasks: patchImageGenerationTask(project.generationTasks, task.id, { preparationStage: undefined }),
                 })));
-                return requestImageModel(imageApi, { ...input, referenceImages: references.referenceImages,
+                return requestImageModel(imageApi, { ...input, signal, referenceImages: references.referenceImages,
                   primaryReferenceImageCount: references.primaryReferenceImageCount, preserveReferenceImageOrder: true }, () => {
                   assertTaskCurrent();
                   imageModelInvoked = true;
                 });
               },
             });
+            if (signal.aborted) throw new GenerationTaskCancelledError();
             const { finalPrompt, generated } = execution;
             imageTaskStage = "image-result-save";
             const actualImageSize = readGeneratedImageDimensions(generated.dataUrl || "");
@@ -14777,6 +14842,7 @@ function DirectorView(ctx: AppContext) {
                   fileName: `${safeFileName(request.name)}.png`,
                 })
               : null;
+            if (signal.aborted) throw new GenerationTaskCancelledError();
             const dataUrl = managed ? undefined : generated.dataUrl;
             const previewUrl = managed?.url || generated.url;
             if (!dataUrl && !previewUrl) throw new Error("图像接口没有返回可保存的图片");
@@ -14836,6 +14902,9 @@ function DirectorView(ctx: AppContext) {
               current,
               requestedProjectId,
               (project) => {
+                if (isGenerationTaskRevoked(requestedProjectId, task)
+                  || project.generationTasks.some((candidate) => candidate.id === task.id && isImageGenerationTask(candidate)
+                    && candidate.createdAt === task.createdAt && candidate.status === "cancelled")) return project;
                 const currentBoard = project.storyboards.find((board) => board.id === sourceBoard.id);
                 const taskTracked = project.generationTasks.some((candidate) => (
                   candidate.id === task.id
@@ -14905,6 +14974,7 @@ function DirectorView(ctx: AppContext) {
             ));
             if (isGenerationTaskRevoked(requestedProjectId, task)) throw new GenerationTaskCancelledError();
             return asset;
+            });
           } catch (error) {
             if (isGenerationTaskCancelledError(error) || isGenerationTaskRevoked(requestedProjectId, task)) {
               throw new GenerationTaskCancelledError();
@@ -15192,7 +15262,7 @@ function DirectorView(ctx: AppContext) {
                   aria-pressed={productionMode === "single"}
                   className={`segment ${productionMode === "single" ? "active" : ""}`}
                   onClick={() => {
-                    setProductionMode("single");
+                    ctx.selectDirectorMode("single");
                     setSequenceStage("direct");
                   }}
                 >
@@ -15204,7 +15274,7 @@ function DirectorView(ctx: AppContext) {
                   aria-pressed={productionMode === "sequence"}
                   className={`segment ${productionMode === "sequence" ? "active violet" : ""}`}
                   onClick={() => {
-                    setProductionMode("sequence");
+                    ctx.selectDirectorMode("sequence");
                     setSequenceStage(
                       activeSequencePlan && activeSequencePlanReadyForGeneration
                         ? "direct"
@@ -16229,7 +16299,7 @@ function DirectorView(ctx: AppContext) {
                                   : `第 ${activeSequenceSegment.index} 段尚未生成`
                           : directorResultStoryboard?.finalPrompt?.trim()
                             ? `${generationPromptFormatLabel}交付稿待生成或刷新`
-                            : `还没有${generationPromptFormatLabel}结果`
+                            : productionMode === "single" ? "尚未生成单段提示词" : `还没有${generationPromptFormatLabel}结果`
                       }
                       description={
                         productionMode === "sequence" && activeSequenceSegment
@@ -16241,7 +16311,9 @@ function DirectorView(ctx: AppContext) {
                                 : "本段还没有真实分镜和非空最终提示词。")
                           : directorResultStoryboard?.finalPrompt?.trim()
                             ? `沿用当前剧情与分镜，生成或刷新${generationPromptFormatLabel}中英文交付稿。`
-                            : `已选择${generationPromptFormatLabel}，可直接从当前剧情生成分镜和目标提示词。`
+                            : productionMode === "single"
+                              ? "当前章节没有独立单段稿，可从当前剧情生成；已有分段提示词可切换到长剧情拆段查看。"
+                              : `已选择${generationPromptFormatLabel}，可直接从当前剧情生成分镜和目标提示词。`
                       }
                       action={
                         <div className="row wrap">
@@ -19858,12 +19930,14 @@ function ImageWorkbenchView(ctx: AppContext) {
       async (task) => {
         const name = task.name;
         let convertedPrompt = "";
+        let ownedConvertedPrompt: Promise<string> | undefined;
         try {
+          await runImageTask(requestedProjectId, task, async (signal) => {
           patchImageTaskForOwningProject(requestedProjectId, task.id, {
             status: "running",
             error: undefined,
           });
-          batchConvertedPrompt ??= (async () => {
+          if (!batchConvertedPrompt) batchConvertedPrompt = ownedConvertedPrompt = (async () => {
           const convertPrompt = async (repairReason = "") => {
             if (!imageBatchTaskIsActive(getCurrentState(), requestedProjectId, task)) throw new GenerationTaskCancelledError();
             const converted = await requestImagePromptConverter(
@@ -19881,7 +19955,9 @@ function ImageWorkbenchView(ctx: AppContext) {
               ].filter(Boolean).join("\n"),
               conversionIdentityContext,
               requestedImageVariant,
+              signal,
             );
+            if (signal.aborted) throw new GenerationTaskCancelledError();
             const sanitized = sanitizeFinalImagePrompt(
               converted,
               imagePromptSelection.ruleSet.format,
@@ -19935,6 +20011,7 @@ function ImageWorkbenchView(ctx: AppContext) {
           if (requestedImageApi.enabled) {
             const result = await requestImageModel(imageBatchMemberApi(requestedImageApi, task.seed), {
               prompt: convertedPrompt,
+              signal,
               ...(task.seed === undefined ? {} : { seed: task.seed }),
               negativePrompt: requestedNegativePrompt,
               width: requestedOutputSize.width,
@@ -19951,6 +20028,7 @@ function ImageWorkbenchView(ctx: AppContext) {
                 throw new GenerationTaskCancelledError();
               }
             });
+            if (signal.aborted) throw new GenerationTaskCancelledError();
             dataUrl = result.dataUrl || "";
             remoteUrl = result.url || "";
             if (!dataUrl && !remoteUrl) throw new Error("图像接口没有返回可保存的图片");
@@ -19966,6 +20044,7 @@ function ImageWorkbenchView(ctx: AppContext) {
           const managedImage = dataUrl && window.lianhuaDesktop?.storeGeneratedImage
             ? await window.lianhuaDesktop.storeGeneratedImage({ dataUrl, fileName: `${safeFileName(name)}.png` })
             : undefined;
+          if (signal.aborted) throw new GenerationTaskCancelledError();
           const type: AssetType = requestedAssetKind === "grid" ? "grid" : requestedAssetKind;
           const role: AssetRole =
             requestedAssetKind === "character"
@@ -20050,7 +20129,14 @@ function ImageWorkbenchView(ctx: AppContext) {
           if (requestedImageApi.enabled && isCurrentProjectOperation(requestedProjectId, getCurrentProjectId())) {
             notify(imageSizeWarning || `图片已保存${actualImageSize ? `，实际 ${actualImageSize.width}×${actualImageSize.height} 像素` : "，实际像素待读取"}。`);
           }
+          });
         } catch (error) {
+          if (isGenerationTaskCancelledError(error) || isGenerationTaskRevoked(requestedProjectId, task)) {
+            // An interrupted converter belongs to this member; later members
+            // must not inherit its rejected (or still pending) request.
+            if (!convertedPrompt && ownedConvertedPrompt && batchConvertedPrompt === ownedConvertedPrompt) batchConvertedPrompt = undefined;
+            return;
+          }
           if (!imageBatchTaskIsActive(getCurrentState(), requestedProjectId, task)) return;
           const errorMessage = getSafeErrorDiagnostics(error, {
             knownSecrets: [requestedTextApi.apiKey, requestedImageApi.apiKey],
@@ -20350,6 +20436,7 @@ function ImageWorkbenchView(ctx: AppContext) {
           }
         };
         try {
+          return await runImageTask(requestedProjectId, task, async (signal) => {
           assertTaskCurrent();
           setBackgroundState((current: AppState) => applyOwnedProjectUpdate(
             current,
@@ -20404,6 +20491,8 @@ function ImageWorkbenchView(ctx: AppContext) {
                 imagePromptSelection.ruleSet.format,
                 imagePromptConverterRules,
                 task.conversionIdentityContext,
+                undefined,
+                signal,
               );
               assertTaskCurrent();
               const sanitized = sanitizeFinalImagePrompt(converted, imagePromptSelection.ruleSet.format);
@@ -20445,10 +20534,11 @@ function ImageWorkbenchView(ctx: AppContext) {
               setBackgroundState((current: AppState) => applyOwnedProjectUpdate(current, requestedProjectId, (project) => ({
                 ...project, generationTasks: patchImageGenerationTask(project.generationTasks, task.id, { preparationStage: undefined }),
               })));
-              return requestImageModel(imageApi, { ...input, referenceImages: references.referenceImages,
+              return requestImageModel(imageApi, { ...input, signal, referenceImages: references.referenceImages,
                 primaryReferenceImageCount: references.primaryReferenceImageCount, preserveReferenceImageOrder: true }, assertTaskCurrent);
             },
           });
+          if (signal.aborted) throw new GenerationTaskCancelledError();
           const actualImageSize = readGeneratedImageDimensions(execution.generated.dataUrl || "");
           const imageSizeWarning = imageReturnedSizeWarning(request, actualImageSize);
           const managed = execution.generated.dataUrl && window.lianhuaDesktop?.storeGeneratedImage
@@ -20457,6 +20547,7 @@ function ImageWorkbenchView(ctx: AppContext) {
                 fileName: `${safeFileName(request.name)}.png`,
               })
             : null;
+          if (signal.aborted) throw new GenerationTaskCancelledError();
           const dataUrl = managed ? undefined : execution.generated.dataUrl;
           const previewUrl = managed?.url || execution.generated.url;
           if (!dataUrl && !previewUrl) throw new Error("图像接口没有返回可保存的图片");
@@ -20505,6 +20596,9 @@ function ImageWorkbenchView(ctx: AppContext) {
             current,
             requestedProjectId,
             (project) => {
+              if (isGenerationTaskRevoked(requestedProjectId, task)
+                || project.generationTasks.some((candidate) => candidate.id === task.id && isImageGenerationTask(candidate)
+                  && candidate.createdAt === task.createdAt && candidate.status === "cancelled")) return project;
               const currentBoard = project.storyboards.find((board) => board.id === sourceBoard.id);
               const taskTracked = project.generationTasks.some((candidate) => (
                 candidate.id === task.id
@@ -20566,6 +20660,7 @@ function ImageWorkbenchView(ctx: AppContext) {
           ));
           if (isGenerationTaskRevoked(requestedProjectId, task)) throw new GenerationTaskCancelledError();
           return asset;
+          });
         } catch (error) {
           if (isGenerationTaskCancelledError(error) || isGenerationTaskRevoked(requestedProjectId, task)) {
             throw new GenerationTaskCancelledError();
@@ -24360,7 +24455,7 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
     })));
     notify(`已加入${currentShotRegeneration ? "当前镜头重新转换并生图" : "重新生图"}队列：${task.name}。原图和原任务会保留。`);
     const sourceAsset = state.project.assets.find((asset) => asset.id === originalTask.resultAssetId);
-    await enqueueImageTask(async () => {
+    await enqueueImageTask(() => runImageTask(requestedProjectId, task, async (signal) => {
       assertSubmissionCurrent();
       setBackgroundState((current) => applyOwnedProjectUpdate(current, requestedProjectId, (project) => ({
         ...project, generationTasks: patchImageGenerationTask(project.generationTasks, task.id, { status: "running", error: undefined }),
@@ -24471,7 +24566,9 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
               ].filter(Boolean).join("\n"),
               source.conversionIdentityContext,
               task.imageVariant,
+              signal,
             );
+            if (signal.aborted) throw new GenerationTaskCancelledError();
             const sanitized = sanitizeFinalImagePrompt(prompt, format);
             return privateRegeneration
               ? normalizePrivateSingleImagePrompt(sanitized, task.imageVariant, format)
@@ -24509,7 +24606,7 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
           assertSubmissionCurrent();
           if (directImageRetry && (references.referenceImages.length !== task.referenceAssetSnapshots?.length
             || references.referenceImages.some((image) => !image.trim()))) throw new Error("角色参考图快照与实际上传图片不完整，尚未提交生图。");
-          return requestImageModel(imageApi, { ...input, referenceImages: references.referenceImages,
+          return requestImageModel(imageApi, { ...input, signal, referenceImages: references.referenceImages,
             primaryReferenceImageCount: references.primaryReferenceImageCount, preserveReferenceImageOrder: true }, () => {
             // Checked inside the transport FIFO after reference uploads and
             // immediately before the paid generation POST, never just enqueue.
@@ -24518,12 +24615,14 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
           });
         },
       });
+      if (signal.aborted) throw new GenerationTaskCancelledError();
       convertedPrompt = result.finalPrompt;
       const actualImageSize = readGeneratedImageDimensions(result.generated.dataUrl || "");
       const imageSizeWarning = imageReturnedSizeWarning(task, actualImageSize);
       const managed = result.generated.dataUrl && window.lianhuaDesktop?.storeGeneratedImage
         ? await window.lianhuaDesktop.storeGeneratedImage({ dataUrl: result.generated.dataUrl, fileName: `${safeFileName(task.name)}.png` })
         : null;
+      if (signal.aborted) throw new GenerationTaskCancelledError();
       const dataUrl = managed ? undefined : result.generated.dataUrl;
       const url = managed?.url || result.generated.url;
       if (!dataUrl && !url) throw new Error("图像接口没有返回可保存的图片。");
@@ -24560,6 +24659,9 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
         createdAt: timestamp, updatedAt: timestamp,
       };
       setBackgroundState((current) => applyOwnedProjectUpdate(current, requestedProjectId, (project) => {
+        if (isGenerationTaskRevoked(requestedProjectId, task)
+          || project.generationTasks.some((candidate) => candidate.id === task.id && isImageGenerationTask(candidate)
+            && candidate.createdAt === task.createdAt && candidate.status === "cancelled")) return project;
         const updated = appendRegeneratedImageResult(project, { ...task, prompt: result.finalPrompt }, asset);
         const warnings = [source.warning ? `${source.warning} 原图和原绑定已保留，新图可在资产库手动绑定。` : "", imageSizeWarning].filter(Boolean).join(" ");
         return warnings ? { ...updated, generationTasks: patchImageGenerationTask(updated.generationTasks, task.id, {
@@ -24567,7 +24669,7 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
         }) } : updated;
       }));
       if (isCurrentProjectOperation(requestedProjectId, getCurrentProjectId())) notify(imageSizeWarning || `已保存新图：${task.name}${actualImageSize ? ` · 实际 ${actualImageSize.width}×${actualImageSize.height}` : ""}。原图未删除。`);
-    });
+    }));
   } catch (error) {
     const failedTask = createdTask;
     if (failedTask && isGenerationTaskRevoked(requestedProjectId, failedTask)) return;
@@ -24730,6 +24832,23 @@ function GenerationTasksView(ctx: AppContext) {
     }));
     storyboardImageBatchLifecycle.releaseCancelledQueuedBatches((taskId) => isImageTaskActiveInWorkspace(ctx.getCurrentState(), taskId));
     notify("已取消此排队任务，其他任务继续；取消记录可以直接删除。");
+  };
+  const forceStopRunningImageTask = (id: string) => {
+    const currentState = ctx.getCurrentState();
+    const projectId = state.project.id;
+    const owner = currentState.project.id === projectId
+      ? currentState.project : currentState.projects.find((project) => project.id === projectId);
+    const task = owner?.generationTasks.find((candidate) => candidate.id === id);
+    if (!owner || !task || !isImageGenerationTask(task) || task.status !== "running") return;
+    // Revoke first so a response arriving during abort cannot save or bind an image.
+    if (!forceStopImageTask(projectId, task)) return;
+    ctx.setBackgroundState((current) => applyOwnedProjectUpdate(current, projectId, (project) => {
+      const live = project.generationTasks.find((candidate) => candidate.id === id);
+      if (!live || live.kind !== task.kind || live.createdAt !== task.createdAt) return project;
+      return { ...project, generationTasks: forceStopImageGenerationTask(project.generationTasks, id).tasks };
+    }));
+    storyboardImageBatchLifecycle.releaseCancelledQueuedBatches((taskId) => isImageTaskActiveInWorkspace(ctx.getCurrentState(), taskId));
+    notify("已强制停止此生图任务，队列继续；迟到结果不再保存。服务端可能仍在生成或计费。");
   };
   /**
    * Cancel and delete local queued video work in one operation. A submitted or
@@ -25249,6 +25368,9 @@ function GenerationTasksView(ctx: AppContext) {
             {task.status === "queued" && <Button small variant="danger" icon={<X size={13} />}
               title="取消此准备中或排队任务，保留一条已取消记录，不影响其他任务"
               onClick={() => cancelQueuedTask(task.id)}>{task.preparationStage ? "取消任务" : "取消排队"}</Button>}
+            {task.status === "running" && <Button small variant="danger" icon={<X size={13} />}
+              title="立即停止本地等待并释放队列，迟到结果不再保存；服务端可能仍在生成或计费"
+              onClick={() => forceStopRunningImageTask(task.id)}>强制停止</Button>}
             <Button
               small
               variant="primary"
@@ -25310,7 +25432,7 @@ function GenerationTasksView(ctx: AppContext) {
               variant={task.status === "running" ? "ghost" : "danger"}
               icon={<Trash2 size={13} />}
               disabled={task.status === "running"}
-              title={task.status === "running" ? "请求已开始，生成完成或失败后可删除" : task.status === "queued" ? "直接移出队列并删除，不再提交生成；已有图片保留" : "删除任务记录，已有图片保留"}
+              title={task.status === "running" ? "先强制停止此任务，再删除记录" : task.status === "queued" ? "直接移出队列并删除，不再提交生成；已有图片保留" : "删除任务记录，已有图片保留"}
               onClick={() => removeTask(task.id)}
             >
               {task.status === "running" ? "不可删除" : "删除"}

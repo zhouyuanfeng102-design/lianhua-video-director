@@ -674,9 +674,14 @@ for (const { purpose, formatRepair } of [
         assert.ok(system.includes('STORY_CAUSALITY_TRANSLATION_V1'));
         assert.ok(!user.includes('随后二人前往庭院。'), 'English translates the approved Chinese, not fresh outside events');
         assert.match(system, /以已确认的 sourcePrompt|保真已确认中文sourcePrompt/u);
-        assert.equal(readTranslationDocument(user).sourcePrompt,
-          formatRepair ? candidateChinese.replace('overall_soundscape:', 'invalid_soundscape:') : candidateChinese,
-          'English translates the actual accepted Chinese body without silently repairing its structure');
+        const translatedSource = readTranslationDocument(user).sourcePrompt;
+        if (formatRepair) {
+          for (const line of candidateChinese.replace('overall_soundscape:', 'invalid_soundscape:').split('\n').filter((line) => line.trim() && !line.startsWith('non_diegetic_music:'))) {
+            assert.ok(translatedSource.includes(line), 'legacy authored content remains intact inside the H3 layout');
+          }
+          assert.match(translatedSource, /overall_soundscape:\n仅呈现上述镜头/u);
+          assert.match(translatedSource, /non_diegetic_music:\nN\/A$/u);
+        } else assert.equal(translatedSource, candidateChinese, 'completed source fields are translated without rewriting');
         return mockEnglish(user);
       }
       assert.match(system, /同一次发话/u);
@@ -742,7 +747,7 @@ for (const { purpose, formatRepair } of [
     'translate',
   ], 'local format differences must not add another check, review or repair request');
   if (formatRepair) assert.ok(generated.officialPromptZh?.includes('invalid_soundscape:'),
-    'the AI review result is preserved instead of being rewritten or rejected by the local protocol checker');
+    'unknown authored content is preserved while the existing H3 serializer supplies the official audio sections');
   assert.equal(generated.officialPromptEnError, '');
   if (purpose === 'initial') {
     assert.equal(generated.finalPrompt, convertedCanonical, 'ordinary H3 delivery preserves the converted source schedule');

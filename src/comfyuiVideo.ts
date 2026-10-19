@@ -163,6 +163,8 @@ export const bindComfyVideoWorkflow = (
   uploadedImages: string[],
   parameters: Record<string, unknown> = {},
   references?: readonly VideoImageReference[],
+  uploadedVideos: string[] = [],
+  videoReferences?: readonly import('./videoMotionTypes').VideoMotionReference[],
 ): ComfyVideoNodeMap => {
   const nodes = structuredClone(parseComfyVideoWorkflow(preset.workflowJson));
   if (!preset.mapping.prompt.length) throw new Error('请绑定视频工作流的提示词输入节点。');
@@ -182,6 +184,10 @@ export const bindComfyVideoWorkflow = (
   // each uploaded value to its stable physical workflow slot; empty slots keep
   // the workflow's existing values, as before.
   uploadedImages.forEach((name, index) => set(preset.mapping.images[references ? videoReferenceSlotIndex(references[index], index) : index], name));
+  uploadedVideos.forEach((name, index) => {
+    const binding = preset.mapping.videos?.[videoReferences?.[index]?.slotIndex ?? index];
+    if (binding) set(binding, name);
+  });
   Object.entries(parameters).forEach(([name, value]) => {
     if (value === undefined || value === null || value === '') return;
     const binding = preset.mapping.parameters?.[name];

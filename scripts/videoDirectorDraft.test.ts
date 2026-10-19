@@ -4,7 +4,7 @@ import { buildOfficialH3SourceFingerprint, hasCurrentOfficialH3Prompt, officialH
 import { buildVideoBatchRows } from '../src/videoBatch';
 import type { ImageGenerationTask, ReferenceAsset, Storyboard, VideoGenerationTask } from '../src/types';
 import { bindStoryboardImageAsset, buildCustomStoryboardImageRequests } from '../src/storyboardImages';
-import { addVideoDraftAssets, applyVideoPromptChoice, defaultVideoPromptFormat, draftFromVideoTask, emptyVideoDraft, formatVideoElapsed, hasPreparedVideoBatchDraft, initialVideoBatchPromptFormat, isVideoDirectorImage, reorderVideoReference, videoExecutionElapsedMs, videoPromptChoices, videoPromptReferencePreviews, type VideoDirectorBatchDraft } from '../src/videoDirectorDraft';
+import { addVideoDraftAssets, applyVideoPromptChoice, defaultVideoPromptFormat, draftFromVideoTask, emptyVideoDraft, formatVideoElapsed, hasPreparedVideoBatchDraft, initialVideoBatchPromptFormat, isVideoDirectorImage, prefillEmptyVideoDirectorChapterDraft, reorderVideoReference, videoExecutionElapsedMs, videoPromptChoices, videoPromptReferencePreviews, type VideoDirectorBatchDraft, type VideoDirectorChapterDraft, type VideoDirectorLaunchRequest } from '../src/videoDirectorDraft';
 
 const state = createInitialState();
 const project = state.project;
@@ -324,6 +324,50 @@ const currentH3: Storyboard = { ...board, targetModelId: 'minimax-h3', officialP
 currentH3.officialPromptSource = buildOfficialH3SourceFingerprint(currentH3, h3Context);
 const currentChoices = videoPromptChoices({ ...project, storyboards: [currentH3] });
 assert.equal(currentChoices.find((choice) => choice.language === 'en')?.prompt, englishH3, 'valid current H3 English retains original dialogue and remains selectable');
+const sidebarProject = {
+  ...project,
+  sourceDocuments: ['chapter-a', 'chapter-b'].map((id) => ({ id, name: id, content: id, createdAt: 1, updatedAt: 1 })),
+  storyboards: [{ ...currentH3, chapterId: 'chapter-a' }, { ...currentH3, id: 'other-chapter-board', chapterId: 'chapter-b' }],
+};
+const sidebarDraft: VideoDirectorChapterDraft = {
+  draft: { ...empty, backend: 'comfyui', workflowId: 'chosen-workflow', parameters: { seed: 42 } },
+  parameterText: '{ "seed": 42 }', parameterDrafts: [['chosen-workflow', '{ "seed": 42 }']], generationMode: 'single',
+};
+const sidebarRequest: VideoDirectorLaunchRequest = {
+  id: 'sidebar-entry', onlyIfEmpty: true, chapterId: 'chapter-a', storyboardId: currentH3.id, language: 'en', promptFormat: 'h3',
+};
+const sidebarBefore = structuredClone({ project: sidebarProject, draft: sidebarDraft });
+const sidebarPrefill = prefillEmptyVideoDirectorChapterDraft(sidebarProject, 'chapter-a', sidebarDraft, sidebarRequest);
+assert.equal(sidebarPrefill.draft.prompt, englishH3, 'sidebar entry fills the exact currently selected language into an empty single-video draft');
+assert.equal(sidebarPrefill.draft.source?.storyboardId, currentH3.id);
+assert.equal(sidebarPrefill.draft.source?.chapterId, 'chapter-a');
+assert.deepEqual(sidebarPrefill.draft.references, selected.references, 'empty sidebar entry uses the same source references as explicit prompt selection');
+assert.equal(sidebarPrefill.draft.backend, 'comfyui');
+assert.equal(sidebarPrefill.draft.workflowId, 'chosen-workflow');
+assert.deepEqual(sidebarPrefill.draft.parameters, { seed: 42 });
+assert.equal(sidebarPrefill.parameterText, sidebarDraft.parameterText, 'sidebar prefill preserves parameter text without reserializing unfinished edits');
+assert.deepEqual(sidebarPrefill.parameterDrafts, sidebarDraft.parameterDrafts);
+assert.deepEqual({ project: sidebarProject, draft: sidebarDraft }, sidebarBefore, 'prefill never changes project sources or the saved input draft');
+for (const [label, prepared] of Object.entries({
+  body: { ...sidebarDraft.draft, prompt: '手动编辑正文' },
+  name: { ...sidebarDraft.draft, name: '手动命名' },
+  source: { ...sidebarDraft.draft, source: { storyboardId: 'earlier-source' } },
+  task: { ...sidebarDraft.draft, reuseTaskId: 'prior-task' },
+  image: { ...sidebarDraft.draft, references: [{ assetId: 'composition', role: 'composition' as const }] },
+  slots: { ...sidebarDraft.draft, referenceSlotRoles: ['first-frame' as const] },
+  audio: { ...sidebarDraft.draft, audioSelectionMode: 'none' as const },
+})) {
+  const saved = { ...sidebarDraft, draft: prepared };
+  assert.equal(prefillEmptyVideoDirectorChapterDraft(sidebarProject, 'chapter-a', saved, sidebarRequest), saved,
+    `sidebar entry preserves an already prepared ${label} without replacing it`);
+}
+const batchEditor = { ...sidebarDraft, generationMode: 'batch' as const };
+assert.equal(prefillEmptyVideoDirectorChapterDraft(sidebarProject, 'chapter-a', batchEditor, sidebarRequest), batchEditor, 'sidebar entry never switches a saved batch editor to single');
+assert.equal(prefillEmptyVideoDirectorChapterDraft(sidebarProject, 'chapter-a', sidebarPrefill, sidebarRequest), sidebarPrefill, 'returning to the filled editor keeps its exact draft');
+assert.equal(prefillEmptyVideoDirectorChapterDraft(sidebarProject, 'chapter-b', sidebarDraft, sidebarRequest), sidebarDraft, 'an old entry cannot fill a different chapter');
+assert.equal(prefillEmptyVideoDirectorChapterDraft(sidebarProject, 'chapter-a', sidebarDraft, { ...sidebarRequest, storyboardId: 'other-chapter-board' }), sidebarDraft, 'the source board must also belong to the displayed chapter');
+assert.equal(prefillEmptyVideoDirectorChapterDraft(sidebarProject, 'chapter-a', sidebarDraft, { ...sidebarRequest, promptFormat: 'seedance' }), sidebarDraft, 'an unavailable selected format leaves the blank editor untouched');
+assert.equal(prefillEmptyVideoDirectorChapterDraft({ ...sidebarProject, storyboards: [{ ...staleH3, chapterId: 'chapter-a' }] }, 'chapter-a', sidebarDraft, sidebarRequest), sidebarDraft, 'an unavailable current prompt does not fall back to another saved body');
 const currentH3ModelEnglish = { ...currentH3, officialPromptEn: englishH3.replace('别走，我有话要说。', 'Do not go. I have something to say.') };
 assert.equal(videoPromptChoices({ ...project, storyboards: [currentH3ModelEnglish] }).find((choice) => choice.language === 'en')?.prompt, currentH3ModelEnglish.officialPromptEn,
   'current H3 English also remains selectable after model-authored dialogue wording changes');

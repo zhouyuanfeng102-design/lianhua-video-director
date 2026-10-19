@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { H3_EXISTING_SOUND_SUMMARY_ZH } from '../src/audioPromptPolicy';
 import {
   MODEL_PROFILES,
   UNKNOWN_MODEL_PROFILE,
@@ -403,7 +404,7 @@ assert.ok(
 );
 assert.equal(countMatches(protectedPresetH3, /台词：无/gu), 6, 'preset compaction must retain the authored no-dialogue instruction in every Shot');
 assert.match(protectedPresetH3, /\[Shot 5\][\s\S]*脚步声与接触碰撞声/u, 'preset compaction must retain the real synchronized foley event');
-assert.equal(countMatches(protectedPresetH3, /无配乐/gu), 6, 'preset compaction must retain the authored negative music instruction in every Shot');
+assert.equal(countMatches(protectedPresetH3, /non_diegetic_music: N\/A/gu), 1, 'the score decision appears once in its official footer');
 assert.equal(
   countMatches(protectedPresetH3, new RegExp(protectedPresetSound, 'gu')),
   0,
@@ -530,7 +531,7 @@ const h3FromRealCanonical = compileTargetPrompt({
   detailMode: 'concise',
   references: []
 });
-assert.match(h3FromRealCanonical.prompt, /\[Shot 2\] At 00:05\.000, [^\n]*落地，随后甩尾扫开石梁，随后最终在高台停住/u, 'real canonical action chain must become natural sequential prose in its later H3 shot');
+assert.match(h3FromRealCanonical.prompt, /\[Shot 2\] At 00:05\.000, [^\n]*落地→甩尾扫开石梁→最终在高台停住/u, 'authored action connectors survive in the later H3 shot without mechanical re-timing');
 assert.equal(countMatches(h3FromRealCanonical.prompt, /主体：@玄甲兽/gu), 1, 'canonical subject anchor must be global, not repeated per source shot');
 assert.equal(countMatches(h3FromRealCanonical.prompt, /台词：无/gu), 2, 'authored no-dialogue instructions must survive for each shot instead of becoming unspecified speech');
 assert.equal(countMatches(h3FromRealCanonical.prompt, /写实电影风格/gu), 2, 'authored shot lighting/style must remain attached to both source shots');
@@ -613,7 +614,7 @@ const h3AuthoredTurn = compileTargetPrompt({
   durationSec: 5,
 });
 assert.ok(h3AuthoredTurn.prompt.includes('先朝山门，再按动作完整转身面向林沐'));
-assert.ok(h3AuthoredTurn.prompt.includes('停步，随后完整转身，随后面对林沐说话'));
+assert.ok(h3AuthoredTurn.prompt.includes('停步→完整转身→面对林沐说话'));
 assert.ok(h3AuthoredTurn.prompt.includes('镜尾状态〔师尊已正面朝林沐，机位不变〕'));
 assert.doesNotMatch(h3AuthoredTurn.prompt, /禁止转身|不得回头|保持背对/u, 'the adapter must not invent a direction lock that overrides an authored turn');
 
@@ -973,7 +974,7 @@ assert.doesNotMatch(realCanonicalAdapted.prompt, /保持当前可见状态/u, 's
 assert.doesNotMatch(realCanonicalAdapted.prompt, /规则基础|输出规则|转换器|三拍动作链/u, 'internal canonical rules must never be copied into the H3 execution prompt');
 assert.doesNotMatch(realCanonicalAdapted.prompt, /连续性规则|人物离开画面/u, 'generic canonical continuity prose must not compete with H3 shot actions');
 assert.doesNotMatch(realCanonicalAdapted.prompt, /\[朝向：|正在\s*\[/u, 'canonical field syntax must be translated into natural H3 shot prose');
-assert.doesNotMatch(realCanonicalAdapted.prompt, /→/u, 'canonical action arrows must be translated into natural sequential prose');
+assert.match(realCanonicalAdapted.prompt, /跃上断桥尽头→尾部卷住石柱→最后昂首咆哮/u, 'the original action relationship is preserved without inserting delays');
 assert.equal(
   countMatches(realCanonicalAdapted.prompt, /（/gu),
   countMatches(realCanonicalAdapted.prompt, /）/gu),
@@ -1212,7 +1213,7 @@ assert.match(unclosedQuoteDetailed, /风格与光影：阴天散射光/u, 'a kno
 assert.match(unclosedQuoteDetailed, /镜头：中景稳定跟拍/u, 'a known camera field after an unclosed quote must still be parsed');
 assert.match(unclosedQuoteDetailed, /第2s <Subject 1>脚步声/u, 'an explicit subject tag in a recovered sound field is outside the unclosed quote and must still map');
 assert.match(unclosedQuoteDetailed, /环境层-\[远处瀑布声\]/u, 'an environment layer after an unclosed quote must remain in its own shot');
-assert.match(unclosedQuoteBeforeStructuredFields.prompt, /overall_soundscape: N\/A/u, 'recovering a local field must not promote it into a global bed');
+assert.ok(unclosedQuoteBeforeStructuredFields.prompt.includes(H3_EXISTING_SOUND_SUMMARY_ZH), 'a local field is summarized without creating a global bed');
 
 const multiCharacterSubjectReference = compileTargetPrompt({
   canonicalPrompt: [
@@ -1524,7 +1525,7 @@ const h3QuietMusicSoundscape = h3ExplicitQuietMusic.prompt
 assert.match(h3QuietMusicDetailed, /第2\.1s剑刃撞木声/u, 'action sound timing must stay inside its corresponding Shot');
 assert.match(h3QuietMusicDetailed, /情绪层-\[极轻古琴点奏\]/u, 'authored emotion audio must stay in its own shot without local classification');
 assert.doesNotMatch(h3QuietMusicSoundscape, /极轻古琴点奏/u, 'music must not leak into overall_soundscape');
-assert.equal(h3QuietMusicSoundscape, 'N/A', 'unbounded low background wind must not mask authored sword impacts');
+assert.equal(h3QuietMusicSoundscape, H3_EXISTING_SOUND_SUMMARY_ZH, 'unbounded low background wind must not mask authored sword impacts');
 assert.doesNotMatch(h3QuietMusicSoundscape, /剑刃撞木声|动作声.*前景/u, 'shot-timed foley must not be promoted globally or forced into the foreground');
 assert.match(h3ExplicitQuietMusic.prompt, /non_diegetic_music: N\/A$/u, 'emotion words do not create a global music field');
 assert.doesNotMatch(h3ExplicitQuietMusic.prompt, /配乐保持稀疏|无对白不抬升/u, 'the adapter must not append its own mix plan');
@@ -1559,7 +1560,7 @@ const h3ProtectedPresetNoScore = compileTargetPrompt({
   references: [],
 }).prompt;
 const h3ProtectedNoScoreGlobal = h3ProtectedPresetNoScore.split('overall_soundscape: ')[1]?.split('\n\nnon_diegetic_music:')[0] || '';
-assert.equal(h3ProtectedNoScoreGlobal, 'N/A', 'local birdsong does not declare a global soundscape');
+assert.equal(h3ProtectedNoScoreGlobal, H3_EXISTING_SOUND_SUMMARY_ZH, 'local birdsong does not declare a global soundscape');
 assert.match(h3ProtectedPresetNoScore, /环境层-\[远处鸟鸣\]/u, 'the authored birdsong remains available in its original shot');
 assert.doesNotMatch(h3ProtectedNoScoreGlobal, /衣料|饰品|电子乐/u, 'protected foley and music descriptions must remain out of the global soundscape');
 assert.match(h3ProtectedPresetNoScore, /non_diegetic_music: N\/A$/u, 'protected music wording is not an authored score request');
@@ -1610,7 +1611,7 @@ for (const references of [
   assert.ok(result.prompt.includes('“我这就来。”'), 'the adapter preserves the authored line and invents no replacement');
   assert.match(result.prompt, /第2s脚步声|第1s脚步声/u);
   assert.match(result.prompt, /环境层-\[第0s起：远处摊贩敲铃一声\]/u, 'the local bell keeps its exact timestamp and punctuation in its shot');
-  assert.match(result.prompt, /overall_soundscape: N\/A/u, 'a single timed bell must not become a segment-wide soundscape');
+  assert.ok(result.prompt.includes(H3_EXISTING_SOUND_SUMMARY_ZH), 'a timed bell is summarized without extending its duration');
   assert.doesNotMatch(result.prompt, /配乐保持稀疏|无对白不抬升|keep any music/u, 'no automatic positive score-tail is appended');
   assert.deepEqual(source, before, 'serialization never modifies saved source text');
 }
@@ -1651,7 +1652,7 @@ const h3ThreeShotGlobalSoundscape = h3ThreeShotSoundscape.prompt
   ?.split('\n\nnon_diegetic_music:')[0] || '';
 assert.match(h3ThreeShotIntegrated, /\[Shot 2\][\s\S]*?第0\.8s鞋底踩湿石声/u, 'walking foley must remain in its corresponding Shot');
 assert.match(h3ThreeShotIntegrated, /\[Shot 3\][\s\S]*?第0\.4s手掌撞木声/u, 'contact foley must remain in its corresponding Shot');
-assert.equal(h3ThreeShotGlobalSoundscape, 'N/A', 'several local environment fields do not authorize a full-segment soundscape');
+assert.equal(h3ThreeShotGlobalSoundscape, H3_EXISTING_SOUND_SUMMARY_ZH, 'several local environment fields do not authorize a full-segment soundscape');
 assert.deepEqual([...h3ThreeShotIntegrated.matchAll(/环境层-\[([^\]]*)\]/gu)].map((match) => match[1]),
   ['远处瀑布声', '林间风声', '远处瀑布声与林间风声'], 'all local environment cues remain in their authored shot, without aggregation');
 assert.doesNotMatch(h3ThreeShotGlobalSoundscape, /鞋底踩湿石声|手掌撞木声/u, 'synchronized foley must not be copied into overall_soundscape');
@@ -1680,7 +1681,7 @@ const h3RelativeAmbientGlobal = h3RelativeAmbientTiming
   ?.split('\n\nnon_diegetic_music:')[0] || '';
 assert.doesNotMatch(h3RelativeAmbientIntegrated, /溪流持续/u, 'continuous ambient beds must be removed from every Shot, including timed legacy cues');
 assert.match(h3RelativeAmbientIntegrated, /\[Shot 2\][\s\S]*?第1s脚步声/u, 'local action sound timing must remain unchanged');
-assert.equal(h3RelativeAmbientGlobal, 'N/A', 'removing a continuous ambient bed must also remove it from the global soundscape');
+assert.equal(h3RelativeAmbientGlobal, H3_EXISTING_SOUND_SUMMARY_ZH, 'removing a continuous ambient bed must also remove it from the global soundscape');
 assert.doesNotMatch(h3RelativeAmbientGlobal, /第\s*\d+(?:\.\d+)?\s*(?:s|秒)/u, 'global ambience must not reinterpret a local Shot timestamp as segment-global time');
 
 const h3ChronologicalEnvironment = compileTargetPrompt({
@@ -1701,7 +1702,7 @@ const h3ChronologicalEnvironment = compileTargetPrompt({
   references: [],
 }).prompt;
 const h3ChronologicalGlobal = h3ChronologicalEnvironment.split('overall_soundscape: ')[1]?.split('\n\nnon_diegetic_music:')[0] || '';
-assert.equal(h3ChronologicalGlobal, 'N/A', 'local rain, wind and birdsong must not be copied into a global layer');
+assert.equal(h3ChronologicalGlobal, H3_EXISTING_SOUND_SUMMARY_ZH, 'local rain, wind and birdsong must not be copied into a global layer');
 assert.deepEqual([...h3ChronologicalEnvironment.matchAll(/环境层-\[([^\]]*)\]/gu)].map((match) => match[1]),
   ['雨声', '风声', '雨声', '雾中鸟鸣', '远处溪流声', '树叶滴水声'],
   'shot-local environment layers retain chronological order and non-adjacent repeats without a second global copy');
@@ -1730,7 +1731,7 @@ for (const references of [[],
   assert.doesNotMatch(first, /瀑布坠落声/u, 'a later audible event is not pulled into the opening by its visible scenery');
   assert.ok(second.includes(lateWaterfallCue), 'local onset, end and distance survive exactly in the 9–15 second shot');
   assert.equal(compiled.prompt.split(lateWaterfallCue).length - 1, 1, 'the local cue occurs once, without a second global copy');
-  assert.match(compiled.prompt, /overall_soundscape: N\/A\n\nnon_diegetic_music: N\/A$/u);
+  assert.ok(compiled.prompt.endsWith(`overall_soundscape: ${H3_EXISTING_SOUND_SUMMARY_ZH}\n\nnon_diegetic_music: N/A`));
   assert.match(compiled.prompt, /第3s鞋底落石声/u, 'the change does not erase foreground foley');
 
   const explicitGlobal = '同一场雨在屋外持续，人物始终在檐下；镜头越过门槛时听觉距离逐渐变近，不新增另一层雨声。';
@@ -1763,7 +1764,7 @@ for (const references of [[],
   assert.deepEqual(readH3PromptProtocol(quoted.prompt), protocol,
     'quoted field-like lines cannot split integrated or full-reference sections');
   assert.ok(quoted.prompt.includes(quotedLabels), 'quoted source prose is not classified or rewritten as global audio');
-  assert.match(quoted.prompt, /overall_soundscape: N\/A\n\nnon_diegetic_music: N\/A$/u);
+  assert.ok(quoted.prompt.endsWith(`overall_soundscape: ${H3_EXISTING_SOUND_SUMMARY_ZH}\n\nnon_diegetic_music: N/A`));
   const otherField = compileTargetPrompt({ ...lateWaterfallInput, references,
     constraints: ['overall_soundscape: N/A\n\nsummary: 这是保留给AI的原始约束说明。\n\nnon_diegetic_music: N/A'] });
   assert.deepEqual(readH3PromptProtocol(otherField.prompt), protocol,
@@ -1771,7 +1772,7 @@ for (const references of [[],
   assert.ok(otherField.prompt.includes('这是保留给AI的原始约束说明。'), 'unrelated source text is retained as opaque constraint prose');
   assert.match(otherField.prompt, /overall_soundscape: N\/A\n\nnon_diegetic_music: N\/A$/u);
   const freeProse = compileTargetPrompt({ ...lateWaterfallInput, references, constraints: ['远处有瀑布，人物不讲话；不要自行补声。'] });
-  assert.match(freeProse.prompt, /overall_soundscape: N\/A/u, 'free prose and scenery are not reclassified into a global sound field');
+  assert.ok(freeProse.prompt.includes(H3_EXISTING_SOUND_SUMMARY_ZH), 'free prose does not introduce new sounds into the summary');
 }
 assert.deepEqual(lateWaterfallInput, lateWaterfallSnapshot, 'serialization leaves source prompts and settings untouched');
 
@@ -1935,6 +1936,23 @@ for (const durationSec of [5, 8, 10, 15, 60]) {
   assert.match(unlimited.prompt, /保留尾部机位事实/u);
   assert.match(unlimited.prompt, /第1s钥匙碰撞声/u);
   assert.equal(JSON.stringify(unlimited.parameters).includes('Infinity'), false);
+}
+
+// Punctuation and repeats carry author intent; serialization must not turn
+// simultaneous hands/feet into a slow sequence or collapse repeated strikes.
+const preservedFightAction = '左手架住来拳，右脚同时低扫；对手失衡时撤步反击。左拳击出，左拳击出；右拳接击两次→借反冲继续绕行';
+for (const references of [[],
+  [{ id: 'fight-start', name: '起势', mediaType: 'image', role: 'first-frame' }],
+  [{ id: 'fight-role', name: '角色', mediaType: 'image', role: 'character' }],
+]) {
+  const fight = compileTargetPrompt({
+    canonicalPrompt: '【0s-5s】 主体：@甲与@乙；动作：' + preservedFightAction + '；空间：庭院；光影：日光；镜头：全身跟拍；台词：无；音效：动作层-[击打接触时短促碰撞，脚步落地时刮地，间隙安静] 情绪层-[无配乐]',
+    durationSec: 5, aspectRatio: '16:9', resolution: '2K', audioMode: 'stereo', targetId: 'minimax-h3', references,
+  });
+  assert.ok(fight.prompt.includes(preservedFightAction), 'all actions, counts, laterality and connectors survive verbatim');
+  assert.equal(fight.prompt.split('左拳击出').length - 1, 2, 'repeated same actions are two events, not duplicate prose');
+  assert.ok(fight.prompt.includes(H3_EXISTING_SOUND_SUMMARY_ZH), 'spot effects without a bed still have a non-silent summary');
+  assert.ok(fight.prompt.endsWith('non_diegetic_music: N/A'), 'no authored score means no added music');
 }
 
 console.log('prompt adapter regression checks passed');

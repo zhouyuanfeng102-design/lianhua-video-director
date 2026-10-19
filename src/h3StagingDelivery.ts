@@ -225,8 +225,8 @@ export const synchronizeAiAuthoredH3StagingDelivery = (
 
 export const H3_STAGING_DELIVERY_RULE = [
   H3_METADATA_SCHEMA_RULE,
-  '本次是未确认的新稿或用户明确请求的本段对白排时修复，不是翻译/选图/衔接/格式修复。sourceStoryContent、本段原文证据及用户要求是事实；candidatePrompt、shots和canonicalPrompt是可修的时间草稿，不把AI先前写坏的短发话时窗当成用户锁定。先理解每句完整原话、原说话人、先后因果、情绪停顿与换人交接，再在当前固定durationSec内安排对白及动作，最后安排镜头。不要固定每秒字数估算、加速说话、截断/删改台词、重演事件、靠无意义停留凑时长；妨碍发话的口部动作结束后才开口。',
-  '只可在本段内调整尚未确认镜长、对白时间与摄影安排，禁止从邻段挪入对白或事件。durationSec是用户已选的固定每段时长，本阶段不得增加总时长或重分段；AI适配全片段数只属于上游语义分段。shotMode=exact时必须保持用户指定shotCount，shotMode=auto时可按剧情调整镜数；完整台词、说话人、原字、事件顺序及用户要求始终锁定。',
+  '本次是未确认的新稿、用户明确请求的本段对白排时修复或action-retiming动作节奏重排，不是翻译/选图/衔接/格式修复。sourceStoryContent、本段原文证据及用户要求是事实；candidatePrompt、shots和canonicalPrompt是可修的时间草稿，不把AI先前写坏的短发话或慢动作时窗当成用户锁定。先理解完整原话、原说话人、全部动作与次数、先后/并行因果，再在当前固定durationSec内安排对白及动作，最后安排镜头。不要固定每秒字数估算、加速说话、截断/删改台词、删减动作、重演事件或靠无意义停留凑时长；妨碍发话的口部动作结束后才开口。',
+  '只可在本段内调整本次获准的事件时窗与镜界，禁止从邻段挪入对白或事件。durationSec是用户已选的固定每段时长，本阶段不得增加总时长或重分段；AI适配全片段数只属于上游语义分段。shotMode=exact时保持用户指定shotCount；普通对白排程修复的auto可按剧情调整镜数，action-retiming则auto也保持当前镜数、顺序及shot.id一对一来源，只让既有切点服从完整动作节奏。完整台词、说话人、原字、动作与次数、事件因果及用户要求始终锁定。',
   '仅返回一个完整JSON交付对象：{"canonicalPrompt":"普通六字段完整排程","h3Prompt":"完整合法H3正文","identityBindings":{"version":1,"characters":[]},"shotSourceIds":[["原shot.id"]],"shotMetadata":[null]}。不要代码围栏、审核说明或单独通过结论。canonicalPrompt与h3Prompt是同一份排程的两种表达，镜数、镜界、对白归属和事件必须同步；不允许只改H3保留旧shots。',
   'canonicalPrompt每镜严格为【0s-5s】主体：@完整姓名，正在 [本镜动作链]；空间：...；光影：...；镜头：...；台词：具名完整对白及完整镜内相对发话区间；音效：本镜音效和镜内相对时间，连续覆盖0至durationSec。普通六字段内部音效/发话时间从本镜0开始；h3Prompt内部则使用本段0开始的时间，转换只偏移一次。shotSourceIds按输出镜头顺序明确列出每镜源自哪些输入shots.id，不编造原文索引；一镜对应多原镜可列多个ID，没有旧镜来源列空数组。',
   'shotMetadata与输出镜头逐项对应。一对一沿用单一原镜且未改变可见范围/连续性时可填null，原镜元数据保持；合并多原镜、一原镜拆成多新镜、无原镜对应或改变这些状态时必须由你明确返回对象：sourceBeatIds（实际源beat ID数组）、sourceExcerpt（本镜依据）、sourceLocationStatus（located或unlocated）、nsfwContinuity（本镜已选状态对象或明确null）、visiblePrivatePartsByCharacter（本镜明确选中的人物ID到可见资料类别数组，无需显示时明确{}）。located还要给真实原文sourceStart/sourceEnd整数，不能定位则unlocated且不提供索引。nsfwContinuity只用已存在的nudity/clothingState/contact/actionStage/residue可选字符串字段，不把档案自动转成可见性；多源范围不能默认取并集，拆镜不能把原镜范围机械复制到每个新镜，均须依据本段原文、已选资料与实际画面选择。这些是保存分镜的元数据，不新增H3字段、不把元数据当台词，也不是删改已授权剧情的理由。',

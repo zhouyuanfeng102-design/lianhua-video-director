@@ -13,6 +13,7 @@ const {
   readManagedImageDataUrl,
 } = require('./imageReferenceTransport.cjs');
 const { decodeReferenceAudioDataUrl, readManagedAudioDataUrl } = require('./audioReferenceTransport.cjs');
+const { readManagedVideoDataUrl, storeVideoReferenceVideo } = require('./videoMotionReference.cjs');
 const { readVideoReferenceImage, storeVideoReferenceImage } = require(path.join(__dirname, 'videoReferenceImage.cjs'));
 const { resolveSystemProxy, createProxyTunnelAgent, MODEL_CONNECT_TIMEOUT_MS } = require('./systemProxyTransport.cjs');
 const { createVideoTransport } = require(path.join(__dirname, 'videoTransport.cjs'));
@@ -1994,6 +1995,12 @@ app.whenReady().then(() => {
   ));
   handleTrustedIpc('lianhua:read-managed-audio-data-url', async (_event, payload) => (
     readManagedAudioDataUrlForRenderer(payload)
+  ));
+  handleTrustedIpc('lianhua:read-managed-video-data-url', async (_event, payload) => (
+    readManagedVideoDataUrl({ assetRoot, relativePath: payload?.relativePath, expectedChecksum: payload?.expectedChecksum })
+  ));
+  handleTrustedIpc('lianhua:store-video-reference-video', async (_event, payload) => (
+    storeVideoReferenceVideo({ assetRoot, dataUrl: payload?.dataUrl, fileName: payload?.fileName })
   ));
 
   handleTrustedIpc('lianhua:relink-media', async (_event, asset) => {

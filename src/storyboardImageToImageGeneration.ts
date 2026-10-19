@@ -5,7 +5,7 @@ import { applyOwnedProjectUpdate } from './appEffects';
 import { cloneImageBatchConfig, imageBatchTaskIsActive } from './imageBatch';
 import { captureImageApiSnapshot, resolveWorkbenchImageApi } from './imageApiSelection';
 import { createImageReferenceAssetSnapshot, imageReferenceSnapshotAssets } from './imageGeneration';
-import { createImageGenerationTask, GenerationTaskCancelledError, isGenerationTaskCancelledError, isGenerationTaskRevoked, patchImageGenerationTask, settleImageGenerationTask } from './generationTasks';
+import { createImageGenerationTask, GenerationTaskCancelledError, isGenerationTaskCancelledError, isGenerationTaskRevoked, patchImageGenerationTask, settleImageGenerationTask, runImageTask } from './generationTasks';
 import { requestImageModel, requestImagePromptConverter, requestTextModel } from './services/llm';
 import { readGeneratedImageDimensions } from './imageDimensions';
 import { imageReturnedSizeWarning } from './imageOutputSize';
@@ -385,7 +385,7 @@ export const generateDirectStoryboardImages = async (
     })));
     tasks = preparedTasks;
     failureDetail = { stage: 'image-generation', context: imageErrorContext };
-    const results = await runStoryboardImageBatch(requests, async (originalRequest, index, firstResult?: ReferenceAsset) => {
+    const results = await runStoryboardImageBatch(requests, (originalRequest, index, firstResult?: ReferenceAsset) => runImageTask(projectId, tasks[index], async (signal) => {
       const request = withStoryboardFirstFrameContinuity(originalRequest, firstResult);
       const continuityAssetId = firstResult && request.continuityAssetId === firstResult.id
         ? firstResult.id : undefined;
@@ -397,6 +397,16 @@ export const generateDirectStoryboardImages = async (
       let task = tasks[index];
       const assertActive = () => {
         if (!ctx.lifecycle.canSubmit(lease) || !imageBatchTaskIsActive(ctx.getState(), projectId, task)) throw new GenerationTaskCancelledError();
+      };
+      // After submission, preserve paid results across ordinary undo/source edits.
+      // Only an explicit stop or a different task instance can discard this result.
+      const resultWasStopped = (project: AppState['project'] | undefined) => {
+        const current = project?.generationTasks.find((item) => item.id === task.id);
+        return signal.aborted || isGenerationTaskRevoked(projectId, task)
+          || Boolean(current && (current.kind !== 'image' || current.createdAt !== task.createdAt || current.status === 'cancelled'));
+      };
+      const assertResultNotStopped = () => {
+        if (resultWasStopped(ownerProject(ctx.getState()))) throw new GenerationTaskCancelledError();
       };
       let taskFailureStage: DirectStoryboardImageErrorDetail['stage'] = 'image-reference-load';
       try {
@@ -438,7 +448,7 @@ export const generateDirectStoryboardImages = async (
           })));
           const converted = await (ctx.convertPrompt || requestImagePromptConverter)(
             textApi, 'storyboard', request.conversionSource, imagePromptTrace!.imagePromptFormat!,
-            imagePromptConverterRules, conversionIdentityContext,
+            imagePromptConverterRules, conversionIdentityContext, undefined, signal,
           );
           assertActive();
           finalPrompt = assertValidFinalImagePrompt(converted, selectedPromptFormat!, request.conversionSource);
@@ -475,11 +485,14 @@ export const generateDirectStoryboardImages = async (
         const generated = await (ctx.generateImage || requestImageModel)(api, {
           prompt: task.prompt, negativePrompt: task.negativePrompt, width: task.width, height: task.height, sizeOverride: task.sizeOverride, resolutionPlan: task.resolutionPlan,
           referenceImages, primaryReferenceImageCount: referenceImages.length, preserveReferenceImageOrder: true,
+          signal,
         }, assertActive);
+        assertResultNotStopped();
         taskFailureStage = 'image-result-save';
         const actual = readGeneratedImageDimensions(generated.dataUrl || '');
         const managed = generated.dataUrl && ctx.storeImage
           ? await ctx.storeImage({ dataUrl: generated.dataUrl, fileName: `${safeFileName(task.name)}.png` }) : undefined;
+        assertResultNotStopped();
         const dataUrl = managed ? undefined : generated.dataUrl;
         const url = managed?.url || generated.url;
         if (!dataUrl && !url) throw new Error('图像接口没有返回可保存的图片。');
@@ -502,15 +515,17 @@ export const generateDirectStoryboardImages = async (
           imageRequestSize: { width: task.width, height: task.height, sizeOverride: task.sizeOverride, resolutionPlan: task.resolutionPlan },
           tags: ['剧情分镜', `第${request.shotIndex}镜`, '图生图', ...(request.purpose === 'first-frame' ? ['首帧'] : request.purpose === 'last-frame' ? ['尾帧'] : [])], createdAt: timestamp, updatedAt: timestamp,
         }, task);
-        ctx.updateBackground((state) => applyOwnedProjectUpdate(state, projectId, (project) => ({
-          ...project, assets: [asset, ...project.assets],
-          // Association lives on the output asset/task. Never change shot refs,
-          // confirmed H3 fingerprints, first/last-frame or video slot bindings.
-          generationTasks: settleImageGenerationTask(project.generationTasks, task, {
-            status: 'succeeded', resultAssetId: asset.id, resultUrl: url, error: undefined,
-            bindingWarning: [task.bindingWarning, imageReturnedSizeWarning(task, actual)].filter(Boolean).join('；') || undefined,
-          }, timestamp, projectId),
-        })));
+        ctx.updateBackground((state) => applyOwnedProjectUpdate(state, projectId, (project) => {
+          if (resultWasStopped(project)) return project;
+          return { ...project, assets: [asset, ...project.assets],
+            // Association lives on the output asset/task. Never change shot refs,
+            // confirmed H3 fingerprints, first/last-frame or video slot bindings.
+            generationTasks: settleImageGenerationTask(project.generationTasks, task, {
+              status: 'succeeded', resultAssetId: asset.id, resultUrl: url, error: undefined,
+              bindingWarning: [task.bindingWarning, imageReturnedSizeWarning(task, actual)].filter(Boolean).join('；') || undefined,
+            }, timestamp, projectId),
+          };
+        }));
         return asset;
       } catch (error) {
         if (isGenerationTaskCancelledError(error) || isGenerationTaskRevoked(projectId, task)) {
@@ -535,7 +550,7 @@ export const generateDirectStoryboardImages = async (
         })));
         throw new Error(message);
       }
-    }, (_request, index) => ctx.lifecycle.canSubmit(lease) && imageBatchTaskIsActive(ctx.getState(), projectId, tasks[index], true));
+    }), (_request, index) => ctx.lifecycle.canSubmit(lease) && imageBatchTaskIsActive(ctx.getState(), projectId, tasks[index], true));
     const cancelled = results.flatMap((result, index) => result.status === 'cancelled' ? [{ task: tasks[index], result }] : []);
     if (cancelled.length) ctx.updateBackground((state) => applyOwnedProjectUpdate(state, projectId, (project) => ({
       ...project, generationTasks: cancelled.reduce((current, entry) => failImagePreparationTasks(current, [entry.task],

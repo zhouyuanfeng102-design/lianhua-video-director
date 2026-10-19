@@ -8,7 +8,7 @@ import type {
 import { translateVideoPromptToEnglish, type TranslateVideoPromptToEnglishOptions } from './promptTranslation';
 import { STORY_CAUSALITY_TRANSLATION_RULE } from './storyCausalityRules';
 import { assertVideoPromptHasNoInstructionLeak, isInternalVideoPromptConstraint } from './videoPromptInstructionLeak';
-import { SEEDANCE_CHINESE_WRITER_RULE, SEEDANCE_PROMPT_STRATEGY_VERSION } from './seedancePromptRules';
+import { seedanceChineseWriterRule, SEEDANCE_PROMPT_STRATEGY_VERSION } from './seedancePromptRules';
 import type { Seedance25Output } from './types';
 import { maskVideoPictureReferenceLiterals } from './videoPictureReferences';
 import { VIDEO_SCENE_CONTEXT_RULE, type VideoSceneContext } from './videoSceneContext';
@@ -16,8 +16,16 @@ import { MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE } from './nsfwPromptRules';
 import { hasNsfwDetailSignal } from './promptConstraints';
 import { ADOPTED_VIDEO_EXPRESSION_RULE } from './videoCreativeDirection';
 import { getPromptDialogues, getPromptQuoteSpans } from './promptDialogueLanguage';
+import type { H3StagingShotMetadata } from './h3StagingMetadata';
+import type { VideoPromptExecutionContext } from './videoPromptExecutionContext';
 
 export interface OfficialSeedancePromptInput extends PromptAdapterInput {
+  /** Request-local authority; ordinary target adaptation keeps confirmed timing. */
+  stagingAuthority?: 'current-segment-action-retiming';
+  /** Existing target prose is an action/sound source, never a fingerprint input. */
+  existingPrompt?: string;
+  /** Actual connection facts, independent of the authored format and source identity. */
+  executionContext?: VideoPromptExecutionContext;
   /** Request authority only; not an authored section or a source-fingerprint input. */
   voiceFactScope?: 'source-grounded-new-draft' | 'preserve-confirmed-source';
   /** Complete read-only story/shot evidence used by this exact generation. */
@@ -26,6 +34,12 @@ export interface OfficialSeedancePromptInput extends PromptAdapterInput {
   sceneContext?: VideoSceneContext;
   /** Exact pre-fix identity with automatic image output IDs; never persisted. */
   legacySourceFingerprint?: string;
+}
+
+export interface SeedanceStagingDelivery {
+  canonicalPrompt?: string;
+  shotSourceIds?: string[][];
+  shotMetadata?: Array<H3StagingShotMetadata | null>;
 }
 
 export interface Seedance25PromptCompilation {
@@ -38,6 +52,8 @@ export interface Seedance25PromptCompilation {
   referenceManifest: ReferenceManifest;
   warnings: string[];
   sourceFingerprint: string;
+  /** Companion source returned in the same existing Chinese writer request. */
+  stagingDelivery?: SeedanceStagingDelivery;
 }
 
 /**
@@ -432,6 +448,10 @@ export const generateOfficialSeedancePrompt = async ({ input, request, isCurrent
     expressionSourceEvidence.sequenceSegmentContext = adoptedContext;
   }
   const evidence = {
+    taskAuthority: input.stagingAuthority ? 'current-segment-staging-replan' : 'preserve-confirmed-schedule',
+    ...(input.stagingAuthority ? { revisionScope: input.stagingAuthority } : {}),
+    ...(input.existingPrompt ? { candidatePrompt: input.existingPrompt } : {}),
+    ...(input.executionContext ? { executionContext: input.executionContext } : {}),
     voiceFactScope: input.voiceFactScope || 'source-grounded-new-draft',
     canonicalPrompt: input.canonicalPrompt,
     sourceEvidence: expressionSourceEvidence,
@@ -453,26 +473,37 @@ export const generateOfficialSeedancePrompt = async ({ input, request, isCurrent
     JSON.stringify(input.sourceEvidence || ''),
     ...(input.constraints || []),
   ) ? MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE : '';
-  const response = await request([SEEDANCE_CHINESE_WRITER_RULE, ADOPTED_VIDEO_EXPRESSION_RULE, VIDEO_SCENE_CONTEXT_RULE, nsfwVideoActionRule].filter(Boolean).join('\n\n'),
+  const response = await request([seedanceChineseWriterRule(Boolean(input.stagingAuthority)), ADOPTED_VIDEO_EXPRESSION_RULE, VIDEO_SCENE_CONTEXT_RULE, nsfwVideoActionRule,
+    input.executionContext ? 'executionContext只提供已选视频连接的事实，与稿件格式独立。unknown表示未获知，模型或工作流名称不证明能力；不虚构参考媒体、不因此改剧情、动作、次数或固定时长，不把这些内部连接字段写进正文。' : '',
+  ].filter(Boolean).join('\n\n'),
     `<seedance_source_data>\n${JSON.stringify(evidence, null, 2).replace(/</gu, '\\u003c').replace(/>/gu, '\\u003e')}\n</seedance_source_data>\n依据以上当前证据返回完整 Seedance 中文成稿。`);
   assertSeedanceRequestCurrent(isCurrent);
-  const promptZh = cleanSeedancePrompt(response);
+  // Deserialize the requested envelope only. The writer owns timing and
+  // content; no extra review, semantic gate or recovery request is introduced.
+  const delivery = input.stagingAuthority ? JSON.parse(response.trim()
+    .replace(/^```(?:json)?\s*/iu, '').replace(/\s*```$/u, '')) as SeedanceStagingDelivery & { seedancePrompt: string } : undefined;
+  const promptZh = cleanSeedancePrompt(delivery ? delivery.seedancePrompt : response);
   assertSeedanceWriterDelivery(promptZh, metadata.referenceManifest);
-  return { ...metadata, prompt: promptZh, promptZh, sourceFingerprint: getOfficialSeedanceSourceFingerprint(input) };
+  return { ...metadata, prompt: promptZh, promptZh, sourceFingerprint: getOfficialSeedanceSourceFingerprint(input),
+    ...(delivery ? { stagingDelivery: { canonicalPrompt: delivery.canonicalPrompt,
+      shotSourceIds: delivery.shotSourceIds, shotMetadata: delivery.shotMetadata } } : {}) };
 };
 
 export interface GenerateSeedanceBilingualOutputOptions extends GenerateOfficialSeedancePromptOptions {
+  /** Adopt the common source before assigning the Chinese/English fingerprint. */
+  onStaging?: (delivery: SeedanceStagingDelivery) => { sourceFingerprint: string; warnings?: string[] };
   /** Save the qualified Chinese immediately and advance only this own checkpoint identity. */
   onChinese: (output: Seedance25Output) => boolean | Promise<boolean>;
   onEnglish: (output: Seedance25Output) => boolean | Promise<boolean>;
 }
 
-export const generateSeedanceBilingualOutput = async ({ input, request, isCurrent, onChinese, onEnglish }: GenerateSeedanceBilingualOutputOptions): Promise<Seedance25Output> => {
+export const generateSeedanceBilingualOutput = async ({ input, request, isCurrent, onChinese, onEnglish, onStaging }: GenerateSeedanceBilingualOutputOptions): Promise<Seedance25Output> => {
   const compiled = await generateOfficialSeedancePrompt({ input, request, isCurrent });
+  const adopted = compiled.stagingDelivery ? onStaging?.(compiled.stagingDelivery) : undefined;
   const chinese: Seedance25Output = {
     targetId: 'seedance-2.5', promptZh: compiled.promptZh, durationSec: compiled.durationSec,
-    sourceFingerprint: compiled.sourceFingerprint, referenceManifest: compiled.referenceManifest.assets.map((asset) => ({ ...asset })),
-    warnings: compiled.warnings, generatedAt: Date.now(), englishError: '',
+    sourceFingerprint: adopted?.sourceFingerprint || compiled.sourceFingerprint, referenceManifest: compiled.referenceManifest.assets.map((asset) => ({ ...asset })),
+    warnings: [...compiled.warnings, ...(adopted?.warnings || [])], generatedAt: Date.now(), englishError: '',
   };
   if (!await onChinese(chinese)) assertSeedanceRequestCurrent(() => false);
   assertSeedanceRequestCurrent(isCurrent);

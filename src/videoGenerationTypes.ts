@@ -3,6 +3,8 @@ import type { ManagedMediaResult } from './storage';
 import type { VideoWorkbenchStatus, WorkbenchExtractedFrame, WorkbenchFrameRequest, WorkbenchFrameResult } from './videoWorkbenchTypes';
 import type { VideoRuntimeStore, VideoRuntimeSnapshot } from './videoRuntimeStore';
 import type { FrozenVideoAudioReference, VideoAudioReference } from './videoAudioTypes';
+import type { FrozenVideoMotionReference, VideoMotionReference } from './videoMotionTypes';
+export type { FrozenVideoMotionReference, VideoMotionReference } from './videoMotionTypes';
 export type { FrozenVideoAudioReference, VideoAudioReference } from './videoAudioTypes';
 
 export interface VideoDesktopRequest {
@@ -49,6 +51,8 @@ export interface VideoGenerationDesktop {
   readManagedImageDataUrl: (payload: { relativePath: string; expectedChecksum?: string }) => Promise<{ dataUrl: string }>;
   readVideoReferenceImage?: (payload: { relativePath: string; expectedChecksum?: string }) => Promise<{ dataUrl: string; mimeType: 'image/png' | 'image/jpeg' | 'image/webp'; sizeBytes: number; checksum: string }>;
   readManagedAudioDataUrl?: (payload: { relativePath: string; expectedChecksum?: string }) => Promise<{ dataUrl: string }>;
+  readManagedVideoDataUrl?: (payload: { relativePath: string; expectedChecksum?: string }) => Promise<{ dataUrl: string }>;
+  storeVideoReferenceVideo?: (payload: { dataUrl: string; fileName?: string }) => Promise<ManagedMediaResult>;
   storeGeneratedImage?: (payload: { dataUrl: string; fileName?: string }) => Promise<ManagedMediaResult>;
   storeVideoReferenceImage?: (payload: { dataUrl: string; fileName?: string }) => Promise<ManagedMediaResult>;
   storeGeneratedAudio?: (payload: { dataUrl: string; fileName?: string }) => Promise<ManagedMediaResult>;
@@ -127,6 +131,10 @@ export interface VideoGenerationDraft {
   /** Defaults copied from a saved segment, so replacing them never consumes a manual override. */
   automaticStoryboardFrames?: { storyboardId: string; firstFrameAssetId?: string; lastFrameAssetId?: string };
   audioReferences?: VideoAudioReference[];
+  videoReferences?: VideoMotionReference[];
+  /** Request-local motion-reference prose, derived only from clips actually transmitted. */
+  videoReferenceBinding?: { version: 1; basePrompt: string; renderedPrompt: string;
+    insertions?: Array<{ at: number; text: string; replacedText?: string }> };
   /** Explicit 'none' prevents project presets being restored after clearing. */
   audioSelectionMode?: 'project' | 'override' | 'none';
   /** Idempotent task-only audio rendering; authored storyboard text is untouched. */
@@ -148,6 +156,7 @@ export interface ComfyVideoInputBinding { nodeId: string; inputName: string }
 export interface ComfyVideoMapping {
   prompt: ComfyVideoInputBinding[];
   images: Array<ComfyVideoInputBinding & { role?: ReferenceRole }>;
+  videos?: ComfyVideoInputBinding[];
   parameters?: Record<string, ComfyVideoInputBinding>;
   outputNodeId?: string;
 }
@@ -206,6 +215,7 @@ export interface VideoGenerationSnapshot {
     frozenAt?: number;
   }>;
   audios?: FrozenVideoAudioReference[];
+  videos?: FrozenVideoMotionReference[];
   clientId: string;
   /** Immutable dependency identity. The reserved reference ID already exists in
    * draft.references; resolving its pixels never rewrites the frozen draft. */
@@ -295,7 +305,7 @@ export interface VideoGenerationJob extends VideoGenerationRuntime {
   remoteGenerationEnded?: true;
   legacyMetadataIncomplete?: boolean;
   /** A durable post-started boundary is written BEFORE POST; it is never permission to resubmit. */
-  preparation?: { version: 1; phase: 'preparing' | 'post-started' | 'acknowledged'; uploadedImages: Array<string | null>; uploadedAudios?: Array<string | null> };
+  preparation?: { version: 1; phase: 'preparing' | 'post-started' | 'acknowledged'; uploadedImages: Array<string | null>; uploadedAudios?: Array<string | null>; uploadedVideos?: Array<string | null> };
   /** Persistent local submission gate for a batch task. Only ready/active entries
    * may enter prepareAndSubmit; waiting entries have not completed their durable
    * checkpoint yet and cancelled/done entries must never be auto-submitted. */

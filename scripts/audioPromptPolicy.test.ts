@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   AUDIO_PROMPT_RULE,
+  H3_EXISTING_SOUND_SUMMARY_ZH,
   AUDIO_H3_DELIVERY_RULE,
   AUDIO_EXISTING_SCOPE_RULE,
   AUDIO_TRANSLATION_SCOPE_RULE,
@@ -52,7 +53,9 @@ assert.match(AUDIO_H3_DELIVERY_RULE, /audioMode为none.*不添加音乐、对白
 assert.match(AUDIO_H3_DELIVERY_RULE, /保持原有H3字段名称与顺序、对白及说话人，镜数与切点保持已确认排程/u);
 assert.match(AUDIO_H3_DELIVERY_RULE, /仅本次指令明确授权taskAuthority=current-segment-staging-replan时.*同时交付的修正canonicalPrompt.*固定段长与exact镜数仍不变/u);
 assert.match(AUDIO_H3_DELIVERY_RULE, /若本次明确是格式修复、参考图更新或上下段衔接修复.*不重新配乐/u);
-assert.match(AUDIO_H3_DELIVERY_RULE, /overall_soundscape只写整段范围的简短剧情内环境\/声景摘要/u);
+assert.match(AUDIO_H3_DELIVERY_RULE, /overall_soundscape写整段已有环境声、物理动作声与非语言人声的简短摘要/u);
+assert.match(AUDIO_H3_DELIVERY_RULE, /只有用户明确要求全片完全静音才写N\/A/u);
+assert.match(NATURAL_BACKGROUND_MUSIC_RULE, /新稿的默认无配乐不能覆盖历史已确认音乐/u);
 assert.match(AUDIO_H3_DELIVERY_RULE, /具体对白原字、唯一说话人、声源编号、逐镜无对白.*全部写在对应\[Shot N\]/u);
 assert.match(AUDIO_H3_DELIVERY_RULE, /不得在overall_soundscape中列Shot编号、对白复述、声源分配、镜内时序或长篇否定清单/u);
 assert.match(AUDIO_H3_DELIVERY_RULE, /不得新增negative_prompt、negative、反向提示词或其它声音section/u);
@@ -70,7 +73,7 @@ assert.match(DIEGETIC_AUDIO_SCOPE_RULE, /远处传来瀑布坠落声.*实际听�
 assert.match(DIEGETIC_AUDIO_SCOPE_RULE, /不把所有真实声音强制缩成短音/u);
 assert.match(DIEGETIC_AUDIO_SCOPE_RULE, /“轻微、低响、柔和、远处”只约束听感，不是持续时间授权/u);
 assert.match(DIEGETIC_AUDIO_SCOPE_RULE, /同一声源只安排一次.*不再在overall_soundscape中变成第二条全局铺底/u);
-assert.match(DIEGETIC_AUDIO_SCOPE_RULE, /没有剧情依据的全局声床时overall_soundscape写N\/A.*局部环境声、对白与动作声仍保留/u);
+assert.match(DIEGETIC_AUDIO_SCOPE_RULE, /没有.*持续底噪|无持续底噪.*局部动作声.*间隙安静/u);
 assert.match(AUDIO_H3_DELIVERY_RULE, /局部环境声的出现、结束和听觉距离保留在对应镜内/u);
 assert.match(AUDIO_TRANSLATION_SCOPE_RULE, /出现与结束时段、相对本镜或本段的时间坐标.*前景或背景层级/u);
 assert.match(AUDIO_TRANSLATION_SCOPE_RULE, /不把局部事件改成贯穿全段的continuous\/throughout ambience/u);
@@ -203,7 +206,7 @@ for (const references of [
   const output = compileTargetPrompt({ ...input, references });
   assert.deepEqual(output.parameters, parameterControl.parameters, 'audio text changes must not alter any generation parameter');
   assert.deepEqual(input, unchangedInput, 'normalization must not mutate source canonical data');
-  assert.doesNotMatch(output.prompt, /底噪|溪流声|溪水声|谷风持续|连续风声/u);
+  assert.doesNotMatch(output.prompt.split('overall_soundscape:')[0], /底噪|溪流声|溪水声|谷风持续|连续风声/u);
   assert.match(output.prompt, /风声持续。快走！/u, 'dialogue containing sound words must be preserved');
   assert.match(output.prompt, /第2\.5s脚步落地/u);
   assert.match(output.prompt, /第1s手掌碰木声，第3s玉佩碰撞/u);
@@ -211,7 +214,7 @@ for (const references of [
   assert.match(output.prompt, /转身看向同伴/u);
   assert.match(output.prompt, /At 00:05\.000/u);
   assert.match(output.prompt, /At 00:10\.000/u);
-  assert.match(output.prompt, /overall_soundscape: N\/A\n\nnon_diegetic_music: N\/A$/u);
+  assert.ok(output.prompt.endsWith(`overall_soundscape: ${H3_EXISTING_SOUND_SUMMARY_ZH}\n\nnon_diegetic_music: N/A`));
   const shotBody = output.prompt.split(output.prompt.includes('detailed_description:') ? 'detailed_description:' : 'integrated_multimodal_description:')[1]
     ?.split('overall_soundscape:')[0] || '';
   assert.equal((shotBody.match(/\[Shot \d+\]/gu) || []).length, 3);
@@ -369,7 +372,7 @@ const realLeakSnapshot = structuredClone(realLeakInput);
 for (const references of [[], [{ id: 'kiss-reference', name: '人物参考', mediaType: 'image', role: 'composition' }]]) {
   const repaired = compileTargetPrompt({ ...realLeakInput, references });
   assert.deepEqual([...repaired.prompt.matchAll(/环境层-\[([^\]]*)\]/gu)].map((match) => match[1]), ['无', '无', '无', '无']);
-  assert.match(repaired.prompt, /overall_soundscape: N\/A\n\nnon_diegetic_music: N\/A$/u);
+  assert.ok(repaired.prompt.endsWith(`overall_soundscape: ${H3_EXISTING_SOUND_SUMMARY_ZH}\n\nnon_diegetic_music: N/A`));
   assert.equal(repaired.prompt.split(subtleKiss).length - 1, 4, 'each visible kiss retains its own precisely timed audible event');
   assert.equal(repaired.prompt.split(subtleLipContact).length - 1, 4);
   assert.equal((repaired.prompt.match(/轻吻同伴脸颊后停住/gu) || []).length, 4);

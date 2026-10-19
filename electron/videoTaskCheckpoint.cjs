@@ -439,6 +439,12 @@ const collectVideoFrozenAssets = (project) => {
         id: `video-audio-input:${task.id}:${index}`, relativePath: audio.relativePath, checksum: audio.checksum,
       });
     });
+    (Array.isArray(snapshot.videos) ? snapshot.videos : []).forEach((video, index) => {
+      if (video.freezeState !== 'frozen' || !mediaPath(video.relativePath) || !identityText(video.checksum)) return;
+      if (!result.has(video.relativePath)) result.set(video.relativePath, {
+        id: `video-motion-input:${task.id}:${index}`, relativePath: video.relativePath, checksum: video.checksum,
+      });
+    });
     // Selection is checkpointed before its image slot is bound. Export those
     // exact pixels too, including tasks retained only by asset provenance.
     const selection = task.videoJob?.tailPreparation?.selection;

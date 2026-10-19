@@ -27,7 +27,7 @@ import { useCurrentVideoDraftImages, videoDraftReferenceAsset } from '../videoDi
 import {
   addVideoDraftAssets, applyVideoPromptChoice, applyVideoReferenceRoleOverrides, draftFromVideoTask, emptyVideoDraft,
   formatVideoElapsed, isVideoDirectorImage, videoExecutionElapsedMs, videoPromptChoices, videoPromptReferencePreviews,
-  chapterIdForVideoLaunch, readVideoDirectorChapterDraft, videoDirectorChapterKey,
+  chapterIdForVideoLaunch, prefillEmptyVideoDirectorChapterDraft, readVideoDirectorChapterDraft, videoDirectorChapterKey,
   defaultVideoPromptFormat, hasPreparedVideoBatchDraft, initialVideoBatchPromptFormat, videoPromptFormatLabel,
   type VideoDirectorLaunchRequest, type VideoDirectorChapterDraft, type VideoDirectorBatchDraft, type VideoPromptReferencePreview, videoImageRole,
 } from '../videoDirectorDraft';
@@ -51,6 +51,9 @@ import { offsetVideoReferenceSlotRoles, videoReferenceSlotCapacity, videoReferen
 import { addVideoReference, removeVideoReference, videoMiddleFrameOrdinal, videoReferenceDisplaySlots, videoReferenceSelection, videoReferenceSlotIndex, videoReferenceSlotSpan, type VideoReferenceSelection } from '../videoReferenceSlots';
 import { videoSegmentCharacterHints, type VideoSegmentCharacterHintResult } from '../videoSegmentCharacters';
 import { ProjectVoicePresetEditor, VideoAudioReferenceEditor } from './VideoAudioReferences';
+import { VideoMotionReferenceEditor } from './VideoMotionReferences';
+import { prepareVideoMotionDraft, renderVideoMotionDraft } from '../videoMotionReferences';
+import type { VideoMotionReference } from '../videoMotionTypes';
 import { audioRetainModes, prepareVideoAudioDraft, renderVideoAudioDraft, validateVideoAudioReferences, videoAudioSlotCount, videoAudioTargetLabel } from '../videoAudioReferences';
 import type { ProjectVoicePresets, VideoAudioSelectionOverride } from '../videoAudioTypes';
 import type { CharacterVoiceProfile } from '../characterVoiceProfile';
@@ -152,7 +155,7 @@ function VideoH3MediaModeNotice({ draft, onRefresh, onUpdated, onBusy, disabled 
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const identity = JSON.stringify([draft.prompt, draft.references, draft.audioReferences, draft.parameters, draft.source]);
+  const identity = JSON.stringify([draft.prompt, draft.references, draft.audioReferences, draft.videoReferences, draft.parameters, draft.source]);
   const latest = useRef(identity); latest.current = identity;
   const inFlight = useRef(false);
   const mounted = useRef(true);
@@ -847,6 +850,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
   const [reviewLegacyDraft, setReviewLegacyDraft] = useState(Boolean(hasPreparedVideoBatchDraft(initialBatch) && !initialBatch?.promptFormat));
   const [referenceOverrides, setReferenceOverrides] = useState<Record<string, VideoImageReference[]>>(initialBatch?.referenceOverrides || {});
   const [audioOverrides, setAudioOverrides] = useState<Record<string, VideoAudioSelectionOverride>>(initialBatch?.audioOverrides || {});
+  const [videoOverrides, setVideoOverrides] = useState<Record<string, VideoMotionReference[]>>(initialBatch?.videoOverrides || {});
   const [h3ReferenceUpdates, setH3ReferenceUpdates] = useState<Record<string, VideoGenerationDraft>>(initialBatch?.h3ReferenceUpdates || {});
   const [referenceRoleOverrides, setReferenceRoleOverrides] = useState<Record<string, ReferenceRole[]>>(initialBatch?.referenceRoleOverrides || {});
   const [automaticTails, setAutomaticTails] = useState<Record<string, AutomaticVideoTailConfiguration>>(initialBatch?.automaticTails || {});
@@ -874,10 +878,10 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
     batchDraftChangeRef.current({ planId, backend, workflowId, apiProfileId, runningHubWorkflowId, parameterText,
       parameterDrafts: [...parameterDrafts.current], selectedKeys: [...selectedKeys], languages,
       promptFormat: reviewLegacyDraft ? undefined : promptFormat, promptFormats: reviewLegacyDraft ? undefined : promptFormats,
-      referenceOverrides, referenceRoleOverrides, audioOverrides, h3ReferenceUpdates, automaticTails, tailCharacterModes,
+      referenceOverrides, referenceRoleOverrides, audioOverrides, videoOverrides, h3ReferenceUpdates, automaticTails, tailCharacterModes,
       previewSegmentId, previewPane, settingsCollapsed, query });
   }, [planId, backend, workflowId, apiProfileId, runningHubWorkflowId, parameterText, selectedKeys, languages, promptFormat, promptFormats,
-    referenceOverrides, referenceRoleOverrides, audioOverrides, h3ReferenceUpdates, automaticTails, tailCharacterModes, previewSegmentId, previewPane, settingsCollapsed, query, reviewLegacyDraft]);
+    referenceOverrides, referenceRoleOverrides, audioOverrides, videoOverrides, h3ReferenceUpdates, automaticTails, tailCharacterModes, previewSegmentId, previewPane, settingsCollapsed, query, reviewLegacyDraft]);
   const submittingRef = useRef(false);
   const mountedRef = useRef(true);
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
@@ -1076,6 +1080,9 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
         } : candidate.draft;
         const audioOverride = audioOverrides[row.segmentId];
         if (audioOverride) draft = { ...draft, audioSelectionMode: audioOverride.mode, audioReferences: structuredClone(audioOverride.references || []), reuseTaskId: undefined };
+        const videoOverride = videoOverrides[row.segmentId];
+        if (videoOverride) draft = { ...draft, videoReferences: structuredClone(videoOverride), reuseTaskId: undefined };
+        if (draft.videoReferenceBinding && draft.prompt === draft.videoReferenceBinding.renderedPrompt) draft = { ...draft, prompt: draft.videoReferenceBinding.basePrompt, videoReferenceBinding: undefined };
         if (draft.audioReferenceBinding && draft.prompt === draft.audioReferenceBinding.renderedPrompt) draft = { ...draft, prompt: draft.audioReferenceBinding.basePrompt, audioReferenceBinding: undefined };
         // Pending-tail drafts retain their original pre-insertion references.
         // Their final slots are resolved after applying the tail placement.
@@ -1103,6 +1110,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
             h3ReferenceWarnings: updated.h3ReferenceWarnings, audioReferenceBinding: updated.audioReferenceBinding };
           draft = prepareVideoAudioDraft(project, draft, audioApi);
         }
+        draft = draft.reuseTaskId ? renderVideoMotionDraft(project, draft, usageContextForDraft(draft)) : prepareVideoMotionDraft(project, draft, usageContextForDraft(draft));
         const referenceFingerprint = videoBatchReferenceFingerprint(draft, project.assets);
         if (!automatic && !mode) {
           const requestFingerprint = videoBatchRequestFingerprint(draft, project.assets,
@@ -1119,7 +1127,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
         };
       };
       return { ...row, zh: decorate(row.zh), en: decorate(row.en) };
-    }), [baseRows, audioOverrides, h3ReferenceUpdates, automaticTails, tailCharacterModes, characterDrafts, project, referenceUsageContext, referenceRoleOverrides, retryEntriesBySegment, reviewFrozenFormats, retryConnection, settings]);
+    }), [baseRows, audioOverrides, videoOverrides, h3ReferenceUpdates, automaticTails, tailCharacterModes, characterDrafts, project, referenceUsageContext, referenceRoleOverrides, retryEntriesBySegment, reviewFrozenFormats, retryConnection, settings]);
   const referencePreviews = useMemo(() => reviewLegacyDraft || promptFormat === 'h3' || Object.values(promptFormats).includes('h3')
     ? videoPromptReferencePreviews(project, chapterId) : [], [project, chapterId, reviewLegacyDraft, promptFormat, promptFormats]);
   const rowReferencePreview = (row: VideoBatchRow, language: 'zh' | 'en') => (reviewLegacyDraft || (promptFormats[row.segmentId] || promptFormat) === 'h3')
@@ -1570,6 +1578,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
                 {automatic && <small className="vd-auto-tail-badge">自动衔接：第 {automatic.predecessorSegmentIndex} 段 → {automatic.selectionMode === 'ai-assisted' ? 'AI 辅助选帧 → ' : '本地末帧 → '}图片槽 {automatic.placement.index + 1} · {automatic.placement.semantics === 'first-frame' ? '首帧输入' : '普通衔接参考（不保证严格首帧）'}</small>}
                 {candidate && outputSummaryForDraft(candidate.draft) && <small className="vop-request-summary">{outputSummaryForDraft(candidate.draft)}</small>}
                 {candidate && <VideoAudioReferenceEditor project={project} draft={candidate.draft} api={usageContextForDraft(candidate.draft).api} scope={`第 ${row.segmentIndex} 段`} disabled={interactionLocked} frozenAudios={candidate.draft.reuseTaskId ? findReusableVideoTask(project, candidate.draft.reuseTaskId)?.videoJob?.snapshot.audios : undefined} onImportAudio={onImportAudio} onChange={(patch) => { setAudioOverrides((current) => ({ ...current, [row.segmentId]: { mode: patch.audioSelectionMode || 'override', references: structuredClone(patch.audioReferences || []) } })); setConfirmation(undefined); }} />}
+                {candidate && <VideoMotionReferenceEditor project={project} draft={candidate.draft} api={usageContextForDraft(candidate.draft).api} workflow={usageContextForDraft(candidate.draft).workflow} scope={`第 ${row.segmentIndex} 段`} disabled={interactionLocked} frozenVideos={candidate.draft.reuseTaskId ? findReusableVideoTask(project, candidate.draft.reuseTaskId)?.videoJob?.snapshot.videos : undefined} onChange={(patch) => { setVideoOverrides((current) => ({ ...current, [row.segmentId]: structuredClone(patch.videoReferences || []) })); setConfirmation(undefined); }} />}
               </div>
             </details>
           </article>;
@@ -1698,9 +1707,11 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
   const effectiveReferences = videoReferenceUsage(draft.references, referenceUsageContext);
   const delivery = useMemo(() => {
     if (generationMode !== 'single') return { draft, warnings: [], characterStates: [] };
-    const clean = draft.audioReferenceBinding && draft.prompt === draft.audioReferenceBinding.renderedPrompt ? { ...draft, prompt: draft.audioReferenceBinding.basePrompt, audioReferenceBinding: undefined } : draft;
+    const withoutVideo = draft.videoReferenceBinding && draft.prompt === draft.videoReferenceBinding.renderedPrompt ? { ...draft, prompt: draft.videoReferenceBinding.basePrompt, videoReferenceBinding: undefined } : draft;
+    const clean = withoutVideo.audioReferenceBinding && withoutVideo.prompt === withoutVideo.audioReferenceBinding.renderedPrompt ? { ...withoutVideo, prompt: withoutVideo.audioReferenceBinding.basePrompt, audioReferenceBinding: undefined } : withoutVideo;
     const imageDelivery = prepareVideoH3ReferenceDraft(project, { ...clean, references: videoReferenceUsage(draft.references, referenceUsageContext) }, referenceUsageContext);
-    return { ...imageDelivery, draft: draft.reuseTaskId ? renderVideoAudioDraft(project, imageDelivery.draft, activeApi) : prepareVideoAudioDraft(project, imageDelivery.draft, activeApi) };
+    const audioDraft = draft.reuseTaskId ? renderVideoAudioDraft(project, imageDelivery.draft, activeApi) : prepareVideoAudioDraft(project, imageDelivery.draft, activeApi);
+    return { ...imageDelivery, draft: draft.reuseTaskId ? renderVideoMotionDraft(project, audioDraft, referenceUsageContext) : prepareVideoMotionDraft(project, audioDraft, referenceUsageContext) };
   }, [project, draft, referenceUsageContext, activeApi, generationMode]);
   const audioIssue = generationMode === 'single' ? validateVideoAudioReferences(project, delivery.draft, activeApi, reusedSnapshot?.audios)[0] : undefined;
   const sourceStale = !draft.reuseTaskId && Boolean(
@@ -1793,6 +1804,19 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
   }, [draftScope, project.id, chapterId, draft, parameterText, generationMode, batchDraft]);
   useEffect(() => {
     if (!launchRequest || consumedLaunchIds.has(launchRequest.id)) return;
+    if (launchRequest.onlyIfEmpty) {
+      // An automatic entry is a one-time offer for this mounted chapter. It
+      // must not reappear after changing chapters or clearing a prepared form.
+      consumedLaunchIds.add(launchRequest.id);
+      const current = draftCache.get(draftScope);
+      if (!current) return;
+      const next = prefillEmptyVideoDirectorChapterDraft(project, chapterId, current, launchRequest);
+      if (next === current) return;
+      setDraft(next.draft);
+      setPromptFormat(next.draft.source?.promptFormat || defaultVideoPromptFormat(project, next.draft.source?.storyboardId));
+      setNotice('当前提示词已带入本次生成草稿；确认并点击“生成视频”后才会提交任务。');
+      return;
+    }
     const launchChapterId = chapterIdForVideoLaunch(project, launchRequest);
     if (launchChapterId && launchChapterId !== chapterId) return;
     consumedLaunchIds.add(launchRequest.id);
@@ -1901,7 +1925,7 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
         <label className="field"><span>视频名称</span><input value={draft.name} onChange={(event) => patchDraft({ name: event.target.value })} placeholder="为本次生成的视频命名" /></label>
         {draft.source ? <div className="vd-source"><span>来源：{draft.source.label || '提示词导演台'} · {videoPromptFormatLabel(draft.source.promptFormat)} · {draft.source.language === 'en' ? '已有英文描述' : '中文提示词'}</span>{onOpenPrompt && draft.source.storyboardId && <button className="btn small ghost" type="button" onClick={() => onOpenPrompt(draft.source!.storyboardId!, draft.source)}>查看原稿</button>}<button className="btn small ghost" type="button" onClick={() => patchDraft({ source: undefined, h3ReferenceBinding: undefined, seedanceReferenceBinding: undefined })}>解除来源关联</button></div> : <p className="field-hint">也可以直接粘贴或手动输入提示词，无需先创建分镜。</p>}
         {draft.source?.storyboardId && <div className="vd-toolbar"><label className="field"><span>本次提示词格式</span><select aria-label="本次提示词格式" value={draft.source.promptFormat || 'legacy'} disabled={submitting || batchSubmitting} onChange={(event) => selectDraftSource(event.target.value as VideoPromptFormat, draft.source?.language || 'zh')}>{!draft.source.promptFormat && <option value="legacy" disabled>历史稿（保留正文）</option>}<option value="h3">H3</option><option value="seedance">Seedance</option><option value="ordinary">普通稿</option></select></label><label className="field"><span>本次稿件语言</span><select aria-label="本次稿件语言" value={draft.source.language || 'zh'} disabled={submitting || batchSubmitting || !draft.source.promptFormat} onChange={(event) => selectDraftSource(draft.source?.promptFormat || defaultVideoPromptFormat(project, draft.source?.storyboardId), event.target.value as 'zh' | 'en')}><option value="zh">中文</option><option value="en">英文描述</option></select></label></div>}
-        <label className="field"><span>本次生成使用的完整提示词</span><textarea aria-label="本次生成使用的完整提示词" className="vd-prompt-editor" value={delivery.draft.prompt} onChange={(event) => patchDraft({ prompt: event.target.value, audioReferenceBinding: delivery.draft.audioReferenceBinding, reuseTaskId: undefined, h3ReferenceBinding: undefined, seedanceReferenceBinding: undefined })} placeholder="选择已有中文 / 英文描述，或在这里填写完整提示词。不会重新扩写、翻译对白或裁剪字数。" /></label>
+        <label className="field"><span>本次生成使用的完整提示词</span><textarea aria-label="本次生成使用的完整提示词" className="vd-prompt-editor" value={delivery.draft.prompt} onChange={(event) => patchDraft({ prompt: event.target.value, audioReferenceBinding: delivery.draft.audioReferenceBinding, videoReferenceBinding: delivery.draft.videoReferenceBinding, reuseTaskId: undefined, h3ReferenceBinding: undefined, seedanceReferenceBinding: undefined })} placeholder="选择已有中文 / 英文描述，或在这里填写完整提示词。不会重新扩写、翻译对白或裁剪字数。" /></label>
         <button className="btn small" type="button" onClick={() => { void navigator.clipboard.writeText(delivery.draft.prompt).then(() => setNotice('已复制本次实际提交提示词。'), () => setError('复制失败，请选中提示词手动复制。')); }}>复制本次提示词</button>
         <VideoH3ReferenceNotices key={`${project.id}:${draft.source?.storyboardId}:${draft.source?.language}`} project={project} draft={delivery.draft} warnings={delivery.warnings} onRepair={repairSingleIdentityBindings} onRepairingChange={setIdentityRepairing} disabled={submitting || batchSubmitting || identityRepairing} />
         <VideoH3MediaModeNotice draft={delivery.draft} onRefresh={onRefreshH3References} onBusy={setIdentityRepairing}
@@ -1924,6 +1948,7 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
         <VideoReferenceVacancies selection={draft} usageContext={referenceUsageContext} />
         <p className="field-hint">在“从图片资产库选择”的“槽位用途”栏中按本段设置用途；不修改原分镜或素材分类。用途不匹配只提示，不阻止生成。</p>
         <VideoAudioReferenceEditor project={project} draft={draft} api={activeApi} scope="本段" disabled={submitting || batchSubmitting} frozenAudios={reusedSnapshot?.audios} onChange={patchDraft} onImportAudio={importAudio} />
+        <VideoMotionReferenceEditor project={project} draft={draft} api={activeApi} workflow={activeWorkflow} scope="本段" disabled={submitting || batchSubmitting} frozenVideos={reusedSnapshot?.videos} onChange={patchDraft} />
       </section>
     </div><div className="vd-stack">
       <section className="card vd-settings-card"><div className="card-title"><h2>3. 生成方式与参数</h2></div><div className="vd-backend-switch">{([['api', '视频 API'], ['comfyui', 'ComfyUI'], ['runninghub', 'RunningHub 云端']] as const).map(([value, label]) => <button type="button" key={value} className={`btn ${sourceKind === value ? 'primary' : ''}`} aria-pressed={sourceKind === value} onClick={() => { if (sourceKind !== value) switchParameterConnection(videoSourceDraftPatch(value, settings)); }}>{label}</button>)}</div>

@@ -193,10 +193,10 @@ const VIDEO_ACTION_EVENT_UNDERSTANDING = [
   NOVEL_ACTION_SOURCE_RULE,
   "先判断当前战斗的实际类型，再安排可见变化：持续交战表现相互攻防与从前招末态接续；压倒性持续清剿表现一方持续迎击、成批受力及后续队列继续压上，保留悬殊战力，不强加对等格挡或数回合苦战；瞬杀表现逼近、短促的既有攻击路径与即时后果，不能为增加动作拉长成持续交战；追逐表现双方目标、路线、距离变化和阻碍；阵列推进表现方向、梯队、通路与阵线变化。这些是依据剧情作出的编排判断，不是每段必做清单；原来静止、蓄势、观察、普通交谈、幻想速度和明确慢动作照原意保留。",
   "行动采用同一sceneStaging的世界关系和phase，具名人物、物体或稳定行动组沿实际轴线推进。群战按事件交代可辨交点、队列、梯队、补位及其他参与者的同步或异步阶段，规模由既有军势与场地体现；前排受力后后排停滞、绕行或继续压上须服从原文。不强加每人独立接触，不删除参与者、限制人数或把持续冲锋改成溃逃。",
-  "涉及接触、负重、起坐或受力位移时，只写决定行为成立的支撑、握持、操作与回应：人物怎样接近可达对象，哪一肢体/工具作用于哪一实体，何时接稳、释放或失去接触，物体怎样随操作改变位置或状态。伸手未碰到就收回时保留未接触，不补成功交接；听闻后的停顿保留被打断的当前行为。战斗的发力、挡闪、偏转与受力终点按同样因果表达；支撑脚借力不代替另一脚实际接触，原设非接触作用照实保留。只有与当前行为有关的身体过程需要展开，观察、等待与普通转头不硬套发力链。",
+  "接触、负重或受力位移保留决定行为成立的因果：怎样进入可达距离，哪一肢体/工具作用于谁，对方怎样挡闪、下沉或偏转，何时释放或脱开，怎样承接下一动作。原文若为按压使肩背下沉、对手撑地蹬腿脱开，就保持持续施力到脱开的过程，不能改成刚碰肩就停住或扶人；限力不取消已有受力位移，也不增加伤害。本来短促的发力和闪避自然实时完成，持续接触按其实际作用延续，不靠慢伸手显示精度，也不将所有接触缩成瞬碰。支撑手/脚与实际攻击手/脚分清，手扫脚踝不改成腿扫；左右手配合及提脚同时按压按原文同时发生，不逐项等待，原设非接触作用保留。",
   "格挡、命中和落空保持各自结果。接挡交代拦截或偏转，避开后沿既有路径继续并到达已有终点；实际穿透、追踪、飞行、能量化或非接触施力只按原设能力表达。人物、武器及受力物保持可辨轮廓与材料，碎屑、火花、模糊和拟音服务真实作用而不代替动作；环境损坏、伤情与胜负仍按已成立事实，不增加新能力或另一事件。",
-  "事件持续时间与镜头覆盖时间分开：按当前自然速度容纳必要操作、交接、停续与结果辨认，普通转头不延长为多段机械动作，持续劳动/迎击不缩成一个姿势。跨镜沿同一时间轴继承位置、注意、接触、持物、物品状态和实际阶段；本镜相对时刻加startSec才是段内时刻。确实未完的段尾保留未完状态，下一镜推进当前阶段；短促位移不因镜长延长，摄影选择不为每招、每次操作另造切点。普通微动作自然表述，不逐个安排毫秒刻度。",
-  "完整原对白按自然发话速度、原语言、具名声源和顺序先预算，并同时为必要动作过程与结果辨认留足时间，再决定覆盖；不先把战斗压成一挥即止、也不将长句塞进镜尾余秒。因果、气息与表演允许时，动作、群体推进、环境和真实在场说话人的画外发话可并行，不必每句切正脸；画外发话仍是原人物的原话，不新增旁白、不转交声源、不提前后果，口部互斥动作错开。时间不足只在sourcePlanningAuthority及durationAdjustmentPolicy允许的未确认源头范围重排窗口、镜界或总长；固定durationSec、exact镜数、当前段事件归属和已确认排程保持，无法容纳时在现有reason说明具体冲突，不删台词、不抢话或谎称自洽。普通转换、参考更新、衔接、保真和翻译不因本规则获得重新导演权限；不按字速、每秒动作数、人数或镜数配额判断内容。",
+  "事件时长与镜头覆盖分开：先保留本段全部动作和次数，再按真实速度安排哪些连续行动在这几秒完成、哪些仍在持续；15秒窗口可以自然承接多个已有动作，不等于把准备、交手、整理各慢演五秒。重要行动组在已有action/performance或phase.action中写明起止时窗、完成点和相接/并行关系，不只给一整块时间再堆动作；H3已有performance.shots[].events时用startSec/endSec承载同一时窗，description写明接触、受力、脱开等内部完成点，允许同时事件时窗重叠，遵循既有timeBase。普通点头、转头不逐关节或逐毫秒排程。真实收手、三步、几个照面、拍土、整理和再起势都保留；明确数量不改，未定量的多次过程不擅自定数。速度不能靠删动作、减少回合或缩短固定视频解决，也不为填时增加攻击。结果可在下一行动中辨认，不额外停住展示；原文有停顿则保留。未完镜尾记录运动进度，下一镜直接续接，不因切镜额外收手站稳，原文真实收手仍演出。跨镜继承位置、速度、接触、持物与阶段，镜内时刻加镜头startSec才是段内时刻。",
+  "完整原对白按自然发话速度、原语言、具名声源和顺序先预算，并同时为完整动作过程留足时间，再决定覆盖；不先把战斗压成一挥即止、也不将长句塞进镜尾余秒。因果、气息与表演允许时，动作、群体推进、环境和真实在场说话人的画外发话可并行，不必每句切正脸；画外发话仍是原人物的原话，不新增旁白、不转交声源、不提前后果，口部互斥动作错开。只在sourcePlanningAuthority及durationAdjustmentPolicy允许的范围重排；固定durationSec、exact镜数和当前段事件归属保持。明确授权重排动作节奏时，旧镜内等分时窗、拉长准备和逐项等待不再锁定，可按全部既有动作的自然完成点重排；镜界是否可变仍服从本次权限，不能借此增减剧情或固定总长。普通转换、参考更新、衔接、保真和翻译不因此获得重新导演权限；不能容纳时只在现有reason说明具体冲突，不删动作台词、不抢话或谎称自洽，不按字速、每秒动作数、人数或镜数配额判断内容。",
 ].join('\n\n');
 
 export const VIDEO_ACTION_CHOREOGRAPHY_RULE = [
@@ -234,7 +234,7 @@ export const VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE = [
 export const VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE = [
   'VIDEO_ACTION_CHOREOGRAPHY_TRANSLATE_V1：以当前已采用中文sourcePrompt为唯一执行稿，英文翻译及格式修复只保真，不重新导演，不从原小说、旧shots或档案补写当前正文未采用的动作。',
   NOVEL_ACTION_DELIVERY_RULE,
-  '准确表达已发生、想做、尝试、中断、等待和否定，reaches but withdraws不变成grabs，takes the cup不追加drinks，holds不等于takes again。逐项传递具名对象、必要支撑/握持、接触/释放、动作先后和物体归属；被击退不是主动退步，擦身不是穿透，普通高速动作不是high-speed photography或slow motion。既定幻想能力、身体结构、静止、慢动作、强度和悬念保持；不按英文例词给源稿添加细节。镜界与事件起止分别保持，同一次跨镜事件只延续当前进度。',
+  '准确表达已发生、尝试、中断与否定，reaches but withdraws不变成grabs，holds不等于takes again。保留具名对象、支撑/发力肢体、接触至受力反应和释放、物体归属与并行关系；手扫脚踝仍是hand sweep，不能在声音中变成leg sweep。被击退不是自主退步，限力或点到为止不是slow motion；按压致下沉后挣脱不能译成stopping on contact。普通高速动作不是high-speed photography。既定静止、明确慢动作、强度与幻想能力保持，不用英文例词补细节；镜界不改变事件速度，同一次跨镜行动只续当前进度。',
   '保持普通六字段、H3三字段或full-reference六字段、原section顺序、[Shot N]、首镜无At、全部At切点、镜内动作时间、Subject/Picture/Video/Audio、S声源、<d>、原语言和逐字对白。参考身份和静态构图不替代动作，不虚构素材，不新增动作schema、规则附录、审核、调用、拦截或重试。',
 ].join('\n\n');
 
@@ -271,6 +271,7 @@ export const withVideoActionChoreographyScope = (systemPrompt: string, scope: Vi
   const firstPartyBlocks = [VIDEO_ACTION_CHOREOGRAPHY_RULE, VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE,
     VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE, VIDEO_ACTION_SEEDANCE_TRANSLATION_RULE, VIDEO_ACTION_CAUSALITY_RULE,
     ...Object.entries(previousNovelRules).filter(([key]) => key.startsWith('PRE_NOVEL_VIDEO_ACTION_')).map(([, value]) => value),
+    ...Object.entries(previousNovelRules).filter(([key]) => key.startsWith('PRE_NATURAL_TEMPO_VIDEO_ACTION_')).map(([, value]) => value),
     LEGACY_VIDEO_ACTION_CHOREOGRAPHY_RULE_V2_5_1, LEGACY_VIDEO_ACTION_CAUSALITY_RULE_V2_5_1,
     LEGACY_VIDEO_ACTION_CHOREOGRAPHY_RULE_V2_3_7, LEGACY_VIDEO_ACTION_CAUSALITY_RULE_V2_3_7,
     LEGACY_VIDEO_ACTION_EVENT_REVIEW_RULE_V2_3_7,

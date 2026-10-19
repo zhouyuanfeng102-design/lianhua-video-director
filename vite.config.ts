@@ -78,6 +78,8 @@ export default defineConfig({
           // eager bundle boundary, not a new lazy-loading execution path.
           if ([
             'h3PromptProtocol.ts',
+            'videoMotionReferences.ts',
+            'h3DeliverySections.ts',
             'characterDossierPolicy.ts',
             'projectBackground.ts',
             'h3IdentityBindings.ts',

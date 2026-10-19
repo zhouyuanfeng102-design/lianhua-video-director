@@ -15,6 +15,8 @@ export {
   isGenerationTaskRevoked,
   revokeQueuedGenerationTask,
   revokeImagePromptReverseTask,
+  forceStopImageTask,
+  runImageTask,
 } from './generationTaskCancellation';
 
 type NewImageGenerationTask = Omit<
@@ -252,7 +254,7 @@ export interface GenerationTaskCancellationResult {
   blocked: boolean;
 }
 
-/** Only queued local work can be cancelled without risking an in-flight billable request. */
+/** The normal cancel action applies only before a local task starts. */
 export const cancelQueuedGenerationTask = (
   tasks: GenerationTask[],
   taskId: string,
@@ -267,6 +269,27 @@ export const cancelQueuedGenerationTask = (
     tasks: tasks.map((task) => task === target ? {
       ...target, status: 'cancelled', error: undefined, bindingWarning: undefined, updatedAt: timestamp,
       ...(isImageGenerationTask(target) || isImagePromptReverseTask(target) ? { preparationStage: undefined } : {}),
+    } : task),
+    cancelled: true,
+    blocked: false,
+  };
+};
+
+/** The explicit running-image stop also rebases its queued undo/redo snapshots. */
+export const forceStopImageGenerationTask = (
+  tasks: GenerationTask[],
+  taskId: string,
+  timestamp = Date.now(),
+): GenerationTaskCancellationResult => {
+  const target = tasks.find((task) => task.id === taskId);
+  if (!target) return { tasks, cancelled: false, blocked: false };
+  if (!isImageGenerationTask(target) || !['queued', 'running'].includes(target.status)) {
+    return { tasks, cancelled: false, blocked: target.status !== 'cancelled' };
+  }
+  return {
+    tasks: tasks.map((task) => task === target ? {
+      ...target, status: 'cancelled', preparationStage: undefined, error: undefined,
+      bindingWarning: undefined, customImageSavePending: false, updatedAt: timestamp,
     } : task),
     cancelled: true,
     blocked: false,

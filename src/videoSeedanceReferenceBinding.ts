@@ -48,7 +48,16 @@ const imageNumber = (token: string): number | undefined => {
   const number = match ? Number(match[1]) : 0;
   return Number.isSafeInteger(number) && number > 0 ? number : undefined;
 };
-const tokenKey = (token: string): string => imageNumber(token) ? `image:${imageNumber(token)}` : token;
+const videoNumber = (token: string): number | undefined => {
+  const match = token.match(/^@(?:Video\s+|视频\s*)(\d+)$/u);
+  return match ? Number(match[1]) : undefined;
+};
+const audioNumber = (token: string): number | undefined => {
+  const match = token.match(/^@(?:Audio\s+|音频\s*)(\d+)$/u);
+  return match ? Number(match[1]) : undefined;
+};
+const tokenKey = (token: string): string => imageNumber(token) ? `image:${imageNumber(token)}`
+  : videoNumber(token) ? `video:${videoNumber(token)}` : audioNumber(token) ? `audio:${audioNumber(token)}` : token;
 const imageToken = (number: number, style?: 'english' | 'chinese'): string => style === 'chinese' ? `@图片${number}` : `@Image ${number}`;
 /** Labels and saved description fields are data, never another media ordinal
  * or a chapter boundary. Preserve their words as one literal display line. */
@@ -83,7 +92,7 @@ const roleResponsibility = (role: ReferenceRole, language: 'zh' | 'en', middleFr
 /** Request-only serialization. Every render starts at the same saved text;
  * authored dialogue, shot timing and the other five sections remain intact. */
 export const prepareVideoSeedanceReferenceDraft = (
-  project: Project, draft: VideoGenerationDraft, plan: VideoSeedanceReferencePlan,
+  project: Project, draft: VideoGenerationDraft, plan: VideoSeedanceReferencePlan, videoNumbers?: readonly number[],
 ): { draft: VideoGenerationDraft; warnings: string[]; characterStates: VideoCharacterReferenceState[] } => {
   if (draft.reuseTaskId) return { draft, warnings: draft.h3ReferenceWarnings || [], characterStates: draft.seedanceReferenceBinding?.characterStates || [] };
   const saved = draft.seedanceReferenceBinding;
@@ -169,7 +178,18 @@ export const prepareVideoSeedanceReferenceDraft = (
   const edits: TextEdit[] = [];
   if (binding && !unknownTokens.length) for (const match of matches) {
     if (!imageNumber(match[0])) {
-      warnings.push(`${match[0]}：本次视频选图只传图片，未配置该类型的专用上传槽；请核对平台的实际媒体输入。`);
+      const video = videoNumber(match[0]);
+      const audio = audioNumber(match[0]);
+      const selected = video ? draft.videoReferences : audio ? draft.audioReferences : undefined;
+      const source = sources.get(tokenKey(match[0]));
+      const original = source?.length === 1 ? source[0] : undefined;
+      const matching = original ? selected?.filter((entry) => entry.assetId === original.assetId)
+        : selected?.filter((entry) => entry.slotIndex + 1 === (video || audio));
+      if (matching?.length) {
+        if (original) edits.push({ start: match.index!, end: match.index! + match[0].length,
+          text: unique(matching.map((entry) => `@${video ? 'Video' : 'Audio'} ${video
+            ? videoNumbers?.[(draft.videoReferences || []).indexOf(entry)] ?? entry.slotIndex + 1 : entry.slotIndex + 1}`)).join(language === 'en' ? ', ' : '、') });
+      } else warnings.push(`${match[0]}：未对应本次已选的${video ? '视频' : audio ? '音频' : '该类型'}参考输入，已保留原说明；请核对实际素材。`);
       continue;
     }
     const original = sources.get(tokenKey(match[0]))![0];
@@ -180,8 +200,9 @@ export const prepareVideoSeedanceReferenceDraft = (
       edits.push({ start: match.index!, end: match.index! + match[0].length, text: language === 'en' ? 'unbound reference material' : '未绑定参考素材' });
     }
   }
-  const noSourceAndNoImages = !binding?.references.length && !draft.references.length;
-  if (canAssociate && section && !noSourceAndNoImages) {
+  const noSourceAndNoMedia = !binding?.references.length && !draft.references.length
+    && !draft.audioReferences?.length && !draft.videoReferences?.length;
+  if (canAssociate && section && !noSourceAndNoMedia) {
     const body = basePrompt.slice(section.start, section.end);
     const bodyEdits = edits.filter((edit) => edit.start >= section.start && edit.end <= section.end);
     const newline = basePrompt.includes('\r\n') ? '\r\n' : '\n';
@@ -201,7 +222,7 @@ export const prepareVideoSeedanceReferenceDraft = (
       .filter((edit) => !declarationEdits.some((declaration) => edit.start >= declaration.start && edit.end <= declaration.end));
     const remappedBody = applyEdits(body, [...preservationEdits, ...declarationEdits]);
     const currentBody = cleanSeedanceReferenceClaims(remappedBody, {
-      hasImages: draft.references.length > 0, hasAudio: false,
+      hasImages: draft.references.length > 0, hasAudio: Boolean(draft.audioReferences?.length), hasVideo: Boolean(draft.videoReferences?.length),
     }).text;
     const replacement = [
         section.inline ? '' : newline,
@@ -212,7 +233,7 @@ export const prepareVideoSeedanceReferenceDraft = (
     for (let index = edits.length - 1; index >= 0; index -= 1) if (edits[index].start >= section.start && edits[index].end <= section.end) edits.splice(index, 1);
     edits.push({ start: section.start, end: section.end, text: replacement });
   }
-  const renderedPrompt = noSourceAndNoImages ? basePrompt : applyEdits(basePrompt, edits);
+  const renderedPrompt = noSourceAndNoMedia ? basePrompt : applyEdits(basePrompt, edits);
   const participation = resolveSeedanceCharacterParticipation(basePrompt, project.characters, board?.seedance25Output);
   const relevant = unique([
     ...participation.characters.filter((entry) => entry.presence !== 'mentioned').map((entry) => entry.characterId),

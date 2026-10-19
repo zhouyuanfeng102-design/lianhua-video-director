@@ -14,6 +14,7 @@ import { sourceContentHash } from './sourceContentHash';
 import { videoH3MediaModeContract, videoH3MediaModeIssue } from './videoH3MediaMode';
 import { assetReferenceLocationOwners } from './assetCharacterBinding';
 import { renderH3ReferenceExecution, type H3ReferenceExecutionCharacter } from './h3ReferenceExecution';
+import { videoMotionReferenceNumbers } from './videoMotionReferences';
 export { collectVideoPictureReferenceNumbers } from './videoPictureReferences';
 export { videoReferenceCharacterOwners, videoReferenceCharacterBindingWarning } from './videoReferenceCharacters';
 
@@ -362,7 +363,8 @@ const videoH3ReferenceUsageEdit = (
 const prepareVideoH3ReferenceDraftInternal = (
   project: Project, draft: VideoGenerationDraft, context: VideoH3ReferenceContext,
 ): PreparedVideoH3ReferenceDraft => {
-  if (draft.source?.promptFormat === 'seedance') return prepareVideoSeedanceReferenceDraft(project, draft, videoSeedanceReferencePlan(draft.references, context));
+  if (draft.source?.promptFormat === 'seedance') return prepareVideoSeedanceReferenceDraft(project, draft,
+    videoSeedanceReferencePlan(draft.references, context), videoMotionReferenceNumbers(draft.videoReferences || [], context));
   const referenceProject = videoH3ReferenceProject(project, draft);
   const binding = videoH3BindingForPrompt(project, draft);
   const basePrompt = binding?.basePrompt || draft.prompt;

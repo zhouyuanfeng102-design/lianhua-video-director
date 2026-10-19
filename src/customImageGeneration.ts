@@ -4,7 +4,7 @@ import { createId, safeFileName } from './storage';
 import { applyOwnedProjectUpdate } from './appEffects';
 import { cloneImageBatchConfig, imageBatchTaskIsActive } from './imageBatch';
 import { captureImageApiSnapshot, resolveImageApiForRegeneration, resolveWorkbenchImageApi } from './imageApiSelection';
-import { createImageGenerationTask, GenerationTaskCancelledError, isGenerationTaskCancelledError, isGenerationTaskRevoked } from './generationTasks';
+import { createImageGenerationTask, GenerationTaskCancelledError, isGenerationTaskCancelledError, isGenerationTaskRevoked, runImageTask } from './generationTasks';
 import { createImageReferenceAssetSnapshot, imageReferenceSnapshotAssets } from './imageGeneration';
 import { enqueueImageTask } from './imageTaskQueue';
 import { resolveImageOutputSize, imageReturnedSizeWarning, type ImageOutputSizePreference } from './imageOutputSize';
@@ -109,9 +109,13 @@ const loadFrozenReferences = (ctx: CustomImageGenerationContext, task: ImageGene
 };
 
 const saveResult = async (ctx: CustomImageGenerationContext, projectId: string, task: ImageGenerationTask, result: ImageGenerationResult): Promise<void> => {
-  const current = ownerProject(ctx.getState(), projectId)?.generationTasks.find((item) => item.id === task.id);
-  if (current?.kind !== 'image' || current.createdAt !== task.createdAt || current.status === 'cancelled'
-    || isGenerationTaskRevoked(projectId, current)) throw new GenerationTaskCancelledError();
+  const assertSaveActive = (): ImageGenerationTask => {
+    const live = ownerProject(ctx.getState(), projectId)?.generationTasks.find((item) => item.id === task.id);
+    if (live?.kind !== 'image' || live.createdAt !== task.createdAt || live.status === 'cancelled'
+      || isGenerationTaskRevoked(projectId, live)) throw new GenerationTaskCancelledError();
+    return live;
+  };
+  const current = assertSaveActive();
   if (current.status === 'succeeded' && current.resultAssetId && ownerProject(ctx.getState(), projectId)?.assets.some((asset) => asset.id === current.resultAssetId)) return;
   if (!ctx.storeImage) throw new Error('当前环境无法保存生成图片，请在桌面版重试保存。');
   let dataUrl = result.dataUrl;
@@ -125,9 +129,11 @@ const saveResult = async (ctx: CustomImageGenerationContext, projectId: string, 
     }
     result.dataUrl = dataUrl;
   }
+  assertSaveActive();
   if (!dataUrl || !/^data:image\//iu.test(dataUrl)) throw new Error('图片已生成，但接口未返回可保存的图片内容。');
   const actual = readGeneratedImageDimensions(dataUrl);
   const managed = await ctx.storeImage({ dataUrl, fileName: `${safeFileName(task.name)}.png` });
+  assertSaveActive();
   if (!managed.managed || !managed.relativePath || !managed.url || !managed.checksum) throw new Error('图片托管未完成，请重试保存。');
   const timestamp = Date.now();
   const asset = withCustomImageRegenerationSnapshot({
@@ -174,7 +180,7 @@ const startWorker = (
         task = { ...task, referenceAssetSnapshots, preparationStage: undefined };
         patchTask(ctx, projectId, task, { referenceAssetSnapshots, preparationStage: undefined });
       }
-      await enqueueImageTask(async () => {
+      await enqueueImageTask(() => runImageTask(projectId, task, async (signal) => {
         assertActive();
         patchTask(ctx, projectId, task, { status: 'running', error: undefined });
         const referenceImages = await loadFrozenReferences(ctx, task);
@@ -186,7 +192,7 @@ const startWorker = (
           validateTextApi(textApi);
           patchTask(ctx, projectId, task, { preparationStage: 'prompt-convert' });
           const prompt = await (ctx.convertPrompt || requestCustomImagePrompt)(textApi, {
-            userPrompt: task.customImageInput.userPrompt, rule, width: task.width, height: task.height,
+            userPrompt: task.customImageInput.userPrompt, rule, width: task.width, height: task.height, signal,
           });
           assertActive();
           if (!prompt.trim()) throw new Error('规则转换未返回有效提示词；本次未提交生图。');
@@ -199,16 +205,19 @@ const startWorker = (
           prompt: task.prompt, ...(raw ? { promptMode: 'verbatim' as const } : { negativePrompt: task.negativePrompt }),
           width: task.width, height: task.height, sizeOverride: task.sizeOverride, resolutionPlan: task.resolutionPlan,
           referenceImages, primaryReferenceImageCount: referenceImages.length, preserveReferenceImageOrder: true,
+          signal,
         }, assertActive);
+        assertActive();
         stage.value = 'save';
         if (!generated.dataUrl && !generated.url) throw new Error('图像接口没有返回图片内容或地址。');
         pendingResults.set(taskKey(projectId, task.id), generated);
         task = { ...task, resultUrl: generated.url || generated.dataUrl, customImageSavePending: true };
         patchTask(ctx, projectId, task, { resultUrl: task.resultUrl, customImageSavePending: true });
         await saveResult(ctx, projectId, task, generated);
-      }, { canStart: active });
+      }), { canStart: active });
     } catch (error) {
       if (isGenerationTaskCancelledError(error) || isGenerationTaskRevoked(projectId, task)) {
+        pendingResults.delete(taskKey(projectId, task.id));
         patchTask(ctx, projectId, task, { status: 'cancelled', preparationStage: undefined });
         return;
       }
@@ -358,7 +367,8 @@ export const retryCustomImageSave = async (ctx: CustomImageGenerationContext, so
   const project = findOwner(ctx.getState(), source);
   if (!project || source.assetKind !== 'custom') return;
   const current = project.generationTasks.find((task) => task.id === source.id);
-  if (current?.kind !== 'image' || !current.customImageSavePending || current.status === 'queued' || current.status === 'running') return;
+  if (current?.kind !== 'image' || !current.customImageSavePending || ['queued', 'running', 'cancelled'].includes(current.status)
+    || isGenerationTaskRevoked(project.id, current)) return;
   const key = taskKey(project.id, source.id);
   if (savingTasks.has(key)) return;
   savingTasks.add(key);
@@ -366,8 +376,12 @@ export const retryCustomImageSave = async (ctx: CustomImageGenerationContext, so
   try {
     if (!result.dataUrl && !result.url) throw new Error('原图内容已不可读取；未重新调用生图接口，请恢复图片后再保存。');
     patchTask(ctx, project.id, current, { status: 'running', error: undefined });
-    await saveResult(ctx, project.id, current, result);
+    await runImageTask(project.id, current, () => saveResult(ctx, project.id, current, result));
   } catch (error) {
+    if (isGenerationTaskCancelledError(error) || isGenerationTaskRevoked(project.id, current)) {
+      pendingResults.delete(key);
+      return;
+    }
     const diagnostic = getSafeErrorDiagnostics(error);
     patchTask(ctx, project.id, current, { status: 'failed', customImageSavePending: true, error: `图片保存未完成：${diagnostic.message}` });
     announce(ctx, project.id, `图片保存未完成：${diagnostic.message}`, 'error');

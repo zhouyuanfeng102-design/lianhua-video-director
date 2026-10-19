@@ -30,6 +30,8 @@ import { videoQueueBlockerSummary } from './videoQueuePresentation';
 import { getOfficialH3SubmissionIssue, isOfficialH3TargetId } from './officialPrompt';
 import { officialH3ContextForStoryboard } from './officialH3Context';
 import { isVideoDirectorAudio, prepareVideoAudioDraft, renderVideoAudioDraft, validateVideoAudioReferences, videoAudioTargetLabel } from './videoAudioReferences';
+import { isVideoDirectorMotionVideo, prepareVideoMotionDraft, stripVideoMotionPromptBinding } from './videoMotionReferences';
+import type { FrozenVideoMotionReference } from './videoMotionTypes';
 import type { WorkbenchExtractedFrame } from './videoWorkbenchTypes';
 import type { extractVideoTailFrameSelection } from './videoFrameSelection';
 import type { AppState, Project, ReferenceAsset, VideoGenerationTask, VideoTaskApiConfig } from './types';
@@ -133,6 +135,10 @@ const sameFrozenAudioSources = (left: VideoGenerationSnapshot | undefined, right
   return a.length === b.length && a.every((audio, index) => canonicalText(audioSourceIdentity(audio)) === canonicalText(audioSourceIdentity(b[index]))
     && (audio.freezeState !== 'frozen' || b[index].freezeState !== 'frozen'
       || canonicalText([audio.relativePath, audio.checksum, audio.dataUrl]) === canonicalText([b[index].relativePath, b[index].checksum, b[index].dataUrl])));
+};
+const sameFrozenMotionSources = (left: VideoGenerationSnapshot | undefined, right: VideoGenerationSnapshot | undefined): boolean => {
+  const identity = (video: FrozenVideoMotionReference) => [video.assetId, video.bindingId, video.slotIndex, video.notes, video.relativePath, video.checksum, video.dataUrl];
+  return canonicalText((left?.videos || []).map(identity)) === canonicalText((right?.videos || []).map(identity));
 };
 const apiCredentialConfig = (config: Omit<VideoTaskApiConfig, 'apiKey'>) => Object.fromEntries(Object.entries(config)
   .filter(([key]) => !['apiKey', 'id', 'name', 'createdAt', 'updatedAt', 'runningHubParameterControls', 'parameterCapabilities'].includes(key))
@@ -242,6 +248,7 @@ interface PreparedBatchItem {
    * original asset because those bytes will never be sent. */
   assets: Array<ReferenceAsset | undefined>;
   audioAssets: ReferenceAsset[];
+  videoAssets: ReferenceAsset[];
   config?: VideoTaskApiConfig;
   comfy: ComfyVideoConfig;
   workflow?: ComfyVideoWorkflowPreset;
@@ -1382,9 +1389,75 @@ export class VideoGenerationEngine {
     return audios;
   }
 
+  private motionAssets(project: Project, draft: VideoGenerationDraft, reuse?: VideoGenerationSnapshot): ReferenceAsset[] {
+    return (draft.videoReferences || []).map((reference) => {
+      const frozen = reuse?.videos?.find((video) => video.assetId === reference.assetId && video.bindingId === reference.bindingId);
+      if (frozen) return { ...structuredClone(frozen), id: frozen.assetId, type: 'video', mediaType: 'video', role: 'composition', tags: [], createdAt: 0, updatedAt: 0 };
+      const asset = project.assets.find((entry) => entry.id === reference.assetId && isVideoDirectorMotionVideo(entry));
+      if (!asset) throw new Error('所选参考视频原文件不存在。');
+      return structuredClone(asset);
+    });
+  }
+
+  private async motionData(taskId: string, video: FrozenVideoMotionReference): Promise<string> {
+    if (video.relativePath && this.options.desktop?.readManagedVideoDataUrl) {
+      return (await this.options.desktop.readManagedVideoDataUrl({ relativePath: video.relativePath, expectedChecksum: video.checksum })).dataUrl;
+    }
+    if (video.dataUrl?.startsWith('data:video/')) return video.dataUrl;
+    if (video.freezeState !== 'frozen' && video.url && /^https?:\/\//iu.test(video.url)) {
+      const task = this.liveTask(taskId);
+      if (this.options.desktop) {
+        const requestId = id(`video_motion_${taskId}`);
+        const requests = this.requestIds.get(taskId) || new Set<string>(); requests.add(requestId); this.requestIds.set(taskId, requests);
+        try {
+          const response = await this.options.desktop.videoRequest({ requestId, url: video.url, method: 'GET', responseType: 'base64' });
+          if (response.status >= 200 && response.status < 300 && response.bodyEncoding === 'base64') return `data:${response.contentType?.startsWith('video/') ? response.contentType.split(';')[0] : video.mimeType || 'video/mp4'};base64,${response.body}`;
+        } finally { requests.delete(requestId); }
+      } else {
+        const response = await fetch(video.url);
+        if (response.ok) {
+          const content = await response.blob();
+          const blob = content.type.startsWith('video/') ? content : new Blob([content], { type: video.mimeType || 'video/mp4' });
+          return new Promise<string>((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(String(reader.result)); reader.onerror = reject; reader.readAsDataURL(blob); });
+        }
+      }
+      if (task) this.ensureActive(task);
+    }
+    throw new Error(`无法读取参考视频“${video.name}”的原文件。`);
+  }
+
+  private async freezeMotion(taskId: string, video: FrozenVideoMotionReference): Promise<{ video: FrozenVideoMotionReference; dataUrl: string }> {
+    const dataUrl = await this.motionData(taskId, video);
+    if (video.freezeState === 'frozen') return { video, dataUrl };
+    const { url: _url, dataUrl: _data, relativePath: _path, checksum: _checksum, ...metadata } = video;
+    if (this.options.desktop?.storeVideoReferenceVideo) {
+      const managed = await this.options.desktop.storeVideoReferenceVideo({ dataUrl, fileName: video.fileName });
+      return { video: { ...metadata, fileName: managed.fileName, relativePath: managed.relativePath, checksum: managed.checksum,
+        mimeType: managed.mimeType, freezeState: 'frozen', frozenAt: Date.now() }, dataUrl };
+    }
+    const bytes = decodeVideoBinaryBody(dataUrl.slice(dataUrl.indexOf(',') + 1));
+    const checksum = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (value) => value.toString(16).padStart(2, '0')).join('');
+    return { video: { ...metadata, dataUrl, checksum, freezeState: 'frozen', frozenAt: Date.now() }, dataUrl };
+  }
+
+  private async freezeDraftVideos(taskId: string, draft: VideoGenerationDraft, assets: ReferenceAsset[]): Promise<FrozenVideoMotionReference[] | undefined> {
+    if (!draft.videoReferences?.length) return undefined;
+    const videos: FrozenVideoMotionReference[] = [];
+    for (const [index, reference] of draft.videoReferences.entries()) {
+      const asset = assets[index] as ReferenceAsset & Pick<FrozenVideoMotionReference, 'freezeState' | 'frozenAt'>;
+      const source: FrozenVideoMotionReference = { ...reference, name: asset.name, fileName: asset.fileName, relativePath: asset.relativePath, checksum: asset.checksum,
+        dataUrl: asset.dataUrl, url: /^https?:\/\//iu.test(asset.url || '') ? asset.url : undefined, mimeType: asset.mimeType,
+        durationSec: asset.durationSec, freezeState: asset.freezeState || 'pending', frozenAt: asset.frozenAt };
+      videos.push((await this.freezeMotion(taskId, source)).video);
+    }
+    return videos;
+  }
+
   /** Image rebinding must see its saved base text. Reinsert explicit audio
    * bindings afterward without consulting mutable project voice presets. */
   private prepareReferenceDraft(project: Project, draft: VideoGenerationDraft, context: Parameters<typeof prepareVideoH3ReferenceDraft>[2]) {
+    if (draft.reuseTaskId) return { draft, issue: undefined };
+    draft = { ...draft, prompt: stripVideoMotionPromptBinding(draft), videoReferenceBinding: undefined };
     const audio = draft.audioReferenceBinding;
     const unbound = audio && draft.prompt === audio.renderedPrompt ? { ...draft, prompt: audio.basePrompt, audioReferenceBinding: undefined } : draft;
     const bound = prepareVideoH3ReferenceDraft(project, unbound, context);
@@ -1503,10 +1576,12 @@ export class VideoGenerationEngine {
     if (boundValidation.issue) throw new Error(boundValidation.issue);
     Object.assign(validationDraft, boundValidation.draft);
     if (!reuse) Object.assign(validationDraft, prepareVideoAudioDraft(project, validationDraft, config));
+    if (!reuse) Object.assign(validationDraft, prepareVideoMotionDraft(project, validationDraft, { backend: draft.backend, api: config, workflow }));
     this.assertAudioConnection(validationDraft, config);
     const audioIssues = validateVideoAudioReferences(project, validationDraft, config, reuse?.audios);
     if (audioIssues.length) throw new Error(audioIssues.join(' '));
     const audioAssets = this.audioAssets(project, validationDraft, reuse);
+    const videoAssets = this.motionAssets(project, validationDraft, reuse);
     // Pending-tail drafts keep their pre-insertion image array for dependency
     // placement, but display/fingerprint the exact eventual submission text.
     draft.prompt = validationDraft.prompt;
@@ -1518,6 +1593,8 @@ export class VideoGenerationEngine {
     draft.audioReferences = validationDraft.audioReferences;
     draft.audioSelectionMode = validationDraft.audioSelectionMode;
     draft.audioReferenceBinding = validationDraft.audioReferenceBinding;
+    draft.videoReferences = validationDraft.videoReferences;
+    draft.videoReferenceBinding = validationDraft.videoReferenceBinding;
     if (draft.source?.promptFormat) draft.source = { ...draft.source, promptFingerprint: sourceContentHash(draft.prompt) };
     if (draft.backend === 'comfyui') {
       assertNoEmbeddedVideoCredentials(parseComfyVideoWorkflow(workflow!.workflowJson), `批量第 ${index + 1} 项 ComfyUI 工作流`);
@@ -1540,7 +1617,7 @@ export class VideoGenerationEngine {
     );
     const requestFingerprint = videoBatchDependencyFingerprint(baseRequestFingerprint, requestedTail);
     return {
-      item: { ...item, itemKey, ...(requestedTail ? { previousTail: requestedTail } : {}) }, index, draft, assets, audioAssets, config, comfy, workflow,
+      item: { ...item, itemKey, ...(requestedTail ? { previousTail: requestedTail } : {}) }, index, draft, assets, audioAssets, videoAssets, config, comfy, workflow,
       apiKey: draft.backend === 'api' ? config!.apiKey : comfy.apiKey,
       requestFingerprint,
     };
@@ -1624,6 +1701,7 @@ export class VideoGenerationEngine {
         };
       }),
       audios: await this.freezeDraftAudios(taskId, draft, prepared.audioAssets, project),
+      videos: await this.freezeDraftVideos(taskId, draft, prepared.videoAssets),
       clientId: id('video_client'),
       ...(previousTail ? { previousTail } : {}),
       ...(chainEnabled ? { batchCompletionOrder: true } : {}),
@@ -1653,7 +1731,7 @@ export class VideoGenerationEngine {
       targetId: draft.backend === 'api' ? prepared.config?.model || 'api' : prepared.workflow?.name || 'comfyui',
       status: 'draft',
       requestBody: { prompt: draft.prompt, parameters: draft.parameters, referenceAssetIds: draft.references.map((reference) => reference.assetId),
-        ...(draft.audioReferences?.length ? { audioAssetIds: draft.audioReferences.map((reference) => reference.assetId) } : {}) },
+        ...(draft.audioReferences?.length ? { audioAssetIds: draft.audioReferences.map((reference) => reference.assetId) } : {}), ...(draft.videoReferences?.length ? { videoAssetIds: draft.videoReferences.map((reference) => reference.assetId) } : {}) },
       sequencePlanId: draft.source?.sequencePlanId,
       segmentId: draft.source?.segmentId,
       segmentIndex: draft.source?.segmentIndex,
@@ -1668,7 +1746,7 @@ export class VideoGenerationEngine {
         snapshot,
         stage: 'preparing',
         batchQueueState: 'waiting',
-        preparation: { version: 1, phase: 'preparing', uploadedImages: [], ...(snapshot.audios?.length ? { uploadedAudios: [] } : {}) },
+        preparation: { version: 1, phase: 'preparing', uploadedImages: [], ...(snapshot.audios?.length ? { uploadedAudios: [] } : {}), ...(snapshot.videos?.length ? { uploadedVideos: [] } : {}) },
         message: '已加入批量任务，等待安全提交',
         ...(previousTail ? { tailPreparation: { phase: 'waiting' as const, revision: 0, message: '等待上一段视频完成并保存到本地' } } : {}),
       },
@@ -1952,10 +2030,12 @@ export class VideoGenerationEngine {
     if (boundDraft.issue) throw new Error(boundDraft.issue);
     Object.assign(draft, boundDraft.draft);
     if (!reuse) Object.assign(draft, prepareVideoAudioDraft(project, draft, config));
+    if (!reuse) Object.assign(draft, prepareVideoMotionDraft(project, draft, { backend: draft.backend, api: config, workflow }));
     this.assertAudioConnection(draft, config);
     const audioIssues = validateVideoAudioReferences(project, draft, config, reuse?.audios);
     if (audioIssues.length) throw new Error(audioIssues.join(' '));
     const audioAssets = this.audioAssets(project, draft, reuse);
+    const videoAssets = this.motionAssets(project, draft, reuse);
     if (draft.source?.promptFormat) draft.source = { ...draft.source, promptFingerprint: sourceContentHash(draft.prompt) };
     const apiEndpoint = config ? videoApiSubmitEndpoint(config) : '';
     if (draft.backend === 'api' && (!config?.enabled || !apiEndpoint)) {
@@ -1988,14 +2068,15 @@ export class VideoGenerationEngine {
         connection: draft.backend === 'api' ? { backend: 'api', api: withoutApiKey(config!) } : { backend: 'comfyui', comfyui: safeComfy, workflow: structuredClone(workflow!) },
         images: draft.references.map((reference, index) => ({ ...reference, name: assets[index].name, fileName: assets[index].fileName, relativePath: assets[index].relativePath, checksum: assets[index].checksum, dataUrl: assets[index].dataUrl, url: /^https?:\/\//iu.test(assets[index].url || '') ? assets[index].url : undefined, freezeState: 'pending' })),
         audios: await this.freezeDraftAudios(taskId, draft, audioAssets, project),
+        videos: await this.freezeDraftVideos(taskId, draft, videoAssets),
         clientId: id('video_client'),
       };
       const task: VideoGenerationTask = {
         id: taskId, kind: 'video', storyboardId: draft.source?.storyboardId || '', targetId: draft.backend === 'api' ? config?.model || 'api' : workflow?.name || 'comfyui',
         status: 'submitting', requestBody: { prompt: draft.prompt, parameters: draft.parameters, referenceAssetIds: draft.references.map((item) => item.assetId),
-          ...(draft.audioReferences?.length ? { audioAssetIds: draft.audioReferences.map((item) => item.assetId) } : {}) },
+          ...(draft.audioReferences?.length ? { audioAssetIds: draft.audioReferences.map((item) => item.assetId) } : {}), ...(draft.videoReferences?.length ? { videoAssetIds: draft.videoReferences.map((item) => item.assetId) } : {}) },
         sequencePlanId: draft.source?.sequencePlanId, segmentId: draft.source?.segmentId, segmentIndex: draft.source?.segmentIndex,
-        videoJob: { snapshot, stage: 'preparing', preparation: { version: 1, phase: 'preparing', uploadedImages: [], ...(snapshot.audios?.length ? { uploadedAudios: [] } : {}) }, message: '正在准备已选择的提示词与素材' }, createdAt: now, updatedAt: now,
+        videoJob: { snapshot, stage: 'preparing', preparation: { version: 1, phase: 'preparing', uploadedImages: [], ...(snapshot.audios?.length ? { uploadedAudios: [] } : {}), ...(snapshot.videos?.length ? { uploadedVideos: [] } : {}) }, message: '正在准备已选择的提示词与素材' }, createdAt: now, updatedAt: now,
       };
       // Inline images are quick local writes. Never put their full pixels in desktop project JSON.
       if (this.options.desktop?.storeGeneratedImage || this.options.desktop?.storeVideoReferenceImage) for (let index = 0; index < snapshot.images.length; index += 1) {
@@ -2153,8 +2234,36 @@ export class VideoGenerationEngine {
         // Persist every file receipt before uploading the next audio or POSTing.
         task = await this.checkpoint({ ...task, videoJob: { ...task.videoJob!, preparation: { ...task.videoJob!.preparation!, uploadedAudios } } });
       }
-      const body = draft.backend === 'api' ? buildVideoApiBody(config!, draft, imageValues, audioValues) : {
-        prompt: bindComfyVideoWorkflow(workflow!, draft.prompt, imageValues, draft.parameters, draft.references), client_id: task.videoJob!.snapshot.clientId,
+      const videoValues: string[] = [];
+      for (const [index, originalVideo] of (task.videoJob!.snapshot.videos || []).entries()) {
+        this.ensureActive(task);
+        const receipt = task.videoJob!.preparation!.uploadedVideos?.[index];
+        if (receipt) { videoValues.push(receipt); continue; }
+        const frozen = await this.freezeMotion(taskId, originalVideo);
+        this.ensureActive(task);
+        let uploadedValue = frozen.dataUrl;
+        const fileName = frozen.video.fileName || `reference-video-${index + 1}.mp4`;
+        if (draft.backend === 'comfyui') {
+          const result = await this.request(task, { url: join(comfy!.baseUrl, '/upload/image'), method: 'POST', headers,
+            multipart: { fields: { overwrite: 'false', type: 'input' }, files: [{ fieldName: 'image', fileName: `${taskId}_video_${index}_${fileName}`, dataUrl: frozen.dataUrl }] } });
+          if (!record(result) || typeof result.name !== 'string') throw new Error('ComfyUI 视频上传未返回文件名。');
+          uploadedValue = `${result.subfolder ? `${result.subfolder}/` : ''}${result.name}`;
+        } else if (config?.provider === 'runninghub' || config?.videoUploadEndpoint) {
+          const runningHub = config.provider === 'runninghub';
+          const url = runningHub ? new URL('/openapi/v2/media/upload/binary', videoApiSubmitEndpoint(config)).toString() : config.videoUploadEndpoint!;
+          const result = await this.request(task, { url, method: 'POST', headers, multipart: { files: [{ fieldName: runningHub ? 'file' : config.videoUploadField || 'file', fileName, dataUrl: frozen.dataUrl }] } });
+          const value = nestedValue(result, runningHub ? 'data.fileName' : config.videoUploadUrlPath || 'url');
+          if (typeof value !== 'string' || !value) throw new Error('参考视频上传未返回文件标识。');
+          uploadedValue = value;
+        }
+        videoValues.push(uploadedValue);
+        const videos = [...(task.videoJob!.snapshot.videos || [])]; videos[index] = frozen.video;
+        const uploadedVideos = [...(task.videoJob!.preparation!.uploadedVideos || [])]; uploadedVideos[index] = uploadedValue === frozen.dataUrl ? null : uploadedValue;
+        task = await this.checkpoint({ ...task, videoJob: { ...task.videoJob!, snapshot: { ...task.videoJob!.snapshot, videos },
+          preparation: { ...task.videoJob!.preparation!, uploadedVideos }, message: `已传入参考视频 ${index + 1}/${videos.length}` } });
+      }
+      const body = draft.backend === 'api' ? buildVideoApiBody(config!, draft, imageValues, audioValues, videoValues) : {
+        prompt: bindComfyVideoWorkflow(workflow!, draft.prompt, imageValues, draft.parameters, draft.references, videoValues, draft.videoReferences), client_id: task.videoJob!.snapshot.clientId,
       };
       if (config?.provider === 'rhtv_web') body.client_id = task.videoJob!.snapshot.clientId;
       if (draft.backend === 'api') {
@@ -2366,6 +2475,7 @@ export class VideoGenerationEngine {
 
   private sameContinuationTask(left: VideoGenerationTask, right: VideoGenerationTask): boolean {
     return sameFrozenAudioSources(left.videoJob?.snapshot, right.videoJob?.snapshot)
+      && sameFrozenMotionSources(left.videoJob?.snapshot, right.videoJob?.snapshot)
       && canonicalText([left.id, left.createdAt, left.batchId, left.batchItemKey, left.batchIndex, left.batchTotal, left.requestFingerprint,
       left.videoJob?.snapshot.projectId, left.videoJob?.snapshot.clientId, left.videoJob?.snapshot.connection,
       left.videoJob?.snapshot.draft, left.videoJob?.snapshot.continuedFrom]) === canonicalText([
@@ -2902,12 +3012,14 @@ export class VideoGenerationEngine {
       const rank = (phase: string | undefined) => phase === 'acknowledged' ? 2 : phase === 'post-started' ? 1 : 0;
       const prepared = (job: VideoGenerationJob) => job.snapshot.images.filter((image) => image.freezeState === 'frozen').length
         + (job.snapshot.audios?.filter((audio) => audio.freezeState === 'frozen').length || 0)
+        + (job.snapshot.videos?.filter((video) => video.freezeState === 'frozen').length || 0) + (job.preparation?.uploadedVideos?.filter(Boolean).length || 0)
         + (job.preparation?.uploadedImages.filter(Boolean).length || 0) + (job.preparation?.uploadedAudios?.filter(Boolean).length || 0);
       const matching = saved?.videoJob && saved.id === current.id && saved.createdAt === current.createdAt && saved.videoJob.snapshot.projectId === current.videoJob.snapshot.projectId
         && saved.videoJob.snapshot.clientId === current.videoJob.snapshot.clientId
         && JSON.stringify(canonical(saved.videoJob.snapshot.connection)) === JSON.stringify(canonical(current.videoJob.snapshot.connection))
         && JSON.stringify(canonical(saved.videoJob.snapshot.draft)) === JSON.stringify(canonical(current.videoJob.snapshot.draft))
         && sameFrozenAudioSources(saved.videoJob.snapshot, current.videoJob.snapshot)
+        && sameFrozenMotionSources(saved.videoJob.snapshot, current.videoJob.snapshot)
         && canonicalText(saved.videoJob.snapshot.previousTail) === canonicalText(current.videoJob.snapshot.previousTail)
         && saved.videoJob.snapshot.batchCompletionOrder === current.videoJob.snapshot.batchCompletionOrder
         && saved.videoJob.snapshot.batchPredecessorTaskId === current.videoJob.snapshot.batchPredecessorTaskId

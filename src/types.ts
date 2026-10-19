@@ -1651,7 +1651,7 @@ export interface VideoTaskApiConfig {
   runningHubOutputNodeIds?: string[];
   /** Ordered image-slot capacity; individual submissions may use fewer slots. */
   runningHubImageRoles?: ReferenceRole[];
-  runningHubMappedFields?: Array<{ nodeId: string; fieldName: string; kind: 'prompt' | 'image' | 'audio' | 'image-count' | 'parameter'; imageIndex?: number; audioIndex?: number; emptyValue?: '' | 'None' | 'example.png'; imageCountMode?: 'prefix'; imageCountSource?: 'explicit' | 'verified-app'; parameter?: string; originalValue?: unknown }>;
+  runningHubMappedFields?: Array<{ nodeId: string; fieldName: string; kind: 'prompt' | 'image' | 'audio' | 'video' | 'image-count' | 'parameter'; imageIndex?: number; audioIndex?: number; videoIndex?: number; emptyValue?: '' | 'None' | 'example.png'; imageCountMode?: 'prefix'; imageCountSource?: 'explicit' | 'verified-app'; parameter?: string; originalValue?: unknown }>;
   /** Local controls for mapped parameters; never included in the cloud request body. */
   runningHubParameterControls?: Record<string, RunningHubVideoFieldControl>;
   /** JSON placeholders: {{prompt}}, {{model}}, {{images}}, {{first_image}}, {{last_image}}, {{parameters}}. */
@@ -1665,6 +1665,10 @@ export interface VideoTaskApiConfig {
   cancelMethod?: 'POST' | 'DELETE';
   /** Optional multipart image-upload endpoint; absent uses data URLs. */
   imageUploadEndpoint?: string;
+  /** Explicit generic multipart video upload; absent custom templates receive the captured data URL. */
+  videoUploadEndpoint?: string;
+  videoUploadField?: string;
+  videoUploadUrlPath?: string;
   imageUploadField?: string;
   imageUploadUrlPath?: string;
 }

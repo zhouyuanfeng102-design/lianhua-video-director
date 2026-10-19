@@ -280,7 +280,7 @@ export const renderVideoAudioDraft = (project: Project, draft: VideoGenerationDr
     if (section) {
       const lines = entries.map(({ reference, target, use }) => `@Audio ${reference.slotIndex + 1}${english ? ': ' : '：'}${target}; ${reference.retainMode}: ${use}`);
       const sectionBody = basePrompt.slice(section.start, section.end);
-      const current = cleanSeedanceReferenceClaims(sectionBody, { hasImages: draft.references.length > 0, hasAudio: true });
+      const current = cleanSeedanceReferenceClaims(sectionBody, { hasImages: draft.references.length > 0, hasAudio: true, hasVideo: Boolean(draft.videoReferences?.length) });
       // Record the exact replacement so clearing the voice selection restores
       // the image-bound draft, including authored scene facts and quotations.
       insertions.push({ at: section.start, replacedText: sectionBody,

@@ -4,6 +4,7 @@ import { prepareVideoH3ReferenceDraft, type VideoH3ReferenceContext } from './vi
 import { readExistingH3PromptProtocol } from './h3PromptProtocol';
 import { sourceContentHash } from './sourceContentHash';
 import { videoReferenceSlotIndex } from './videoReferenceSlots';
+import { stripVideoMotionPromptBinding } from './videoMotionReferences';
 
 export type VideoH3MediaMode = 'base' | 'keyframe' | 'full-reference';
 export interface VideoH3MediaModeContract {
@@ -14,6 +15,7 @@ export interface VideoH3MediaModeContract {
   boundarySemantics: 'explicit-keyframe-input' | 'composition-reference';
   images: Array<{ assetId: string; slotIndex: number; role: ReferenceRole }>;
   audioCount: number;
+  videoCount: number;
   inputIdentity: string;
   /** Only explicit request updates carry a freshness claim. */
   referenceUpdateCurrent?: boolean;
@@ -48,11 +50,12 @@ export const videoH3MediaModeContract = (
   const images = draft.references.map((reference, index) => ({ assetId: reference.assetId,
     slotIndex: videoReferenceSlotIndex(reference, index), role: reference.role }));
   const audioCount = draft.audioReferences?.length || 0;
+  const videoCount = draft.videoReferences?.length || 0;
   const boundaryOnly = images.length <= 2 && images.every((image) => image.role === 'first-frame' || image.role === 'last-frame')
     && images.filter((image) => image.role === 'first-frame').length <= 1
     && images.filter((image) => image.role === 'last-frame').length <= 1;
-  const mode: VideoH3MediaMode = !images.length && !audioCount ? 'base'
-    : boundaryOnly && !audioCount ? 'keyframe' : 'full-reference';
+  const mode: VideoH3MediaMode = !images.length && !audioCount && !videoCount ? 'base'
+    : boundaryOnly && !audioCount && !videoCount ? 'keyframe' : 'full-reference';
   const protocol = readExistingH3PromptProtocol(draft.prompt);
   const authoredMode = !protocol ? 'unreadable' as const : protocol.sections[0] === 'subject_definitions' ? 'full-reference' as const : 'integrated' as const;
   const boundarySemantics = context.backend === 'api' && (context.api?.provider === 'minimax'
@@ -62,24 +65,29 @@ export const videoH3MediaModeContract = (
     assetId: image.assetId === '__future_tail_binding__' || draft.h3ReferenceBinding?.pendingPictureSlots?.some((slot) =>
       slot.slotIndex === image.slotIndex && slot.role === image.role)
       ? `pending-tail-slot:${image.slotIndex}` : image.assetId }));
+  const videoMappings = context.api?.runningHubMappedFields?.filter((field) => field.kind === 'video');
+  const workflowVideos = context.workflow?.mapping.videos;
   const inputIdentity = sourceContentHash(JSON.stringify([identityImages, draft.audioReferences || [], draft.backend,
     draft.workflowId, draft.runningHubWorkflowId, draft.apiProfileId, boundarySemantics,
     { provider: context.api?.provider, model: context.api?.model, endpoint: context.api?.endpoint,
       requestTemplateHash: referenceTemplateHash(context),
       imageRoles: context.api?.runningHubImageRoles,
       imageMappings: context.api?.runningHubMappedFields?.filter((field) => field.kind === 'image'),
+      ...(videoMappings?.length ? { videoMappings } : {}),
       rhtvMode: draft.parameters.rhtv_mode || context.api?.rhtvMode },
     context.workflow ? { id: context.workflow.id, images: context.workflow.mapping.images,
-      workflowHash: sourceContentHash(context.workflow.workflowJson) } : undefined]));
-  return { version: 1, mode, authoredMode, boundarySemantics, images, audioCount, inputIdentity,
+      ...(workflowVideos?.length ? { videos: workflowVideos } : {}),
+      workflowHash: sourceContentHash(context.workflow.workflowJson) } : undefined,
+    ...(videoCount ? [{ videoReferences: draft.videoReferences }] : [])]));
+  return { version: 1, mode, authoredMode, boundarySemantics, images, audioCount, videoCount, inputIdentity,
     ...(draft.h3MediaModeUpdate ? { referenceUpdateCurrent: draft.h3MediaModeUpdate.inputIdentity === inputIdentity } : {}) };
 };
 
 export const videoH3MediaModeIssue = (contract: VideoH3MediaModeContract): string | undefined =>
   contract.referenceUpdateCurrent === false
-    ? '本次参考图片、音频或连接映射已变化，可直接使用当前稿生成，也可“更新本次参考”。'
+    ? '本次参考图片、音频、视频或连接映射已变化，可直接使用当前稿生成，也可“更新本次参考”。'
     : contract.mode === 'full-reference' && contract.authoredMode !== 'full-reference'
-      ? '本次使用多参考图片或音频，已有稿采用三字段格式。可直接生成，也可“更新本次参考”调整参考说明。' : undefined;
+      ? '本次使用多参考图片、音频或视频，已有稿采用三字段格式。可直接生成，也可“更新本次参考”调整参考说明。' : undefined;
 
 /** The same deterministic compiler is used by explicit reference updates and
  * submission. Unknown historical prose stays compatible without an LLM call. */
@@ -92,6 +100,7 @@ export const refreshVideoH3MediaModeDraft = async (input: {
   const assertCurrent = () => { if (input.isCurrent?.() === false) throw new Error('当前选图或视频稿已变化，参考更新未应用。'); };
   assertCurrent();
   let draft = structuredClone(input.draft);
+  draft = { ...draft, prompt: stripVideoMotionPromptBinding(draft), videoReferenceBinding: undefined };
   if (draft.audioReferenceBinding && draft.prompt === draft.audioReferenceBinding.renderedPrompt) {
     draft = { ...draft, prompt: draft.audioReferenceBinding.basePrompt, audioReferenceBinding: undefined };
   }

@@ -7,6 +7,7 @@ import { assertVideoReferenceSlots, videoReferenceSlotIndex } from './videoRefer
 import { prepareVideoH3ReferenceDraft, type VideoH3ReferenceContext } from './videoH3ReferenceBinding';
 import { normalizeVideoTransportImage, videoTransportReferenceAsset } from './videoTransportImage';
 import type { VideoAudioReference } from './videoAudioTypes';
+import type { VideoMotionReference } from './videoMotionTypes';
 import type {
   AppState,
   AppSettings,
@@ -357,6 +358,15 @@ const audioReferenceManifest = (
   })).sort((left, right) => left.slotIndex - right.slotIndex || left.bindingId.localeCompare(right.bindingId));
 };
 
+const motionReferenceManifest = (references: readonly VideoMotionReference[], assets: readonly FingerprintAsset[]) => {
+  const byId = new Map(assets.map((asset) => [asset.id, asset]));
+  return references.map((reference) => ({ ...reference, content: assetContentIdentity(byId.get(reference.assetId), reference.assetId) }))
+    .sort((left, right) => left.slotIndex - right.slotIndex || left.bindingId.localeCompare(right.bindingId));
+};
+const snapshotMotionManifest = (snapshot: VideoGenerationSnapshot) => motionReferenceManifest(snapshot.draft.videoReferences || [],
+  (snapshot.videos || []).map((video) => ({ id: video.assetId, checksum: video.checksum, dataUrl: video.dataUrl,
+    relativePath: video.relativePath, url: video.url, updatedAt: video.frozenAt || 0 })));
+
 const snapshotAudioManifest = (snapshot: VideoGenerationSnapshot) => (snapshot.audios || [])
   .map((audio) => audioReferenceManifest([audio], [{
     id: audio.assetId, checksum: audio.checksum, dataUrl: audio.dataUrl,
@@ -379,10 +389,12 @@ export const videoBatchPromptFingerprint = (
 });
 
 export const videoBatchReferenceFingerprint = (
-  draft: Pick<VideoGenerationDraft, 'references' | 'audioReferences'>,
+  draft: Pick<VideoGenerationDraft, 'references' | 'audioReferences' | 'videoReferences'>,
   assets: readonly ReferenceAsset[],
-): string => fingerprint('video-reference', draft.audioReferences?.length
-  ? { images: referenceManifest(draft.references, assets), audios: audioReferenceManifest(draft.audioReferences, assets) }
+): string => fingerprint('video-reference', draft.audioReferences?.length || draft.videoReferences?.length
+  ? { images: referenceManifest(draft.references, assets),
+    ...(draft.audioReferences?.length ? { audios: audioReferenceManifest(draft.audioReferences, assets) } : {}),
+    ...(draft.videoReferences?.length ? { videos: motionReferenceManifest(draft.videoReferences, assets) } : {}) }
   : referenceManifest(draft.references, assets));
 
 export const videoBatchConnectionIdentity = (
@@ -427,6 +439,7 @@ export const videoBatchRequestFingerprint = (
   prompt: draft.prompt,
   references: referenceManifest(referenceUsageForConnection(draft, connectionIdentity, referenceOffset), assets),
   ...(draft.audioReferences?.length ? { audios: audioReferenceManifest(draft.audioReferences, assets) } : {}),
+  ...(draft.videoReferences?.length ? { videos: motionReferenceManifest(draft.videoReferences, assets) } : {}),
   backend: draft.backend,
   connection: semanticConnection(connectionIdentity),
   parameters: draft.parameters,
@@ -460,6 +473,7 @@ const snapshotRequestFingerprint = (snapshot: VideoGenerationSnapshot): string =
   prompt: snapshot.draft.prompt,
   references: snapshotReferenceManifest(snapshot),
   ...(snapshot.audios?.length ? { audios: snapshotAudioManifest(snapshot) } : {}),
+  ...(snapshot.videos?.length ? { videos: snapshotMotionManifest(snapshot) } : {}),
   backend: snapshot.draft.backend,
   connection: semanticConnection(snapshot.connection),
   parameters: snapshot.draft.parameters,

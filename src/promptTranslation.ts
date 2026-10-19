@@ -18,10 +18,13 @@ import { VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE, withVideoActionChoreography
 import { MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE } from './nsfwPromptRules';
 import { hasNsfwDetailSignal } from './promptConstraints';
 import { buildPromptTranslationDocument, renderPromptTranslationDocument, type PromptTranslationSourceCharacter, type PromptTranslationSourceDialogue, type PromptTranslationSourceEvent } from './promptTranslationDocument';
+import { serializeAuthoredH3Prompt } from './h3DeliverySections';
 
 export interface TranslateVideoPromptToEnglishOptions {
   /** Target-specific format scope; historical callers retain the H3/ordinary contract. */
-  promptFormat?: 'seedance';
+  promptFormat?: 'seedance' | 'h3';
+  /** Explicit source ownership; legacy H3 need not already contain titles. */
+  h3AudioMode?: string;
   /** Keep AI-authored content; optional metadata must not veto the translation. */
   acceptAiAuthoredContent?: boolean;
   onDeliveryWarnings?: (warnings: string[]) => void;
@@ -210,6 +213,7 @@ const restoreValues = (source: string, values: readonly ProtectedValue[]): strin
 
 export const translateVideoPromptToEnglish = async ({
   promptFormat,
+  h3AudioMode,
   sourcePrompt,
   request,
   clean,
@@ -238,8 +242,10 @@ export const translateVideoPromptToEnglish = async ({
     throw new Error('没有可翻译的视频提示词，请先生成中文提示词。');
   }
 
-  const sourceIsH3 = Boolean(readH3PromptProtocol(sourcePrompt))
+  const sourceIsH3 = promptFormat === 'h3' || Boolean(readH3PromptProtocol(sourcePrompt))
     || (acceptAiAuthoredContent && /^(?:subject_definitions|integrated_multimodal_description):/mu.test(sourcePrompt));
+  if (sourceIsH3 && promptFormat !== 'seedance') sourcePrompt = serializeAuthoredH3Prompt(sourcePrompt,
+    { language: 'zh', audioMode: h3AudioMode });
   const sourceHasNsfwVideoAction = hasNsfwDetailSignal(sourcePrompt, stagingContext ? JSON.stringify(stagingContext) : '');
   let serializationRepairs = 0;
   const checkedRequest = async (system: string, user: string, includesStagingContext = false, withIdentityEnvelope = false, serializationRepair = false, sourceDocumentTranslation = false): Promise<string> => {
@@ -284,7 +290,7 @@ export const translateVideoPromptToEnglish = async ({
             .replace('不把镜内声音提升或重复到overall_soundscape', '不把镜内声音提升为整段或重复铺设')
             .replace('H3字段、切点和原语言对白保持不变。', 'Seedance 章节、已确认起止时间和原语言对白保持不变。'));
       }
-      scopedSystem = withVideoActionChoreographyScope(scopedSystem, 'translation', promptFormat);
+      scopedSystem = withVideoActionChoreographyScope(scopedSystem, 'translation', promptFormat === 'seedance' ? 'seedance' : undefined);
       const response = await request(scopedSystem, user,
         (includesStagingContext && stagingContext) || serializationRepair || sourceDocumentTranslation ? {
           ...(includesStagingContext && stagingContext ? { includesStagingContext: true as const } : {}),
@@ -299,7 +305,7 @@ export const translateVideoPromptToEnglish = async ({
     }
   };
 
-  if (promptFormat !== 'seedance' && sourceIsH3 && (acceptAiAuthoredContent || reviewWithAi || identityBindings)) {
+  if (promptFormat !== 'seedance' && sourceIsH3 && (promptFormat === 'h3' || acceptAiAuthoredContent || reviewWithAi || identityBindings)) {
     const document = buildPromptTranslationDocument({ sourcePrompt, identityBindings, sourceCharacters, sourceDialogues, sourceEvents });
     const response = await checkedRequest(VIDEO_PROMPT_ENGLISH_DOCUMENT_TRANSLATION_SYSTEM_PROMPT,
       JSON.stringify({

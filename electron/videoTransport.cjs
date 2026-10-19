@@ -2,6 +2,7 @@ const { randomBytes } = require('node:crypto');
 const path = require('node:path');
 const { decodeReferenceImageDataUrl } = require('./imageReferenceTransport.cjs');
 const { decodeReferenceAudioDataUrl } = require('./audioReferenceTransport.cjs');
+const { decodeReferenceVideoDataUrl } = require('./videoMotionReference.cjs');
 
 const abortError = () => Object.assign(new Error('视频请求已取消'), { name: 'AbortError', code: 'ABORT_ERR' });
 const validId = (value) => {
@@ -44,7 +45,8 @@ const videoRequestOptions = (payload, signal) => {
     }
     for (const [index, file] of files.entries()) {
       const decoded = /^data:audio\//iu.test(String(file.dataUrl || ''))
-        ? decodeReferenceAudioDataUrl(file.dataUrl) : decodeReferenceImageDataUrl(file.dataUrl, Number.POSITIVE_INFINITY);
+        ? decodeReferenceAudioDataUrl(file.dataUrl) : /^data:video\//iu.test(String(file.dataUrl || ''))
+          ? decodeReferenceVideoDataUrl(file.dataUrl) : decodeReferenceImageDataUrl(file.dataUrl, Number.POSITIVE_INFINITY);
       const requested = path.basename(String(file.fileName || `reference-${index + 1}`)).replace(/[\r\n"\\/]/gu, '_').slice(0, 160);
       const name = `${path.basename(requested, path.extname(requested)) || 'reference'}${decoded.extension}`;
       append(`--${boundary}\r\nContent-Disposition: form-data; name="${fieldName(file.fieldName || file.name)}"; filename="${name}"\r\nContent-Type: ${decoded.mimeType}\r\n\r\n`);

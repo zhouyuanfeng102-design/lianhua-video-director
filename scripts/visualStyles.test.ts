@@ -114,6 +114,11 @@ for (const definition of definitions) {
   }
 }
 
+for (const definition of definitions) {
+  assert.doesNotMatch(definition.preset.sound, /音乐只在|轻柔电子乐维持|主题旋律只在|音乐在招式结果|管弦或主题旋律在|低频合成器随追逐/u,
+    'a visual preset must not authorize an automatic score');
+}
+
 const wasteland = findVisualStyleDefinition('末日废土');
 assert.ok(wasteland, '末日废土 must be findable by name');
 for (const anchor of ['灰橙低饱和', '锈蚀金属', '风沙尘雾', '破败混凝土', '硬质逆光', '空旷压迫感']) {

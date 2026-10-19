@@ -32,6 +32,7 @@ export interface RunningHubVideoMapping {
   images: Array<RunningHubVideoInputBinding & { role?: ReferenceRole }>;
   /** File inputs only. Labels are local metadata, not extra cloud fields. */
   audios?: Array<RunningHubVideoInputBinding & { label?: string }>;
+  videos?: Array<RunningHubVideoInputBinding & { label?: string }>;
   /** Actual selected image count, including a continuation frame. Null disables verified-app adaptation. */
   imageCount?: RunningHubVideoInputBinding | null;
   /** Only explicitly entered task overrides are applied; omitted values keep cloud defaults. */

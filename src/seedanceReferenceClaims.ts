@@ -3,13 +3,14 @@ import { maskVideoPictureReferenceLiterals } from './videoPictureReferences';
 export interface SeedanceReferenceMediaState {
   hasImages: boolean;
   hasAudio: boolean;
+  hasVideo?: boolean;
 }
 
 export interface SeedanceReferenceClaim {
   start: number;
   end: number;
   text: string;
-  kind: 'images' | 'audio' | 'media' | 'text-only';
+  kind: 'images' | 'audio' | 'video' | 'media' | 'text-only';
 }
 
 const zhMedia = '(?:图片|图像|图像像素|照片|视频|音频|声音|音色|声线|参考图片|参考图像|参考照片|参考图|参考音频|Clay\\s+Render)';
@@ -38,7 +39,8 @@ const patterns: Array<{ source: string; kind?: SeedanceReferenceClaim['kind'] }>
 const claimKind = (text: string): SeedanceReferenceClaim['kind'] => {
   const images = /图片|图像|照片|参考图|\b(?:images?|pictures?|photos?)\b/iu.test(text);
   const audio = /音频|声音|音色|声线|\b(?:audio|audios|sound|voices?)\b/iu.test(text);
-  return images && audio ? 'media' : images ? 'images' : audio ? 'audio' : 'media';
+  const video = /视频|\bvideos?\b/iu.test(text);
+  return Number(images) + Number(audio) + Number(video) > 1 ? 'media' : images ? 'images' : audio ? 'audio' : video ? 'video' : 'media';
 };
 
 /** Find only complete, explicit availability/use clauses. A narrative clause
@@ -47,7 +49,7 @@ const claimKind = (text: string): SeedanceReferenceClaim['kind'] => {
 export const findSeedanceReferenceConflicts = (
   text: string, state: SeedanceReferenceMediaState,
 ): SeedanceReferenceClaim[] => {
-  if (!state.hasImages && !state.hasAudio) return [];
+  if (!state.hasImages && !state.hasAudio && !state.hasVideo) return [];
   const masked = maskVideoPictureReferenceLiterals(text);
   const claims: SeedanceReferenceClaim[] = [];
   for (const pattern of patterns) {
@@ -62,9 +64,16 @@ export const findSeedanceReferenceConflicts = (
       if (/声音|音色|声线|\b(?:sound|voices?)\b/iu.test(match[2])
         && !/参考|素材|材料|样本|提供|上传|配置|绑定|映射|\b(?:references?|samples?|materials?|assets?|supplied|provided|uploaded|mapped)\b/iu.test(match[2])) continue;
       const kind = pattern.kind || claimKind(match[2]);
-      if (kind === 'images' && !state.hasImages || kind === 'audio' && !state.hasAudio) continue;
-      // A video-only absence is accurate when this application sends pictures/audio.
-      if (!pattern.kind && /视频|\bvideos?\b/iu.test(match[2]) && !/图片|图像|照片|参考图|音频|声音|音色|声线|\b(?:images?|pictures?|photos?|audio|audios|sound|voices?)\b/iu.test(match[2])) continue;
+      if (kind === 'images' && !state.hasImages || kind === 'audio' && !state.hasAudio || kind === 'video' && !state.hasVideo) continue;
+      // A mixed list conflicts only with one of the media it actually names.
+      // Selecting a video does not make an absence of images/audio inaccurate.
+      if (!pattern.kind && kind === 'media') {
+        const mentionsImages = /图片|图像|照片|参考图|\b(?:images?|pictures?|photos?)\b/iu.test(match[2]);
+        const mentionsAudio = /音频|声音|音色|声线|\b(?:audio|audios|sound|voices?)\b/iu.test(match[2]);
+        const mentionsVideo = /视频|\bvideos?\b/iu.test(match[2]);
+        if ((mentionsImages || mentionsAudio || mentionsVideo)
+          && !(mentionsImages && state.hasImages || mentionsAudio && state.hasAudio || mentionsVideo && state.hasVideo)) continue;
+      }
       if (!claims.some((claim) => claim.start < end && claim.end > start)) claims.push({ start, end, text: text.slice(start, end), kind });
     }
   }

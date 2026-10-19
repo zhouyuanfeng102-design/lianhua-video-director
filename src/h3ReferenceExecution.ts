@@ -2,6 +2,7 @@ import type { H3IdentityBindings, ReferenceRole } from './types';
 import { buildPromptTranslationDocument } from './promptTranslationDocument';
 import { maskVideoPictureReferenceLiterals } from './videoPictureReferences';
 import { renderH3PerformancePlan } from './h3PerformancePlan';
+import { H3_EXISTING_SOUND_SUMMARY_EN, H3_EXISTING_SOUND_SUMMARY_ZH } from './h3DeliverySections';
 
 type Identity = H3IdentityBindings['characters'][number];
 type Event = NonNullable<H3IdentityBindings['events']>[number];
@@ -415,9 +416,10 @@ export const renderH3ReferenceExecution = (input: H3ReferenceExecutionInput): H3
   const summaryBody = /^\[reference generation(?:[^\]]*)\]/u.test(authoredSummary) ? authoredSummary : `[reference generation] ${authoredSummary}`;
   const retentionBody = renderRetention(retention?.body || '', characters);
   const bodyTail = /[\r\n]$/u.test(body) ? body : `${body}\n`;
-  // Some saved H3 bodies predate the explicit global sound fields. Do not
-  // promote their local effects into a global bed or ask a model to invent it.
-  const soundText = soundscape ? soundscape.raw + (!music && !/[\r\n]$/u.test(soundscape.raw) ? '\n' : '') : 'overall_soundscape:\nN/A\n\n';
+  // Missing legacy sound sections do not mean the shot's existing sounds are
+  // muted. Summarize their existing scope without introducing a global bed.
+  const soundText = soundscape ? soundscape.raw + (!music && !/[\r\n]$/u.test(soundscape.raw) ? '\n' : '')
+    : `overall_soundscape:\n${input.language === 'en' ? H3_EXISTING_SOUND_SUMMARY_EN : H3_EXISTING_SOUND_SUMMARY_ZH}\n\n`;
   const musicText = music?.raw || 'non_diegetic_music:\nN/A';
   const rendered = `subject_definitions:\n${definitionBody}\n\nsummary:\n${renderVoiceTokens(summaryBody, voiceTokens)}\n\nretention_analysis:\n${renderVoiceTokens(retentionBody, voiceTokens)}\n\ndetailed_description:${bodyTail}${soundText}${musicText}`;
   const renderedEvents = identities.events?.map((event) => {

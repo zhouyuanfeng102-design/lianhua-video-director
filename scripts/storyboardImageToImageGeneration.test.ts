@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { applyOwnedProjectUpdate } from '../src/appEffects';
 import { getSafeErrorDiagnostics } from '../src/errorDiagnostics';
-import { cancelQueuedGenerationTask, removeGenerationTask, revokeQueuedGenerationTask } from '../src/generationTasks';
+import { cancelQueuedGenerationTask, forceStopImageGenerationTask, forceStopImageTask, removeGenerationTask, revokeQueuedGenerationTask } from '../src/generationTasks';
 import { enqueueImageTask } from '../src/imageTaskQueue';
 import { createInitialState, type ManagedMediaResult } from '../src/storage';
 import { createStoryboardImageBatchLifecycle } from '../src/storyboardImages';
@@ -954,6 +954,75 @@ try {
   } }, 'a real image failure keeps the submitted image API, never the newly selected text or image API');
   assert.equal(switchedImageFailure.imageTasks().length, 0, 'late image failure does not write into the newly active project');
   assert.equal(switchedImageFailure.getState().projects.find((project) => project.id === switchedImageFailure.projectId)?.generationTasks[0].status, 'failed');
+
+  for (const undoStage of ['generation', 'save'] as const) {
+    const paidResult = fixture();
+    const paidStarted = deferred();
+    const paidResponse = deferred();
+    const originalStore = paidResult.ctx.storeImage!;
+    let submitted = false;
+    paidResult.ctx.generateImage = async (_api, _input, onStart) => {
+      await onStart?.();
+      submitted = true;
+      if (undoStage === 'generation') { paidStarted.resolve(); await paidResponse.promise; }
+      return { dataUrl: pngA };
+    };
+    paidResult.ctx.storeImage = async (input) => {
+      if (undoStage === 'save' && submitted) { paidStarted.resolve(); await paidResponse.promise; }
+      return originalStore(input);
+    };
+    const pendingPaidResult = paidResult.run({ mode: 'selected-shots', shotIds: ['shot-2'] });
+    await bounded(paidStarted.promise);
+    paidResult.mutate((state) => applyOwnedProjectUpdate(state, paidResult.projectId, (project) => ({
+      ...project, generationTasks: [], storyboards: project.storyboards.map((board) => ({ ...board, officialPromptZh: '用户后来修改的分镜原稿' })),
+    })));
+    paidResult.ctx.lifecycle.releaseCancelledQueuedBatches(() => false);
+    paidResponse.resolve();
+    await bounded(pendingPaidResult);
+    assert.equal(paidResult.imageTasks()[0]?.status, 'succeeded', `${undoStage}: ordinary undo does not lose a submitted paid result`);
+    assert.equal(paidResult.getState().project.assets.filter((asset) => asset.source === 'generated').length, 1);
+    assert.equal(paidResult.getState().project.storyboards[0].officialPromptZh, '用户后来修改的分镜原稿');
+    assert.equal(paidResult.getState().project.storyboards[0].firstFrameAssetId, 'existing-first');
+    assert.equal(paidResult.getState().project.storyboards[0].lastFrameAssetId, 'existing-last');
+  }
+
+  const forceStopped = fixture();
+  const stopStarted = deferred();
+  const stoppedResponse = deferred();
+  const stopGenerator = forceStopped.ctx.generateImage!;
+  let stoppedSignal: AbortSignal | undefined;
+  let stopRequests = 0;
+  forceStopped.ctx.generateImage = async (...args) => {
+    if (++stopRequests === 1) {
+      await args[2]?.();
+      stoppedSignal = (args[1] as ImageGenerationOptions).signal;
+      stopStarted.resolve();
+      await stoppedResponse.promise;
+      return { dataUrl: pngA };
+    }
+    return stopGenerator(...args);
+  };
+  const stopBatch = forceStopped.run({ mode: 'selected-shots', shotIds: ['shot-2', 'shot-4'] });
+  await bounded(stopStarted.promise);
+  const stoppedTask = forceStopped.imageTasks().find((task) => task.status === 'running')!;
+  forceStopImageTask(forceStopped.projectId, stoppedTask);
+  forceStopped.mutate((state) => applyOwnedProjectUpdate(state, forceStopped.projectId, (project) => ({
+    ...project, generationTasks: forceStopImageGenerationTask(project.generationTasks, stoppedTask.id).tasks,
+  })));
+  assert.equal(stoppedSignal?.aborted, true);
+  await bounded(stopBatch);
+  assert.deepEqual(forceStopped.imageTasks().map((task) => task.status), ['cancelled', 'succeeded']);
+  assert.equal(stopRequests, 2, 'the later member proceeds before the stopped provider returns');
+  const completedOutputIds = forceStopped.getState().project.assets.map((asset) => asset.id);
+  const savedBeforeLateResponse = forceStopped.stores.length;
+  forceStopped.mutate((state) => applyOwnedProjectUpdate(state, forceStopped.projectId, (project) => ({
+    ...project, generationTasks: project.generationTasks.map((task) => task.id === stoppedTask.id ? stoppedTask : task),
+  })));
+  stoppedResponse.resolve();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.deepEqual(forceStopped.getState().project.assets.map((asset) => asset.id), completedOutputIds, 'undo cannot make a stopped late result enter the asset library');
+  assert.equal(forceStopped.stores.length, savedBeforeLateResponse, 'no local image write begins after force-stop');
+  assert.equal(forceStopped.imageTasks().find((task) => task.id === stoppedTask.id)?.status, 'cancelled');
 
   const failure = fixture();
   const originalGenerator = failure.ctx.generateImage!;

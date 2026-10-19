@@ -13,6 +13,7 @@ import {
   sanitizeNsfwAutomaticConstraints,
 } from './promptConstraints';
 import {
+  H3_EXISTING_SOUND_SUMMARY_ZH,
   normalizeShotAmbientSound,
   stripAmbientBedFromAction,
 } from './audioPromptPolicy';
@@ -962,9 +963,6 @@ function renderMinimaxH3Prompt(
   shots: readonly H3CanonicalShot[],
   manifest: ReferenceManifest
 ): string {
-  const actionClausesFor = (shot: H3CanonicalShot): string[] => uniqueH3Texts(h3Clauses(
-    stripAmbientBedFromAction(stripH3GlobalSpecs(shot.action, input)).replace(/\s*→\s*/gu, '，随后'),
-  ).map((clause) => clause.replace(/^随后/u, '').trim()).filter(Boolean));
   const isSilent = /^(?:none|silent|静音)$/iu.test(clean(input.audioMode));
   const isAudibleValue = (value: string): boolean => {
     const normalized = clean(value);
@@ -1002,8 +1000,9 @@ function renderMinimaxH3Prompt(
 
   let previousCut = 0;
   const renderedShots = shots.map((shot, index) => {
-    const clauses = actionClausesFor(shot);
-    const actionText = clauses.join('，随后') || '延续前镜动作';
+    // Punctuation is not a timing operator. Preserve parallel actions,
+    // cause/effect, laterality and repeated strikes exactly as authored.
+    const actionText = stripAmbientBedFromAction(stripH3GlobalSpecs(shot.action, input)).trim() || '延续前镜动作';
     const entryState = stripH3GlobalSpecs(shot.entryState, input);
     const endState = stripH3GlobalSpecs(shot.endState, input);
     const direction = stripH3GlobalSpecs(shot.direction, input);
@@ -1066,10 +1065,10 @@ function renderMinimaxH3Prompt(
     ...shots.map((shot) => stripH3GlobalSpecs(shot.music, input)),
     ...structuredAudio.music,
   ]).filter(isAudibleValue);
-  // N/A means no separately declared global bed, not that shot-local audio
-  // should be erased. Explicit model/user prose (including N/A) is kept as
-  // authored, with no local duration, distance or loudness reinterpretation.
-  const soundscape = isSilent ? 'N/A' : explicitSoundscapes.join('；') || 'N/A';
+  // This is a summary of existing sounds, not an extra global audio bed.
+  // Keep explicit source prose (including confirmed N/A) untouched. Missing
+  // prose refers only to authored shot sounds; only explicit silence mutes.
+  const soundscape = isSilent ? 'N/A' : explicitSoundscapes.join('；') || H3_EXISTING_SOUND_SUMMARY_ZH;
   // Serialize explicit music without adding a second, contradictory mix plan.
   // The final AI review owns sound design and resolves any authored conflict.
   const music = isSilent ? 'N/A' : musicValues.join('；') || 'N/A';
@@ -1302,7 +1301,8 @@ function renderMinimaxH3FullReference(
   // whole section up to the next official field instead.
   const baseSections = h3TopLevelSections(basePrompt);
   const integrated = baseSections.find((section) => section.name === 'integrated_multimodal_description')?.value || '';
-  const soundscape = baseSections.find((section) => section.name === 'overall_soundscape')?.raw || 'overall_soundscape: N/A';
+  const soundscape = baseSections.find((section) => section.name === 'overall_soundscape')?.raw
+    || `overall_soundscape: ${/^(?:none|silent|静音)$/iu.test(clean(input.audioMode)) ? 'N/A' : H3_EXISTING_SOUND_SUMMARY_ZH}`;
   const music = baseSections.find((section) => section.name === 'non_diegetic_music')?.raw || 'non_diegetic_music: N/A';
   const detailed = bindH3DetailedSubjectMentions(
     integrated,

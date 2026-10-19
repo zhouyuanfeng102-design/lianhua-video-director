@@ -20,7 +20,7 @@ const source = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
 const ast = ts.createSourceFile('App.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
 const view = ast.statements.find((node) => ts.isFunctionDeclaration(node) && node.name?.text === 'GenerationTasksView');
 assert.ok(view && ts.isFunctionDeclaration(view) && view.body);
-const actionSource = ['cancelQueuedTask', 'removeTask'].map((name) => {
+const actionSource = ['cancelQueuedTask', 'forceStopRunningImageTask', 'removeTask'].map((name) => {
   const statement = view.body!.statements.find((node) => ts.isVariableStatement(node)
     && node.declarationList.declarations.some((entry) => ts.isIdentifier(entry.name) && entry.name.text === name));
   assert.ok(statement, `production ${name} callback must remain covered`);
@@ -93,8 +93,9 @@ const fixture = (initialTasks: GenerationTask[]) => {
     isUnsubmittedVideoTask, videoTaskHasUnresolvedSubmission, videoTaskBatchStatus, removeVideoTaskKeepingProvenance,
     formatUserFacingError, notify: (message: string) => notices.push(message),
   };
-  const actions = new Function('d', `with(d){${compiled};return {cancelQueuedTask,removeTask};}`)(dependencies) as {
+  const actions = new Function('d', `with(d){${compiled};return {cancelQueuedTask,forceStopRunningImageTask,removeTask};}`)(dependencies) as {
     cancelQueuedTask: (id: string) => void;
+    forceStopRunningImageTask: (id: string) => void;
     removeTask: (id: string) => Promise<void>;
   };
   const historyState = (entries: GenerationTask[], label: string): AppState => {
@@ -171,6 +172,54 @@ test('production image/autofill running tasks reject stale cancel and delete cli
     assert.equal(env.writes().backgroundWrites, 0);
     assert.equal(env.writes().historyWrites, 0);
   }
+});
+
+test('production force-stop revokes a running image immediately and rebases active history', async () => {
+  const target = image('force-stop-running', { status: 'running' });
+  const unrelated = image('force-stop-keep-queued');
+  const completed = image('force-stop-keep-completed', { status: 'succeeded', resultAssetId: 'keep-asset' });
+  const env = fixture([target, unrelated, completed]);
+  env.addHistory([{ ...target, status: 'queued' }, unrelated, completed], 'before-start');
+  env.addHistory([target, unrelated, completed], 'running-redo', true);
+  const lease = env.lifecycle.begin('force-stop-lease')!;
+  env.lifecycle.trackBatchSubmissions(lease, [target.id]);
+  let signal!: AbortSignal;
+  const started = deferred();
+  const worker = tasks.runImageTask(env.projectId, target, async (input) => {
+    signal = input; started.resolve(); return new Promise<void>(() => {});
+  });
+  const rejection = assert.rejects(worker, tasks.GenerationTaskCancelledError);
+  await started.promise;
+  env.forceStopRunningImageTask(target.id);
+  assert.equal(signal.aborted, true);
+  await rejection;
+  assert.equal(env.current().project.generationTasks[0].status, 'cancelled');
+  assert.strictEqual(env.current().project.generationTasks[1], unrelated);
+  assert.strictEqual(env.current().project.generationTasks[2], completed);
+  assert.equal(env.lifecycle.isActive('force-stop-lease'), false);
+  assert.equal(env.writes().historyWrites, 0);
+  for (const snapshot of [...env.history().undo, ...env.history().redo]) {
+    assert.equal(snapshot.project.generationTasks[0].status, 'cancelled');
+  }
+  env.undo(); env.redo();
+  assert.equal(env.current().project.generationTasks[0].status, 'cancelled');
+  await env.removeTask(target.id);
+  assert.deepEqual(env.current().project.generationTasks, [unrelated, completed]);
+});
+
+test('production force-stop ignores stale terminal clicks and preserves different history instances', () => {
+  const target = image('force-stop-identity', { status: 'running' });
+  const older = { ...target, createdAt: 99 };
+  const env = fixture([target]);
+  env.addHistory([older], 'different-instance');
+  env.forceStopRunningImageTask(target.id);
+  assert.deepEqual(env.history().undo[0].project.generationTasks, [older]);
+  assert.equal(tasks.isGenerationTaskRevoked(env.projectId, older), false);
+  const done = image('force-stop-stale-completed', { status: 'succeeded' });
+  const stale = fixture([done]);
+  stale.forceStopRunningImageTask(done.id);
+  assert.equal(stale.writes().backgroundWrites, 0);
+  assert.equal(tasks.isGenerationTaskRevoked(stale.projectId, done), false);
 });
 
 const deferred = () => {

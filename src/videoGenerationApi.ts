@@ -109,7 +109,7 @@ const clearUnusedRunningHubTemplateImages = (value: unknown, occupiedSlots: Read
   }) };
 };
 
-export const buildVideoApiBody = (config: Omit<VideoTaskApiConfig, 'apiKey'>, draft: VideoGenerationDraft, images: string[], audios: string[] = []): Record<string, unknown> => {
+export const buildVideoApiBody = (config: Omit<VideoTaskApiConfig, 'apiKey'>, draft: VideoGenerationDraft, images: string[], audios: string[] = [], videos: string[] = []): Record<string, unknown> => {
   const imageCapacity = getVideoApiImageCapacity(config);
   if (imageCapacity && images.length > imageCapacity.maxCount) throw new Error(`当前接口返回的模型图片容量为 ${imageCapacity.maxCount} 张，本次选了 ${images.length} 张；不会丢弃图片，尚未提交视频。`);
   if ((draft.audioReferences?.length || audios.length) && config.provider !== 'runninghub') {
@@ -166,9 +166,12 @@ export const buildVideoApiBody = (config: Omit<VideoTaskApiConfig, 'apiKey'>, dr
     try { raw = JSON.parse(config.requestTemplate); } catch { throw new Error('视频 API 请求模板不是有效 JSON。'); }
     if (config.provider === 'runninghub') assertRunningHubTemplateNumbersSafe(config.requestTemplate);
     const result = config.provider === 'runninghub' && config.runningHubMappedFields
-      ? bindRunningHubVideoRequest(config.requestTemplate, config.runningHubMappedFields, draft, images, config, audios)
+      ? bindRunningHubVideoRequest(config.requestTemplate, config.runningHubMappedFields, draft, images, config, audios, videos)
       : expandTemplate(config.provider === 'runninghub' ? clearUnusedRunningHubTemplateImages(raw, new Set(slots)) : raw, {
-      prompt: draft.prompt, model: config.model || '', images,
+      prompt: draft.prompt, model: config.model || '', images, videos,
+      video_references: videos.map((video_url, index) => ({ video_url, role: 'reference', slot_index: draft.videoReferences?.[index]?.slotIndex ?? index })),
+      ...Object.fromEntries([...config.requestTemplate.matchAll(/\{\{video_([1-9]\d*)\}\}/gu)].map((match) => [`video_${match[1]}`, ''])),
+      ...Object.fromEntries(videos.map((video, index) => [`video_${(draft.videoReferences?.[index]?.slotIndex ?? index) + 1}`, video])),
       // Generic arrays remain dense: never manufacture an empty URL. A
       // reference-capable template can consume explicit physical slot metadata;
       // named image_N fields always bind the selected slot directly.

@@ -2,6 +2,7 @@ import type {
   H3IdentityBindings, H3IdentityEventBinding, H3PerformanceEvent, H3PerformancePlan,
   H3PerformanceReaction, H3PerformanceVoiceEvent,
 } from './types';
+import { H3_EXISTING_SOUND_SUMMARY_EN, H3_EXISTING_SOUND_SUMMARY_ZH, renderH3DeliverySections } from './h3DeliverySections';
 
 const object = (value: unknown): value is Record<string, unknown> => value !== null
   && typeof value === 'object' && !Array.isArray(value);
@@ -87,6 +88,7 @@ export interface RenderH3PerformancePlanInput {
   plan: H3PerformancePlan;
   characters: H3IdentityBindings['characters'];
   language: 'zh' | 'en';
+  audioMode?: string;
   mode?: 'integrated' | 'full-reference';
   subjectTokens?: ReadonlyMap<string, string>;
   characterPictures?: ReadonlyMap<string, readonly number[]>;
@@ -128,6 +130,9 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
   const language = input.language;
   plan.descriptionLanguage = language;
   const en = language === 'en';
+  plan.overallSoundscape = plan.overallSoundscape.trim() || (input.audioMode === 'none' ? 'N/A'
+    : en ? H3_EXISTING_SOUND_SUMMARY_EN : H3_EXISTING_SOUND_SUMMARY_ZH);
+  plan.nonDiegeticMusic = plan.nonDiegeticMusic.trim() || 'N/A';
   const fullReference = input.mode === 'full-reference';
   const speakerTokens = h3PerformanceSpeakerTokens(plan);
   const entries = new Map(input.characters.map((entry) => [entry.characterId, entry]));
@@ -267,8 +272,6 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
   });
   const body = [fullReference ? plan.preamble?.trim() : '', ...shots]
     .filter(Boolean).join('\n\n');
-  const soundscape = plan.overallSoundscape.trim() || 'N/A';
-  const music = plan.nonDiegeticMusic.trim() || 'N/A';
   const definitions = [...renderedCharacters.map((entry) => entry.referenceAnchor), ...voiceOnlyDefinitions];
   if (input.subjectDefinitions?.trim()) definitions.push(input.subjectDefinitions.trim());
   const pictureRoles: Record<string, string> = {
@@ -292,8 +295,9 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
   const summary = (input.summary ?? plan.summary)?.trim() || (en ? 'The authored scene unfolds in the following shots.' : '按下列镜头展开已确认的场景表演。');
   const retention = (input.retentionAnalysis ?? plan.retentionAnalysis)?.trim() || (en
     ? 'Keep the referenced identities and the authored scene relationships.' : '保留参考身份与已确认的场景关系。');
-  const prompt = fullReference
-    ? `subject_definitions:\n${definitions.join('\n')}\n\nsummary:\n${/^\[reference generation[^\]]*\]/u.test(summary) ? summary : `[reference generation] ${summary}`}\n\nretention_analysis:\n${retention}\n\ndetailed_description:\n${body}\n\noverall_soundscape:\n${soundscape}\n\nnon_diegetic_music:\n${music}`
-    : `integrated_multimodal_description:\n${body}\n\noverall_soundscape:\n${soundscape}\n\nnon_diegetic_music:\n${music}`;
+  const prompt = renderH3DeliverySections({ body, subjectDefinitions: definitions.join('\n'),
+    summary: /^\[reference generation[^\]]*\]/u.test(summary) ? summary : `[reference generation] ${summary}`,
+    retentionAnalysis: retention, overallSoundscape: plan.overallSoundscape, nonDiegeticMusic: plan.nonDiegeticMusic,
+  }, { mode: fullReference ? 'full-reference' : 'integrated', language });
   return { prompt, body, plan, speakerTokens, characters: renderedCharacters, events };
 };

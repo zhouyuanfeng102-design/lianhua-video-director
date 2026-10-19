@@ -412,7 +412,7 @@ for (const required of [
   'integrated_multimodal_description', 'subject_definitions', 'detailed_description',
   'full-reference', '[Shot N]', 'At MM:SS.mmm', 'Subject/Picture/Video/Audio',
   '主体/空间/光影/镜头/台词/音效', 'AI负责语义与格式改写',
-  'overall_soundscape只保留整段范围的简短剧情内环境/声景摘要',
+  'overall_soundscape汇总整段已有的环境声、物理动作声与非语言人声',
   '具体对白原字、说话人/声源ID、某一镜无对白',
   '不得新增negative_prompt、negative、反向提示词或其它section',
 ]) {
