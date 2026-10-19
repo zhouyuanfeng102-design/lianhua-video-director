@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import {
   createSemanticPlanningStatus, recordSemanticPlanningDiagnostic, semanticPlanningElapsedMs,
-  SEMANTIC_PLANNING_DIAGNOSTIC_KEY,
+  SEMANTIC_PLANNING_DIAGNOSTIC_KEY, semanticPlanningStatusText,
 } from '../src/semanticSequenceProgress';
 
 const secret = 'sk-semantic-diagnostic-secret';
@@ -10,7 +10,7 @@ const context = {
   model: `mock-model-${secret}`, apiKey: secret, endpoint: 'https://private-endpoint.invalid/v1', story: 'PRIVATE_ORIGINAL_STORY',
 };
 const progress = {
-  stage: 'requesting' as const, requestNumber: 1, maxRequests: 4, elapsedMs: 1200,
+  stage: 'requesting' as const, requestNumber: 1, maxRequests: 1, elapsedMs: 1200,
   durationMode: 'fixed' as const, totalDurationSec: 180, segmentDurationSec: 30, requiredSegmentCount: 6,
   detail: `正在等待响应，diagnostic secret=${secret}`, story: 'PRIVATE_ORIGINAL_STORY', apiKey: secret,
   endpoint: 'https://private-endpoint.invalid/v1',
@@ -30,15 +30,13 @@ const storage = {
 };
 recordSemanticPlanningDiagnostic(status, storage);
 recordSemanticPlanningDiagnostic(createSemanticPlanningStatus({ ...progress, stage: 'parsing', detail: undefined }, context, 1100), storage);
-const recoveryReason = 'JSON 未闭合；使用原有技术恢复请求。';
-recordSemanticPlanningDiagnostic(createSemanticPlanningStatus({ ...progress, stage: 'repairing', requestNumber: 2, detail: recoveryReason }, context, 1200), storage);
-recordSemanticPlanningDiagnostic(createSemanticPlanningStatus({ ...progress, stage: 'requesting', requestNumber: 2, detail: undefined }, context, 1300), storage);
-recordSemanticPlanningDiagnostic(createSemanticPlanningStatus({ ...progress, stage: 'completed', requestNumber: 2, detail: undefined }, context, 1400), storage);
+const failureReason = 'JSON 未闭合，本次分段结束。';
+recordSemanticPlanningDiagnostic(createSemanticPlanningStatus({ ...progress, stage: 'failed', detail: failureReason }, context, 1200), storage);
 let entries = JSON.parse(values.get(SEMANTIC_PLANNING_DIAGNOSTIC_KEY)!);
 assert.equal(entries.length, 1, 'progress replaces one operation record instead of adding a log for each stage');
-assert.equal(entries[0].stage, 'completed'); assert.equal(entries[0].requests.length, 2);
-assert.equal(entries[0].requests.find((request: { requestNumber: number }) => request.requestNumber === 2).detail, recoveryReason,
-  'later stages preserve the reason behind the existing technical recovery');
+assert.equal(entries[0].stage, 'failed'); assert.equal(entries[0].requests.length, 1);
+assert.equal(entries[0].requests[0].detail, failureReason, 'one failed request retains its diagnostic reason');
+assert.doesNotMatch(semanticPlanningStatusText(status, 3200), /第.*次请求|恢复|重试/u);
 assert.ok(!JSON.stringify(entries).includes(secret));
 assert.ok(!JSON.stringify(entries).includes('PRIVATE_ORIGINAL_STORY'));
 assert.ok(!JSON.stringify(entries).includes('private-endpoint.invalid'));
@@ -59,4 +57,4 @@ assert.doesNotThrow(() => recordSemanticPlanningDiagnostic(status, {
   getItem: () => '[]', setItem: () => { throw new Error('storage quota exceeded'); },
 }), 'diagnostic write failures do not escape into the planning request');
 
-console.log('semanticSequenceProgress: metadata-only redacted diagnostics replace operation records, retain recovery reasons, freeze terminal elapsed time and isolate storage errors.');
+console.log('semanticSequenceProgress: metadata-only redacted diagnostics retain one request per operation, freeze terminal elapsed time and isolate storage errors.');

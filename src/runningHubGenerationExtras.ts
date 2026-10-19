@@ -1,6 +1,6 @@
-import { ensureRunningHubVideoRequestNode } from './runningHubVideo';
+import { ensureRunningHubVideoRequestNode, readRunningHubVideoRequest } from './runningHubVideo';
 import { resolveRunningHubVideoImageProtocol } from './runningHubImageProtocol';
-import { isRunningHubVideoSecretField, listRunningHubVideoNodes } from './runningHubVideoNodes';
+import { isRunningHubVideoSecretField, listRunningHubVideoNodes, normalizeRunningHubVideoLoraStrengthBindings } from './runningHubVideoNodes';
 import type { RunningHubGenerationExtras, RunningHubLoraSlot, RunningHubVideoInputBinding, RunningHubVideoNodeInfo, RunningHubVideoWorkflow } from './runningHubVideoTypes';
 
 const record = (raw: unknown): raw is Record<string, unknown> => Boolean(raw) && typeof raw === 'object' && !Array.isArray(raw);
@@ -53,7 +53,8 @@ export const normalizeRunningHubGenerationExtras = (raw: unknown): RunningHubGen
 };
 
 const requestNodes = (workflow: RunningHubVideoWorkflow): RunningHubVideoNodeInfo[] => {
-  const nodes = listRunningHubVideoNodes(workflow.requestTemplate, undefined);
+  const requestKeys = new Set(listRunningHubVideoNodes(workflow.requestTemplate, undefined).map((node) => keyOf(bindingOf(node))));
+  const nodes = listRunningHubVideoNodes(workflow.requestTemplate, workflow.nodeCatalog).filter((node) => requestKeys.has(keyOf(bindingOf(node))));
   const counts = new Map<string, number>();
   nodes.forEach((node) => counts.set(keyOf(bindingOf(node)), (counts.get(keyOf(bindingOf(node))) || 0) + 1));
   return nodes.filter((node) => counts.get(keyOf(bindingOf(node))) === 1 && Boolean(normalizeBinding(bindingOf(node))) && safeScalar(node.fieldValue));
@@ -62,6 +63,7 @@ const reservedConflict = (workflow: RunningHubVideoWorkflow, binding: RunningHub
   if (workflow.mapping.prompt.some((item) => same(item, binding))) return '提示词输入';
   if (workflow.mapping.images.some((item) => same(item, binding))) return '参考图片槽';
   if ((workflow.mapping.audios || []).some((item) => same(item, binding))) return '参考音频槽';
+  if ((workflow.mapping.videos || []).some((item) => same(item, binding))) return '参考视频槽';
   const imageCount = resolveRunningHubVideoImageProtocol(workflow).imageCount;
   if (imageCount && same(imageCount, binding)) return '实际图片数量';
   const common = Object.entries(workflow.mapping.parameters || {}).find(([name, item]) => commonParameters.has(name) && same(item, binding));
@@ -71,6 +73,14 @@ const slotBindings = (slot: RunningHubLoraSlot): RunningHubVideoInputBinding[] =
 
 export interface RunningHubDetectedLoraSlot extends RunningHubLoraSlot { automatic: boolean }
 
+const detectedStrength = (node: RunningHubVideoNodeInfo, kind: 'strength' | 'clipStrength', nodes: RunningHubVideoNodeInfo[]): RunningHubVideoInputBinding | undefined => {
+  const name = kind === 'strength' ? 'strengthmodel' : 'strengthclip';
+  const matches = nodes.filter((item) => item.nodeId === node.nodeId && compact(item.fieldName) === name);
+  if (matches.length === 1) return bindingOf(matches[0]);
+  const linked = normalizeRunningHubVideoLoraStrengthBindings(node.loraStrengthBindings)?.[kind];
+  return linked && nodes.some((item) => same(bindingOf(item), linked) && typeof item.fieldValue === 'number') ? linked : undefined;
+};
+
 /** Only fields already exposed in the submitted template become automatic slots. */
 export const listRunningHubLoraSlots = (workflow: RunningHubVideoWorkflow): RunningHubDetectedLoraSlot[] => {
   const extras = normalizeRunningHubGenerationExtras(workflow.generationExtras);
@@ -79,6 +89,8 @@ export const listRunningHubLoraSlots = (workflow: RunningHubVideoWorkflow): Runn
   const hidden = new Set((extras.hiddenLoras || []).map(keyOf));
   const slots: RunningHubDetectedLoraSlot[] = [];
   const seen = new Set<string>();
+  const other = new Set((extras.otherFields || []).map(keyOf));
+  const manuallyOwned = new Set((extras.loraSlots || []).flatMap(slotBindings).map(keyOf));
   for (const slot of extras.loraSlots || []) {
     if (hidden.has(keyOf(slot.model)) || !byKey.has(keyOf(slot.model)) || reservedConflict(workflow, slot.model)) continue;
     const strength = slot.strength && byKey.has(keyOf(slot.strength)) && !reservedConflict(workflow, slot.strength) ? slot.strength : undefined;
@@ -88,14 +100,13 @@ export const listRunningHubLoraSlots = (workflow: RunningHubVideoWorkflow): Runn
   }
   for (const node of nodes) {
     const model = bindingOf(node);
-    if (!loraModelName.test(compact(node.fieldName)) || seen.has(keyOf(model)) || hidden.has(keyOf(model)) || reservedConflict(workflow, model)) continue;
-    const findStrength = (name: string) => {
-      const matches = nodes.filter((item) => item.nodeId === node.nodeId && compact(item.fieldName) === name);
-      const binding = matches.length === 1 ? bindingOf(matches[0]) : undefined;
-      return binding && !reservedConflict(workflow, binding) ? binding : undefined;
+    if (typeof node.fieldValue !== 'string' || !loraModelName.test(compact(node.fieldName)) || seen.has(keyOf(model)) || hidden.has(keyOf(model)) || other.has(keyOf(model)) || manuallyOwned.has(keyOf(model)) || reservedConflict(workflow, model)) continue;
+    const findStrength = (kind: 'strength' | 'clipStrength') => {
+      const binding = detectedStrength(node, kind, nodes);
+      return binding && !other.has(keyOf(binding)) && !manuallyOwned.has(keyOf(binding)) && !reservedConflict(workflow, binding) ? binding : undefined;
     };
-    const strength = findStrength('strengthmodel');
-    const clipStrength = findStrength('strengthclip');
+    const strength = findStrength('strength');
+    const clipStrength = findStrength('clipStrength');
     slots.push({ model, ...(strength ? { strength } : {}), ...(clipStrength ? { clipStrength } : {}),
       ...(typeof node.description === 'string' && node.description.trim() ? { label: node.description.trim() } : {}), automatic: true });
     seen.add(keyOf(model));
@@ -103,15 +114,49 @@ export const listRunningHubLoraSlots = (workflow: RunningHubVideoWorkflow): Runn
   return slots;
 };
 
+/** Editor-only: materialize discovered LoRA fields in the draft, preserving saved
+ * values and explicit positions. Nothing is submitted until the user saves/runs. */
+export const syncRunningHubLoraSlots = (workflow: RunningHubVideoWorkflow): RunningHubVideoWorkflow => {
+  try { readRunningHubVideoRequest(workflow.requestTemplate); } catch { return workflow; }
+  const extras = normalizeRunningHubGenerationExtras(workflow.generationExtras);
+  const hidden = new Set((extras.hiddenLoras || []).map(keyOf));
+  const manualModels = new Set((extras.loraSlots || []).map((slot) => keyOf(slot.model)));
+  const occupied = new Set([...(extras.otherFields || []), ...(extras.loraSlots || []).flatMap(slotBindings)].map(keyOf));
+  const available = listRunningHubVideoNodes(workflow.requestTemplate, workflow.nodeCatalog);
+  const counts = new Map<string, number>();
+  available.forEach((node) => counts.set(keyOf(bindingOf(node)), (counts.get(keyOf(bindingOf(node))) || 0) + 1));
+  const nodes = available.filter((node) => counts.get(keyOf(bindingOf(node))) === 1 && safeScalar(node.fieldValue)
+    && Boolean(normalizeBinding(bindingOf(node))));
+  let requestTemplate = workflow.requestTemplate;
+  for (const node of nodes) {
+    const model = bindingOf(node); const key = keyOf(model);
+    if (typeof node.fieldValue !== 'string' || !loraModelName.test(compact(node.fieldName))
+      || hidden.has(key) || manualModels.has(key) || occupied.has(key) || reservedConflict(workflow, model)) continue;
+    requestTemplate = ensureRunningHubVideoRequestNode(requestTemplate, node);
+    for (const kind of ['strength', 'clipStrength'] as const) {
+      const binding = detectedStrength(node, kind, nodes);
+      if (!binding || occupied.has(keyOf(binding)) || reservedConflict(workflow, binding)) continue;
+      const source = nodes.find((item) => same(bindingOf(item), binding))!;
+      requestTemplate = ensureRunningHubVideoRequestNode(requestTemplate, source);
+    }
+  }
+  return requestTemplate === workflow.requestTemplate ? workflow : { ...workflow, requestTemplate };
+};
+
 const loraFields = (workflow: RunningHubVideoWorkflow): Set<string> => {
   // A hidden automatic slot still owns its LoRA fields; removing its panel never
   // changes the request's model/strength or reclassifies those fields as generic.
   const extras = normalizeRunningHubGenerationExtras(workflow.generationExtras);
   const keys = new Set((extras.loraSlots || []).flatMap(slotBindings).map(keyOf));
+  const other = new Set((extras.otherFields || []).map(keyOf));
   const nodes = listRunningHubVideoNodes(workflow.requestTemplate, workflow.nodeCatalog)
     .filter((node) => Boolean(normalizeBinding(bindingOf(node))) && safeScalar(node.fieldValue));
   for (const model of nodes.filter((node) => loraModelName.test(compact(node.fieldName)))) {
     keys.add(keyOf(bindingOf(model)));
+    for (const kind of ['strength', 'clipStrength'] as const) {
+      const binding = detectedStrength(model, kind, nodes);
+      if (binding && !other.has(keyOf(binding))) keys.add(keyOf(binding));
+    }
     for (const node of nodes) {
       if (node.nodeId === model.nodeId && ['strengthmodel', 'strengthclip'].includes(compact(node.fieldName))) keys.add(keyOf(bindingOf(node)));
     }

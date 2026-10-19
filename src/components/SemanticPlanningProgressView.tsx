@@ -24,6 +24,5 @@ export const SemanticPlanningProgressView = ({ status, notify }: {
         copied ? '已复制本次分段诊断。' : '复制失败，请重试。', copied ? undefined : 'error',
       )).catch(() => notify('复制失败，请重试。', 'error'))}>复制诊断</button>
     {longWait && <small style={{ display: 'block' }}>接口尚未返回完整结果，等待时间较长；可使用“停止分段”，已有方案保留。</small>}
-    {status.stage === 'repairing' && status.detail && <small style={{ display: 'block' }}>{status.detail}</small>}
   </>;
 };

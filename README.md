@@ -4,13 +4,13 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的 Windows 桌面工作台。
 
-当前版本：**2.7.6** · 2026-10-19 · Windows 64 位 · 便携运行
+当前版本：**2.7.8** · 2026-10-20 · Windows 64 位 · 便携运行
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows 便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-2.7.6.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-2.7.8.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
 1. 下载上面的 EXE，放在可写入的文件夹里，双击运行，无需安装 Node.js。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
@@ -32,13 +32,13 @@
 - **自定义生图+反推图片提示词**：输入要求生成图片，或复用上传/资产库参考图，通过视觉 API 反推可复制的提示词与人物、物品、场景、风格详情。反推同步显示在聊天和资料任务，支持后台执行、停止、重试及项目保存恢复；原有生图支持原文直发或规则转换，结果自动入库。
 - **项目与资产管理**：管理图片、视频和音频，保存项目包、备份资料并导出提示词。
 
-## 最新更新 · v2.7.6
+## 最新更新 · v2.7.8
 
-- AI 剧情分段先安排完整连续动作的自然时间，再分配视频窗口；相邻自然段和多个动作可以进入同一段。
-- 保留全部动作、次数、对白、喘息整理和局部慢速，固定总时长仍服从用户设置。
-- 已有分段保留，使用现有“重新 AI 分段”应用新规则；不新增按钮、运行时内容校验、重试或额外模型请求。
+- RunningHub 读取云端节点或导入节点 JSON 后，自动补齐真实 LoRA 模型与强度位置，保留已有值、手动位置和隐藏选择，不重复添加。
+- 按实际连线识别跨节点强度，支持将 343 的 LoRA 自动关联到 366 的速度滑块值。
+- API 节点图误入 cURL 入口时提示正确导入位置。363 等空输入前端分组开关仍不支持直接绑定；不新增模型请求、重试或生成时拦截。
 
-[查看本版完整说明](docs/releases/发布说明-2.7.6.md) · [历史版本归档](docs/releases/README.md)
+[查看本版完整说明](docs/releases/发布说明-2.7.8.md) · [历史版本归档](docs/releases/README.md)
 
 ## 从源码运行
 

@@ -48,6 +48,11 @@ export interface RunningHubVideoNodeCatalogEntry {
   fieldType?: string;
   classType?: string;
   audioUpload?: boolean;
+  /** Confirmed API graph links. An empty object clears earlier link evidence. */
+  loraStrengthBindings?: {
+    strength?: RunningHubVideoInputBinding;
+    clipStrength?: RunningHubVideoInputBinding;
+  };
   control?: RunningHubVideoFieldControl;
 }
 export interface RunningHubVideoWorkflow {

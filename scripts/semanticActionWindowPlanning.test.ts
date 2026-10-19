@@ -71,7 +71,7 @@ const prompt = (payload: HttpPayload, role: string): string =>
 const envelope = (payload: HttpPayload): Record<string, unknown> => {
   const user = prompt(payload, 'user');
   assert.ok(user.startsWith('semantic_sequence_input='));
-  return JSON.parse(user.slice('semantic_sequence_input='.length)) as Record<string, unknown>;
+  return JSON.parse(user.split('\n', 1)[0].slice('semantic_sequence_input='.length)) as Record<string, unknown>;
 };
 const install = (authored: unknown): HttpPayload[] => {
   const calls: HttpPayload[] = [];
@@ -123,6 +123,17 @@ try {
     assert.equal(Object.hasOwn(aiPayload, key), false, `AI must not inherit ${key}`);
   }
   assertSharedActionWindowRule(prompt(aiCalls[0], 'system'));
+  const exampleText = prompt(aiCalls[0], 'system').split('\n').find((line) => line.startsWith('{"reason":'));
+  assert.ok(exampleText, 'the single response example is a complete JSON object');
+  const example = JSON.parse(exampleText);
+  assert.equal(example.segments[0].semanticSource.sceneStaging[0].version, 1);
+  assert.equal(example.segments[0].semanticSource.dialogues[0].text, '把标有"A"的钥匙放下。');
+  assert.doesNotMatch(prompt(aiCalls[0], 'system'), /sceneId:string|sourceEventIds\?:string\[\]/u);
+  const finalInstruction = prompt(aiCalls[0], 'user').split('\n\n').slice(1).join('\n\n');
+  assert.match(finalInstruction, /生成窗口D=15秒/u);
+  assert.match(finalInstruction, /来源记录，不是已分好的视频段/u);
+  assert.match(finalInstruction, /reason与segments必须描述同一次实际时间安排/u);
+  assert.match(finalInstruction, /不减少动作次数、不删除整理喘息/u);
   assert.equal(story.split('\n\n').length, 6);
   assert.equal(aiPlan.segments.length, 1, 'N comes from returned windows, not source paragraphs or event count');
   assert.equal(aiPlan.totalDurationSec, 15);
@@ -154,6 +165,7 @@ try {
   assertSharedActionWindowRule(prompt(fixedCalls[0], 'system'));
   assert.match(prompt(fixedCalls[0], 'system'), /T=30秒/u);
   assert.match(prompt(fixedCalls[0], 'system'), /N=2段/u);
+  assert.match(prompt(fixedCalls[0], 'user').split('\n\n').slice(1).join('\n\n'), /全片T=30秒固定/u);
   assert.equal(fixedPlan.durationMode, 'fixed');
   assert.equal(fixedPlan.requestedTotalDurationSec, 30);
   assert.equal(fixedPlan.totalDurationSec, 30);

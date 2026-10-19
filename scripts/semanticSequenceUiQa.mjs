@@ -12,9 +12,9 @@ export const QA_INVENTORY = [
   'The returned N semantic segments occupy N complete 15-second windows, remain unconfirmed until the user confirms, and contain no master shot ownership.',
   'Each confirmed segment requests its own shot plan and H3; later segments receive the exact previous final H3 and the existing 0.5-second handoff contract.',
   'A real reload preserves semantic source metadata, confirmed boundaries, completed prompts, legacy plans, and sparse video reference slots.',
-  'An unclosed semantic JSON body automatically recovers with one additional request, appends an independent plan, and preserves all completed H3 and earlier plans.',
-  'JSON output mode is present only in semantic planning/recovery requests; shot planning, H3 and English requests retain their existing protocol.',
-  'A non-recoverable HTTP 400 does not overwrite completed results or automatically retry; the runtime error log retains its concrete reason and explicit retry starts one new request.',
+  'An unclosed semantic JSON body ends after one request, displays the failure, and preserves all completed H3, earlier plans and reference slots.',
+  'JSON output mode is present only in semantic planning requests; shot planning, H3 and English requests retain their existing protocol.',
+  'An HTTP 400 does not overwrite completed results or automatically retry; the runtime error log retains its concrete reason and explicit retry starts one new request.',
   'The semantic review remains unclipped at 1366×900 and 1120×720 with 100% font scale, with visible planning and confirmation actions.',
   'For both an empty plan and an existing plan, the semantic action row is a direct panel child immediately below the whole options box, right-aligned and uncovered at 1366×900 and 1120×720 whether options are expanded or collapsed.',
   'While an isolated semantic request is pending, its disabled planning button and enabled stop button stay together in that external row in every layout; stopping aborts the request, ignores a released late reply, and retains all existing plans/H3/reference slots without duplicate requests.',
@@ -22,7 +22,7 @@ export const QA_INVENTORY = [
   'Custom total 90 seconds at D=15 requests exactly six segments; raw 100 aligns to 105 on blur and reaches the API as exactly seven complete segments.',
   'Changing D keeps the custom total on complete segment multiples, and a real reload restores custom mode/T; switching to AI omits the old T from the wire payload.',
   'Whitespace/case-only fitStatus variations normalize to balanced on the initial request, with no additional AI review or repair call.',
-  'Four consecutive invalid fitStatus replies exhaust only the initial-plus-three repair budget, show the field and all allowed values in both visible summaries, retain old plans/H3/reference slots, and permit a one-call retry without changing duration.',
+  'One invalid fitStatus reply ends the request, shows the field and all allowed values in both visible summaries, retains old plans/H3/reference slots, and permits a separate one-call user retry without changing duration.',
 ];
 
 const root = path.resolve(import.meta.dirname, '..');
@@ -318,7 +318,7 @@ const installMocks = async () => {
       let kind; let response; let data;
       if (system.includes('RAW_STORY_SEMANTIC_SEQUENCE_PLANNING_V1')) {
         kind = 'semantic-plan'; const prefix = 'semantic_sequence_input=';
-        assert.ok(user.includes(prefix)); data = JSON.parse(user.slice(user.indexOf(prefix) + prefix.length).trim());
+        assert.ok(user.includes(prefix)); data = JSON.parse(user.slice(user.indexOf(prefix) + prefix.length).split(/\r?\n/u, 1)[0].trim());
         assert.equal(data.story, story); assert.equal(data.segmentDurationSec, 15);
         if (data.durationMode === 'fixed') {
           assert.equal(data.requestedTotalDurationSec % data.segmentDurationSec, 0);
@@ -330,24 +330,10 @@ const installMocks = async () => {
           for (const field of ['requestedTotalDurationSec', 'totalDurationSec', 'requiredSegmentCount']) {
             assert.equal(Object.hasOwn(data, field), false, `AI wire input must omit old custom ${field}`);
           }
-          response = phase === 'plan-recovery' ? partialSemanticResponse
+          response = phase === 'plan-json-failure' ? partialSemanticResponse
             : phase === 'fit-status-failure' ? invalidFitStatusResponse
               : phase === 'semantic-plan' ? { ...semanticResponse, fitStatus: ' BALANCED ' }
                 : phase === 'fit-status-retry' ? { ...semanticResponse, fitStatus: ' Balanced ' } : semanticResponse;
-        }
-      } else if (system.includes('RAW_STORY_SEMANTIC_SEQUENCE_TECHNICAL_REPAIR_V1')) {
-        assert.ok(phase === 'plan-recovery' || phase === 'fit-status-failure', 'technically valid semantic responses must not trigger an extra semantic/repair gate');
-        kind = 'semantic-repair'; const prefix = 'semantic_sequence_repair=';
-        assert.ok(user.includes(prefix)); data = JSON.parse(user.slice(user.indexOf(prefix) + prefix.length).trim());
-        assert.equal(data.input.story, story); assert.equal(data.input.segmentDurationSec, 15);
-        assert.ok(data.technicalIssues.length);
-        if (phase === 'fit-status-failure') {
-          assert.equal(data.previousResponse, JSON.stringify(invalidFitStatusResponse));
-          assertFitStatusFailureSummary(data.technicalIssues.join('；'), 'technical repair issues');
-          response = invalidFitStatusResponse;
-        } else {
-          assert.equal(data.previousResponse, partialSemanticResponse);
-          response = semanticResponse;
         }
       } else if (system.includes('智能导演分类器')) { kind = 'director'; response = { mode: 'narrative', reason: '合成的本段动作' }; }
       else if (planning || planningReview) { kind = planning ? 'shot-plan' : 'shot-review'; data = planning || planningReview; response = { shots: makeShots(segmentIndex) }; assert.equal(data.durationSec, 15); }
@@ -358,11 +344,14 @@ const installMocks = async () => {
       } else if (englishReview) { kind = 'english-review'; data = englishReview; response = englishReview.candidateEnglishPrompt; }
       else if (/提示词翻译器/u.test(system)) { kind = 'translate'; response = translated(user.split('\n\n<sequence_text_handoff_data>')[0]); }
       else throw new Error(`Unexpected model stage (no master/estimate/legacy segmentation allowed): ${system.slice(0, 100)}`);
-      const semanticRequest = kind === 'semantic-plan' || kind === 'semantic-repair';
+      const semanticRequest = kind === 'semantic-plan';
       if (phase === 'semantic-plan' || phase === 'plan-failure' || phase === 'plan-retry' || phase === 'fit-status-retry') assert.equal(kind, 'semantic-plan', 'preflight must only request semantic boundaries');
       if (phase.startsWith('semantic-cancel-')) assert.equal(kind, 'semantic-plan', 'cancellation must not issue a preflight or technical-repair request');
       if (phase.startsWith('custom-total-') || phase === 'ai-after-custom-total') assert.equal(kind, 'semantic-plan', 'duration controls must only request semantic boundaries');
-      if (phase === 'plan-recovery' || phase === 'fit-status-failure') assert.ok(semanticRequest, 'automatic recovery must only request semantic boundaries');
+      if (phase === 'plan-json-failure' || phase === 'fit-status-failure') {
+        assert.ok(semanticRequest, 'failed semantic planning must not issue another model stage');
+        assert.equal(requests.filter((entry) => entry.phase === phase).length, 0, 'a failed semantic operation must not automatically issue another request');
+      }
       if (semanticRequest) assert.deepEqual(payload.response_format, { type: 'json_object' }, 'semantic planner opts into JSON output mode');
       else assert.equal(payload.response_format, undefined, `${kind}: existing shot/H3/English protocol must not inherit semantic JSON mode`);
       if (!semanticRequest) for (const futureLine of lines.slice(segmentIndex)) assert.ok(!user.includes(futureLine), `segment ${segmentIndex} must not receive later-segment dialogue ${futureLine}`);
@@ -507,22 +496,26 @@ const run = async () => {
   const planButton = semanticPlanButton(); await planButton.waitFor();
   await verifySemanticCancellation('existing', originals);
   await page.setViewportSize({ width: 1120, height: 720 });
-  const beforeRecovery = savedResults(await readState()); const recoveryStart = requests.length; phase = 'plan-recovery';
+  const beforeJsonFailure = savedResults(await readState()); const jsonFailureStart = requests.length; phase = 'plan-json-failure';
+  const errorsBeforeJsonFailure = await page.evaluate(() => JSON.parse(localStorage.getItem('lianhua_runtime_error_log_v1') || '[]'));
   await planButton.click();
-  await page.waitForFunction(({ key, count }) => JSON.parse(localStorage.getItem(key)).project.sequencePlans.length === count + 1,
-    { key: storageKey, count: beforeRecovery.plans.length });
-  const recovered = await readState(); const recoveredPlan = recovered.project.sequencePlans.find((entry) => !beforeRecovery.plans.some((old) => old.id === entry.id));
-  assert.ok(recoveredPlan); assert.equal(recoveredPlan.planningMode, 'semantic-segments'); assert.equal(recoveredPlan.reviewConfirmedFingerprint, undefined);
-  assert.equal(requests.length, recoveryStart + 2, 'unclosed body must make precisely the initial request and one automatic recovery request');
-  assert.deepEqual(requests.slice(recoveryStart).map((request) => request.kind), ['semantic-plan', 'semantic-repair']);
-  assert.ok(requests[recoveryStart + 1].maxTokens > requests[recoveryStart].maxTokens, 'unclosed JSON recovery raises the request output allowance');
-  for (const oldPlan of beforeRecovery.plans) assert.deepEqual(recovered.project.sequencePlans.find((entry) => entry.id === oldPlan.id), oldPlan);
-  assert.deepEqual(recovered.project.storyboards, beforeRecovery.boards, 'automatic recovery retains the exact earlier bilingual final H3');
-  assertNoUnexpectedGeneration(recovered, originals);
-  assert.equal(await page.locator('.runtime-error-log-count').textContent(), '0', 'successful recovery does not produce a final failure log');
-  await capture('04b-unclosed-json-recovered-1120x720');
-  steps.push('after reload, one unclosed JSON body automatically recovers on request two and appends a new unconfirmed plan, preserving exact prior H3, old plans and sparse references');
+  await page.waitForFunction(() => {
+    const button = document.querySelector('[data-testid="semantic-sequence-plan"]');
+    return button && !button.disabled && document.querySelector('.sequence-planning-error > span')?.textContent?.includes('JSON');
+  });
+  const jsonFailed = await readState();
+  assert.equal(requests.length, jsonFailureStart + 1, 'an unclosed body terminates after its only request');
+  assert.deepEqual(requests.slice(jsonFailureStart).map((request) => request.kind), ['semantic-plan']);
+  assert.deepEqual(savedResults(jsonFailed), beforeJsonFailure, 'incomplete JSON retains all earlier plans and exact bilingual H3');
+  assertNoUnexpectedGeneration(jsonFailed, originals);
+  const jsonErrors = await page.evaluate(() => JSON.parse(localStorage.getItem('lianhua_runtime_error_log_v1') || '[]'));
+  assert.equal(jsonErrors.length, errorsBeforeJsonFailure.length + 1, 'one failed request creates one diagnostic');
+  assert.equal(await page.locator('.runtime-error-log-count').textContent(), String(jsonErrors.length));
+  assert.doesNotMatch(await page.locator('.sequence-planning-error').innerText(), /自动重试|正在修复|第\s*\d+\s*次请求/u);
+  await capture('04b-unclosed-json-stops-keeps-results-1120x720');
+  steps.push('after reload, one unclosed JSON reply stops the operation without another request or output-budget adjustment and preserves exact prior H3, old plans and sparse references');
   const beforeFailure = savedResults(await readState()); const failureStart = requests.length; phase = 'plan-failure';
+  const errorsBeforeFailure = await page.evaluate(() => JSON.parse(localStorage.getItem('lianhua_runtime_error_log_v1') || '[]'));
   await planButton.click();
   await waitForCondition({ label: 'expected failed semantic request', timeoutMs: 20_000, intervalMs: 30, check: () => requests.length === failureStart + 1 });
   await page.waitForFunction(() => Array.from(document.querySelectorAll('.sequence-planner-panel button'))
@@ -530,13 +523,13 @@ const run = async () => {
   assert.deepEqual(savedResults(await readState()), beforeFailure, 'failed replan must not remove old confirmed boundaries or completed prompts');
   assert.equal(requests.length, failureStart + 1, 'failed provider response must not silently auto-retry');
   const runtimeErrors = await page.evaluate(() => JSON.parse(localStorage.getItem('lianhua_runtime_error_log_v1') || '[]'));
-  assert.equal(runtimeErrors.length, 1); assert.equal(runtimeErrors[0].stage, 'sequence-semantic-planning');
+  assert.equal(runtimeErrors.length, errorsBeforeFailure.length + 1); assert.equal(runtimeErrors[0].stage, 'sequence-semantic-planning');
   assert.equal(runtimeErrors[0].status, 400); assert.match(runtimeErrors[0].message, /QA_SEMANTIC_EXPECTED_FAILURE/u);
-  assert.equal(await page.locator('.runtime-error-log-count').textContent(), '1');
+  assert.equal(await page.locator('.runtime-error-log-count').textContent(), String(runtimeErrors.length));
   await capture('05-failed-replan-keeps-completed-results');
   await page.locator('.runtime-error-log-trigger').click();
   const errorDialog = page.getByRole('dialog', { name: '报错日志', exact: true }); await errorDialog.waitFor();
-  const errorDetails = errorDialog.locator('.runtime-error-details details');
+  const errorDetails = errorDialog.locator('.runtime-error-details details').first();
   if (await errorDetails.count()) await errorDetails.locator('summary').click();
   assert.match(await errorDialog.innerText(), /QA_SEMANTIC_EXPECTED_FAILURE/u, 'the log dialog displays the concrete provider failure');
   await capture('05b-http400-concrete-error-log-1120x720');
@@ -641,24 +634,23 @@ const run = async () => {
     return button && !button.disabled && document.querySelector('.sequence-planning-error > span')?.textContent?.includes('$.fitStatus');
   });
   const fitStatusRequests = requests.slice(fitStatusFailureStart);
-  assert.deepEqual(fitStatusRequests.map((request) => request.kind), ['semantic-plan', 'semantic-repair', 'semantic-repair', 'semantic-repair'],
-    'invalid fitStatus uses exactly the initial request plus the existing three technical repairs, with no extra review');
+  assert.deepEqual(fitStatusRequests.map((request) => request.kind), ['semantic-plan'],
+    'invalid fitStatus ends after one request, with no automatic repair or extra review');
   assert.ok(fitStatusRequests.every((request) => request.phase === 'fit-status-failure'));
-  for (const repair of fitStatusRequests.slice(1)) assert.deepEqual(repair.data.input, fitStatusRequests[0].data, 'enum repair must retain the exact original planning input and duration');
-  assert.deepEqual(savedResults(await readState()), beforeFitStatusFailure, 'exhausted enum repairs must retain every old plan, exact bilingual H3, and physical reference slot');
+  assert.deepEqual(savedResults(await readState()), beforeFitStatusFailure, 'a failed enum response must retain every old plan, exact bilingual H3, and physical reference slot');
   assertNoUnexpectedGeneration(await readState(), originals);
-  assert.equal(await planButton.isEnabled(), true, 'the planning button becomes available again after enum repair exhaustion');
+  assert.equal(await planButton.isEnabled(), true, 'the planning button becomes available again after the single enum response fails');
   assert.equal(await aiModeButton.getAttribute('aria-pressed'), 'true');
   assert.equal(await customTotalInput.count(), 0, 'invalid fitStatus must not require changing duration mode or exposing a new total');
   const fitStatusSummary = await page.locator('.sequence-planning-error > span').innerText();
   assertFitStatusFailureSummary(fitStatusSummary, 'planning failure summary');
   assert.match(await page.locator('.sequence-planning-error').innerText(), /无需手动重算总时长/u);
   const fitStatusErrors = await page.evaluate(() => JSON.parse(localStorage.getItem('lianhua_runtime_error_log_v1') || '[]'));
-  assert.equal(fitStatusErrors.length, errorsBeforeFitStatusFailure.length + 1, 'one final enum failure creates one log, not one log per repair');
+  assert.equal(fitStatusErrors.length, errorsBeforeFitStatusFailure.length + 1, 'one failed enum response creates one diagnostic log');
   assert.equal(fitStatusErrors[0].stage, 'sequence-semantic-planning');
   assertFitStatusFailureSummary(fitStatusErrors[0].message, 'persisted failure diagnostic');
   assert.equal(await page.locator('.runtime-error-log-count').textContent(), String(fitStatusErrors.length));
-  await capture('12-invalid-fit-status-exhausted-keeps-results');
+  await capture('12-invalid-fit-status-stops-keeps-results');
   await page.locator('.runtime-error-log-trigger').click();
   const fitStatusErrorDialog = page.getByRole('dialog', { name: '报错日志', exact: true }); await fitStatusErrorDialog.waitFor();
   assertFitStatusFailureSummary(await fitStatusErrorDialog.locator('.runtime-error-log-entry').first().locator('.task-error-summary').innerText(), 'runtime log summary');
@@ -682,7 +674,7 @@ const run = async () => {
   assert.equal(await page.locator('.sequence-planning-error').count(), 0, 'successful retry clears the current planning error');
   assert.equal(await page.locator('.runtime-error-log-count').textContent(), String(fitStatusErrors.length), 'successful retry preserves the diagnostic log without adding a new failure');
   await capture('13-fit-status-retry-without-changing-duration');
-  steps.push('four invalid fitStatus replies exhaust the existing initial-plus-three budget; planning/log summaries name $.fitStatus and all four allowed values without the unknown-error fallback; old plans/H3/sparse references remain exact and the retry button recovers');
+  steps.push('one invalid fitStatus reply ends the operation without automatic retries; planning/log summaries name $.fitStatus and all four allowed values without the unknown-error fallback; old plans/H3/sparse references remain exact and the retry button recovers');
   steps.push('direct retry with " Balanced " succeeds in one semantic request using the unchanged duration and planning input, appends an independent unconfirmed plan, and requires no extra AI review');
   const callsBeforeLegacy = requests.length;
   await page.getByRole('button', { name: /^项目库（/u }).click();

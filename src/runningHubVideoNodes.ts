@@ -59,8 +59,23 @@ export const parseRunningHubVideoFieldData = (value: unknown): RunningHubVideoFi
   return type === 'STRING' || type === 'TEXT' ? { kind: 'text' } : undefined;
 };
 
-type NodeEvidence = Pick<RunningHubVideoNodeCatalogEntry, 'fieldType' | 'classType' | 'audioUpload'>;
-/** Keep upload-widget evidence separate from display controls and wire values. */
+type LoraStrengthBindings = NonNullable<RunningHubVideoNodeCatalogEntry['loraStrengthBindings']>;
+/** Normalize local graph evidence without changing request values. */
+export const normalizeRunningHubVideoLoraStrengthBindings = (value: unknown): LoraStrengthBindings | undefined => {
+  if (!record(value)) return undefined;
+  const result: LoraStrengthBindings = {};
+  for (const key of ['strength', 'clipStrength'] as const) {
+    const binding = value[key];
+    if (record(binding) && typeof binding.nodeId === 'string' && binding.nodeId.trim()
+      && typeof binding.inputName === 'string' && binding.inputName.trim() && !isRunningHubVideoSecretField(binding.inputName)) {
+      result[key] = { nodeId: binding.nodeId, inputName: binding.inputName };
+    }
+  }
+  return result;
+};
+
+type NodeEvidence = Pick<RunningHubVideoNodeCatalogEntry, 'fieldType' | 'classType' | 'audioUpload' | 'loraStrengthBindings'>;
+/** Keep discovery evidence separate from display controls and wire values. */
 const nodeEvidence = (value: Record<string, unknown>): NodeEvidence => {
   let data = value.fieldData;
   for (let attempt = 0; typeof data === 'string' && attempt < 3; attempt += 1) {
@@ -76,7 +91,8 @@ const nodeEvidence = (value: Record<string, unknown>): NodeEvidence => {
       : typeof details.audio_upload === 'boolean' ? details.audio_upload : undefined;
   return { ...(fieldType?.trim() ? { fieldType: fieldType.trim() } : {}),
     ...(classType?.trim() ? { classType: classType.trim() } : {}),
-    ...(audioUpload !== undefined ? { audioUpload } : {}) };
+    ...(audioUpload !== undefined ? { audioUpload } : {}),
+    ...(own(value, 'loraStrengthBindings') ? { loraStrengthBindings: normalizeRunningHubVideoLoraStrengthBindings(value.loraStrengthBindings) ?? {} } : {}) };
 };
 
 export const normalizeRunningHubVideoFieldControls = (value: unknown): Record<string, RunningHubVideoFieldControl> => {
@@ -152,7 +168,9 @@ export const listRunningHubVideoNodes = (
     const control = catalogNode?.control
       ?? normalizeRunningHubVideoFieldControl(node.control) ?? parseRunningHubVideoFieldData(node.fieldData);
     result.push({ ...node, ...(catalogNode ? nodeEvidence(catalogNode as unknown as Record<string, unknown>) : {}),
-      ...nodeEvidence(node), ...(control ? { control } : {}) } as RunningHubVideoNodeInfo);
+      ...nodeEvidence(node),
+      ...(catalogNode?.loraStrengthBindings !== undefined ? { loraStrengthBindings: catalogNode.loraStrengthBindings } : {}),
+      ...(control ? { control } : {}) } as RunningHubVideoNodeInfo);
     seen.add(keyOf(node as RunningHubVideoNodeInfo));
   }
   for (const node of normalizedCatalog) {
@@ -286,10 +304,29 @@ export const parseRunningHubVideoNodes = (source: string): RunningHubVideoNodesR
       const entries = Object.entries(value);
       const graph = entries.length > 0 && entries.every(([, node]) => record(node) && typeof node.class_type === 'string' && record(node.inputs));
       if (graph) {
+        const linkedLoraStrength = (nodeId: string, inputs: Record<string, unknown>, fieldName: string): RunningHubVideoInputBinding | undefined => {
+          const link = inputs[fieldName];
+          if (!Array.isArray(link) || link.length !== 2 || link[1] !== 0) return undefined;
+          const sourceId = exactId(link[0], [...path, nodeId, 'inputs', fieldName, 0]);
+          const sourceNode = own(value, sourceId) ? value[sourceId] : undefined;
+          // This source node's output 0 directly exposes its numeric 值 input.
+          // Other sliders, expressions and output slots need their own known mapping.
+          if (!record(sourceNode) || sourceNode.class_type !== 'GoohaiUniversalSlider' || !record(sourceNode.inputs)
+            || typeof sourceNode.inputs['值'] !== 'number' || !scalar(sourceNode.inputs['值'])) return undefined;
+          return { nodeId: sourceId, inputName: '值' };
+        };
         for (const [nodeId, rawNode] of entries) {
           const node = rawNode as { class_type: string; inputs: Record<string, unknown>; _meta?: unknown };
           const description = record(node._meta) && typeof node._meta.title === 'string' ? node._meta.title : node.class_type;
-          for (const [fieldName, value] of Object.entries(node.inputs)) add(nodeId, fieldName, value, [...path, nodeId, 'inputs', fieldName], description, undefined, { classType: node.class_type });
+          for (const [fieldName, inputValue] of Object.entries(node.inputs)) {
+            const evidence: NodeEvidence = { classType: node.class_type };
+            if (typeof inputValue === 'string' && /^(?:lora|loraname|loramodel|loramodelname|lorafile|lorafilename|lora模型|lora名称|lora文件|lora文件名)$/u.test(fieldName.toLowerCase().replace(/[\s_-]+/gu, ''))) {
+              const strength = linkedLoraStrength(nodeId, node.inputs, 'strength_model');
+              const clipStrength = linkedLoraStrength(nodeId, node.inputs, 'strength_clip');
+              evidence.loraStrengthBindings = { ...(strength ? { strength } : {}), ...(clipStrength ? { clipStrength } : {}) };
+            }
+            add(nodeId, fieldName, inputValue, [...path, nodeId, 'inputs', fieldName], description, undefined, evidence);
+          }
         }
         return;
       }

@@ -12,7 +12,7 @@ import { buildVideoCreativeDirection } from '../src/videoCreativeDirection';
 import { sourceContentHash } from '../src/sourceContentHash';
 import { matchingStoryVisualConversion } from '../src/storyVisualConversion';
 import { buildVideoSceneContext } from '../src/videoSceneContext';
-import { MAX_SEMANTIC_SEQUENCE_REPAIRS, requestSemanticSequencePlan as productionSemanticSequencePlanner,
+import { requestSemanticSequencePlan as productionSemanticSequencePlanner,
   type SemanticSequencePlannerOptions, type SemanticSequencePlannerProgress } from '../src/services/semanticSequencePlanner';
 import { createSemanticPlanningStatus, recordSemanticPlanningDiagnostic, type SemanticPlanningStatus } from '../src/semanticSequenceProgress';
 import { createRuntimeErrorLogEntry, type RuntimeErrorLogEntry } from '../src/runtimeErrorLog';
@@ -84,7 +84,7 @@ const fixture = (holdPreflight = false, useProductionPlanner = false,
     storyboardRequestApiIdentity, buildVideoCreativeDirection, sourceContentHash, defaultStylePresets,
     activeChapter, chapterScopeProject, chapterWorkspace, withChapterWorkspace, readProjectStoryDraft,
     matchingStoryVisualConversion, buildVideoSceneContext, generationPromptFormat: 'h3',
-    MAX_SEMANTIC_SEQUENCE_REPAIRS, createSemanticPlanningStatus,
+    createSemanticPlanningStatus,
     semanticPlanningProgressRef: { current: null },
     recordSemanticPlanningDiagnostic: (status: SemanticPlanningStatus) => {
       diagnostics.push(structuredClone(status));
@@ -123,7 +123,7 @@ const fixture = (holdPreflight = false, useProductionPlanner = false,
     requestSemanticSequencePlan: async (config: TextApiConfig, input: SemanticSequencePlanningInput, signal?: AbortSignal, options: SemanticSequencePlannerOptions = {}) => {
       calls.push({ input, signal, options });
       const emit = (stage: SemanticSequencePlannerProgress['stage']) => options.onProgress?.({
-        stage, requestNumber: 1, maxRequests: MAX_SEMANTIC_SEQUENCE_REPAIRS + 1, elapsedMs: 1,
+        stage, requestNumber: 1, maxRequests: 1, elapsedMs: 1,
         durationMode: input.durationMode ?? 'ai-estimated', segmentDurationSec: input.segmentDurationSec,
         ...(input.requestedTotalDurationSec !== undefined ? { totalDurationSec: input.requestedTotalDurationSec,
           requiredSegmentCount: input.requestedTotalDurationSec / input.segmentDurationSec } : {}),
@@ -358,92 +358,37 @@ try {
     assert.equal(h.ui.setPlanningBusy, false); assert.deepEqual(h.runtimeErrors, []);
   }
   {
-    const h = fixture(false, true); const before = structuredClone(h.state.project); wireCalls.length = 0;
-    const mismatch = { ...response, segmentCount: 9 };
-    wireReply = (index) => wireResponse(JSON.stringify(index === 0 ? mismatch : responseWithoutCount()));
-    const { pending } = await begin(h); h.release(); await pending;
-    assert.equal(h.calls.length, 1); assert.equal(wireCalls.length, 2, 'a contradictory legacy count is repaired once by AI, not dropped locally');
-    const repair = JSON.parse(wireCalls[1].messages.find((message: any) => message.role === 'user').content.split('semantic_sequence_repair=')[1]);
-    assert.equal(repair.previousResponse, JSON.stringify(mismatch)); assert.equal(repair.input.story, story);
-    assert.ok(repair.technicalIssues.some((issue: string) => /AI 声明 9 段，实际返回 2 段/u.test(issue)));
-    const plan = h.state.project.sequencePlans[0];
-    assert.equal(plan.segments.length, 2); assert.equal(plan.totalDurationSec, 30);
-    assert.deepEqual(plan.segments.map((segment) => segment.content), responseWithoutCount().segments.map((segment) => segment.content), 'the repaired AI content is saved without filling or deleting local segments');
-    assert.deepEqual(h.state.project.sequencePlans[1], before.sequencePlans[0]);
-    assert.deepEqual(h.state.project.storyboards, before.storyboards);
-    assert.ok(h.notices.some((message) => /AI 正在修复分段数据（1\/3）/u.test(message)));
-    assert.equal(h.ui.setPlanningBusy, false); assert.deepEqual(h.runtimeErrors, []);
-  }
-  {
-    const h = fixture(false, true); const before = structuredClone(h.state.project); wireCalls.length = 0;
-    const mismatch = { ...response, segmentCount: 9 };
-    wireReply = () => wireResponse(JSON.stringify(mismatch));
-    const { pending } = await begin(h); h.release(); await pending;
-    assert.equal(h.calls.length, 1); assert.equal(wireCalls.length, 4, 'one initial request and exactly three repairs share the bounded attempt budget');
-    assert.deepEqual(h.state.project, before, 'exhausting legacy-count repairs commits no new plan or source, and preserves historical H3');
-    for (const attempt of [1, 2, 3]) assert.ok(h.notices.some((message) => message.includes(`AI 正在修复分段数据（${attempt}/3）`)));
-    assert.match(String(h.ui.setSequenceMasterGenerationIssue), /自动重试 3 次（共 4 次请求）/u);
-    assert.match(String(h.ui.setSequenceMasterGenerationIssue), /AI 声明 9 段，实际返回 2 段/u);
-    assert.equal(h.runtimeErrors.length, 1);
-    assert.match(h.runtimeErrors[0].message, /自动重试 3 次（共 4 次请求）/u);
-    assert.match(h.runtimeErrors[0].message, /AI 声明 9 段，实际返回 2 段/u);
-    assert.equal(h.ui.setPlanningBusy, false); assert.equal(h.dependencies.planningBusy, false);
-    assert.equal((h.dependencies.sequencePlanningAbortRef as { current: unknown }).current, null);
-    assert.equal((h.dependencies.sequencePlanningRequestIdentityRef as { current: unknown }).current, '');
-    assert.equal((h.dependencies.semanticSequencePlanningActiveRef as { current: unknown }).current, false);
-    assert.equal(h.ui.setActivePlanId, undefined, 'the failed request does not replace the selected historical plan');
-    // Retry the same UI/closure, without resetting busy, refs or state in the
-    // fixture. Only the model response changes to the successful wire format.
-    wireReply = () => wireResponse(JSON.stringify(responseWithoutCount()));
-    await h.call();
-    assert.equal(h.calls.length, 2); assert.equal(wireCalls.length, 5, 'the next user click starts one fresh request after an exhausted operation');
-    assert.equal(h.state.project.sequencePlans.length, before.sequencePlans.length + 1);
-    assert.deepEqual(h.state.project.sequencePlans[1], before.sequencePlans[0]);
-    assert.deepEqual(h.state.project.storyboards, before.storyboards);
-    assert.equal(h.ui.setSequenceMasterGenerationIssue, ''); assert.equal(h.ui.setPlanningBusy, false);
-    assert.equal(h.runtimeErrors.length, 1, 'a successful new attempt does not duplicate or erase the previous failure log');
-    assert.equal(h.ui.setSequenceStage, 'plan', 'the recovered operation returns to the existing plan-review step');
-  }
-  {
-    const h = fixture(false, true, { durationMode: 'fixed', totalDuration: 45 });
-    const before = structuredClone(h.state.project); wireCalls.length = 0;
-    wireReply = (index) => wireResponse(JSON.stringify(index === 0 ? response : responseWithCount(3)));
-    const { pending } = await begin(h); h.release(); await pending;
-    assert.equal(h.calls.length, 1, 'one custom-total App action owns all bounded structural repair');
-    assert.equal(wireCalls.length, 2, 'wrong fixed segment count is repaired through the real planner');
-    const firstInput = JSON.parse(wireCalls[0].messages.find((message: any) => message.role === 'user').content.split('semantic_sequence_input=')[1]);
-    const repair = JSON.parse(wireCalls[1].messages.find((message: any) => message.role === 'user').content.split('semantic_sequence_repair=')[1]);
-    assert.equal(firstInput.durationMode, 'fixed'); assert.equal(firstInput.requestedTotalDurationSec, 45);
-    assert.equal(repair.input.durationMode, 'fixed'); assert.equal(repair.input.requestedTotalDurationSec, 45);
-    assert.equal(repair.previousResponse, JSON.stringify(response));
-    assert.ok(repair.technicalIssues.length, 'wrong segment count must be a real production structural issue');
-    const plan = h.state.project.sequencePlans[0];
-    assert.equal(plan.durationMode, 'fixed'); assert.equal(plan.totalDurationSec, 45); assert.equal(plan.segments.length, 3);
-    assert.equal(plan.semanticPlanningSnapshot?.requestedTotalDurationSec, 45);
-    assert.deepEqual(h.state.project.sequencePlans[1], before.sequencePlans[0]);
-    assert.deepEqual(h.state.project.storyboards, before.storyboards, 'custom-count recovery preserves the exact old H3');
-    assert.deepEqual(h.runtimeErrors, []);
-  }
-  {
-    const h = fixture(false, true); h.mutate((state) => { state.settings.textApi.model = 'deepseek-semantic-mock'; });
-    const before = structuredClone(h.state.project); const configBefore = structuredClone(h.state.settings.textApi);
-    const partial = JSON.stringify(response).slice(0, -20); wireCalls.length = 0;
-    wireReply = (index) => wireResponse(index === 0 ? partial : JSON.stringify(response));
-    const { pending } = await begin(h); h.release(); await pending;
-    assert.equal(h.calls.length, 1, 'one App action owns the entire bounded recovery');
-    assert.equal(wireCalls.length, 2, 'unclosed JSON body must recover with one automatic model request');
-    assert.ok(wireCalls.every((payload) => payload.response_format?.type === 'json_object' && payload.thinking?.type === 'disabled'));
-    assert.ok(wireCalls[1].max_tokens > wireCalls[0].max_tokens, 'incomplete JSON recovery raises only the request-owned output allowance');
-    const repair = JSON.parse(wireCalls[1].messages.find((message: any) => message.role === 'user').content.split('semantic_sequence_repair=')[1]);
-    assert.equal(repair.previousResponse, partial); assert.equal(repair.input.story, story);
-    assert.equal(h.state.project.sequencePlans.length, before.sequencePlans.length + 1);
-    assert.deepEqual(h.state.project.sequencePlans[1], before.sequencePlans[0]);
-    assert.deepEqual(h.state.project.storyboards, before.storyboards, 'recovery preserves the complete prior final H3');
-    assert.deepEqual(h.state.settings.textApi, configBefore, 'recovery must not mutate the saved API configuration');
-    assert.equal(h.state.project.sequencePlans[0].planningMode, 'semantic-segments');
-    assert.equal(h.state.project.sequencePlans[0].masterStoryboardId, undefined);
-    assert.ok(h.notices.some((message) => /AI 正在修复分段数据（1\/3）/u.test(message)));
-    assert.deepEqual(h.runtimeErrors, [], 'successful automatic recovery is not a failed operation');
+    const failures = [
+      { name: 'legacy count', result: JSON.stringify({ ...response, segmentCount: 9 }) },
+      { name: 'fixed count', result: JSON.stringify(response), fixed: true },
+      { name: 'incomplete JSON', result: JSON.stringify(response).slice(0, -20) },
+      { name: 'invalid JSON', result: 'not a JSON document' },
+    ];
+    for (const failure of failures) {
+      const h = fixture(false, true, failure.fixed ? { durationMode: 'fixed', totalDuration: 45 } : {});
+      const before = structuredClone(h.state.project); const configBefore = structuredClone(h.state.settings.textApi); wireCalls.length = 0;
+      wireReply = () => wireResponse(failure.result);
+      const { pending } = await begin(h); h.release(); await pending;
+      assert.equal(h.calls.length, 1); assert.equal(wireCalls.length, 1, failure.name + ': one user action performs one request');
+      assert.deepEqual(h.state.project, before, failure.name + ': failure preserves old plan, source and H3');
+      assert.deepEqual(h.state.settings.textApi, configBefore);
+      assert.equal(h.ui.setActivePlanId, undefined);
+      assert.equal(h.runtimeErrors.length, 1); assert.equal(h.ui.setPlanningBusy, false);
+      assert.equal((h.ui.setSemanticPlanningProgress as SemanticPlanningStatus).stage, 'failed');
+      assert.ok(h.diagnostics.every((status) => status.requestNumber <= 1 && status.maxRequests === 1));
+      assert.ok(h.notices.every((message) => !/正在修复分段数据|自动重试/u.test(message)));
+      assert.equal((h.dependencies.sequencePlanningAbortRef as { current: unknown }).current, null);
+      assert.equal((h.dependencies.sequencePlanningRequestIdentityRef as { current: unknown }).current, '');
+      assert.equal((h.dependencies.semanticSequencePlanningActiveRef as { current: unknown }).current, false);
+      // Only a fresh user action may make another call after failure.
+      wireReply = () => wireResponse(JSON.stringify(responseWithoutCount(failure.fixed ? 3 : 2)));
+      await h.call();
+      assert.equal(h.calls.length, 2); assert.equal(wireCalls.length, 2);
+      assert.equal(h.state.project.sequencePlans.length, before.sequencePlans.length + 1);
+      assert.deepEqual(h.state.project.sequencePlans[1], before.sequencePlans[0]);
+      assert.deepEqual(h.state.project.storyboards, before.storyboards);
+      assert.equal(h.runtimeErrors.length, 1); assert.equal(h.ui.setSequenceMasterGenerationIssue, '');
+    }
   }
   {
     const h = fixture(false, true); const before = structuredClone(h.state.project); wireCalls.length = 0;
@@ -457,4 +402,4 @@ try {
     assert.equal(h.runtimeErrors[0].status, 400); assert.match(h.runtimeErrors[0].message, /QA_HTTP400_ACCOUNT_BLOCKED: billing unavailable/u);
   }
 } finally { globalThis.fetch = originalFetch; }
-console.log('semanticSequenceApp: fixed insufficiency ends after one request and retains its reason/history, manual retry recovers, existing technical repairs remain bounded, and stale callbacks cannot write results or progress (mock only).');
+console.log('semanticSequenceApp: fixed insufficiency ends after one request and retains its reason/history, manual retry recovers, all semantic failures stop after one request, and stale callbacks cannot write results or progress (mock only).');

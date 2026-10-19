@@ -62,8 +62,14 @@ export interface SemanticSequenceResponse {
 export type SemanticSequenceTechnicalErrorKind = 'invalid-shape' | 'missing-json' | 'invalid-json' | 'incomplete-json';
 export interface SemanticSequenceJsonDiagnostics {
   readonly responseLength: number;
+  /** Original response candidate boundaries; end is exclusive, not an error location. */
   readonly jsonStart?: number;
   readonly jsonEnd?: number;
+  /** Syntax location in the response (layer 0) or a decoded JSON string (layer 1+). */
+  readonly syntaxPosition?: number;
+  readonly syntaxLine?: number;
+  readonly syntaxColumn?: number;
+  readonly decodedStringLayer?: number;
 }
 export class SemanticSequenceTechnicalError extends Error {
   constructor(
@@ -71,15 +77,67 @@ export class SemanticSequenceTechnicalError extends Error {
     readonly kind: SemanticSequenceTechnicalErrorKind = 'invalid-shape',
     readonly diagnostics?: Readonly<SemanticSequenceJsonDiagnostics>,
   ) {
+    const syntaxScope = diagnostics?.decodedStringLayer
+      ? `第${diagnostics.decodedStringLayer}层解码字符串内`
+      : '响应正文内';
     const positions = diagnostics ? [
       `响应长度 ${diagnostics.responseLength}`,
-      ...(diagnostics.jsonStart !== undefined ? [`JSON 起点 ${diagnostics.jsonStart}`] : []),
-      ...(diagnostics.jsonEnd !== undefined ? [`JSON 终点 ${diagnostics.jsonEnd}`] : []),
+      ...(diagnostics.jsonStart !== undefined ? [`候选 JSON 范围起点 ${diagnostics.jsonStart}`] : []),
+      ...(diagnostics.jsonEnd !== undefined ? [`候选 JSON 范围终点 ${diagnostics.jsonEnd}（不含）`] : []),
+      ...(diagnostics.syntaxPosition !== undefined ? [`${syntaxScope}语法错误位置 ${diagnostics.syntaxPosition}（从0计数）`] : []),
+      ...(diagnostics.syntaxLine !== undefined && diagnostics.syntaxColumn !== undefined
+        ? [`${syntaxScope}第${diagnostics.syntaxLine}行第${diagnostics.syntaxColumn}列（从1计数）`] : []),
     ] : [];
     super(`AI 语义分段结构无效：${issues.join('；')}${positions.length ? `（${positions.join('，')}）` : ''}`);
     this.name = 'SemanticSequenceTechnicalError';
   }
 }
+
+/** Diagnose an existing JSON.parse failure only. Native messages can contain
+ * private prose, so retain only numeric locations and fixed category labels. */
+const jsonSyntaxFailure = (
+  error: unknown, issue: string, kind: SemanticSequenceTechnicalErrorKind,
+  diagnostics: SemanticSequenceJsonDiagnostics, source: string, parseStart = 0, decodedStringLayer = 0,
+): SemanticSequenceTechnicalError => {
+  if (!(error instanceof SyntaxError)) return new SemanticSequenceTechnicalError([issue], kind, diagnostics);
+  const message = error.message;
+  const categories: ReadonlyArray<readonly [RegExp, string]> = [
+    [/^Expected ',' or '\}' after property value in JSON\b/u, '对象成员分隔或闭合符无效'],
+    [/^Expected ',' or '\]' after array element in JSON\b/u, '数组元素分隔或闭合符无效'],
+    [/^Expected ':' after property name in JSON\b/u, '属性名后缺少冒号'],
+    [/^Expected (?:double-quoted property name|property name or '\}') in JSON\b/u, '属性名或对象成员格式无效'],
+    [/^Bad control character in string literal in JSON\b/u, '字符串含未转义控制字符'],
+    [/^Bad escaped character in JSON\b/u, '字符串转义无效'],
+    [/^Bad Unicode escape in JSON\b/u, 'Unicode 转义无效'],
+    [/^Unterminated string in JSON\b/u, '字符串未闭合'],
+    [/^Unexpected end of JSON input\b/u, 'JSON 提前结束'],
+    [/^Unexpected non-whitespace character after JSON\b/u, 'JSON 结束后存在额外字符'],
+  ];
+  const category = categories.find(([pattern]) => pattern.test(message))?.[1];
+  const positionMatch = message.match(/ at position (\d+)(?: \(line (\d+) column (\d+)\))?$/u);
+  const lineMatch = message.match(/^JSON\.parse:.* at line (\d+) column (\d+) of the JSON data$/u);
+  const relativePosition = positionMatch ? Number(positionMatch[1]) : undefined;
+  const location: { syntaxPosition?: number; syntaxLine?: number; syntaxColumn?: number; decodedStringLayer?: number } = {};
+  if (relativePosition !== undefined && Number.isSafeInteger(relativePosition)
+    && relativePosition >= 0 && parseStart + relativePosition <= source.length) {
+    location.syntaxPosition = parseStart + relativePosition;
+    const precedingLines = source.slice(0, location.syntaxPosition).split(/\r\n|[\r\n]/u);
+    location.syntaxLine = precedingLines.length;
+    location.syntaxColumn = precedingLines[precedingLines.length - 1].length + 1;
+  } else if (lineMatch) {
+    const line = Number(lineMatch[1]);
+    const column = Number(lineMatch[2]);
+    if (Number.isSafeInteger(line) && line >= 1 && Number.isSafeInteger(column) && column >= 1) {
+      const precedingLines = source.slice(0, parseStart).split(/\r\n|[\r\n]/u);
+      location.syntaxLine = precedingLines.length + line - 1;
+      location.syntaxColumn = column + (line === 1 ? precedingLines[precedingLines.length - 1].length : 0);
+    }
+  }
+  if (Object.keys(location).length) location.decodedStringLayer = decodedStringLayer;
+  return new SemanticSequenceTechnicalError(
+    [issue, ...(category ? [`语法类别：${category}`] : [])], kind, { ...diagnostics, ...location },
+  );
+};
 
 const record = (value: unknown): value is Record<string, unknown> => (
   value !== null && typeof value === 'object' && !Array.isArray(value)
@@ -377,11 +435,13 @@ const decodeJsonObject = (
   let layers = stringLayers;
   while (typeof value === 'string') {
     if (layers >= 2) throw new SemanticSequenceTechnicalError(['响应 JSON 字符串编码层数超过上限'], 'invalid-json', diagnostics);
-    const text = value.trim();
-    try { value = JSON.parse(text) as unknown; } catch {
+    const encodedValue = value;
+    const text = encodedValue.trim();
+    try { value = JSON.parse(text) as unknown; } catch (error) {
       const span = text[0] === '{' || text[0] === '[' || text[0] === '"' ? readJsonSpan(text, 0) : undefined;
       const kind = span && span.end === undefined ? 'incomplete-json' : 'invalid-json';
-      throw new SemanticSequenceTechnicalError([kind === 'incomplete-json' ? '响应 JSON 未闭合，可能已截断' : '响应 JSON 语法无效'], kind, diagnostics);
+      throw jsonSyntaxFailure(error, kind === 'incomplete-json' ? '响应 JSON 未闭合，可能已截断' : '响应 JSON 语法无效',
+        kind, diagnostics, encodedValue, encodedValue.length - encodedValue.trimStart().length, layers + 1);
     }
     layers += 1;
   }
@@ -400,7 +460,10 @@ const parseJsonObject = (raw: string): Record<string, unknown> => {
   });
   let direct: unknown;
   let directParsed = false;
-  try { direct = JSON.parse(raw.trim()) as unknown; directParsed = true; } catch { /* Extract original JSON boundaries below. */ }
+  let directError: unknown;
+  try { direct = JSON.parse(raw.trim()) as unknown; directParsed = true; } catch (error) {
+    directError = error; // Preserve only for safe diagnostics if this same value is selected below.
+  }
   if (directParsed) return decodeJsonObject(direct, diagnostics(start, raw.trimEnd().length));
 
   const candidates: Array<JsonSpan & { value?: Record<string, unknown>; error?: SemanticSequenceTechnicalError }> = [];
@@ -432,7 +495,7 @@ const parseJsonObject = (raw: string): Record<string, unknown> => {
       candidates.push({ ...span, value, planLike: hasEncodedPlanProtocol(parsed) || hasPlanProtocol(value) });
     } catch (error) {
       candidates.push({ ...span, planLike, error: error instanceof SemanticSequenceTechnicalError ? error
-        : new SemanticSequenceTechnicalError(['响应 JSON 语法无效'], 'invalid-json', diagnostics(index, span.end)) });
+        : jsonSyntaxFailure(error, '响应 JSON 语法无效', 'invalid-json', diagnostics(index, span.end), raw, index) });
     }
     index = span.end - 1;
   }
@@ -442,14 +505,18 @@ const parseJsonObject = (raw: string): Record<string, unknown> => {
   // trailing {"incomplete":. Do not publish an earlier example in its place.
   const incomplete = candidates.find((candidate) => candidate.end === undefined
     && (!selected || candidate.start >= (selected.end ?? selected.start)));
-  if (incomplete) throw new SemanticSequenceTechnicalError(['响应 JSON 未闭合，可能已截断'], 'incomplete-json', diagnostics(incomplete.start));
+  if (incomplete) throw incomplete.start === start
+    ? jsonSyntaxFailure(directError, '响应 JSON 未闭合，可能已截断', 'incomplete-json', diagnostics(incomplete.start), raw, start)
+    : new SemanticSequenceTechnicalError(['响应 JSON 未闭合，可能已截断'], 'incomplete-json', diagnostics(incomplete.start));
   if (selected?.error) throw selected.error;
   if (selected?.value) return selected.value;
   const last = candidates[candidates.length - 1];
   if (last?.error) throw last.error;
   if (last?.value) return last.value;
-  if (raw.trim() === '{' || raw.trim() === '[') throw new SemanticSequenceTechnicalError(['响应 JSON 未闭合，可能已截断'], 'incomplete-json', diagnostics(start));
-  if (raw[start] === '{' || raw[start] === '[') throw new SemanticSequenceTechnicalError(['响应 JSON 语法无效'], 'invalid-json', diagnostics(start));
+  if (raw.trim() === '{' || raw.trim() === '[') throw jsonSyntaxFailure(directError,
+    '响应 JSON 未闭合，可能已截断', 'incomplete-json', diagnostics(start), raw, start);
+  if (raw[start] === '{' || raw[start] === '[') throw jsonSyntaxFailure(directError,
+    '响应 JSON 语法无效', 'invalid-json', diagnostics(start), raw, start);
   throw new SemanticSequenceTechnicalError(['响应没有可解析的 JSON 对象'], 'missing-json', diagnostics());
 };
 

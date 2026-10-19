@@ -162,7 +162,7 @@ try {
       calls.push({ system, user });
       assert.match(system, /RAW_STORY_SEMANTIC_SEQUENCE_PLANNING_V1/u);
       assert.doesNotMatch(system, /RAW_STORY_SEMANTIC_SEQUENCE_TECHNICAL_REPAIR_V1/u);
-      const data = JSON.parse(user.slice('semantic_sequence_input='.length));
+      const data = JSON.parse(user.slice('semantic_sequence_input='.length).split(/\r?\n/u, 1)[0]);
       assert.equal(data.story, story); assert.equal(data.segmentDurationSec, 15);
       if (data.durationMode === 'fixed') {
         assert.equal(data.requestedTotalDurationSec, 45);
@@ -187,7 +187,7 @@ try {
     sourceSceneIds: ['semantic-scene'], shotMode: 'exact' as const, shotCount: 2,
   };
   const plan = await requestSemanticSequencePlan(config, input, undefined, {
-    planId: 'semantic-plan', now: () => 100, onRepair: () => assert.fail('no local semantic gate/review is allowed'),
+    planId: 'semantic-plan', now: () => 100,
   });
   assert.equal(calls.length, 1); assert.equal(plan.planningMode, 'semantic-segments');
   assert.equal(plan.masterStoryboardId, undefined); assert.equal(plan.totalDurationSec, 45);

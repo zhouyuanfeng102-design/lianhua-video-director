@@ -64,10 +64,7 @@ export const recordSemanticPlanningDiagnostic = (
       requestNumber: status.requestNumber, stage: status.stage, elapsedMs: status.elapsedMs,
       ...(status.detail || previousRequest?.detail ? { detail: status.detail || previousRequest.detail } : {}),
     };
-    const incoming = { ...status, requests: [
-      ...requests.filter((entry: { requestNumber?: number }) => entry?.requestNumber !== status.requestNumber),
-      snapshot,
-    ].slice(-status.maxRequests - 1) };
+    const incoming = { ...status, requests: [snapshot] };
     target.setItem(SEMANTIC_PLANNING_DIAGNOSTIC_KEY, JSON.stringify([
       incoming, ...entries.filter((entry) => entry?.operationId !== status.operationId),
     ].slice(0, MAX_DIAGNOSTICS)));
@@ -83,10 +80,10 @@ export const semanticPlanningElapsedMs = (status: SemanticPlanningStatus, now = 
 export const semanticPlanningStatusText = (status: SemanticPlanningStatus, now = Date.now()): string => {
   const labels: Record<SemanticPlanningStatus['stage'], string> = {
     preparing: '准备当前完整剧情', requesting: '等待接口完整响应', parsing: '解析分段结果',
-    materializing: '整理分段计划', repairing: '现有技术恢复', completed: '分段完成',
+    materializing: '整理分段计划', completed: '分段完成',
     failed: '本次分段未完成', stopped: '分段已停止',
   };
   const seconds = Math.floor(semanticPlanningElapsedMs(status, now) / 1000);
   const time = seconds >= 60 ? `${Math.floor(seconds / 60)}分${seconds % 60}秒` : `${seconds}秒`;
-  return `${labels[status.stage]}${status.requestNumber ? ` · 第 ${status.requestNumber} 次请求` : ''} · 已用时 ${time}`;
+  return `${labels[status.stage]} · 已用时 ${time}`;
 };

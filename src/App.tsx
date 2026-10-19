@@ -331,7 +331,7 @@ import {
   type StoryPreparationMode,
 } from "./services/llm";
 import { canonicalCharacterVariantName, characterVariantDisplayName } from "./characterVariants";
-import { MAX_SEMANTIC_SEQUENCE_REPAIRS, requestSemanticSequencePlan, type SemanticSequencePlannerProgress } from "./services/semanticSequencePlanner";
+import { requestSemanticSequencePlan, type SemanticSequencePlannerProgress } from "./services/semanticSequencePlanner";
 import { createSemanticPlanningStatus, recordSemanticPlanningDiagnostic, type SemanticPlanningStatus } from "./semanticSequenceProgress";
 import { SemanticPlanningProgressView } from "./components/SemanticPlanningProgressView";
 import { isSemanticSequencePlan, normalizeSemanticSequenceRequestedTotalDuration, semanticSegmentSourceContext, semanticSequenceSourceFingerprint, semanticSequenceCharacters } from "./semanticSequencePlan";
@@ -4236,7 +4236,7 @@ export default function App() {
       recordSemanticPlanningDiagnostic(status);
     };
     const initialProgress = { stage: "preparing" as const, requestNumber: 0,
-      maxRequests: MAX_SEMANTIC_SEQUENCE_REPAIRS + 1, elapsedMs: 0, durationMode, segmentDurationSec,
+      maxRequests: 1, elapsedMs: 0, durationMode, segmentDurationSec,
       ...(requestedTotalDurationSec !== undefined ? { totalDurationSec: requestedTotalDurationSec,
         requiredSegmentCount: Math.round(requestedTotalDurationSec / segmentDurationSec) } : {}) };
     setPlanningBusy("segmenting");
@@ -4286,9 +4286,6 @@ export default function App() {
         planId: createId("sequence"),
         isCurrent,
         onProgress: updateProgress,
-        onRepair: ({ attempt, maxAttempts, detail }) => {
-          if (isCurrent()) notify(`AI 正在修复分段数据（${attempt}/${maxAttempts}）：${getSafeErrorDiagnostics(detail).message}`);
-        },
       }), chapterId: requestChapterId, generationPromptFormat };
       if (!isCurrent()) return;
       let committed = false;

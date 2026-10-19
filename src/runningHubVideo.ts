@@ -223,7 +223,7 @@ export const ensureRunningHubVideoRequestNode = (text: string, node: RunningHubV
   const spans = jsonSpans(text).filter((span) => span.path.length === 1 && span.path[0] === 'nodeInfoList');
   if (spans.length !== 1 || spans[0].kind !== 'array') throw new Error('请求中的 nodeInfoList 不唯一或不是数组，请先修复 JSON 结构。');
   const at = spans[0].end - 1;
-  const { control: _control, fieldType: _fieldType, classType: _classType, audioUpload: _audioUpload, ...requestNode } = safe;
+  const { control: _control, fieldType: _fieldType, classType: _classType, audioUpload: _audioUpload, loraStrengthBindings: _loraStrengthBindings, ...requestNode } = safe;
   return text.slice(0, at) + `${request.nodeInfoList.length ? ',' : ''}\n    ${JSON.stringify(requestNode)}\n  ` + text.slice(at);
 };
 
@@ -451,7 +451,7 @@ export const importRunningHubVideoWorkflow = (input: string, name?: string): Run
     text = typeof document.workflow.requestTemplate === 'string' ? document.workflow.requestTemplate : emptyRequest;
   } else if (Array.isArray(document)) text = `{\n  "nodeInfoList": ${text}\n}`;
   else if (isRecord(document)) {
-    if (!Array.isArray(document.nodeInfoList)) throw new Error('请导入云端 API 文档的 nodeInfoList 请求体；普通 ComfyUI API 节点图不是 RunningHub 请求配置。');
+    if (!Array.isArray(document.nodeInfoList)) throw new Error('此入口需要云端 API 文档的 nodeInfoList 请求体。从网页导出的工作流 API JSON，请关闭此窗口，选中对应的 ComfyUI 工作流，再点击“导入节点 JSON”→“选择节点文件”。');
     if (!endpoint) {
       if (typeof document.endpoint === 'string' && /\/openapi\/v2\/run\//u.test(document.endpoint)) endpoint = readRunUrl(document.endpoint);
       else if (typeof document.remoteId === 'string' || typeof document.remoteId === 'number') {

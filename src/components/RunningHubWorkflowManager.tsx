@@ -15,7 +15,7 @@ import { bindRunningHubImageCount, isRunningHubImageCountField, removeRunningHub
 import { resolveRunningHubVideoImageProtocol } from '../runningHubImageProtocol';
 import { isRunningHubImageV3Workflow } from '../runningHubImageV3';
 import { syncRunningHubAudioSlots } from '../runningHubAudioSlots';
-import { listRunningHubLoraSlots, listRunningHubOtherFields } from '../runningHubGenerationExtras';
+import { listRunningHubLoraSlots, listRunningHubOtherFields, syncRunningHubLoraSlots } from '../runningHubGenerationExtras';
 import { RunningHubGenerationExtras } from './RunningHubGenerationExtras';
 import { bindRunningHubVideoOutput, isRunningHubVideoMegapixelsBinding, runningHubVideoOutputCandidates, runningHubVideoOutputConflict, runningHubVideoOutputControl, runningHubVideoOutputDraft, runningHubVideoOutputFields, setRunningHubVideoFieldControl, type RunningHubVideoOutputKey } from '../runningHubVideoOutput';
 import '../videoWorkflowManager.css';
@@ -87,7 +87,7 @@ function Pager({ label, total, page, size, onChange }: { label: string; total: n
 export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, onClose, mediaKind = 'video', importWorkflow, isWorkflowReady, validateWorkflow }: RunningHubWorkflowManagerProps) {
   const isImage = mediaKind === 'image';
   const isReady = isWorkflowReady || isRunningHubVideoWorkflowReady;
-  const prepareWorkflowDraft = (workflow: RunningHubVideoWorkflow) => isImage ? syncRunningHubImageSlots(workflow) : prepareVideoWorkflowDraft(workflow);
+  const prepareWorkflowDraft = (workflow: RunningHubVideoWorkflow) => syncRunningHubLoraSlots(isImage ? syncRunningHubImageSlots(workflow) : prepareVideoWorkflowDraft(workflow));
   const initial = config.workflows.find((workflow) => workflow.id === config.activeWorkflowId) || config.workflows[0];
   const [draft, setDraft] = useState<RunningHubVideoWorkflow | undefined>(() => initial ? prepareWorkflowDraft(structuredClone(initial)) : undefined);
   const [baseline, setBaseline] = useState(() => initial ? jsonKey(initial) : '');
@@ -414,8 +414,8 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
       if (!stillCurrent()) return;
       setDraft((value) => value ? prepareWorkflowDraft({ ...value, nodeCatalog: mergeRunningHubVideoNodeCatalog(value.nodeCatalog, result.nodes) }) : value);
       setMessage(`${isImage
-        ? `已读取 ${result.nodes.length} 个节点字段；图片文件输入已列为草稿槽位。已有槽位顺序和参数保留，保存后生效，未提交生成。`
-        : `已读取 ${result.nodes.length} 个节点字段；图片和音频文件输入已列为草稿槽位。用途及人物在生成视频时按分段设置，已有映射保留，保存后生效，未提交生成。`}${result.warnings.length ? ` ${result.warnings.join(' ')}` : ''}`);
+        ? `已读取 ${result.nodes.length} 个节点字段；图片文件输入已列为草稿槽位，可识别的 LoRA 位置已自动补齐。已有槽位顺序和参数保留，保存后生效，未提交生成。`
+        : `已读取 ${result.nodes.length} 个节点字段；图片和音频文件输入已列为草稿槽位，可识别的 LoRA 位置已自动补齐。用途及人物在生成视频时按分段设置，已有映射保留，保存后生效，未提交生成。`}${result.warnings.length ? ` ${result.warnings.join(' ')}` : ''}`);
     } catch (cause) { if (stillCurrent()) setError(errorText(cause)); }
     finally { if (mountedRef.current && epoch === discoveryEpoch.current) { setDiscovering(false); discoveryController.current = undefined; } }
   }
@@ -429,8 +429,8 @@ export function RunningHubWorkflowManager({ config, getCurrentConfig, onChange, 
       setDraft((value) => value ? prepareWorkflowDraft({ ...value, nodeCatalog: mergeRunningHubVideoNodeCatalog(value.nodeCatalog, result.nodes) }) : value);
       closeNodeDialog(); setNodeSource(''); setManualNode({ nodeId: '', fieldName: '', value: '', type: 'string' }); setNodeSearch(''); setParameterPage(0);
       setMessage(`${isImage
-        ? `已加入 ${result.nodes.length} 个候选字段，图片文件输入自动列为草稿槽位；既有槽位顺序和参数保留，保存后才生效。`
-        : `已加入 ${result.nodes.length} 个候选字段，图片和音频文件输入自动列为草稿槽位；既有槽位顺序和参数保留，用途及人物在生成视频时按分段设置，保存后才生效。`}${result.warnings.length ? ` ${result.warnings.join(' ')}` : ''}`);
+        ? `已加入 ${result.nodes.length} 个候选字段，图片文件输入自动列为草稿槽位，可识别的 LoRA 位置已自动补齐；既有槽位顺序和参数保留，保存后才生效。`
+        : `已加入 ${result.nodes.length} 个候选字段，图片和音频文件输入自动列为草稿槽位，可识别的 LoRA 位置已自动补齐；既有槽位顺序和参数保留，用途及人物在生成视频时按分段设置，保存后才生效。`}${result.warnings.length ? ` ${result.warnings.join(' ')}` : ''}`);
       return true;
     } catch (cause) { setError(errorText(cause)); return false; }
   }
