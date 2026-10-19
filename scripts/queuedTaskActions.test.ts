@@ -9,6 +9,7 @@ import { createStoryboardImageBatchLifecycle } from '../src/storyboardImages';
 import { createInitialState } from '../src/storage';
 import { isUnsubmittedVideoTask, videoTaskHasUnresolvedSubmission } from '../src/videoGenerationQueue';
 import { removeVideoTaskKeepingProvenance } from '../src/videoProvenance';
+import { removeVideoTaskFromListKeepingProvenance } from '../src/videoBatchDeletion';
 import { videoTaskBatchStatus } from '../src/videoTaskBatchStatus';
 import { formatUserFacingError } from '../src/userFacingError';
 import type { AppState, GenerationTask, ImageGenerationTask, VideoGenerationTask } from '../src/types';
@@ -58,6 +59,9 @@ let fixtureSequence = 0;
 const fixture = (initialTasks: GenerationTask[]) => {
   const initial = createInitialState();
   const projectId = `queued-action-project-${++fixtureSequence}`;
+  for (const task of initialTasks) {
+    if (tasks.isVideoGenerationTask(task) && task.videoJob) task.videoJob.snapshot.projectId = projectId;
+  }
   const project = { ...initial.project, id: projectId, assets: [], generationTasks: initialTasks };
   let state: AppState = { ...initial, project, projects: [project], activeProjectId: projectId };
   const renderState = state;
@@ -80,7 +84,7 @@ const fixture = (initialTasks: GenerationTask[]) => {
   const ctx = {
     getCurrentState: () => state,
     setBackgroundState: update(false),
-    videoController: { cancel: async (id: string) => {
+    videoController: { runtimeById: {}, cancel: async (id: string) => {
       cancelledIds.push(id);
       const task = state.project.generationTasks.find((entry): entry is VideoGenerationTask => entry.id === id && tasks.isVideoGenerationTask(entry));
       assert.ok(task, 'the App must cancel the requested live task');
@@ -90,7 +94,7 @@ const fixture = (initialTasks: GenerationTask[]) => {
   const dependencies = {
     ...tasks, ctx, state: renderState, setState: update(true), busyId: '', runtimeById: {},
     storyboardImageBatchLifecycle: lifecycle, isImageTaskActiveInWorkspace, applyOwnedProjectUpdate,
-    isUnsubmittedVideoTask, videoTaskHasUnresolvedSubmission, videoTaskBatchStatus, removeVideoTaskKeepingProvenance,
+    isUnsubmittedVideoTask, videoTaskHasUnresolvedSubmission, videoTaskBatchStatus, removeVideoTaskKeepingProvenance, removeVideoTaskFromListKeepingProvenance,
     formatUserFacingError, notify: (message: string) => notices.push(message),
   };
   const actions = new Function('d', `with(d){${compiled};return {cancelQueuedTask,forceStopRunningImageTask,removeTask};}`)(dependencies) as {

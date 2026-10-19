@@ -11,6 +11,16 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "2.7.9",
+    releasedAt: "2026-10-20",
+    title: "单条视频任务支持从列表删除",
+    highlights: [
+      "为已停止本地追踪、远端结果尚未确认的单条视频任务补上删除入口，沿用批次任务已有的列表移除方式。",
+      "删除后保留原任务身份、提交记录与后续片段衔接关系，已有素材和视频继续保留。",
+      "删除只清理本地任务列表，不代替远端取消，不重新提交任务或新增模型请求、自动重试。",
+    ],
+  },
+  {
     version: "2.7.8",
     releasedAt: "2026-10-20",
     title: "RunningHub 自动添加 LoRA 位置与连线强度",

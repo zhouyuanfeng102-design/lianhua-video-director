@@ -20,6 +20,9 @@ export interface VideoBatchDeletionOptions {
   activeLocalTaskId?: string;
 }
 
+export type VideoTaskDeletionOptions = Omit<VideoBatchDeletionOptions, 'batchId'> & { taskId: string };
+type VideoDeletionOptions = Omit<VideoBatchDeletionOptions, 'batchId'>;
+
 export interface VideoBatchDeletionInspection {
   taskIds: string[];
   blockedTaskIds: string[];
@@ -27,7 +30,7 @@ export interface VideoBatchDeletionInspection {
   reason?: string;
 }
 
-const unsafeTask = (task: VideoGenerationTask, options: VideoBatchDeletionOptions): boolean => (
+const unsafeTask = (task: VideoGenerationTask, options: VideoDeletionOptions): boolean => (
   videoTaskDeletionBlocked(task, options.getRuntime?.(task.id), options.activeLocalTaskId)
 );
 
@@ -42,7 +45,7 @@ const exactContinuationChild = (source: VideoGenerationTask, child: VideoGenerat
 const pendingContinuation = (
   project: BatchDeletionProject,
   task: VideoGenerationTask,
-  options: VideoBatchDeletionOptions,
+  options: VideoDeletionOptions,
   ancestors = new Set<string>(),
 ): boolean => {
   const claim = task.videoJob?.batchContinuation;
@@ -58,18 +61,16 @@ const pendingContinuation = (
   return pendingContinuation(project, child, options, nextAncestors);
 };
 
-/** Pure eligibility for both the card and the final synchronous state update. */
-export const inspectVideoBatchDeletion = (
+/** Shared eligibility keeps single-row and batch removal on the same policy. */
+const inspectVideoTaskSelection = (
   project: BatchDeletionProject,
-  options: VideoBatchDeletionOptions,
+  options: VideoDeletionOptions,
+  tasks: VideoGenerationTask[],
+  blockedReason: string,
 ): VideoBatchDeletionInspection => {
   if (!options.projectId || project.id !== options.projectId) {
     return { taskIds: [], blockedTaskIds: [], canDelete: false, reason: '项目已切换，未删除其他项目的任务。' };
   }
-  if (!options.batchId.trim()) return { taskIds: [], blockedTaskIds: [], canDelete: false };
-  const tasks = project.generationTasks.filter((task): task is VideoGenerationTask => (
-    isVideoGenerationTask(task) && isVisibleGenerationTask(task) && task.batchId === options.batchId
-  ));
   if (!tasks.length) return { taskIds: [], blockedTaskIds: [], canDelete: false };
   const occurrences = new Map<string, number>();
   for (const task of project.generationTasks) occurrences.set(task.id, (occurrences.get(task.id) || 0) + 1);
@@ -82,17 +83,33 @@ export const inspectVideoBatchDeletion = (
   )).map((task) => task.id);
   return {
     taskIds, blockedTaskIds, canDelete: !blockedTaskIds.length,
-    ...(blockedTaskIds.length ? { reason: '本批次仍有运行、下载、取消中、尚未停止追踪的待确认任务，或续跑关联尚未建立完整；请处理后再删除。' } : {}),
+    ...(blockedTaskIds.length ? { reason: blockedReason } : {}),
   };
 };
 
+/** Pure eligibility for both the card and the final synchronous state update. */
+export const inspectVideoBatchDeletion = (
+  project: BatchDeletionProject,
+  options: VideoBatchDeletionOptions,
+): VideoBatchDeletionInspection => inspectVideoTaskSelection(project, options,
+  project.generationTasks.filter((task): task is VideoGenerationTask => (
+    isVideoGenerationTask(task) && isVisibleGenerationTask(task) && Boolean(options.batchId.trim()) && task.batchId === options.batchId
+  )), '本批次仍有运行、下载、取消中、尚未停止追踪的待确认任务，或续跑关联尚未建立完整；请处理后再删除。');
+
+export const inspectVideoTaskDeletion = (
+  project: BatchDeletionProject,
+  options: VideoTaskDeletionOptions,
+): VideoBatchDeletionInspection => inspectVideoTaskSelection(project, options,
+  project.generationTasks.filter((task): task is VideoGenerationTask => (
+    isVideoGenerationTask(task) && isVisibleGenerationTask(task) && task.id === options.taskId
+  )), '任务仍在运行、下载、取消中，或续跑关联尚未建立完整；请处理后再删除。');
+
 /** Remove list entries atomically. Needed terminal lineage stays as history;
  * this never cancels work, releases a live successor or touches files/APIs. */
-export const removeVideoBatchKeepingProvenance = <TProject extends BatchDeletionProject>(
+const removeInspectedVideoTasks = <TProject extends BatchDeletionProject>(
   project: TProject,
-  options: VideoBatchDeletionOptions,
+  inspection: VideoBatchDeletionInspection,
 ): VideoBatchDeletionInspection & { project: TProject; removedTaskIds: string[] } => {
-  const inspection = inspectVideoBatchDeletion(project, options);
   if (!inspection.canDelete) return { ...inspection, project, removedTaskIds: [] };
   let preserved = project;
   for (const taskId of inspection.taskIds) preserved = preserveVideoProvenanceBeforeTaskRemoval(preserved, taskId);
@@ -128,3 +145,14 @@ export const removeVideoBatchKeepingProvenance = <TProject extends BatchDeletion
     removedTaskIds: inspection.taskIds,
   };
 };
+
+export const removeVideoBatchKeepingProvenance = <TProject extends BatchDeletionProject>(
+  project: TProject,
+  options: VideoBatchDeletionOptions,
+) => removeInspectedVideoTasks(project, inspectVideoBatchDeletion(project, options));
+
+/** A single click selects only its row, preserving the same history and lineage as batch removal. */
+export const removeVideoTaskFromListKeepingProvenance = <TProject extends BatchDeletionProject>(
+  project: TProject,
+  options: VideoTaskDeletionOptions,
+) => removeInspectedVideoTasks(project, inspectVideoTaskDeletion(project, options));

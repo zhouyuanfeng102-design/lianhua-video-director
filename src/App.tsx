@@ -171,7 +171,7 @@ import { AssetVideoPlayerDialog } from "./components/AssetVideoPlayerDialog";
 import { H3PromptDisplay } from "./components/H3PromptDisplay";
 import { matchesVideoSelection, selectVideoAsset, type VideoAssetSelection } from "./videoAssetPreview";
 import { findVideoAssetSourceTask, frozenVideoReferenceAsset, relatedVideoAssets, removeVideoTaskKeepingProvenance } from "./videoProvenance";
-import { inspectVideoBatchDeletion, removeVideoBatchKeepingProvenance } from "./videoBatchDeletion";
+import { inspectVideoBatchDeletion, inspectVideoTaskDeletion, removeVideoBatchKeepingProvenance, removeVideoTaskFromListKeepingProvenance } from "./videoBatchDeletion";
 import { applyVideoApiParameterCapabilities } from "./videoApiParameterSettings";
 import { resolveConfiguredVideoApi } from "./runningHubVideo";
 import { refreshVideoH3MediaModeDraft, videoH3MediaModeContract } from "./videoH3MediaMode";
@@ -24848,9 +24848,8 @@ function GenerationTasksView(ctx: AppContext) {
     notify("已强制停止此生图任务，队列继续；迟到结果不再保存。服务端可能仍在生成或计费。");
   };
   /**
-   * Cancel and delete local queued video work in one operation. A submitted or
-   * uncertain remote task still needs confirmed cancellation before removal;
-   * an old local queue label must never discard its recovery record.
+   * Cancel local queued work before deletion. Explicitly stopped remote work
+   * can leave the list while its original recovery record remains in history.
    */
   const removeTask = async (id: string) => {
     const currentState = ctx.getCurrentState();
@@ -24873,7 +24872,8 @@ function GenerationTasksView(ctx: AppContext) {
       return;
     }
     if (isVideoGenerationTask(task)) {
-      const runtime = runtimeById[task.id];
+      const runtime = ctx.videoController.runtimeStore?.getTaskSnapshot(task.id)
+        || ctx.videoController.runtimeById[task.id];
       const stage = videoTaskBatchStatus(task, runtime);
       const active = !["succeeded", "failed", "stopped"].includes(stage);
       const deleteQueued = isUnsubmittedVideoTask(task);
@@ -24899,10 +24899,6 @@ function GenerationTasksView(ctx: AppContext) {
           return;
         }
       }
-      if (!active && videoTaskHasUnresolvedSubmission(task)) {
-        notify("远端结果尚未确认，需要保留原任务记录以便恢复查询。已停止跟踪的任务不会占用本机并发名额。", "error");
-        return;
-      }
     }
     const latestState = ctx.getCurrentState();
     const latestProject = latestState.project.id === state.project.id
@@ -24911,6 +24907,28 @@ function GenerationTasksView(ctx: AppContext) {
     const latestTasks = latestProject?.generationTasks || [];
     const latestTask = latestTasks.find((candidate) => candidate.id === id);
     if (!latestTask || latestTask.kind !== task.kind || latestTask.createdAt !== task.createdAt) return;
+    if (isVideoGenerationTask(latestTask) && latestProject) {
+      let removed = false;
+      let reason = "";
+      const commitRemoval = queuedVideoDeletion ? ctx.setBackgroundState : setState;
+      commitRemoval((current: AppState) => applyOwnedProjectUpdate(current, latestProject.id, (project) => {
+        const liveTask = project.generationTasks.find((candidate) => candidate.id === id);
+        if (!liveTask || liveTask.kind !== task.kind || liveTask.createdAt !== task.createdAt) return project;
+        const result = removeVideoTaskFromListKeepingProvenance(project, {
+          projectId: latestProject.id, taskId: id, activeLocalTaskId: busyId,
+          getRuntime: (taskId) => ctx.videoController.runtimeStore?.getTaskSnapshot(taskId)
+            || ctx.videoController.runtimeById[taskId],
+        });
+        removed = result.removedTaskIds.length > 0;
+        reason = result.reason || "";
+        return result.project;
+      }));
+      if (removed) notify(queuedVideoDeletion
+        ? "已取消并删除尚未提交的视频任务，其他任务继续。"
+        : "已从列表删除任务记录，已生成的视频和素材保留。");
+      else if (reason) notify(reason);
+      return;
+    }
     const preview = removeGenerationTask(latestTasks, id, busyId);
     if (preview.blocked) {
       const latestTask = latestTasks.find((candidate) => candidate.id === id);
@@ -24930,21 +24948,18 @@ function GenerationTasksView(ctx: AppContext) {
     }
     if (!preview.removed || !latestProject) return;
     const requestedProjectId = latestProject.id;
-    const commitRemoval = queuedVideoDeletion ? ctx.setBackgroundState : setState;
-    commitRemoval((current: AppState) => applyOwnedProjectUpdate(
+    setState((current: AppState) => applyOwnedProjectUpdate(
       current,
       requestedProjectId,
       (project) => {
         const liveVideoTask = project.generationTasks.find((candidate) => candidate.id === id);
         if (!liveVideoTask || liveVideoTask.kind !== task.kind || liveVideoTask.createdAt !== task.createdAt) return project;
-        if (liveVideoTask && isVideoGenerationTask(liveVideoTask) && videoTaskHasUnresolvedSubmission(liveVideoTask)) return project;
         const result = removeVideoTaskKeepingProvenance(project, id, busyId);
         return result.removed
           ? result.project
           : project;
       },
     ));
-    if (queuedVideoDeletion) notify("已取消并删除尚未提交的视频任务，其他任务继续。");
   };
   const videoBatchDeletionBusyReason = (batchId: string) => (
     resumingVideoBatchId || continuingVideoBatchId || stoppingVideoBatchId
@@ -25014,9 +25029,11 @@ function GenerationTasksView(ctx: AppContext) {
     const active = !["succeeded", "failed", "stopped"].includes(status) && !awaitingResultChoice;
     const localQueued = active && isUnsubmittedVideoTask(task);
     const cancellationPending = Boolean(live?.cancellationPending);
-    const removable = !active && !cancellationPending && !videoTaskHasUnresolvedSubmission(task) && (task.status === "failed"
-      || task.status === "succeeded" && live?.stage !== "downloading"
-      || live?.trackingStopped);
+    const deletion = inspectVideoTaskDeletion(state.project, {
+      projectId: state.project.id, taskId: task.id, activeLocalTaskId: busyId,
+      getRuntime: (taskId) => runtimeById[taskId],
+    });
+    const removable = !active && deletion.canDelete;
     return <Fragment key={task.id}>
       <div className="field-hint task-chapter-label">{taskChapterLabel(task)}</div>
       <VideoTaskCard
