@@ -8,6 +8,7 @@ import { STORY_PACING_RULE } from '../storyPacing';
 import { STORY_CAUSALITY_RULE } from '../storyCausalityRules';
 import { VIDEO_SCENE_CONTEXT_RULE } from '../videoSceneContext';
 import { SCENE_STAGING_OUTPUT_SHAPE } from '../sceneStaging';
+import { NOVEL_ACTION_SOURCE_RULE, NOVEL_ACTION_CONTINUITY_RULE } from '../novelActionDirection';
 import type { SequenceDurationMode, TextApiConfig, VideoSequencePlan } from '../types';
 import { videoPacingWithoutCreativeRequirement } from '../videoCreativeDirection';
 import { requestTextModel, TextModelHttpError, TextModelResponseError } from './llm';
@@ -68,11 +69,14 @@ const SEMANTIC_SEQUENCE_COMMON_RULE = [
   '先完整阅读story、creativeDirection、pacing和characterContinuity，理解全部剧情后再决定语义边界和每段实际推进的内容。本阶段时长权限以请求的durationAdjustmentPolicy为准：单段D=segmentDurationSec，每段足额D秒，总长N×D，无短尾段。实际段数N只取完整segments数组的元素数量，范围1–900且总长不超过3600秒，这是技术容量而不是建议段数；不再另外输出segmentCount，避免先报段数后展开正文造成重复数字矛盾。',
   STORY_CAUSALITY_RULE,
   VIDEO_SCENE_CONTEXT_RULE,
+  '本次规划同时承担尚未编排的小说行为转为可演场面的工作：直接输入小说时，在这一次请求内把原文已有行为补成具体的行动过程并写入content；已有采用稿、sceneStaging或stagingAdditions时延续仍适用的编排，只补当前正文尚未表达的必要连接，不重新导演已有动作。用户明确的剧情修改、分段边界与固定时长优先，只在尚未确认的范围内安排；不输出独立动作分析稿，也不要求再调用动作理解或导演模型。',
+  NOVEL_ACTION_SOURCE_RULE,
+  NOVEL_ACTION_CONTINUITY_RULE,
   '先理解全文叙述视角、人物称呼和连续事件，再分段。按地点、连续时间、人物目标、阻碍与局势变化组织完整场面，content让观众看懂人物相对关系、行动来由与结果怎样推进剧情；入场、交谈、行动与回应可以在同一场面连续发生，不把事件条目、人物介绍或一招一式写成暗示一项一镜的拍摄清单。narrativePurpose写本段具体叙事职责，entryState/exitState/continuityPack传递当前真实状态；分段不是先为后续摄影预填镜数。背景信息、旁观者反应或被动句中记载的真实可见行动，同样属于必须分配的剧情事件，不能因为栏目名称、姓名未出现或正文只描述受击结果就遗漏行动者。结合characterContinuity中的id/name/aliases确认称呼对应，资料中的能力本身不代表本段发生过该事件。',
-  'originalSourceContext若存在，是与当前story匹配的画面描述转化前原始小说，只用于回查指代、真实攻击来源、比喻及判断依据；当前story是被采用的剧情稿，不因旧原文而撤销用户已改变的剧情，不补入本段未分配的事件，也不提前揭示原文尚未知的身份。',
+  'originalSourceContext若存在，是与当前story匹配的画面描述转化前原始小说，只用于回查指代、真实行动来源、行为意图、比喻及判断依据；当前story是被采用的剧情稿，不因旧原文而撤销用户已改变的剧情，不补入本段未分配的事件，也不提前揭示原文尚未知的身份或原因。',
   'originalSourceContext.actionPlan若存在，是转化时保留的原文事件依据：沿用events中的稳定id、行动者、对象、原动作和结果，按当前片段实际推进填写semanticSource.events及phase，不重新猜测攻击来源或把踢改为扔。paragraphs中的stagingAdditions是用户采用的画面编排补充，不是原文事实，保持已采用稿的动作连续性，但不能用编排补充制造新伤势、能力、胜负或身份。sourceEvidence仍从本次story中逐字取证；actionPlan.evidence属于旧原文，仅用于因果核对，不伪造为本次story的字符位置。',
-  '在本次同一规划中先沿完整场面建立sceneStaging，再分配事件阶段和段界。它适用于交谈、行进、观察、交战和物体运动，不按段落或出场人物重新摆场面。originalSourceContext.actionPlan.sceneStaging或paragraphs.sceneStaging已有记录时沿用sceneId、参与者和phase的稳定id及仍适用的世界关系；没有记录时在当前调用内根据本次剧情形成场面选择。场面记录是采用的表现方式，不是新增原文事实，不填未知精确坐标。',
-  `每段semanticSource.sceneStaging为可选数组，元素结构为${SCENE_STAGING_OUTPUT_SHAPE}。同一连续场面跨段沿用sceneId，只保留本段实际推进的phases并衔接其startState/endState；participants分别记录世界位置、身体面向、视线对象和动作对象，motionPath/motionEndpoint分别记录真实移动路径和终点，不能从身体朝向反推位移。sourceEventIds/eventId只沿用实际事件id，participantIds引用本场参与者id；未知关系省略。entryState/exitState与本段正文来自同一事件进度，不新增镜头表或摄影要求。`,
+  '在本次同一规划中先沿完整场面安排连续行为、对白和必要停顿，再形成sceneStaging并分配事件阶段和段界。它适用于日常操作、人际互动、观察、情绪中断、行进、交战和物体运动，不按段落或出场人物重新摆场面。originalSourceContext.actionPlan.sceneStaging或paragraphs.sceneStaging已有记录时沿用sceneId、参与者和phase的稳定id及仍适用的世界关系；没有记录时在当前调用内根据本次剧情形成场面选择。场面记录是采用的表现方式，不是新增原文事实，不填未知精确坐标。',
+  `每段semanticSource.sceneStaging为可选数组，元素结构为${SCENE_STAGING_OUTPUT_SHAPE}。同一连续场面跨段沿用sceneId，只保留本段实际推进的phases并衔接其startState/endState；同一phase跨窗口继续时保留稳定id，写清本窗口的起止进度。participants分别记录世界位置、身体面向、视线对象和动作对象，motionPath/motionEndpoint分别记录真实移动路径和终点，不能从身体朝向反推位移。startState/endState使用现有文字字段传递本阶段有关的持物归属、接触/释放、门与容器开合、姿势、注意和情绪进度；只记录与后续有关的已采用状态，未知省略，不添加全套占位状态或新字段。sourceEventIds/eventId只沿用实际事件id，participantIds引用本场参与者id；未知关系省略。entryState/exitState/continuityPack与本段content来自同一事件进度，正文必须实际演出这些变化，不能只在记录里补动作，不新增镜头表或摄影要求。`,
   '旧paragraphs.battleStaging若存在，仍作为已采用战斗编排读取并在semanticSource.battleStaging保留本段适用部分，factLocks与stagingChoices不混成原文证据；沿用行动组与阶段id，不重复生成另一套相互竞争的站位。没有旧字段的普通剧情无需新增战斗记录。',
   '长事件可以跨多个D秒片段；给每段分配该事件真实推进的不同阶段，入口、已完成状态、当前推进与出口要明确。不同段可以引用同一事件ID或原文证据，不等于重复发生；已经完成的动作和对白只作承接事实，不能再从头重演。前段还未完成的真实动作或长发话，必须标清连续位置而非重复起点。',
   '原文和AI创作必须分离：semanticSource.sourceEvidence只列本段所依据的原文字句，逐字保留；可选sourceStart/sourceEnd使用完整story的UTF-16半开区间，无法确认准确位置则两者都省略。content是你根据归属事件写成的本段完整可执行剧情正文，不是原文截取工具的输出，也不是总剧情摘要。不得用一段全文冒充每个片段正文。',
@@ -82,7 +86,7 @@ const SEMANTIC_SEQUENCE_COMMON_RULE = [
   '动作实施者actorCharacterId、单一作用对象targetCharacterId及可选多个明确对象targetCharacterIds只根据该动作的原文事实和已有明确关系关联characterContinuity的id；动作与发话是独立关系，不能因为某人正在说话、听话、被称呼或在附近就让其执行动作。递出、接取、擦拭等动作分别保留真实实施者和承受者，未知不编造ID，不更改原事件先后、镜头或排程。',
   'content必须实际表达已分配事件的行动者、动作对象与结果，不能只在causality/summary里写攻击者、正文仍只剩敌人飞出；允许旁观者或受击者视角，也要说明已经能够确认的攻击来源。追赶、退避、倒退、贴近、拉开距离或跨门进入走廊等动作要保留谁先动、谁跟随、朝哪里移动及相对位置变化；不得把追击中的退避者改成原地守住中线，或把同一人每段重新放到新位置。长事件跨段时保留同一因果关系并标清本段阶段，前段完成的攻击不能为表现主体而再次执行。比喻不改成真实能力，原文确有的能力仍须保留。',
   'content必须将本段全部已分配对白的完整原话、说话人和发话先后直接嵌入对应动作与反应，不能只写动作、把台词仅留在semanticSource.dialogues附录。dialogues是content中同一次发话的结构记录，不是额外再说一次；正文和记录逐句对应，原字、语言、归属与continuation一致。决定N、各段边界和fitStatus时同时计算这些实际发话、换人交接、必要反应及动作所需的自然时间，不只按动作正文估时，不将未说完的对白当成已完成状态。',
-  '先按原文顺序安排完整发话、换人交接、必要停顿以及口部接触/饮食结束后才能开口的先后，再决定各段语义边界；不能先把大部分D秒分给动作，再把多句对白挤在末尾或留给后续单段导演自己加速解决。尽量让完整一句对白在一个生成窗口内自然说完，口部互斥动作不能和同一人物清晰说话同时发生。只有确需跨段连续长话时，分别分配真实接续的原文字句，明确同一声源和连续接点，不能在各段重复整句。入口/出口/continuityPack仅记录状态和接力，不把前段对白再列为本段要说的话。',
+  '先按原文顺序安排完整发话、换人交接、必要停顿以及口部接触/饮食结束后才能开口的先后，再决定各段语义边界；原文允许同时发生的行走、取放、观察、倾听与现场信息可以和发话并行，接稳后松手、命令后执行、听到后反应等必要先后保留。不能先把大部分D秒分给动作，再把多句对白挤在末尾或留给后续单段导演自己加速解决。尽量让完整一句对白在一个生成窗口内自然说完，口部互斥动作不能和同一人物清晰说话同时发生。只有确需跨段连续长话时，分别分配真实接续的原文字句，明确同一声源和连续接点，不能在各段重复整句。入口/出口/continuityPack仅记录状态和接力，不把前段对白再列为本段要说的话。',
   '从第二段开始，用entryState/transitionHint交代后续单段生成如何从上段最终中文提示词的结束状态接续：允许0–0.50秒短视觉重叠，最多0.80秒，必须计入当前D秒，不重播已经说过的台词，不把这个接力设计成新增剧情。当前阶段只规划承接事实，不编造尚未生成的上段最终提示词。',
   'creativeDirection是完整用户创作资料，逐项读取导演、视觉、预设、cameraTerms、lightingTerms与完整extraRequirement，不截短最后条款。空选项表示未限定，不代表默认跟拍或无摄影设计。当前先保证连续场面和完整叙事，后续摄影依据观看任务选择少而充分的覆盖，普通风格和运镜偏好不能反过来拆散场面、增造事件或拉长片段；高速动作不等于快速剪辑。可选shotMode/shotCount仅是之后每段的摄影偏好，不规定全片N，不生成shot数组。本阶段没有已确认镜数或全片切点。',
   '人物事实只用于身份、外貌、服装、道具与表演连续性，不把资料朗读成台词，也不为展示档案先扫武器、抬脸、逐项停留。content在必要时简短辨认人物，主要写当前行动、互动与结果；普通迈步、抬手、视线与短停顿用自然先后表达，不逐项追加小数秒时间表。声音只分配原剧情真实发生且必要的声源，视觉环境不自动变成贯穿底噪；没有本次明确配乐授权不新增非叙事BGM。',

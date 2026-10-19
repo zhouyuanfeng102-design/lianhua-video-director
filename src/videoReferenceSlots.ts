@@ -34,6 +34,20 @@ export const videoReferenceSlotSpan = (references: readonly VideoImageReference[
   (span, reference, index) => Math.max(span, videoReferenceSlotIndex(reference, index) + 1), 0,
 );
 
+/** Physical slots shown by a picker. A known connection capacity limits empty
+ * slots, while every occupied slot remains visible at its original position.
+ * Purpose memory is retained for switching back to a larger connection. */
+export const videoReferenceDisplaySlots = (
+  selection: VideoReferenceSelection, capacity?: number, offset = 0,
+): number[] => {
+  const occupied = selection.references.map((reference, index) => videoReferenceSlotIndex(reference, index) + offset);
+  const slotCount = capacity ?? Math.max(
+    (selection.referenceSlotRoles?.length || 0) + offset,
+    videoReferenceSlotSpan(selection.references) + offset,
+  );
+  return [...new Set([...Array.from({ length: Math.max(slotCount, offset) }, (_, index) => index), ...occupied])].sort((left, right) => left - right);
+};
+
 // Only occupied slots travel to the engine. Removing a picture must materialize
 // its neighbours' original positions before filtering the dense upload list.
 const positioned = (references: readonly VideoImageReference[]): VideoImageReference[] => references.map(

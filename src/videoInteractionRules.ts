@@ -47,12 +47,12 @@ export const LEGACY_VIDEO_INTERACTION_TRANSLATION_RULE_V1_8_8 = [
 ].join('\n\n');
 
 export const VIDEO_INTERACTION_DIRECTION_RULE = [
-  "逐镜采用场面计划中具名行动者、动作对象与实际注意关系：攻击、递接、追击、逃离或对话分别写清向谁、作用于谁或从谁处离开；支撑、发力与对方回应按同一事件表达。身体朝向、头部转角、视线、武器方向和摄影机观察对象各自说明必要部分，可以自然不同向。",
+  "逐镜采用具名行动者、动作对象与实际注意关系：取放明确哪一件物品，递接/搀扶/拥抱明确双方各自行动与回应，观察明确注意对象，追击/攻击明确实际目标。只按已采用过程表达接近、接稳、释放、阻拦或未接触收回，区分想做和实际发生；身体朝向、头部、视线、手中工具和摄影机观察对象各自说明必要部分，可以自然不同向。",
   "转身、回头与更换目标由已有刺激、动作或当前获准调度产生，并在连续过程中发生；摄影机跟随、反打、环绕或正面取景只观察此过程。按当前动作选择正面、侧面、背面及画外关系；角色已有的直视镜头、目标主观视点与背身招式照原意保留。身份资料与镜头关注不新增身体转向或更换攻击目标。",
 ].join('\n\n');
 
 export const VIDEO_PHYSICAL_DISTANCE_RULE = [
-  "采用同一场面的可通行区域、固定地标与双方进入距离，按照各自实际位移形成退出关系。近身接触以前有必要的接近；自主退步、后跃、受力倒飞、接地滑退或既有悬浮各用对应的启动、支撑与连续阶段。距离已给数值则保留测量端点，未知时采用有依据的相对尺度，不从身份图、景别或远处柱列推算米数。",
+  "采用同一场面的可通行区域、固定地标、人物与所操作物体的进入关系。拿取、交接、开门或扶持发生在已有接近后可达的位置，人物身高、身体结构、道具尺度与放置位置相容；近景不能把远处物品变成手边，尺度按已知依据保留，不从身份图或景别推算米数。位移按实际换步、起跳、受力或原设能力推进，不以摄影机移动代替接近。",
   "人物与物体移动写出必要的路径和末态：从哪一侧擦过、在哪里受阻或接地、最终停在谁的身体哪侧或哪个地标区域。下一动作从真实末态接续，摄影机变化只改变投影与可见范围。已确认稿或翻译保持既有移动方式、阶段、路径和结果，不利用缺失细节重编场面。",
 ].join('\n\n');
 
@@ -66,7 +66,7 @@ export const VIDEO_STORY_PERFORMANCE_SEPARATION_RULE = [
   '新规划在原剧情和授权范围内完成可见表达；转换、英译、换图只传递已经采纳的动作与声音，不重新安排摄影、切点、人物出场或增加动作。原始认知描述不是让人物开口的命令，静默观察也不是全程冻脸或静音，真实动作声和非说话表情继续保留。',
 ].join('\n');
 
-export const VIDEO_INTERACTION_TRANSLATION_RULE = "翻译保真已采用的具名交互双方、动作对象、身体/头部朝向、视线目标、发力与支撑、同步进退、接触/落空、实体路径、末态及画内/画外关系。faces the opponent与faces the camera、主动退让与受力倒飞、旁侧掠过与穿透分别按源稿表达；摄影机关注或移动只翻译其观察关系。对话保持原话、原语种、唯一声源和听者状态，不从旧资料补动作、距离、转身、摄影或结局。";
+export const VIDEO_INTERACTION_TRANSLATION_RULE = "翻译保真具名交互双方、同一动作对象、身体/头部朝向、视线、支撑/握持、接近、接触/释放、未接触中断、实体路径、物品归属与末态及画内/画外关系。接稳后松手与先松手、想拉住与实际抓住、faces the opponent与faces the camera、主动退让与受力倒飞分别按源稿表达；摄影机移动只改变观察。对话保留原话、原语种、唯一声源和听者所得信息后的反应，不从旧资料补动作、距离、转身、摄影或结局。";
 
 /** Exact first-party request blocks only; saved prose and custom additions are
  * never rewritten. The current directing rules are supplied by the caller. */
@@ -77,7 +77,9 @@ export const stripLegacyVideoInteractionRules = (value: string): string => {
     ...[VIDEO_INTERACTION_RULES, VIDEO_INTERACTION_DIRECTION_RULE,
       VIDEO_PHYSICAL_DISTANCE_RULE, VIDEO_INTERACTION_TRANSLATION_RULE]
       .map((text) => ({ text, preserve: true })),
-    ...[LEGACY_VIDEO_INTERACTION_RULES_V2_5_1, LEGACY_VIDEO_INTERACTION_DIRECTION_RULE_V2_5_1, LEGACY_VIDEO_PHYSICAL_DISTANCE_RULE_V2_5_1,
+    ...[...Object.entries(previousNovelRules).filter(([key]) => key.startsWith('PRE_NOVEL_VIDEO_INTERACTION_')
+      || key === 'PRE_NOVEL_VIDEO_PHYSICAL_DISTANCE_RULE').map(([, text]) => text),
+      LEGACY_VIDEO_INTERACTION_RULES_V2_5_1, LEGACY_VIDEO_INTERACTION_DIRECTION_RULE_V2_5_1, LEGACY_VIDEO_PHYSICAL_DISTANCE_RULE_V2_5_1,
       LEGACY_VIDEO_INTERACTION_TRANSLATION_RULE_V2_5_1, LEGACY_VIDEO_INTERACTION_RULES_V1_8_8, LEGACY_VIDEO_INTERACTION_DIRECTION_RULE_V1_8_8,
       LEGACY_VIDEO_PHYSICAL_DISTANCE_RULE_V1_8_8, LEGACY_VIDEO_INTERACTION_TRANSLATION_RULE_V1_8_8,
       LEGACY_VIDEO_INTERACTION_RULES_V1_8_1, LEGACY_VIDEO_INTERACTION_DIRECTION_RULE_V1_8_1,
@@ -106,3 +108,5 @@ export const stripLegacyVideoInteractionRules = (value: string): string => {
   }
   return result.join('');
 };
+import * as previousNovelRules from './novelActionLegacyRequestRules';
+

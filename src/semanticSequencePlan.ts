@@ -723,7 +723,7 @@ export const semanticSegmentSourceContext = (plan: VideoSequencePlan, segment: V
         name: character.name, ...(character.id ? { id: character.id } : {}),
         ...(character.aliases ? { aliases: [...character.aliases] } : {}),
       })),
-      instruction: '本区全文及原始小说只用于理解人物指代、别名、攻击来源、比喻和跨段因果，不是本段演出清单。实际演出仅限本段已分配事件和对白，不搬入前后段新剧情，不重演已完成事件，不提前揭示身份。contentOverridden=true时以用户当前正文为准，不从旧证据或全文恢复用户已删除、修改的事件和对白。',
+      instruction: '本区全文及原始小说只用于理解人物指代、别名、行为意图、行动来源、比喻和跨段因果，不是本段演出清单。实际演出仅限本段已分配事件和对白，延续已采用的动作阶段、物品状态和人物反应，不搬入前后段新剧情，不重演已完成事件，不把未实施的意图变成完成动作，不提前揭示身份或未知原因。contentOverridden=true时以用户当前正文为准，不从旧证据或全文恢复用户已删除、修改的事件和对白。',
     },
     ...(segment.contentOverridden ? { contentOverridden: true } : {}),
     creativeDirection, pacing: copyPacing(snapshot.pacing), characterContinuity: copyCharacters(snapshot.characterContinuity),

@@ -5,6 +5,7 @@ import type {
 } from './types';
 import { sourceContentHash } from './sourceContentHash';
 import { normalizeComicPageAnalysis, normalizeComicStoryDraft, normalizeStoryComicSettings, storyReferenceVideoAssetIds } from './comicSources';
+import { hasStoryReferenceSource } from './storyReferenceSource';
 
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const text = (value: unknown): string => typeof value === 'string' ? value : '';
@@ -161,6 +162,11 @@ const patchWorkspace = (project: Project, chapterId: string | undefined, patch: 
   if (!id || !project.sourceDocuments.some((chapter) => chapter.id === id)) return project;
   const next = { ...project, updatedAt: now, chapterWorkspaces: { ...project.chapterWorkspaces,
     [id]: { ...workspaceOf(project, id), ...patch } } };
+  // Empty input/narrator controls prepare future work; they do not replace an
+  // existing source. Keep async fingerprints unchanged and retain all saved
+  // stale markers. Either side having real references still uses the normal
+  // comparison, including disabling/removing the final image or leaving image mode.
+  if (!hasStoryReferenceSource(workspaceOf(project, id)) && !hasStoryReferenceSource(workspaceOf(next, id))) return next;
   return storyReferenceFingerprint(project, id) === storyReferenceFingerprint(next, id)
     ? next : invalidateChapterStoryReferences(next, id, now);
 };

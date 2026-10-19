@@ -18,10 +18,13 @@ export interface SceneStaging {
     id: string;
     eventId?: string;
     participantIds?: string[];
+    /** Relevant adopted state: pose, held objects, contact, open/closed objects,
+     * attention and emotional progress. Optional prose, not a required ledger. */
     startState?: string;
     action?: string;
     motionPath?: string;
     motionEndpoint?: string;
+    /** The same event/phase may continue in another window from this state. */
     endState?: string;
   }>;
   entryState?: string;

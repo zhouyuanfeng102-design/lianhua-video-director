@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import type { Character, ComicPageAnalysis, Project, ReferenceAsset, StoryReferenceAnalysis } from '../src/types';
+import type { ChapterWorkspace, Character, ComicPageAnalysis, Project, ReferenceAsset, StoryReferenceAnalysis, Storyboard, VideoSequencePlan } from '../src/types';
 import { chapterWorkspace, migrateProjectChapters, withChapterSelection } from '../src/chapters';
 import { createInitialState, normalizeState, serializeStateForStorage } from '../src/storage';
 import {
@@ -46,6 +46,89 @@ const recognize = (project: Project, id: string, comic: boolean): Project => {
   const started = beginStoryReferenceRecognition(project, id, `request-${id}`, 'a', 2);
   return completeStoryReferenceRecognition(started.project, started.request, evidence(comic), 3);
 };
+
+const completedComicProject = (workspace: Partial<ChapterWorkspace>): Project => {
+  const project = base();
+  const plans: VideoSequencePlan[] = ['a', 'b'].map((id) => ({
+    id: `plan-${id}`, chapterId: id, title: id, sourceStoryTitle: id, sourceStoryContent: '既有正文',
+    durationMode: 'fixed', totalDurationSec: 15, requestedTotalDurationSec: 15, segmentDurationSec: 15,
+    segmentationMode: 'fixed', fitStatus: 'balanced', createdAt: 1, updatedAt: 1,
+    segments: [{ id: `segment-${id}`, index: 1, title: '抬灯', globalStartSec: 0, globalEndSec: 15, durationSec: 15,
+      content: '已保存剧情', summary: '', sourceSceneIds: [], sourceBeatIds: [], narrativePurpose: '',
+      entryState: '', exitState: '', transitionHint: '', status: 'ready' }],
+  }));
+  return { ...project, chapterWorkspaces: { ...project.chapterWorkspaces, a: { ...chapterWorkspace(project, 'a'), ...workspace } },
+    scenes: [...project.scenes, { ...project.scenes[0], id: 'scene-b', chapterId: 'b' }],
+    storyboards: ['a', 'b'].map((id) => ({ id: `board-${id}`, chapterId: id, sceneId: `scene-${id}`,
+      shots: [], finalPrompt: '已保存完整提示词', createdAt: 1, updatedAt: 1 } as Storyboard)), sequencePlans: plans };
+};
+const preparedPages = (enabled: boolean): NonNullable<ChapterWorkspace['storyReferences']> => ['page-one', 'page-two'].map((assetId, index) => ({
+  id: `prepared-${index}`, number: index + 1, assetId, assetChecksum: `checksum-${assetId}`,
+  sourceRole: 'comic', pageOrder: index + 1, enabled, status: 'ready', analysis: evidence(true),
+  subjectBindings: [], createdAt: 1, updatedAt: 1,
+}));
+const assertSavedArtifacts = (actual: Project, expected: Project): void => {
+  for (const key of ['sourceDocuments', 'scenes', 'storyboards', 'sequencePlans', 'generationTasks', 'assets'] as const) {
+    assert.deepEqual(actual[key], expected[key], `${key} survives unused comic preparation`);
+  }
+  assert.deepEqual(actual.chapterWorkspaces?.b, expected.chapterWorkspaces?.b);
+};
+const assertChapterSourceChanged = (actual: Project, original: Project): void => {
+  assertSavedArtifacts(actual, { ...original,
+    scenes: original.scenes.map((scene) => scene.chapterId === 'a' ? { ...scene, sourceStale: true } : scene),
+    storyboards: original.storyboards.map((board) => board.chapterId === 'a' ? { ...board, sourceStale: true } : board),
+    sequencePlans: original.sequencePlans.map((plan) => plan.chapterId === 'a' ? { ...plan, sourceStale: true,
+      segments: plan.segments.map((segment) => ({ ...segment, status: 'stale' as const })) } : plan),
+  });
+};
+const preparationSettings = { readingDirection: 'vertical', dialogueMode: 'chinese', renderMode: 'motion_comic' } as const;
+
+// Empty image controls, disabled pages and text-mode page preparation do not
+// change a saved source. Full request/draft fingerprints still track the edits.
+for (const storyInputMode of [undefined, 'text', 'image'] as const) {
+  for (const enabled of [undefined, false, true]) {
+    if (storyInputMode === 'image' && enabled === true) continue;
+    const original = completedComicProject({ storyInputMode, storyImageSourceMode: 'reference',
+      storyReferences: enabled === undefined ? [] : preparedPages(enabled) });
+    const saved = JSON.stringify(original);
+    const comicMode = setStoryImageSourceMode(original, 'comic', 'a');
+    const prepared = setStoryComicSettings(comicMode, preparationSettings, 'a');
+    assertSavedArtifacts(comicMode, original);
+    assertSavedArtifacts(prepared, original);
+    assertSavedArtifacts(moveComicPage(prepared, 'prepared-1', -1, 'a'), original);
+    assert.deepEqual(storyComicSettings(prepared, 'a'), preparationSettings);
+    assert.notEqual(comicSourceFingerprint(prepared, 'a'), comicSourceFingerprint(comicMode, 'a'));
+    assert.equal(JSON.stringify(original), saved, 'preparation leaves the original project immutable');
+  }
+}
+const activeReference = completedComicProject({ storyInputMode: 'image', storyImageSourceMode: 'reference', storyReferences: preparedPages(true) });
+const legacyReference = completedComicProject({ storyInputMode: 'image', storyReferences: preparedPages(true) });
+assertSavedArtifacts(setStoryComicSettings(legacyReference, preparationSettings, 'a'), legacyReference);
+const dormantComicSettings = setStoryComicSettings(activeReference, preparationSettings, 'a');
+assertSavedArtifacts(dormantComicSettings, activeReference);
+assert.deepEqual(storyComicSettings(dormantComicSettings, 'a'), preparationSettings);
+assert.equal(storyReferenceFingerprint(dormantComicSettings, 'a'), storyReferenceFingerprint(activeReference, 'a'));
+assert.notEqual(comicSourceFingerprint(dormantComicSettings, 'a'), comicSourceFingerprint(activeReference, 'a'),
+  'inactive comic settings still invalidate a pending comic request or draft, without invalidating existing reference-based output');
+
+const activeComic = completedComicProject({ storyInputMode: 'image', storyImageSourceMode: 'comic', storyReferences: preparedPages(true) });
+assertSavedArtifacts(setStoryComicSettings(activeComic, {}, 'a'), activeComic);
+for (const patch of [{ readingDirection: 'vertical' }, { dialogueMode: 'chinese' }, { renderMode: 'motion_comic' }] as const) {
+  assertChapterSourceChanged(setStoryComicSettings(activeComic, patch, 'a'), activeComic);
+}
+assertChapterSourceChanged(setStoryImageSourceMode(activeReference, 'comic', 'a'), activeReference);
+assertChapterSourceChanged(setStoryImageSourceMode(activeComic, 'reference', 'a'), activeComic);
+assertChapterSourceChanged(moveComicPage(activeComic, 'prepared-1', -1, 'a'), activeComic);
+assertChapterSourceChanged(withStoryInputMode(activeComic, 'text', 'a'), activeComic);
+const dormantPages = completedComicProject({ storyInputMode: 'text', storyImageSourceMode: 'comic', storyReferences: preparedPages(true) });
+assertChapterSourceChanged(withStoryInputMode(dormantPages, 'image', 'a'), dormantPages);
+
+const alreadyStale = completedComicProject({ storyInputMode: 'image', storyReferences: [] });
+alreadyStale.scenes[0].sourceStale = true;
+alreadyStale.storyboards[0].sourceStale = true;
+alreadyStale.sequencePlans[0].sourceStale = true;
+alreadyStale.sequencePlans[0].segments[0].status = 'stale';
+assertSavedArtifacts(setStoryComicSettings(setStoryImageSourceMode(alreadyStale, 'comic', 'a'), preparationSettings, 'a'), alreadyStale);
 
 assert.deepEqual(storyComicSettings(base(), 'a'), { readingDirection: 'rtl', dialogueMode: 'original', renderMode: 'animation' });
 assert.deepEqual(normalizeComicPageAnalysis(panelEvidence), panelEvidence, 'original words, Chinese counterpart, action phases, bounds and uncertainty survive normalization');

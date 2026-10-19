@@ -2,7 +2,7 @@ import type { StoryPreparationWarning } from './storyPreparationReview';
 import { normalizeBattleSceneStaging, type BattleSceneStaging } from './battleScenePlanning';
 import { normalizeSceneStaging, normalizeSceneStagingList, type SceneStaging } from './sceneStaging';
 
-export const STORY_VISUAL_ENGINE_VERSION = 'story-action-3.1';
+export const STORY_VISUAL_ENGINE_VERSION = 'story-action-3.2';
 export type StoryVisualDetailMode = 'faithful' | 'detailed';
 
 export interface StoryVisualActionPlan {

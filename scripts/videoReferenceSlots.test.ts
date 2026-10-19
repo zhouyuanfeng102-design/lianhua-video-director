@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { addVideoReference, assertVideoReferenceSlots, changeVideoReferenceRole, moveVideoReference, removeVideoReference, videoReferenceSelection, videoReferenceSlotIndex, videoReferenceSlotSpan } from '../src/videoReferenceSlots';
-import { videoReferenceSlotLabels, videoReferenceUsage } from '../src/videoReferenceUsage';
-import type { VideoImageReference } from '../src/videoGenerationTypes';
+import { addVideoReference, assertVideoReferenceSlots, changeVideoReferenceRole, moveVideoReference, removeVideoReference, videoReferenceDisplaySlots, videoReferenceSelection, videoReferenceSlotIndex, videoReferenceSlotSpan } from '../src/videoReferenceSlots';
+import { videoReferenceSlotCapacity, videoReferenceSlotLabels, videoReferenceUsage } from '../src/videoReferenceUsage';
+import type { ComfyVideoWorkflowPreset, VideoImageReference } from '../src/videoGenerationTypes';
 
 const refs: VideoImageReference[] = [
   { assetId: 'opening', role: 'composition' }, { assetId: 'a', role: 'character' },
@@ -49,4 +49,42 @@ assert.deepEqual(videoReferenceSlotLabels(flexible.references, mapped, 1, flexib
 flexible = removeVideoReference(removeVideoReference(flexible, 'b'), 'c');
 assert.equal(flexible.references.length, 0);
 assert.deepEqual(addVideoReference(flexible, { assetId: 'd', role: 'scene' }).references, [{ assetId: 'd', role: 'character' }]);
-console.log('videoReferenceSlots: stable holes, refill order, remembered/custom roles, round-trip, immutable sources, labels and technical validation passed');
+
+// A six-slot workflow may retain nine purposes from an earlier connection.
+// Display only current empty slots, without erasing memory or moving images.
+const rememberedNine = Array.from({ length: 9 }, () => 'character' as const);
+const sixReferences = Array.from({ length: 6 }, (_, index) => ({ assetId: `person-${index}`, role: 'character' as const }));
+const full = videoReferenceSelection(sixReferences, rememberedNine);
+const fullBefore = JSON.stringify(full);
+const nineSlotWorkflow: ComfyVideoWorkflowPreset = {
+  id: 'old-nine', name: 'Old nine-slot workflow', createdAt: 1, updatedAt: 1, workflowJson: '{}',
+  mapping: { prompt: [], images: rememberedNine.map((role, index) => ({ nodeId: String(index), inputName: 'image', role })), outputNodeId: 'out' },
+};
+const sixSlotContext = { backend: 'api' as const, workflow: nineSlotWorkflow,
+  api: { provider: 'runninghub' as const, runningHubImageRoles: rememberedNine.slice(0, 6) }, slotRoles: rememberedNine };
+const capacity = videoReferenceSlotCapacity(sixSlotContext);
+assert.equal(capacity, 6, 'RunningHub capacity does not borrow a stale ComfyUI workflow or remembered purposes');
+assert.deepEqual(videoReferenceDisplaySlots(full, capacity), [0, 1, 2, 3, 4, 5]);
+const withHole = removeVideoReference(full, 'person-2');
+assert.deepEqual(videoReferenceDisplaySlots(withHole, capacity), [0, 1, 2, 3, 4, 5], 'the real third-slot vacancy remains visible');
+assert.deepEqual(withHole.references.map(videoReferenceSlotIndex), [0, 1, 3, 4, 5]);
+assert.deepEqual(videoReferenceDisplaySlots(full, 9), [0, 1, 2, 3, 4, 5, 6, 7, 8], 'switching back to nine slots reveals the retained purposes');
+assert.equal(JSON.stringify(full), fullBefore, 'display derivation never modifies saved roles or selected slots');
+const overflow = videoReferenceSelection([{ assetId: 'overflow', role: 'character', slotIndex: 8 }], rememberedNine);
+assert.deepEqual(videoReferenceDisplaySlots(overflow, 6), [0, 1, 2, 3, 4, 5, 8], 'keep an occupied ninth slot visible without inventing empty seventh/eighth slots');
+
+// Composite mode reserves physical slot 1; its five editable slots still fit
+// the same six-slot connection. An actual extra image keeps its true slot.
+const composite = videoReferenceSelection(sixReferences.slice(0, 5), rememberedNine);
+assert.deepEqual(videoReferenceDisplaySlots(composite, capacity, 1), [0, 1, 2, 3, 4, 5]);
+assert.deepEqual(videoReferenceDisplaySlots(full, capacity, 1), [0, 1, 2, 3, 4, 5, 6]);
+const compositeHole = removeVideoReference(composite, 'person-1');
+assert.deepEqual(videoReferenceDisplaySlots(compositeHole, capacity, 1), [0, 1, 2, 3, 4, 5]);
+assert.deepEqual(compositeHole.references.map((reference, index) => videoReferenceSlotIndex(reference, index) + 1), [1, 3, 4, 5]);
+
+assert.equal(videoReferenceSlotCapacity({ ...sixSlotContext, backend: 'comfyui' }), 9);
+assert.equal(videoReferenceSlotCapacity({ backend: 'api', workflow: nineSlotWorkflow }), undefined);
+assert.deepEqual(videoReferenceDisplaySlots(full), [0, 1, 2, 3, 4, 5, 6, 7, 8], 'unknown capacity preserves existing editable memory');
+assert.equal(videoReferenceSlotCapacity({ backend: 'api', api: { provider: 'runninghub', runningHubImageRoles: [] } }), 0);
+assert.deepEqual(videoReferenceDisplaySlots(videoReferenceSelection([], rememberedNine), 0), [], 'known zero capacity differs from undeclared capacity');
+console.log('videoReferenceSlots: stable holes, refill order, remembered/custom roles, immutable sources, capacity-bound display, reserved offsets, labels and technical validation passed');

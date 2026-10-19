@@ -1,6 +1,7 @@
 import type { ReferenceRole, VideoTaskApiConfig } from './types';
 import type { ComfyVideoWorkflowPreset, VideoGenerationBackend, VideoImageReference } from './videoGenerationTypes';
 import { videoReferenceSlotIndex } from './videoReferenceSlots';
+import { getVideoApiImageCapacity } from './videoImageCapacity';
 
 export interface VideoReferenceUsageContext {
   backend: VideoGenerationBackend;
@@ -22,6 +23,13 @@ const mappedImageRoles = (context: VideoReferenceUsageContext): readonly (Refere
   context.backend === 'comfyui'
     ? context.workflow?.mapping.images.map((slot) => slot.role)
     : context.api?.provider === 'runninghub' ? context.api.runningHubImageRoles : undefined
+);
+
+/** Use the active backend's declared physical slots; old per-segment purpose
+ * memory never expands the current connection's capacity. */
+export const videoReferenceSlotCapacity = (context: VideoReferenceUsageContext): number | undefined => (
+  mappedImageRoles(context)?.length
+    ?? (context.backend === 'api' ? getVideoApiImageCapacity(context.api)?.maxCount : undefined)
 );
 
 /** A composite picker stores only its editable slots. Convert their purpose

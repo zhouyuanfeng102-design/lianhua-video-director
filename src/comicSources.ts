@@ -3,6 +3,7 @@ import type {
   Project, StoryComicSettings, StoryImageSourceMode, StoryReference,
 } from './types';
 import { sourceContentHash } from './sourceContentHash';
+import { hasStoryReferenceSource } from './storyReferenceSource';
 
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const text = (value: unknown): string => typeof value === 'string' ? value : '';
@@ -127,6 +128,9 @@ const patchWorkspace = (project: Project, chapterId: string | undefined, patch: 
   const now = Date.now();
   const next: Project = { ...project, updatedAt: now, chapterWorkspaces: { ...project.chapterWorkspaces,
     [id]: { ...workspaceOf(project, id), ...patch } } };
+  // Preparation controls do not replace a source while neither workspace has
+  // enabled image input. Keep the full async fingerprint and saved stale state.
+  if (!hasStoryReferenceSource(workspaceOf(project, id)) && !hasStoryReferenceSource(workspaceOf(next, id))) return next;
   if (!invalidates || comicSourceFingerprint(project, id) === comicSourceFingerprint(next, id)) return next;
   return { ...next,
     scenes: next.scenes.map((scene) => scene.chapterId === id ? { ...scene, sourceStale: true } : scene),
@@ -141,7 +145,8 @@ export const setStoryImageSourceMode = (project: Project, mode: StoryImageSource
 );
 
 export const setStoryComicSettings = (project: Project, patch: Partial<StoryComicSettings>, chapterId?: string): Project => (
-  patchWorkspace(project, chapterId, { storyComicSettings: normalizeStoryComicSettings({ ...storyComicSettings(project, chapterId), ...patch }) }, true)
+  patchWorkspace(project, chapterId, { storyComicSettings: normalizeStoryComicSettings({ ...storyComicSettings(project, chapterId), ...patch }) },
+    workspaceOf(project, chapterId).storyImageSourceMode === 'comic')
 );
 
 export const moveComicPage = (project: Project, referenceId: string, direction: -1 | 1, chapterId?: string): Project => {

@@ -56,6 +56,7 @@ import { VIDEO_SCENE_CONTEXT_RULE, type VideoSceneContext } from '../videoSceneC
 import { VIDEO_ACTION_CHOREOGRAPHY_RULE, VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE, VIDEO_ACTION_EVENT_REVIEW_RULE } from '../videoActionChoreographyRules';
 import { SPATIAL_COORDINATE_RULE, SPATIAL_CONTINUITY_REVIEW_RULE } from '../spatialContinuityRules';
 import { normalizeSceneStagingList, SCENE_STAGING_OUTPUT_SHAPE, type SceneStaging } from '../sceneStaging';
+import { NOVEL_ACTION_SOURCE_RULE, NOVEL_ACTION_CONTINUITY_RULE, NOVEL_ACTION_FRAME_RULE } from '../novelActionDirection';
 import { getStoryPreparationParagraphs, normalizeStoryPreparationResult, type StoryPreparationResult } from '../storyPreparationReview';
 import {
   STORY_VISUAL_ENGINE_VERSION,
@@ -1457,10 +1458,10 @@ const STORY_REFERENCE_BINDING_RULE = [
 
 const STORY_VISUAL_ACTION_CONTRACT = [
   '当前模式：AI画面描述转化（optimize）。先阅读全文理解剧情事实，再细化已经发生的动作。用户完整原文是最高事实依据，不执行文学润色、后续故事扩写或最终分镜设计。',
-  '事实锁定：保留人物身份、数量、称呼、实体尺度、能力、动作动词、事件顺序、目标、是否命中、伤害程度、因果和胜负结果。踢不能改为扔，躲过不能改为挡住，猜测不能写成已发生的事实。人物资料只辅助身份与外观，不代表本段已经发动能力。',
+  '事实锁定：保留人物身份、数量、称呼、实体尺度、能力、动作动词、事件顺序、目标、是否命中、伤害程度、因果和胜负结果。踢不能改为扔，躲过不能改为挡住，猜测不能写成已发生的事实。人物资料辅助身份、身体与当前行为方式，不代表本段已经发动能力或必须展示全部习惯。',
   '对白保留原话全文、说话人、原语种和出现顺序，保留对白与动作的先后或同时关系；不新增、删减、翻译台词。动作、语气、神态不是人名；未确定说话人时保留原代称或不确定性。道具名和引述概念不等于对白。',
-  '复杂动作不能只复述“打斗激烈”“闪避攻击”“迅速完成”。对原文已经发生的动作，理解并写清准备/发力、执行、运动路径、接触或落空、反应与结束状态；能确定多少写多少，不强制普通点头、推门、对话等简单动作凑满阶段。连续交锋分别记录每次攻击的主体、对象和结果，不合并成笼统打斗。',
-  '区分原文事实与导演编排。detailed 模式对同一次既有战斗补足可摄影的站位、逼近、枪路或肢体轨迹、接触、群体受力和下一动作衔接，并逐项记入 stagingAdditions。原文概述持续交战、每次攻击或连续清剿时，可以选择与其能力、战况及结果相容的具体迎击和局部交换；这不是新增另一场战斗，不能因具体招数未写而停留在“攻击细节未知”。原文明示的次数、单次事件、瞬杀、未命中和结局保持，不能将瞬杀扩成缠斗或把持续攻击缩成挥一下。不得借编排新增技能、武器、角色、伤势、台词或胜负；看不见的墙等修辞不当作新能力。faithful 模式仅展开原文有依据的过程，不指定未知左右/脚步/新姿势，也不采用无依据的导演动作。',
+  NOVEL_ACTION_SOURCE_RULE,
+  NOVEL_ACTION_CONTINUITY_RULE,
   '先以连续场面建立具名人物、地标和事件关系，再沿同一关系展开动作与末态，采用的选择保存为sceneStaging，适用于交谈、行进、观察与交战。分别表达身体面向谁、看向谁、作用于谁、怎样移动和终点在哪里；受力后退或倒飞不等于转身。detailed可安排相容的未知调度并记为编排，faithful只保留已有依据。同一场面跨段沿用sceneId及已建立关系；此阶段不设计摄影，不为身份展示安排人物动作。',
   '实际战斗按持续交战、压倒性清剿、瞬杀、追逐或阵列推进的原意展开，群体沿既有空间层与路径变化。旧battleStaging仍作为已采用编排承接，不为普通剧情新增战斗结构，也不以音效、残影或飞散结果代替真实作用。',
   '心理判断、情报、过去设定和身份未揭示保留必要的简短说明与不确定性，不能通过虚构同伴出场、闪回或新动作变成画面。跨段人物位置、朝向、所持物和受伤状态前后相容；路径与力量方向遵守原文世界及尺度。',
@@ -1478,7 +1479,8 @@ const storyVisualContinuity = (context?: StoryPreparationContext) => ({
     id: character.id, name: character.name, aliases: character.aliases || [],
     baseName: character.baseName, formLabel: character.formLabel, variantOf: character.variantOf,
     race: character.race, gender: character.gender, apparentAge: character.apparentAge, actualAge: character.actualAge, height: character.height,
-    appearance: character.appearance, outfit: character.outfit, motionHabits: character.motionHabits, negativeContinuity: character.negativeContinuity,
+    appearance: character.appearance, outfit: character.outfit, personality: character.personality,
+    motionHabits: character.motionHabits, negativeContinuity: character.negativeContinuity,
     signatureProps: character.signatureProps, anchor: character.anchor, morphology: character.morphology, bodyPlan: character.bodyPlan,
   })) || [],
   locations: context?.locations?.map((location) => ({
@@ -1552,7 +1554,7 @@ const storyVisualBatches = (paragraphs: StoryVisualActionPlan['sourceParagraphs'
 };
 
 const STORY_VISUAL_PLAN_OUTPUT = [
-  '第一阶段：理解剧情并建立事实动作表，不写画面正文。通读提供的完整原文与已有事实状态，在整段关系中理解当前 focusParagraphIds，仅记录当前批次原文片段实际发生的关键事件、对白/设定/心理判断及复杂动作的每次交锋，不重复输出其他批次事件。',
+  '第一阶段：理解剧情并建立事实动作表，不写画面正文。通读提供的完整原文与已有事实状态，在整段关系中理解当前 focusParagraphIds，记录当前批次的关键事件、对白、设定、心理判断及行为状态。实际执行、意图、尝试、中断、条件、否定、回忆和习惯在action/phases/result/uncertainties中按原意区分；此阶段不采用导演编排，不把未发生动作写成已发生，不重复输出其他批次事件。',
   '只返回一个 JSON 对象：{"version":1,"summary":"全段人物关系、空间位置、持物、伤势和因果的简短状态摘要（约600字以内），明确未知","events":[{"id":"e1","sourceParagraphIds":["p1"],"evidence":"来自对应段落的一段逐字连续原文","actor":"动作发出者/说话人，未知留空或用原称呼","target":"作用对象，原文无对象留空","action":"原文事实事件，不写编排新动作","phases":["有原文依据的起始状态/发力/路径/接触或落空/反应/终态"],"result":"已发生结果，未知留空","uncertainties":["不可确定的身份、方向或结论"]}]}。',
   'sourceParagraphIds 只能使用数据中稳定编号，evidence 使用能证明本事件的最短连续原句片段（通常20–80字），必须逐字来自对应原文，不使用省略号拼接，不复制整个长段或全文。每项事件由原文支撑，不遗漏后段、对白、设定和未能直接拍摄的因果。summary 不得将推测确定化。不要返回 sourceParagraphs，程序保留原文；不要代码围栏或额外文字。',
   `可在同一对象内返回sceneStaging数组，元素结构为${SCENE_STAGING_OUTPUT_SHAPE}。本阶段只记录原文已有的世界关系与事件阶段，不作未知调度选择；场面延续时沿用precedingSceneStaging的sceneId及参与者id。没有相关事实时省略，不能从人物身份图或原作知识推定朝向、路径和落点。`,
@@ -1560,8 +1562,8 @@ const STORY_VISUAL_PLAN_OUTPUT = [
 ].join('\n');
 
 const STORY_VISUAL_BODY_OUTPUT = [
-  '第二阶段：根据完整剧情、actionPlan 和原文依据生成自然连贯的剧情画面正文。重点细化当前 focusParagraphIds 内已发生的复杂动作；前后事件仅用于连续性，不重复输出其他批次。',
-  '写清既有行动的准备、执行、路径、接触或落空、反应和终态，动作与事件逐一对应，保留必要不可见信息和完整原对白；简单动作无需人为增长。detailed 将符合既有交战的具体动作与群体调度列在 stagingAdditions，并自然融入正文；faithful 无依据的编排留空且不写入正文。actionPlan 中身份、能力和结果未知仍保持未知；仅攻击路径、脚步或空间关系未写时，detailed 可选择相容的表现方式并标为编排，不把未知当成不设计动作的理由。',
+  '第二阶段：根据完整剧情、actionPlan 和原文依据生成自然连贯的剧情画面正文。将当前 focusParagraphIds 中已有行为按其实际性质展开，包括普通操作、人物互动、对话反应和战斗；保留尚未发生、中断或条件行为的原意。前后事件仅用于连续性，不重复输出其他批次。',
+  '按当前行为写清必要的启动、执行、路径、接触或落空、停续、反应和终态，动作与事件逐一对应，保留必要不可见信息和完整原对白；简单动作无需人为增长。detailed 将同一既有行为中相容的操作、双人配合、调度和衔接列在 stagingAdditions，并自然融入正文；faithful 无依据的编排留空且不写入正文。actionPlan 中身份、能力、原因和结果未知仍保持未知；仅握持、移动路线、接触方式或空间关系未写时，detailed 可选择相容的表现方式并标为编排，不把未知当成不设计动作的理由。',
   'sourceParagraphs 是本批实际覆盖的原文片段；sourceStart/sourceEnd（若有）只是原段内的请求预算切分位置，不是新的事件或人物状态。同一事件依据可能横跨相邻批次：只表达本批原文实际覆盖的动作阶段，承接 precedingVisualParagraphs 的状态，不重播前批完整攻击、对白或结果，也不提前演出后批反应。',
   '只返回一个 JSON 对象：{"paragraphs":[{"id":"v1","sourceParagraphIds":["p1"],"eventIds":["e1"],"text":"自然中文正文段落，包含此时发生的原对白，不输出栏目或镜头信息","stagingAdditions":["本段采用、原文未指定的具体动作或群体调度；未补充则空数组"]}]}。',
   `paragraph可增加sceneStaging对象，结构为${SCENE_STAGING_OUTPUT_SHAPE}。同一连续场面沿用actionPlan.sceneStaging与precedingVisualParagraphs中已有sceneId、参与者id与phase id，当前段只推进相应事件阶段；换场才建立另一sceneId。participants的position/bodyFacing/gazeTarget/actionTarget分别绑定具名关系，phases的startState/action/motionPath/motionEndpoint/endState记录同一动作及末态，不把移动方向写成身体面向。sourceEventIds/eventId只引用实际采用的actionPlan事件；faithful仅记录有依据的关系，detailed所选未知调度列入stagingAdditions。它是模型场面选择，不是摄影表、原著新增事实或必填表；旧battleStaging只在已有时承接。`,
@@ -3290,13 +3292,14 @@ type StoryboardCharacterContinuity = Pick<
   Character,
   'name' | 'aliases' | 'baseName' | 'formLabel' | 'variantOf' | 'transformationType'
   | 'gender' | 'race' | 'morphology' | 'bodyPlan' | 'appearance' | 'outfit' | 'anchor'
-> & Partial<Pick<Character, 'id' | 'nsfwProfile' | 'apparentAge' | 'actualAge' | 'voiceProfile'>> & {
+> & Partial<Pick<Character, 'id' | 'nsfwProfile' | 'apparentAge' | 'actualAge' | 'voiceProfile'
+  | 'personality' | 'motionHabits' | 'height' | 'signatureProps' | 'negativeContinuity'>> & {
   /** Pre-projected availability metadata from UI callers; values stay local. */
   availablePrivateParts?: readonly NsfwPrivatePart[];
 };
 
 /** TypeScript Pick does not strip runtime extension fields. Only ordinary
- * identity/wardrobe facts belong in shot planning; a saved private dossier
+ * identity, body and performance facts belong in shot planning; a saved private dossier
  * must not become an implicit instruction to show it in every scene. */
 const storyboardCharacterContinuityFacts = (characters: readonly StoryboardCharacterContinuity[] | undefined) => characters?.map((character) => ({
   ...characterVoiceIdentityFacts(character),
@@ -3310,6 +3313,8 @@ const storyboardCharacterContinuityFacts = (characters: readonly StoryboardChara
   gender: character.gender, race: character.race,
   morphology: character.morphology, bodyPlan: character.bodyPlan,
   appearance: character.appearance, outfit: character.outfit, anchor: character.anchor,
+  personality: character.personality, motionHabits: character.motionHabits,
+  height: character.height, signatureProps: character.signatureProps, negativeContinuity: character.negativeContinuity,
   ...(character.id ? { availablePrivateParts: Array.isArray(character.availablePrivateParts)
     ? VIDEO_PRIVATE_PARTS.filter((part) => character.availablePrivateParts!.includes(part))
     : availableVideoPrivateParts(character) } : {}),
@@ -3793,6 +3798,8 @@ const STORYBOARD_SEMANTIC_SOURCE_RULE = [
 ].join('\n');
 
 const STORYBOARD_SCENE_STAGING_OUTPUT_RULE = [
+  NOVEL_ACTION_CONTINUITY_RULE,
+  NOVEL_ACTION_FRAME_RULE,
   `在本次同一响应内返回可选顶层sceneStaging数组，元素结构为${SCENE_STAGING_OUTPUT_SHAPE}。输入已有场面时沿用sceneId和阶段id；直接剧情生成且没有记录时，先建立本段连续场面再生成shots。worldRelations/participants/phases只记录本次采用的关系与事件，身体面向、目光对象、动作对象与移动路径/终点分开。元数据是模型选择，不是原文证据，不包含摄影或身份展示任务。`,
   '将同一场面选择写入已有字段：space承载世界关系，direction承载身体/视线/动作对象，action/result承载阶段推进与末态；camera只观察已安排的事件并确定可见范围，performance和身份细节最后按该范围表达。shots可附本镜采用阶段的sceneStaging子集，沿用顶层sceneId与phase id；同一完整返回保留本次仍适用的场面记录，不把内部字段名写入视频正文。',
 ].join('\n');
@@ -4079,11 +4086,11 @@ export const requestShotRecommendation = async (
       STORYBOARD_SCENE_STAGING_OUTPUT_RULE,
       'dialogue 在每句原话旁直接注明完整说话人、项目已知身份、画内/背影/画外声源及相对起止时刻；有原剧情或用户确认的声线时才附具体音色，没有特殊声线要求时保持项目已知的性别与基本发声身份，不为填“声音身份”自行补造少年音、男声、音高或特殊音色。怯懦、结巴、低声和喊叫只表达本句表演，不能改变人物声音身份；本轮候选自行补出的声线不是用户确认事实。身份资料用于辨认，是否出场或发声仍由本段剧情决定。未获授权的其他人物在该句期间不发该句、不做同步说话口型。',
       STORYBOARD_STABLE_SUBJECT_CONTRACT,
-      'characterContinuity 只包含项目人物的普通身份与衣着基准。人物出镜时必须保持对应 name、baseName、formLabel、variantOf、transformationType、gender、race、appearance 和身份 anchor。没有剧情明确形态转换时不得改变性别、物种或身体结构；如果全文明确发生转换，必须在对应镜头使用具体“谁·什么形态”的 name，并只使用该形态的资料，不把原始形态与转化形态合并。outfit 是没有剧情变化时继承的穿着基准；当前原文明示换装或已确认进入状态不同时，由你按真实时间顺序保持该变化，不强行恢复资料中的旧衣着。不要求把字段名写进 JSON，也不要把整份身份资料复写为每镜画面。',
-      'action 写本镜实际可见的连续事件与双方回应，把心理说明转成可见证据。小说只写连续交战、连击或复杂动作时，在同一次交战和原结果内补足必要步法、攻击落点、接挡方式、受力与下一招承接；不是每镜只允许一次挥舞，也不凭空新增能力、伤情、胜负或对白。先安排剧情与完整发话再决定容纳它们的镜长，不反过来按AI自定镜长压缩原话，也不按固定动作阶段数、字数或每秒额度裁剪完整剧情与对白。已有准确可拍的动作描述可以沿用，不必为了词面变化改写。',
+      'characterContinuity 包含项目人物的普通身份、身体、性格、动作习惯和稳定衣物道具基准。人物出镜时必须保持对应 name、baseName、formLabel、variantOf、transformationType、gender、race、appearance 和身份 anchor。没有剧情明确形态转换时不得改变性别、物种或身体结构；如果全文明确发生转换，必须在对应镜头使用具体“谁·什么形态”的 name，并只使用该形态的资料，不把原始形态与转化形态合并。personality/motionHabits/height 只辅助选择当前剧情相容的行为方式，signatureProps 不是必用道具或能力发动指令。outfit 是没有剧情变化时继承的穿着基准；当前原文明示换装或已确认进入状态不同时，由你按真实时间顺序保持该变化，不强行恢复资料中的旧衣着。不要求把字段名写进 JSON，也不要把整份身份资料复写为每镜画面。',
+      'action 写本镜真实发生的连续行为、关键交互及双方回应，包含取放、递接、行进、劳动、对话中断和战斗。已有具体演出沿用；直接小说尚未编排的已有事件，在同一次请求内按 detailed 权限补足实现过程，不借行为展开新增事件、心理动机或对白。心理说明只在有依据时体现为相容反应，必要不可见信息保留而不强行演出。先安排行为与完整发话再决定镜长，不反过来按AI自定镜长压缩原话，也不按固定动作阶段数、字数或每秒额度裁剪完整剧情与对白。',
       nsfwDetailRule,
       nsfwVideoActionRule,
-      '涉及走跑、起跳、转身、攻击、格挡、推拉或负重时，按剧情实际写出时长容得下的支撑脚与地面反力、重心转移、髋和躯干带动肩臂或腿、接触阻力与即时反馈、随动卸力和恢复平衡，避免滑步、漂浮、瞬间换姿势和僵硬肢体。',
+      '涉及走跑、起跳、转身、攻击、格挡、推拉或负重时，只写决定本次行为成立的支撑、重心、接触反馈与随动；普通转身无需逐关节拆解或固定眼睛/头/肩顺序，轻松动作不强制蓄力，选择应符合人物身体和当前负担。让动作在可用时间内自然启动、改变和结束，避免滑步、漂浮、瞬间换姿势和僵硬肢体。',
       AUDIO_PROMPT_RULE,
       DIALOGUE_DELIVERY_RULE,
       VIDEO_LOCAL_TIME_RULE,

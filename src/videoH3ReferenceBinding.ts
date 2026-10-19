@@ -253,6 +253,26 @@ export const videoH3ReferenceCharacterIds = (project: Project, draft: VideoGener
   }));
 };
 
+/** Both request-local reference paths already have a trusted authored source.
+ * Read its real section/shot offsets by the same rules, including legacy
+ * bodies without headings. Masking preserves offsets and excludes literal
+ * dialogue, sound payloads and quoted examples from structural boundaries. */
+const videoH3ReferenceProseRanges = (prompt: string) => {
+  const masked = maskReferenceLiterals(prompt);
+  const description = /^(?:integrated_multimodal_description|detailed_description):/mu.exec(masked);
+  const sectionStart = description ? description.index + description[0].length : 0;
+  const nextSection = /^(?:overall_soundscape|non_diegetic_music):/mu.exec(masked.slice(sectionStart));
+  const sectionEnd = nextSection ? sectionStart + nextSection.index : prompt.length;
+  const markers = [...masked.slice(sectionStart, sectionEnd).matchAll(/\[Shot[ \t]*([1-9]\d*)\]/gu)];
+  const shots = markers.map((marker, index) => ({
+    index: Number(marker[1]),
+    start: sectionStart + marker.index!,
+    bodyStart: sectionStart + marker.index! + marker[0].length,
+    end: sectionStart + (markers[index + 1]?.index ?? sectionEnd - sectionStart),
+  }));
+  return { masked, sectionStart, shots };
+};
+
 /** Add only a request-local identity association inside a proven visual shot.
  * It never creates Subject/voice IDs or moves a later character to Shot 1. */
 const participationReferenceEdit = (
@@ -262,17 +282,10 @@ const participationReferenceEdit = (
   shotIndexes: readonly number[],
   numbers: readonly number[],
 ): VideoPictureReferenceEdit | undefined => {
-  const masked = maskReferenceLiterals(prompt);
-  const description = /^(?:integrated_multimodal_description|detailed_description):/mu.exec(masked);
-  if (!description) return undefined;
-  const sectionStart = description.index + description[0].length;
-  const nextSection = /^(?:overall_soundscape|non_diegetic_music):/mu.exec(masked.slice(sectionStart));
-  const sectionEnd = nextSection ? sectionStart + nextSection.index : prompt.length;
-  const shots = [...masked.slice(sectionStart, sectionEnd).matchAll(/\[Shot[ \t]*([1-9]\d*)\]/gu)];
-  const index = shots.findIndex((shot) => shotIndexes.includes(Number(shot[1])));
-  if (index < 0) return undefined;
-  const start = sectionStart + shots[index].index! + shots[index][0].length;
-  const end = sectionStart + (shots[index + 1]?.index ?? sectionEnd - sectionStart);
+  const { masked, shots } = videoH3ReferenceProseRanges(prompt);
+  const shot = shots.find((entry) => shotIndexes.includes(entry.index));
+  if (!shot) return undefined;
+  const { bodyStart: start, end } = shot;
   const visualText = masked.slice(start, end);
   const aliases = characterParticipationAliases(character, characters).slice().sort((a, b) => b.length - a.length);
   const alias = aliases.find((value) => {
@@ -303,9 +316,8 @@ const participationReferenceEdit = (
 const videoH3ReferenceUsageEdit = (
   prompt: string, references: readonly VideoImageReference[], numbers: readonly number[],
   language: 'zh' | 'en', authoredPictureNumbers: ReadonlySet<number>,
-  rememberedRoles?: readonly ReferenceRole[],
+  rememberedRoles?: readonly ReferenceRole[], multiViewNumbers: readonly number[] = [],
 ): VideoPictureReferenceEdit | undefined => {
-  const masked = maskReferenceLiterals(prompt);
   const uses: Partial<Record<ReferenceRole, readonly [string, string]>> = {
     'first-frame': ['开场构图参考', 'opening composition reference'],
     'last-frame': ['结束构图参考', 'ending composition reference'],
@@ -317,6 +329,7 @@ const videoH3ReferenceUsageEdit = (
     camera: ['摄影构图参考', 'camera composition reference'],
     'clay-render': ['形体与空间结构参考', 'form and spatial structure reference'],
     creative: ['视觉创意参考', 'visual concept reference'],
+    general: ['通用视觉参考', 'general visual reference'],
   };
   const selectedUses = references.flatMap((reference, index) => {
     const number = numbers[index];
@@ -327,18 +340,21 @@ const videoH3ReferenceUsageEdit = (
     return number && use && !authoredPictureNumbers.has(number)
       ? [`<Picture ${number}> ${use[language === 'zh' ? 0 : 1]}`] : [];
   });
-  if (!selectedUses.length) return undefined;
-  const description = /^(?:integrated_multimodal_description|detailed_description):/mu.exec(masked);
-  if (!description) return undefined;
-  const sectionStart = description.index + description[0].length;
-  const nextSection = /^(?:overall_soundscape|non_diegetic_music):/mu.exec(masked.slice(sectionStart));
-  const sectionEnd = nextSection ? sectionStart + nextSection.index : masked.length;
-  const firstShot = /\[Shot[ \t]*1\]/u.exec(masked.slice(sectionStart, sectionEnd));
-  if (!firstShot) return undefined;
-  const start = sectionStart + firstShot.index + firstShot[0].length;
-  return { start, end: start, text: language === 'zh'
-    ? ` 本段参考图用途：${selectedUses.join('；')}。人物朝向与动作时序按正文推进，静态姿态不延长动作。`
-    : ` Reference uses for this clip: ${selectedUses.join('; ')}. Facing and action timing follow the written sequence; still poses do not prolong actions.` };
+  if (!selectedUses.length && !multiViewNumbers.length) return undefined;
+  const { sectionStart, shots } = videoH3ReferenceProseRanges(prompt);
+  // Insert before the real shot header, never inside its At time prefix or
+  // a masked dialogue/quote. Unsectioned source prose needs no new envelope.
+  const start = shots.find((shot) => shot.index === 1)?.start ?? sectionStart;
+  const multiViewPictures = unique(multiViewNumbers).map((number) => `<Picture ${number}>`).join(language === 'zh' ? '、' : ', ');
+  const text = [
+    selectedUses.length ? language === 'zh'
+      ? `本段参考图用途：${selectedUses.join('；')}。人物朝向与动作时序按正文推进，静态姿态不延长动作。`
+      : `Reference uses for this clip: ${selectedUses.join('; ')}. Facing and action timing follow the written sequence; still poses do not prolong actions.` : '',
+    multiViewPictures ? language === 'zh'
+      ? `多视图身份参考：${multiViewPictures} 各自展示其已关联的同一个人物的多个角度，仅参考身份与外观；图内不同视角不是同时入画的多个人，实际人数、站位、朝向与动作沿用本镜正文。`
+      : `Multi-view identity references: ${multiViewPictures} each show multiple angles of their respective single bound character, for identity and appearance only; the views are not multiple people entering the frame. Character count, placement, facing and action follow the current shot.` : '',
+  ].filter(Boolean).join('\n');
+  return { start, end: start, text: `${text}\n` };
 };
 
 /** Pure serialization of explicit identity anchors. Warning-only failures
@@ -536,14 +552,6 @@ const prepareVideoH3ReferenceDraftInternal = (
   let prompt = binding.basePrompt;
   for (const edit of edits.sort((a, b) => b.start - a.start)) prompt = prompt.slice(0, edit.start) + edit.text + prompt.slice(edit.end);
   const language = binding.sourceLanguage || draft.source?.language;
-  // Missing old manifest entries cannot authorize a competing new mapping.
-  // With no old Picture tokens, however, the selected roles and proven input
-  // slots are sufficient; an empty historical manifest must not drop uses.
-  if (!pictureSourceIssues.length && plan.numbers && language) {
-    const authoredPictureNumbers = new Set([...pictureNumbers.values()].flatMap((numbers) => numbers || []));
-    const usage = videoH3ReferenceUsageEdit(prompt, draft.references, plan.numbers, language, authoredPictureNumbers, draft.referenceSlotRoles);
-    if (usage) prompt = prompt.slice(0, usage.start) + usage.text + prompt.slice(usage.end);
-  }
   const changedKnownMapping = [...pictureNumbers].some(([number, mapped]) => mapped !== null && (mapped.length !== 1 || mapped[0] !== number));
   if (pictureSourceIssues.length && changedKnownMapping) return unchanged([
     ...pictureSourceIssues,
@@ -586,6 +594,28 @@ const prepareVideoH3ReferenceDraftInternal = (
       language: binding.sourceLanguage || draft.source?.language,
       pictureUses: draft.references.map((reference, index) => ({ number: plan.numbers![index], role: reference.role })) }) : undefined;
   if (execution) prompt = execution.prompt;
+  // Serialize uses after any existing execution rendering, so a saved
+  // performance plan cannot discard this request's image responsibilities.
+  // Missing old manifest entries still cannot authorize a competing mapping.
+  if (!pictureSourceIssues.length && plan.numbers && language) {
+    const authoredPictureNumbers = new Set([...pictureNumbers.values()].flatMap((numbers) => numbers || []));
+    const multiViewNumbers = draft.references.flatMap((reference, index) => {
+      if (!['character', 'subject'].includes(reference.role) && reference.characterIds === undefined) return [];
+      const assets = project.assets.filter((asset) => asset.id === reference.assetId && !asset.missing);
+      const asset = assets.length === 1 ? assets[0] : undefined;
+      if (!asset || !['five-view', 'three-view', 'turnaround', 'private-five-view', 'private-turnaround'].includes(asset.imageVariant || '')) return [];
+      const owners = videoReferenceCharacterOwners(referenceProject, asset, reference);
+      if (owners.length !== 1) return [];
+      const state = characterStates.find((entry) => entry.characterId === owners[0].id);
+      const number = plan.numbers![index];
+      // This describes the bound asset, not who must enter the shot. Reusing
+      // fallback prose visibility here could discard a proven identity use.
+      return state?.status === 'bound' && state.slots.includes(number) ? [number] : [];
+    });
+    const usage = videoH3ReferenceUsageEdit(prompt, draft.references, plan.numbers, language,
+      authoredPictureNumbers, draft.referenceSlotRoles, multiViewNumbers);
+    if (usage) prompt = prompt.slice(0, usage.start) + usage.text + prompt.slice(usage.end);
+  }
   return { draft: { ...draft, prompt,
     ...(!draft.reuseTaskId && !draft.h3ReferenceBinding && draft.source && draft.source.language === undefined
       && binding.sourceLanguage === 'en' && sourceBoard.length === 1

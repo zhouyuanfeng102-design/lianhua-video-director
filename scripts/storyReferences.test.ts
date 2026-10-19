@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import type { Character, Project, ReferenceAsset, StoryReferenceAnalysis, Storyboard } from '../src/types';
+import type { Character, Project, ReferenceAsset, StoryReferenceAnalysis, Storyboard, VideoSequencePlan } from '../src/types';
 import { migrateProjectChapters, withChapterSelection, chapterWorkspace } from '../src/chapters';
 import { createInitialState, normalizeState, serializeStateForStorage } from '../src/storage';
 import { deleteAssetFromProject } from '../src/assetDeletion';
@@ -35,6 +35,77 @@ const recognize = (project: Project, referenceId: string, analysis = evidence(),
   const begun = beginStoryReferenceRecognition(project, referenceId, `request-${referenceId}`, chapterId, 2);
   return completeStoryReferenceRecognition(begun.project, begun.request, analysis, 3);
 };
+
+// Preparing an empty image input must not invalidate a completed fourteen-part
+// text plan. Exercise both chapters and saved output/task data, not just the flag.
+const completedProject = (): Project => {
+  const project = base();
+  const plans: VideoSequencePlan[] = ['a', 'b'].map((id) => ({
+    id: `plan-${id}`, chapterId: id, title: id, sourceStoryTitle: id, sourceStoryContent: `${id}章原文。`,
+    durationMode: 'fixed', totalDurationSec: 210, requestedTotalDurationSec: 210, segmentDurationSec: 15,
+    segmentationMode: 'fixed', fitStatus: 'balanced', createdAt: 1, updatedAt: 1,
+    segments: Array.from({ length: 14 }, (_, index) => ({ id: `${id}-${index}`, index: index + 1, title: `第${index + 1}段`,
+      globalStartSec: index * 15, globalEndSec: (index + 1) * 15, durationSec: 15, content: '原有剧情正文。', summary: '',
+      sourceSceneIds: [], sourceBeatIds: [], narrativePurpose: '', entryState: '', exitState: '', transitionHint: '', status: 'ready' as const })),
+  }));
+  return { ...project, scenes: [...project.scenes, { ...project.scenes[0], id: 'scene-b', chapterId: 'b' }],
+    storyboards: [board, { ...board, id: 'board-b', chapterId: 'b', finalPrompt: '另一章原稿' }], sequencePlans: plans,
+    generationTasks: [{ id: 'saved-video', kind: 'video', storyboardId: board.id, targetId: 'saved-model', status: 'succeeded',
+      requestBody: { prompt: '原任务冻结提示词', references: ['one'] }, resultAssetId: 'saved-video-result', createdAt: 1, updatedAt: 2 }] };
+};
+const assertArtifactsRetained = (actual: Project, expected: Project): void => {
+  for (const key of ['sourceDocuments', 'scenes', 'storyboards', 'sequencePlans', 'generationTasks', 'assets'] as const) {
+    assert.deepEqual(actual[key], expected[key], `${key} survives empty input preparation`);
+  }
+};
+for (const initialMode of [undefined, 'text', 'image'] as const) {
+  const original = completedProject();
+  if (initialMode) original.chapterWorkspaces!.a = { ...original.chapterWorkspaces!.a, storyInputMode: initialMode };
+  const saved = JSON.stringify(original);
+  let current = original;
+  for (const mode of ['image', 'text', 'image'] as const) {
+    current = withStoryInputMode(current, mode, 'a');
+    current = withStoryNarrator(current, { name: '准备中的叙述者' }, 'a');
+    assertArtifactsRetained(current, original);
+    assert.deepEqual(current.chapterWorkspaces?.b, original.chapterWorkspaces?.b);
+  }
+  assert.equal(JSON.stringify(original), saved, 'editing never mutates the input project');
+}
+const stale = completedProject();
+stale.sequencePlans[0].sourceStale = true;
+stale.sequencePlans[0].segments[0].status = 'stale';
+stale.storyboards = stale.storyboards.map((item) => item.chapterId === 'a' ? { ...item, sourceStale: true } : item);
+assertArtifactsRetained(withStoryNarrator(withStoryInputMode(stale, 'image', 'a'), { name: '准备' }, 'a'), stale);
+const inactive = updateStoryReference(addStoryReference(completedProject(), 'one', { id: 'inactive', chapterId: 'a' }), 'inactive', { enabled: false }, 'a');
+assertArtifactsRetained(withStoryInputMode(inactive, 'image', 'a'), inactive);
+assert.notEqual(storyReferenceFingerprint(withStoryInputMode(base(), 'image', 'a'), 'a'), storyReferenceFingerprint(base(), 'a'),
+  'async ownership still distinguishes empty image mode from text; persisted hashes are not changed');
+
+// Real source changes must still invalidate only their chapter, including the
+// transitions to/from no enabled images. Preserved prose and jobs are untouched.
+const textWithImage = addStoryReference(completedProject(), 'one', { id: 'active', chapterId: 'a' });
+const imageSource = { ...textWithImage, chapterWorkspaces: { ...textWithImage.chapterWorkspaces,
+  a: { ...textWithImage.chapterWorkspaces!.a, storyInputMode: 'image' as const } } };
+for (const changed of [
+  withStoryInputMode(textWithImage, 'image', 'a'), withStoryInputMode(imageSource, 'text', 'a'),
+  updateStoryReference(imageSource, 'active', { enabled: false }, 'a'), removeStoryReference(imageSource, 'active', 'a'),
+  updateStoryReference(imageSource, 'active', { notes: '真实来源备注变化' }, 'a'),
+  withStoryNarrator(imageSource, { name: '已选参考图的叙述者' }, 'a'),
+  addStoryReference(imageSource, 'two', { id: 'added', chapterId: 'a' }),
+  updateStoryReference(withStoryInputMode(inactive, 'image', 'a'), 'inactive', { enabled: true }, 'a'),
+]) {
+  assert.equal(changed.sequencePlans[0].sourceStale, true);
+  assert.ok(changed.sequencePlans[0].segments.every((segment) => segment.status === 'stale'));
+  assert.equal(changed.scenes[0].sourceStale, true);
+  assert.equal(changed.storyboards[0].sourceStale, true);
+  assert.deepEqual(changed.sequencePlans[1], imageSource.sequencePlans[1]);
+  assert.deepEqual(changed.scenes[1], imageSource.scenes[1]);
+  assert.deepEqual(changed.storyboards[1], imageSource.storyboards[1]);
+  assert.deepEqual(changed.sourceDocuments, imageSource.sourceDocuments);
+  assert.deepEqual(changed.generationTasks, imageSource.generationTasks);
+  assert.deepEqual(changed.storyboards.map((item) => item.finalPrompt), imageSource.storyboards.map((item) => item.finalPrompt));
+  assert.deepEqual(changed.sequencePlans[0].segments.map((segment) => segment.content), imageSource.sequencePlans[0].segments.map((segment) => segment.content));
+}
 
 // Chapter labels are persisted identities, not array positions; switching modes preserves text.
 let project = withStoryInputMode(base(), 'image', 'a');

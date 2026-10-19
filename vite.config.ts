@@ -46,6 +46,12 @@ export default defineConfig({
           ) return 'react-vendor';
           if (normalized.includes('/node_modules/')) return 'vendor';
           if (normalized.endsWith('/src/updateLog.ts')) return 'update-log';
+          // Rule catalogs read these constants during module initialization.
+          // Keep their dependency-free definitions out of domain: otherwise
+          // generation-contracts -> domain -> generation-contracts evaluates
+          // the frame rule before its binding is initialized and blanks startup.
+          if (['novelActionDirection.ts', 'novelActionLegacyRequestRules.ts']
+            .some((file) => normalized.endsWith(`/src/${file}`))) return 'novel-action-rules';
           // These catalogs initialize constants from videoInteractionRules at
           // module scope. Keep both sides of that dependency in the same leaf
           // chunk; falling back to domain creates a domain -> rules -> domain

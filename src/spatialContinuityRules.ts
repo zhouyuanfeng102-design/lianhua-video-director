@@ -46,6 +46,7 @@ export const DIRECTED_ACTION_RELATION_RULE = [
  * geometry verdict or extra review request. Applies only to a requested still
  * whose source establishes a story moment or concrete spatial relations. */
 export const IMAGE_STORY_SPATIAL_STATE_RULE = [
+  NOVEL_ACTION_FRAME_RULE,
   "剧情静帧先冻结所选事件的唯一时刻和动作阶段，再采用同一场面的世界站位、距离两端、地标、支撑/接触、身体朝向、视线与动作对象及该阶段的路径或末态；随后冻结该时刻已采用的摄影机位置、视向、景别和裁切，再确定实际入画人物与可见部位，最后展开这些部位的身份细节。普通身份设定图和无人环境图按当前用途处理，不附加剧情人物或动作。",
   "首帧取进入状态，尾帧取行动产生的退出状态，中间帧取指定阶段；使用sceneStaging时继承同一sceneId与对应phase的已有关系。距离保留原参照和端点，缺失精确数值时用已有相对尺度与可达关系；原有通路、门槛和障碍只有实际行动才改变。摄影机推近、后拉和裁切只改变观察，不能提前消耗行动空间或把之后才接近的人物移到一起。",
   "自然语言先写该时刻的必要世界关系与取景，再展开可见人物；SD共享场景段和NAI基础段保留必要关系，各角色段绑定本人当时可见姿态与身份。每个画格和description都独立表达已采用的画面；近景只写可见空间证据及必要画外定位，完整档案不等于所有人物和装备都要入画。保持当前输出格式，不添加空间地图、审核报告或新摄影。",
@@ -68,9 +69,7 @@ export const STORYBOARD_SPATIAL_FRAME_RULE = [
 ].join('\n\n');
 
 /** Exact previous composition, removed only from runtime request copies. */
-export const LEGACY_STORYBOARD_SPATIAL_FRAME_RULE_V2_5_6 = STORYBOARD_SPATIAL_FRAME_RULE.replace(
-  DIRECTED_ACTION_RELATION_RULE, LEGACY_DIRECTED_ACTION_RELATION_RULE_V2_5_6,
-);
+export const LEGACY_STORYBOARD_SPATIAL_FRAME_RULE_V2_5_6 = PRE_NOVEL_LEGACY_STORYBOARD_SPATIAL_FRAME_RULE_V2_5_6;
 
 /** Exact 1.8.1 first-party text, retained only for request-time compatibility. */
 /** Request-time AI direction only. No local geometry verdicts or prose rewriting. */
@@ -108,3 +107,6 @@ export const LEGACY_STORYBOARD_SPATIAL_FRAME_RULE_V1_8_1 = [
   '静帧必须是既有镜头在所选时刻的画面，不是为每张图片重新设计一台摄影机。以最终已确认H3对应镜头的视觉事实为准，旧canonical/结构化分镜与参考图已有文字只作来源背景；旧稿或旧首尾帧的构图不能覆盖最终H3明确的人物站位、机位、身体侧别及在画/画外状态。H3没有提供的事实再由原剧情和结构化镜头补充，不把缺失信息当作已观察事实。本批先由AI统一理解同一场景的空间关系，再选动作阶段、时间点和原镜头允许的裁切；不得为了多生成几张而擅自改视点、反打、镜像、跨轴或让人物换边。若原镜头有摄影机运动或人物真实走位，依据所选时刻求当时投影。每张description以及最终生图正文都要独立保留必要的具名人物画面位置、身体朝向、接触侧别和机位依据，不只写“与上图一致”，不把多张画面拼在一张。人物身份参考只锁身份，非当前时刻的构图图不代替本镜空间事实；没有真实像素就不要声称看过图。AI输出前自检修复：自身左右是否误当画面左右、原本分居两侧的人物是否被误放同侧、画外人物是否被添入、最终H3的空间修复是否被旧资料覆盖；只纠正图像提示词，不改动原H3。',
   'H3摘录代表与当前剧情和镜头结构相符的最后成稿，不保证其主体定义中的外貌与后来编辑的项目资料同步。主体定义仅用于解析标签和身份，不表示全部人物入画；如本次另提供更新的人物固定身份与外貌资料，以最新资料决定该人物外观，不把旧H3中的外貌回填覆盖新资料。外貌资料更新和新增身份参考图不等于人物换边、换机位或进入画面；由你对照当前资料与H3镜头保留空间关系、修复图像正文，不回退旧分镜站位或修改H3原文。',
 ].join('\n');
+import { NOVEL_ACTION_FRAME_RULE } from './novelActionDirection';
+import { PRE_NOVEL_LEGACY_STORYBOARD_SPATIAL_FRAME_RULE_V2_5_6 } from './novelActionLegacyRequestRules';
+

@@ -15,6 +15,7 @@ import {
   LEGACY_VIDEO_INTERACTION_RULES_V1_8_8, LEGACY_VIDEO_INTERACTION_TRANSLATION_RULE_V1_8_8,
   LEGACY_VIDEO_INTERACTION_RULES_V1_8_1, LEGACY_VIDEO_INTERACTION_TRANSLATION_RULE_V1_8_1,
 } from './videoInteractionRules';
+import * as previousNovelRules from './novelActionLegacyRequestRules';
 
 /** Exact previous request blocks; compatibility only. */
 export const LEGACY_VIDEO_NATURAL_PERFORMANCE_RULE_V2_5_1 = "由你结合原剧情、人物关系、已知性格和当前信息，逐镜判断人物注意什么、为何反应、反应如何变化，把可见表演写入现有performance/action。身份与面容稳定不等于表情冻结，人物参考图的静态表情不是全片表情锁；沉着、克制或安静不等于面部和身体僵住。普通身份资料中的性格、动作习惯与“笑容明亮”“被某事后神色如常”等静态或条件式表情锚点只是角色参考，不是当镜必须执行的事件或全程固定表情，不把整份档案逐镜复制成动作命令。以当前段真实事件触发表演变化，档案里的条件只有当前剧情实际触发才适用，不把后段才发生的动作或后果提前，也不为丰富表情添加影响剧情的动作；保留原有角色身份与用户明确设定，不擅自改变年龄、衣着、外貌或已确认状态。只在剧情有依据且景别可读时，用视线、语气、姿态或动作节奏表达刺激后的理解、回应与自然回落，不要求每镜凑齐一套微动作。表演幅度和持续时间须符合情境与已选风格：原文有强烈喜悦、恐惧、愤怒等就保留，不能一律改成面无表情或微笑，也不能把普通交谈放大成长时间瞪眼、挑眉、咧嘴或夸张点头。说话者的口型和语气跟随自己的原话及停顿；倾听者依实际听到的信息维持注意或作出有依据的反应，不代说、不随别人的台词张口，也不把不说话写成紧咬嘴唇或全程木然。表情不随切镜机械重置，同一人物的反应阶段要接续；不强迫背影和远景展示不可见的面部细节，不为表演新增剧情事件、改变原有情绪走向或添加影响因果的人物动作，不指定固定眨眼频率、每秒表情次数或所有人物同步反应。";
@@ -29,13 +30,20 @@ export const LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_5_1 = "先理解完整剧情，
  * no rewriting of saved presets, and no video generation or media inspection.
  */
 export const VIDEO_NATURAL_PERFORMANCE_RULE = [
-  "人物表演由当前事件、意图、实际所见所闻及人物关系触发，按已有情绪强度自然变化并跨镜承接。身份资料、参考图静态表情与性格习惯提供理解，不自动成为当镜事件；克制可有细微回应，强烈情绪可保留强度，普通交谈不持续夸张。只选择本镜景别下可读的必要反应，不给每人安排同一套眨眼或微动作。",
+  "人物表演由当前事件、意图、实际所见所闻及人物关系触发，性格、动作习惯、身体结构和当前持物影响此刻做事方式；不是给每人添加一套眨眼、握拳或手抖。情绪应改变正在发生的行为、节奏或注意：得知信息后可停住手中操作，克制可表现为继续做事，已有犹豫/中断照实保留，不替原文选择未知动机。身份资料和参考图静态表情不自动成为当镜事件；强烈情绪保持原强度，普通交谈不持续夸张。",
   "身体姿态、头部与目光按当时动作或注意对象自然变化，转身、回头或改换注意需有事件依据。可见面服从既定机位：远景、背影和遮挡用可读姿态与节奏表达，正面或特写可表达当前可见表情；完整身份不强制露脸。说话者口型跟随自己的原话与停顿，听者按实际信息回应，画外发声和沉默按原意保留。",
 ].join('\n\n');
 
-export const VIDEO_WORLD_SPACE_CAMERA_RULE = [
+/** Exact prior projection block, used only to recognize saved request rules. */
+export const LEGACY_VIDEO_WORLD_SPACE_CAMERA_RULE_V2_6_6 = [
   "摄影采用已建立的世界站位、路径、动作阶段与末态，再确定当前相机相对行动轴的位置、视向、运动和取景。cameraTarget是摄影机的观察对象，和人物bodyFacing、gazeTarget及actionTarget分开；跟拍、推近、反打与环绕改变观察，不自动改变人物朝向、视线、距离或动作终点。",
   "从相机当前位置推导实际可见面、身体侧别、前后景、地标、遮挡与画外关系；画面左右可以随合法换位变化，世界关系继续承接。行进目的地不是人物背后背景，正面退拍观察人物继续前行时，背景来自其身后实际可见路段。以当前动作可读性选择正面、侧面、背后、越肩、主观或其他有依据的视角，不把某类机位硬设为所有事件默认。",
+].join('\n\n');
+
+export const VIDEO_WORLD_SPACE_CAMERA_RULE = [
+  "摄影采用worldRelations、participants已建立的具名人物实例、世界站位、路径、动作阶段与末态；旧稿无这些字段时沿用已确认正文。再确定当前相机相对行动轴的位置、视向、运动和取景。cameraTarget是摄影机的观察对象，和人物bodyFacing、gazeTarget及actionTarget分开；跟拍、推近、反打与环绕改变观察，不自动改变人物朝向、视线、距离或动作终点。",
+  "从相机当前位置为每个人物实例推导同一时刻唯一的画面位置与可见范围：前景、中景或背景中的具体位置，以及实际入画的全身、局部、遮挡或画外状态。越肩的肩、后脑与背部属于该具名人物的同一个身体；已在前景以局部入画的这名人物，不再另置一份在中景或背景。换机位时从同一世界站位重新推导投影，画面左右与层次可改变，只有真实行动才改变人物位置；不得为保留上一机位的背景人物而复制同一身体。原剧情或用户明确成立的分身、镜像、倒影等多实例或成像关系分别标明来源、位置与可见范围，按原意保留，不将它们合并或一律禁止。",
+  "面对面交谈按既定身体朝向和视线选择关系构图、越肩或反打，听者可以仅有肩背入画或处于画外；不得为了同框正脸把听者搬到说话者身后，画外关系也不成为补人指令。将实际可见面、身体侧别、前后层次、地标与遮挡写入现有space/camera及逐镜正文，不新增人物清单或报告。行进目的地不是人物背后背景，正面退拍观察人物继续前行时，背景来自其身后实际可见路段。以当前动作可读性选择正面、侧面、背后、越肩、主观或其他有依据的视角，不把某类机位硬设为所有事件默认。",
 ].join('\n\n');
 
 export const LEGACY_VIDEO_AI_SHOT_COVERAGE_RULE_V1_8_9 = '镜数与覆盖方式由你先分析剧情信息、动作因果、对白回应、空间变化、情绪转折和可用时长后决定，不默认三镜、不为凑固定镜数机械等分，也不因每句对白或每个人物都必须露正脸而切镜。规划阶段在用户指定镜数或允许范围内，选择足以清楚表现当前剧情的镜头数量；自动模式按需要决定镜数与镜长，在规划JSON已有reason（保存后对应shotCountReason）和每镜purpose/transition说明具体依据，不新增JSON属性，也不只复述“电影感”。分段时长窗口不等于一个镜头：15秒可以包含多个有叙事动机的镜头，先安排完整对白区间、换人交接和必要动作，再选择覆盖方式，不先把每段做成一镜后硬塞全部事件。多人轮流接话时明确当前具名发话者和口型可见性，可采用关系构图、说话者中近景或单镜内有动机的关注转移；观察重点须与当前话轮和动作一致，不让后面的亲吻提前成为开场正在执行的焦点。一个连续镜头可以成立，有必要的信息揭示、反应或空间建立也可以拆镜，不为镜头多样性制造事件。选择建立空间、双人关系、侧面行进、背后跟随、主观观察或反应近景等覆盖方式须服务当前情节，不把这些例子变成每段必做清单；对白不自动等于正面面部近景，正面跟拍也不被一律禁止。转换、H3复核和翻译阶段若镜数与时间边界已经确认，则保留既定镜数、顺序和切点，在现有镜头内改善调度，不借自主导演之名重切整段或裁掉对白。';
@@ -45,7 +53,7 @@ export const LEGACY_VIDEO_AI_SHOT_COVERAGE_RULE_V2_1_0 = '先排本段各事件�
 /** Scene understanding precedes photography; these are generation instructions. */
 export const VIDEO_CONTINUOUS_SCENE_RULE = [
   '先理解完整剧情，再按地点、连续时间、人物目标、阻碍及局势变化组织连续场面；同一场面可以包含进入、交谈、行动、回应和结果，事件条目、人物登场、段落标题与生成窗口都不自动成为摄影切点。先确定观众此刻必须理解谁在何处、谁对谁做什么、为什么这样行动及结果怎样改变局势，再安排观看任务与摄影。',
-  '入场与对峙先让人物、通路和相对关系可读；对白按真实话轮与听者反应推进；连续攻防让发起、轨迹、对方回应、接触或落空及反馈保持连贯；线索或身份揭示按原文的知情顺序展示。场面条件决定观看重点，不把这些场面例子变成每段必做清单。人物拥有身份、服装、武器或身体特征，不表示必须逐项扫拍、停留展示或先给道具再给脸。',
+  '同一场面沿人物、道具和注意状态继续：取放让握持与放置可读，递接让双方接稳/松手相承，起坐和移动承接支撑与位置，观察或犹豫保留注意、停续和未发生的接触；对白按真实话轮与听者所得信息推进。战斗保留发起、轨迹、回应与反馈；线索、身份和原因按原文的知情顺序揭示。只选当前场面必要过程，不把这些例子变成每段清单，不为展示身份先扫道具再切脸。',
   '身份资料是辨认与连续性依据，不是需要演出的事件；在格式允许的位置简短定义必要稳定特征一次，后续保留姓名及当镜实际状态，不把整份档案、动作习惯或设定真值写成当镜行动。普通迈步、抬手、移开视线和细微停顿按自然先后或并行表达；数字时刻用于镜界、完整发话区间与确需同步的关键事件，不为每个微动作编造小数秒排程。',
 ].join('\n\n');
 
@@ -72,7 +80,7 @@ export const LEGACY_VIDEO_CAMERA_SELECTION_RULE_V2_1_0 = LEGACY_VIDEO_CAMERA_SEL
 );
 
 export const VIDEO_CAMERA_SELECTION_RULE = [
-  "事件与动作末态确定后，摄影的观看任务是让观众理解其关系、路径、接触、回应或新信息。依据当前任务选择景别、机位、cameraTarget、焦点与必要运动，再推导可见范围。人物目光落点不是自动切特写的摄影指令，某人拥有面孔、装备或身体特征也不产生展示任务。",
+  "事件与动作阶段确定后，摄影让观众理解必要关系、操作、路径、接触、停续或新信息：交接需要读清同一物品与双方，起坐/负重需要必要支撑，行进需要方向与通路，犹豫或细微回应选可读景别。按已安排的过程选择机位、cameraTarget、焦点和运动，给动作保留所需空间；镜头推近、环绕和切脸不代替动作。并非每镜全身或每个接触都切特写，人物目光落点和身份特征不自动成为摄影展示指令。",
   "用户明确指定的摄影按其范围落实，多选偏好在适用处采用；未指定时用足以表达本镜关系的简洁摄影。固定、正面、反打、越肩和环绕都可有依据采用，不机械禁用；单镜连贯关注交接与必要切换由信息表达决定，避免为逐项展示身份叠加扫拍、绕行和变焦。",
 ].join('\n\n');
 
@@ -80,19 +88,19 @@ export const VIDEO_MOTIVATED_LIGHTING_RULE = '由你结合当前地点、时间�
 
 export const LEGACY_VIDEO_ACTING_CAMERA_FIELD_RULE_V2_1_0 = '上述决定必须进入现有逐镜内容，不能只在总说明写“表情自然、轴线一致、AI自主运镜”。规划时使用现有purpose、action、performance、direction、space、camera、lighting、transition、result等shot字段：action/space/direction先落实双方动作和进入关系，result承接可见的退出关系，camera覆盖该事件，transition从这份末态交代下一镜如何继续；具体选择理由融入purpose/camera/transition，保持既有数据结构。六字段转换稿将表演与连续攻防放在主体/动作，将世界路线、距离变化和机位关系放在空间/镜头，将光源和可见效果放在光影；H3稿将这些内容融入当前每个[Shot N]的现有段落。保持既有H3顶层section名称、顺序、参考标签和输出格式，时间切点保持已确认排程；仅本次指令明确授权taskAuthority=current-segment-staging-replan时，切点以同时交付的修正canonicalPrompt为准，用户固定段长与exact镜数仍不变。不新增表演审查、空间地图、运镜理由等H3顶层字段或附录，不输出内部推理链。';
 
-export const VIDEO_ACTING_CAMERA_FIELD_RULE = "源头采用的场面按当前交付结构写入：现有purpose、action、performance、direction、space、camera、lighting、transition和result分别承载观看任务、真实行动、朝向目标、世界关系、摄影与可继承末态；支持sceneStaging时保存同一场面的sceneId和阶段，旧稿无该可选字段时依已有正文。六字段和H3只将同一事实编译到各镜现有段落，身份定义与结果状态不重复指挥动作。保持原有H3 section、参考标签、时间及授权边界，不新增顶层摄影报告或推理链。";
+export const VIDEO_ACTING_CAMERA_FIELD_RULE = "源头采用的场面按当前交付结构写入：现有purpose、action、performance、direction、space、camera、lighting、transition和result承载观看任务、行动/停续、朝向目标、世界关系、摄影与可继承末态。action写实际过程，result保留人物位置、姿态、注意、接触和持物及相关物品状态，未完成或中断仍按其状态交付；支持sceneStaging时沿同一sceneId和phase保存，旧稿无可选字段时依已有正文。六字段和H3只将同一演出编译到每镜现有段落，不能缩回剧情摘要，身份与结果不再次指挥行动。保持section、参考标签、时间和授权边界，不新增报告或推理链。";
 
 /** Faithful downstream serialization; never another photography decision. */
 export const VIDEO_ACTING_CAMERA_PRESERVATION_RULES = [
   'VIDEO_ACTING_CAMERA_PRESERVE_V1：本次只忠实转写已有摄影排程，保留既定镜数、顺序、切点、景别、机位、轴线侧别、运镜、观察对象与注意交接。完整导演风格、运镜多选与人物资料只帮助理解既定内容，不授权主动选镜、改机位、切特写、拆合镜头或另编摄影；原稿的静态机位、长镜头与有意义的切换均原样传递。',
-  '保留逐镜人物身份、世界站位、真实间距、朝向、行动路径、连续动作强度、对方同步回应、接触或落空及进入退出状态；不把动作降成准备、摆姿势或停顿，也不补新招式、转身或结果。原对白逐字保留原语言、具名说话人、声源、完整发话区间、听者与口型状态，画外发声和无对白安排保真，不因构图或身份资料转交台词。',
+  '保留逐镜身份、世界站位、间距、朝向、行动路径、强度、对方回应、接触/释放、持物归属和物品状态。实际行动不降成摆姿势，原来等待、尝试、未接触收手和有意义静止不补成完成；注意改变与被打断动作按源稿顺序。原对白逐字保持原语言、具名声源、完整区间、听者与口型状态，画外发声和无对白保真，不因构图转交台词。',
   '只在现有字段与正文中消除转写遗漏和表达歧义，说明原稿已经成立的空间与动作关系，不借澄清重做摄影。简短身份定义用于辨认，不朗读档案、不逐镜复制长外貌，不把已完成状态再写成一次行动；普通微动作按原先后自然表述，未给定的小数时间不自行添加。保持当前六字段或H3字段格式、[Shot N]、At切点、参考标签与声音标签，不新增审核字段、调用或重试。',
 ].join('\n\n');
 
 export const VIDEO_ACTING_CAMERA_REVIEW_RULE = '提交前由同一AI对照当前段原文、人物资料、实际选择的运镜/光影、参考资料职责与完整候选稿自行复核并修复：表演是否有触发依据和自然变化，是否将克制误写成木偶或将普通对白写成持续夸张表情，说话者/倾听者是否分清，切镜是否重置反应；每镜的机位和视向是否确实能看到所写背景，人物是否仍沿既定世界路线行进，光源是否与空间一致；镜头是否重复怼正脸而漏掉信息或空间，所选运镜是否落实、有动机且不过度堆叠。发现问题直接在当前阶段允许的字段和边界内修正，保留身份、事件因果、原话、原说话人及当前段范围，不以新增转身、赶路事件或其他剧情来圆场；保留本来合理的强烈表演、固定镜头、正面跟拍和背景变化。复核修复后返回完整最终正文，不只给通过结论、问题清单或让用户手动修改。全部内容判断由AI完成，不增加本地语义拦截、关键词否决或表情/镜数配额，不要求先生成视频或重新运行收费视频来验证提示词。';
 
 export const VIDEO_ACTING_CAMERA_TRANSLATION_RULE = [
-  "英文翻译以已采用的sourcePrompt为执行稿，保留事件、动作实际阶段和末态，以及该场面的身体、头部、视线、动作对象与摄影机观察对象各自关系。转身、回头、正面或背面按原稿表达，保留真实表演强度、说话与倾听归属、光源和可见背景；克制不变成僵硬，强烈情绪不被减弱。完整资料及sceneStaging帮助理解，不为译文补机位、露脸动作、路径或结果；格式、标签、切点和对白保持。",
+  "英文翻译以已采用sourcePrompt为执行稿，保留实际动作阶段、停续、未发生的接触和末态，以及身体、头部、视线、动作对象与cameraTarget各自关系。取放、交接、观察、情绪中断和战斗均保留已写过程及人物/物品状态；转身、回头和可见面按原稿表达，不从人物资料增加露脸或动作。表演强度、说话/倾听归属、光源和背景保持，克制不变成僵硬。sceneStaging只作理解，不补机位、路径、操作或结果；格式、标签、切点和对白保持。",
   SPATIAL_TRANSLATION_RULE,
   VIDEO_INTERACTION_TRANSLATION_RULE,
 ].join('\n\n');
@@ -111,6 +119,9 @@ export const VIDEO_ACTING_CAMERA_RULES = [
   VIDEO_MOTIVATED_LIGHTING_RULE,
   VIDEO_ACTING_CAMERA_FIELD_RULE,
 ].join('\n\n');
+
+/** Exact previous bundle; remove it as a whole before attaching current rules. */
+export const LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_6_6 = previousNovelRules.PRE_NOVEL_LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_6_6;
 
 /** Exact previous live bundle; compatibility only, never an extra rule. */
 export const LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_3_7 = LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_5_1
@@ -197,6 +208,9 @@ export const stripLegacyVideoActingCameraRules = (value: string): string => {
     SPATIAL_CONTINUITY_REVIEW_RULE, SPATIAL_TRANSLATION_RULE, SPATIAL_COORDINATE_RULE,
   ];
   const legacyRules = [
+    ...Object.entries(previousNovelRules).filter(([key]) =>
+      !key.startsWith('PRE_NOVEL_VIDEO_ACTION_')).map(([, text]) => text),
+    LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_6_6, LEGACY_VIDEO_WORLD_SPACE_CAMERA_RULE_V2_6_6,
     LEGACY_SPATIAL_COORDINATE_RULE_V2_5_1, LEGACY_SPATIAL_CONTINUITY_REVIEW_RULE_V2_5_1,
     LEGACY_STORYBOARD_SPATIAL_FRAME_RULE_V2_5_1, LEGACY_STORYBOARD_FRAME_VISIBILITY_RULE_V2_5_1,
     LEGACY_DIRECTED_ACTION_RELATION_RULE_V2_5_1, LEGACY_SPATIAL_TRANSLATION_RULE_V2_5_1,
