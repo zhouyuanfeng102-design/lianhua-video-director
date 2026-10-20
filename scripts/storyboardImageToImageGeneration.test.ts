@@ -492,6 +492,83 @@ try {
   assert.equal(recoveredTail.continuityAssetId, boundaryFirstTask.resultAssetId);
   assert.deepEqual(recoveredTail.referenceAssetIds, boundaryTailTask.referenceAssetIds, 'asset-only replay retains the frozen first result rather than finding a new first image');
 
+  for (const failureStage of ['image-502', 'image-save', 'prompt-convert'] as const) {
+    const firstFailure = fixture();
+    firstFailure.mutate((state) => ({ ...state, project: { ...state.project,
+      assets: [...state.project.assets, { ...makeImage('existing-first'), source: 'generated',
+        sourceStoryboardId: 'board-2', imageVariant: 'first-frame', type: 'first-frame', role: 'first-frame' }],
+    } }));
+    const boardBeforeFailure = JSON.stringify(firstFailure.getState().project.storyboards[0]);
+    const convert = firstFailure.ctx.convertPrompt!;
+    const generate = firstFailure.ctx.generateImage!;
+    const store = firstFailure.ctx.storeImage!;
+    let conversionAttempts = 0;
+    let imageAttempts = 0;
+    let outputSaveAttempts = 0;
+    firstFailure.ctx.convertPrompt = async (...args) => {
+      if (++conversionAttempts === 1 && failureStage === 'prompt-convert') throw new Error('fixture first prompt conversion failed');
+      return convert(...args);
+    };
+    firstFailure.ctx.generateImage = async (...args) => {
+      if (++imageAttempts === 1 && failureStage === 'image-502') {
+        await args[2]?.();
+        throw Object.assign(new Error('fixture image HTTP 502'), { status: 502 });
+      }
+      return generate(...args);
+    };
+    firstFailure.ctx.storeImage = async (payload) => {
+      if (!payload.fileName?.includes('图生图参考') && ++outputSaveAttempts === 1 && failureStage === 'image-save') {
+        throw new Error('fixture first image save failed');
+      }
+      return store(payload);
+    };
+    await bounded(firstFailure.run({ mode: 'boundary-frames' }));
+    const [failedFirst, completedTail] = firstFailure.imageTasks();
+    assert.deepEqual([failedFirst.status, completedTail.status], ['failed', 'succeeded'], `${failureStage}: first failure does not cancel the authored tail`);
+    assert.equal(conversionAttempts, 2, `${failureStage}: each requested frame converts once, without a retry`);
+    assert.equal(imageAttempts, failureStage === 'prompt-convert' ? 1 : 2, `${failureStage}: no extra image requests`);
+    assert.equal(completedTail.continuityAssetId, undefined);
+    assert.deepEqual(completedTail.referenceAssetIds, ['b', 'a']);
+    assert.deepEqual(completedTail.referenceAssetSnapshots?.map((asset) => asset.id), ['b', 'a'],
+      `${failureStage}: no existing or failed first-frame locator enters the tail snapshot`);
+    const tailCall = firstFailure.calls.at(-1)!;
+    assert.deepEqual(tailCall.input.referenceImages, [pngB, pngA]);
+    assert.match(firstFailure.conversions.at(-1)!.source, /视频尾帧.*最后一镜结束/u);
+    assert.doesNotMatch(tailCall.input.prompt, /本批已成功首图/u);
+    assert.equal(firstFailure.reported.length, 1, 'only the original first failure is reported');
+    assert.equal(JSON.stringify(firstFailure.getState().project.storyboards[0]), boardBeforeFailure);
+    assert.equal(firstFailure.getState().project.assets.find((asset) => asset.id === completedTail.resultAssetId)?.imageVariant, 'last-frame');
+    assert.equal(firstFailure.getState().project.assets.filter((asset) => asset.imageVariant === 'first-frame').length, 1,
+      'the old first image remains untouched and is not replaced or retried');
+  }
+
+  const stoppedBoundary = fixture();
+  const stoppedBoundaryStarted = deferred();
+  const stoppedBoundaryResponse = deferred();
+  let stoppedBoundaryRequests = 0;
+  stoppedBoundary.ctx.generateImage = async (_api, _input, onStart) => {
+    stoppedBoundaryRequests += 1;
+    await onStart?.();
+    stoppedBoundaryStarted.resolve();
+    await stoppedBoundaryResponse.promise;
+    return { dataUrl: pngA };
+  };
+  const stoppedBoundaryRun = stoppedBoundary.run({ mode: 'boundary-frames' });
+  await bounded(stoppedBoundaryStarted.promise);
+  const stoppedFirst = stoppedBoundary.imageTasks().find((task) => task.imageVariant === 'first-frame')!;
+  forceStopImageTask(stoppedBoundary.projectId, stoppedFirst);
+  stoppedBoundary.mutate((state) => applyOwnedProjectUpdate(state, stoppedBoundary.projectId, (project) => ({
+    ...project, generationTasks: forceStopImageGenerationTask(project.generationTasks, stoppedFirst.id).tasks,
+  })));
+  await bounded(stoppedBoundaryRun);
+  assert.deepEqual(stoppedBoundary.imageTasks().map((task) => task.status), ['cancelled', 'cancelled']);
+  assert.equal(stoppedBoundaryRequests, 1, 'a user stop cannot submit the paired tail');
+  assert.equal(stoppedBoundary.conversions.length, 1, 'a stopped pair cannot start a tail text conversion');
+  assert.match(stoppedBoundary.imageTasks()[1].error || '', /首帧已取消或停止/u);
+  stoppedBoundaryResponse.resolve();
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  assert.equal(stoppedBoundary.getState().project.assets.filter((asset) => asset.source === 'generated').length, 0);
+
   const tailReferenceFailure = fixture();
   const originalTailRead = tailReferenceFailure.ctx.loader.readManagedImageDataUrl!;
   const originalTailGenerate = tailReferenceFailure.ctx.generateImage!;
@@ -874,8 +951,9 @@ try {
   assert.equal(emptyConversion.calls.length, 0, 'an empty ordinary converter result blocks image submission instead of falling back to local framing rules');
   assert.equal(emptyConversion.imageTasks()[0].status, 'failed');
   assert.match(emptyConversion.imageTasks()[0].error || '', /提示词为空/u);
-  assert.equal(emptyConversion.imageTasks()[1].status, 'cancelled');
-  assert.match(emptyConversion.imageTasks()[1].error || '', /本批首帧未成功保存/u);
+  assert.equal(emptyConversion.imageTasks()[1].status, 'failed', 'tail records its own converter failure rather than being cancelled with the first');
+  assert.match(emptyConversion.imageTasks()[1].error || '', /提示词为空/u);
+  assert.equal(emptyConversion.reported.length, 2, 'both independently failing conversions retain their actual error');
   assert.ok(emptyConversion.reportDetails.every((detail) => detail?.stage === 'image-prompt-convert'));
 
   for (const echoFormat of ['raw', 'json', 'url'] as const) {

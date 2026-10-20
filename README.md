@@ -4,13 +4,13 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的 Windows 桌面工作台。
 
-当前版本：**2.8.3** · 2026-10-20 · Windows 64 位 · 便携运行
+当前版本：**2.8.5** · 2026-10-20 · Windows 64 位 · 便携运行
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows 便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-2.8.3.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-2.8.5.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
 1. 下载上面的 EXE，放在可写入的文件夹里，双击运行，无需安装 Node.js。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
@@ -32,14 +32,13 @@
 - **自定义生图+反推图片提示词**：输入要求生成图片，或复用上传/资产库参考图，通过视觉 API 反推可复制的提示词与人物、物品、场景、风格详情。反推同步显示在聊天和资料任务，支持后台执行、停止、重试及项目保存恢复；原有生图支持原文直发或规则转换，结果自动入库。
 - **项目与资产管理**：管理图片、视频和音频，保存项目包、备份资料并导出提示词。
 
-## 最新更新 · v2.8.3
+## 最新更新 · v2.8.5
 
-- NSFW 剧情在 AI 语义分段阶段即保留具体动作阶段、人物与部位归属、衣物状态、接触变化和段尾状态，不再先压成普通亲密概述。
-- 分镜规划、视频提示词转换与 H3 继续读取当前段原始语义证据；即使分段正文较概括，新稿仍使用动作细化规则。
-- 新稿转换使用动作生成规则，参考更新、连续性修复和结构修复使用保真规则，避免串用旧规则或丢失已有细节。
-- AI 画面描述转化的理解与正文两阶段继续按实际 NSFW 原文各注入一次完整规则；不新增年龄门禁、运行时审核、生成拦截、自动重试或模型请求。
+- 修复首尾帧队列将首帧普通失败当作尾帧硬依赖的问题：首帧遇到 HTTP 502 等错误时，尾帧继续按原文和原参考图完成一次原定生成。
+- 首帧成功时仍作为尾帧连续性参考，用户主动取消时仍停止队列；不会自动重试失败的首帧或增加模型处理步骤。
+- 保留 2.8.4 的生成任务页紧凑布局，以及此前的单段生成、参考图关联和提示词修复。
 
-[查看本版完整说明](docs/releases/发布说明-2.8.3.md) · [历史版本归档](docs/releases/README.md)
+[查看本版完整说明](docs/releases/发布说明-2.8.5.md) · [历史版本归档](docs/releases/README.md)
 
 ## 从源码运行
 

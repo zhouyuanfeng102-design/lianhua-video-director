@@ -15026,7 +15026,7 @@ function DirectorView(ctx: AppContext) {
       if (results.some((result) => result.blockedBy !== undefined)) {
         setBackgroundState((current: AppState) => applyOwnedProjectUpdate(current, requestedProjectId, (project) => ({
           ...project, generationTasks: results.reduce((currentTasks, result, index) => result.blockedBy !== undefined
-            ? failImagePreparationTasks(currentTasks, [tasks[index]], result.error || "本批首帧未成功保存，尾帧未提交。", true)
+            ? failImagePreparationTasks(currentTasks, [tasks[index]], result.error || "本批首帧已取消或停止，尾帧未继续提交。", true)
             : currentTasks, project.generationTasks),
         })));
       }
@@ -20691,7 +20691,7 @@ function ImageWorkbenchView(ctx: AppContext) {
       if (results.some((result) => result.blockedBy !== undefined)) {
         setBackgroundState((current: AppState) => applyOwnedProjectUpdate(current, requestedProjectId, (project) => ({
           ...project, generationTasks: results.reduce((currentTasks, result, index) => result.blockedBy !== undefined
-            ? failImagePreparationTasks(currentTasks, [tasks[index]], result.error || "本批首帧未成功保存，尾帧未提交。", true)
+            ? failImagePreparationTasks(currentTasks, [tasks[index]], result.error || "本批首帧已取消或停止，尾帧未继续提交。", true)
             : currentTasks, project.generationTasks),
         })));
       }
@@ -25597,10 +25597,19 @@ function GenerationTasksView(ctx: AppContext) {
   };
   return (
     <div className="grid jobs-view">
-      <SectionHeading eyebrow="GENERATION JOBS" title="生成任务" description="图片、视频和资料任务分开查看，状态与操作互不混杂。" />
+      <div className="section-heading generation-jobs-heading">
+        <div>
+          <div className="eyebrow">GENERATION JOBS</div>
+          <h2>生成任务</h2>
+        </div>
+        <div className="generation-jobs-context">
+          <p>图片、视频和资料任务分开查看，状态与操作互不混杂。</p>
+          <span className="field-hint">{chapterFilter === "all" ? "显示全项目任务" : `当前范围 ${chapterFilteredTasks.length} 项`} · 后台任务持续运行</span>
+        </div>
+      </div>
       <Card className="soft generation-task-browser">
-        <div className="row-between" style={{ marginBottom: 10 }}>
-          <label className="row">
+        <div className="generation-task-toolbar">
+          <label className="generation-task-scope">
             <span>章节范围</span>
             <select value={chapterFilter} onChange={(event) => setChapterFilter(event.target.value)} aria-label="任务章节筛选">
               <option value="all">全项目 · 全部章节</option>
@@ -25610,32 +25619,31 @@ function GenerationTasksView(ctx: AppContext) {
               <option value="shared">项目共享 / 历史任务</option>
             </select>
           </label>
-          <span className="field-hint">{chapterFilter === "all" ? "显示全项目任务" : `当前范围 ${chapterFilteredTasks.length} 项`} · 后台任务持续运行</span>
-        </div>
-        <div className="generation-task-tabs" role="tablist" aria-label="任务分类">
-          {(["image", "video", "autofill"] as const).map((category) => {
-            const meta = taskCategoryMeta[category];
-            const active = activeTaskCategory === category;
-            const Icon = category === "image" ? ImageIcon : category === "video" ? Film : FileText;
-            return (
-              <button
-                key={category}
-                type="button"
-                id={`generation-task-tab-${category}`}
-                className={`generation-task-tab ${active ? "active" : ""}`}
-                data-task-category={category}
-                role="tab"
-                aria-selected={active}
-                aria-controls={`generation-task-panel-${category}`}
-                aria-label={`${meta.label}，${meta.count} 个`}
-                onClick={() => setActiveTaskCategory(category)}
-              >
-                <Icon size={16} />
-                <span>{meta.label}</span>
-                <span className="generation-task-count" aria-hidden="true">{meta.count}</span>
-              </button>
-            );
-          })}
+          <div className="generation-task-tabs" role="tablist" aria-label="任务分类">
+            {(["image", "video", "autofill"] as const).map((category) => {
+              const meta = taskCategoryMeta[category];
+              const active = activeTaskCategory === category;
+              const Icon = category === "image" ? ImageIcon : category === "video" ? Film : FileText;
+              return (
+                <button
+                  key={category}
+                  type="button"
+                  id={`generation-task-tab-${category}`}
+                  className={`generation-task-tab ${active ? "active" : ""}`}
+                  data-task-category={category}
+                  role="tab"
+                  aria-selected={active}
+                  aria-controls={`generation-task-panel-${category}`}
+                  aria-label={`${meta.label}，${meta.count} 个`}
+                  onClick={() => setActiveTaskCategory(category)}
+                >
+                  <Icon size={16} />
+                  <span>{meta.label}</span>
+                  <span className="generation-task-count" aria-hidden="true">{meta.count}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
         <div className="row-between generation-task-category-summary">
           <div>

@@ -620,50 +620,72 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
 .batch-toolbar input:not([type="checkbox"]) { width: min(320px, 28vw); }
 .batch-toolbar .compact-check { min-height: 28px; margin: 0; }
 .revision-panel { margin-top: 8px; padding: 7px; border: 1px solid var(--line); border-radius: 7px; background: #fff; display: grid; gap: 5px; }
-.jobs-view { gap: 9px; }
-.generation-task-browser { display: grid; gap: 9px; }
+.jobs-view { min-width: 0; gap: 6px; container-type: inline-size; }
+.generation-jobs-heading { min-width: 0; min-height: 34px; margin: 0; justify-content: flex-start; gap: 16px; }
+.generation-jobs-heading > div { min-width: 0; }
+.generation-jobs-heading > div:first-child { flex: 0 0 auto; }
+.generation-jobs-heading .eyebrow { font-size: clamp(8px, .75cqi, calc(9px * var(--ui-font-scale, 1))); line-height: 1.2; }
+.generation-jobs-heading h2 { font-size: clamp(12px, 1.15cqi, calc(13px * var(--ui-font-scale, 1))); line-height: 1.3; }
+.generation-jobs-heading p { margin: 0; font-size: clamp(9px, .9cqi, calc(10px * var(--ui-font-scale, 1))); line-height: 1.3; overflow-wrap: anywhere; }
+.generation-jobs-context { display: grid; gap: 2px; }
+.generation-jobs-context .field-hint { font-size: clamp(8px, .8cqi, calc(9px * var(--ui-font-scale, 1))); line-height: 1.25; overflow-wrap: anywhere; }
+.generation-task-browser { min-width: 0; display: grid; gap: 6px; padding: 8px; }
+.generation-task-toolbar { min-width: 0; display: grid; grid-template-columns: minmax(250px, 1fr) minmax(0, 2fr); align-items: center; gap: 12px; }
+.generation-task-scope { min-width: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 7px; font-size: clamp(10px, 1cqi, calc(11px * var(--ui-font-scale, 1))); line-height: 1.25; }
+.generation-task-scope > span { white-space: nowrap; }
+.generation-task-scope select { min-width: 0; min-height: 30px; padding: 3px 7px; font-size: inherit; line-height: 1.25; }
 .generation-task-tabs {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 7px;
+  gap: 6px;
 }
 .generation-task-tab {
   min-width: 0;
-  min-height: 36px;
+  min-height: 30px;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
+  gap: 5px;
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 6px 10px;
+  border-radius: 6px;
+  padding: 3px 8px;
   background: #ffffff;
   color: var(--muted);
   box-shadow: 0 2px 6px rgba(40,34,48,.035);
-  font-size: calc(11px * var(--ui-font-scale, 1));
+  font-size: clamp(10px, 1cqi, calc(11px * var(--ui-font-scale, 1)));
   font-weight: 750;
+  line-height: 1.2;
 }
+.generation-task-tab > svg { width: 14px; height: 14px; flex: 0 0 auto; }
+.generation-task-tab > span { overflow-wrap: anywhere; }
 .generation-task-tab:hover { border-color: var(--line-strong); background: #faf8fb; }
 .generation-task-tab:focus-visible { outline: 2px solid rgba(200,79,134,.42); outline-offset: 1px; }
 .generation-task-tab.active { color: #ffffff; border-color: var(--pink); background: var(--pink); }
 .generation-task-tab.active[data-task-category="video"] { border-color: var(--violet); background: var(--violet); }
 .generation-task-tab.active[data-task-category="autofill"] { border-color: var(--cyan); background: var(--cyan); }
 .generation-task-count {
-  min-width: 20px;
-  height: 20px;
+  min-width: 17px;
+  min-height: 17px;
+  flex: 0 0 auto;
   display: inline-grid;
   place-items: center;
   border-radius: 999px;
-  padding: 0 5px;
+  padding: 2px 4px;
   background: #f2edf2;
   color: var(--faint);
-  font-size: calc(9px * var(--ui-font-scale, 1));
+  font-size: clamp(8px, .8cqi, calc(9px * var(--ui-font-scale, 1)));
   line-height: 1;
 }
 .generation-task-tab.active .generation-task-count { background: rgba(255,255,255,.2); color: #ffffff; }
-.generation-task-category-summary { min-width: 0; padding-top: 8px; border-top: 1px solid var(--line); gap: 12px; }
-.generation-task-category-summary > div { min-width: 0; }
-.generation-task-category-summary .field-hint { margin-top: 2px; }
+.generation-task-category-summary { min-width: 0; padding-top: 6px; border-top: 1px solid var(--line); gap: 10px; }
+.generation-task-category-summary > div { min-width: 0; overflow-wrap: anywhere; }
+.generation-task-category-summary strong { font-size: clamp(10px, 1cqi, calc(11px * var(--ui-font-scale, 1))); line-height: 1.25; }
+.generation-task-category-summary .field-hint { margin-top: 1px; font-size: clamp(8px, .8cqi, calc(9px * var(--ui-font-scale, 1))); line-height: 1.3; }
+.generation-task-category-summary > .btn { flex: 0 0 auto; min-height: 28px; padding: 3px 7px; gap: 5px; font-size: clamp(10px, 1cqi, calc(11px * var(--ui-font-scale, 1))); line-height: 1.2; }
+@container (max-width: 640px) {
+  .generation-task-toolbar { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .generation-jobs-heading { align-items: flex-start; gap: 10px; }
+}
 .job-request { min-height: 180px; margin-top: 9px; font-family: Consolas, monospace; font-size: calc(11px * var(--ui-font-scale, 1)); }
 .job-list { display: grid; gap: 7px; min-height: 0; overflow: auto; }
 .video-task-batch {

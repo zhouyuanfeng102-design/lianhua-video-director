@@ -1922,11 +1922,13 @@ export const runStoryboardImageBatch = async <
     const dependencyIndex = request.purpose === 'last-frame' && firsts.length === 1 && tails.length === 1
       ? firsts[0].itemIndex : undefined;
     // Wait before taking a global queue slot, including tail-first input order.
+    // A successful first frame supplements continuity. A failed first frame
+    // does not invalidate the tail's own authored source and reference images.
     const operation = (async (): Promise<StoryboardImageBatchResult<T, TRequest>> => {
       const dependency = dependencyIndex === undefined ? undefined : await run(dependencyIndex);
-      if (dependency && dependency.status !== 'succeeded') return {
+      if (dependency?.status === 'cancelled') return {
         request, status: 'cancelled', blockedBy: dependencyIndex,
-        error: '本批首帧未成功保存，尾帧未提交。',
+        error: '本批首帧已取消或停止，尾帧未继续提交。',
       };
       return enqueueImageTask(async () => {
         try {

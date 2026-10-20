@@ -29,18 +29,24 @@ assert.deepEqual(order, ['first-frame', 'last-frame']);
 assert.deepEqual(paired.map((result) => result.status), ['succeeded', 'succeeded']);
 assert.equal(paired[0].value?.id, 'saved-tail');
 
-// Failure blocks only the matching tail; another board continues without retrying.
-const failureCalls: string[] = [];
-const independent = request('last-frame', 'other-board');
-const failed = await runStoryboardImageBatch([tail, first, independent], async (item) => {
-  failureCalls.push(`${item.storyboardId}:${item.purpose}`);
-  if (item === first) throw new Error('首图保存失败');
-  return 'saved';
-});
-assert.deepEqual(failureCalls, ['board:first-frame', 'other-board:last-frame']);
-assert.deepEqual(failed.map((result) => result.status), ['cancelled', 'failed', 'succeeded']);
-assert.equal(failed[0].blockedBy, 1);
-assert.match(failed[0].error || '', /尾帧未提交/u);
+// A normal first-frame failure leaves the authored tail runnable, without retries.
+for (const failure of ['HTTP 502', '首图保存失败', '首图提示词转换失败']) {
+  const failureCalls: string[] = [];
+  const independent = request('last-frame', 'other-board');
+  const originalTail = JSON.stringify(tail);
+  const failed = await runStoryboardImageBatch([tail, first, independent], async (item, _index, prior) => {
+    failureCalls.push(`${item.storyboardId}:${item.purpose}`);
+    assert.equal(prior, undefined, 'a failed first result cannot substitute an older first frame');
+    if (item === first) throw new Error(failure);
+    return 'saved';
+  });
+  assert.deepEqual([...failureCalls].sort(), ['board:first-frame', 'board:last-frame', 'other-board:last-frame']);
+  assert.ok(failureCalls.indexOf('board:first-frame') < failureCalls.indexOf('board:last-frame'));
+  assert.deepEqual(failed.map((result) => result.status), ['succeeded', 'failed', 'succeeded']);
+  assert.equal(failed[0].blockedBy, undefined);
+  assert.equal(failed[1].error, failure);
+  assert.equal(JSON.stringify(tail), originalTail, 'tail retains its own source and chosen references');
+}
 
 for (const cancelledBeforeStart of [true, false]) {
   let tailCalls = 0;
@@ -54,6 +60,7 @@ for (const cancelledBeforeStart of [true, false]) {
   assert.equal(tailCalls, 0);
   assert.deepEqual(results.map((result) => result.status), ['cancelled', 'cancelled']);
   assert.equal(results[0].blockedBy, 1);
+  assert.match(results[0].error || '', /首帧已取消或停止/u);
 }
 
 let soloCalls = 0;
@@ -83,4 +90,4 @@ const repeated = await runStoryboardImageBatch([first, { ...first, shotId: 'anot
   return 'saved';
 });
 assert.ok(repeated.every((result) => result.status === 'succeeded'));
-console.log('storyboard boundary dependency: 6 focused cases passed; no API calls.');
+console.log('storyboard boundary dependency: success continuity, three independent failure stages, cancellation and standalone cases passed; no API calls.');
