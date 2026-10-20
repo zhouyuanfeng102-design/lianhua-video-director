@@ -310,6 +310,9 @@ export async function generateSingleSegmentPrompt(
     }) : undefined;
   const hasNsfwVideoActionSignal = hasNsfwDetailSignal(
     semanticStoryContent,
+    input.sequenceSegmentContext?.segment?.semanticSource
+      ? JSON.stringify(input.sequenceSegmentContext.segment.semanticSource)
+      : undefined,
     input.sourceStoryContent,
     input.conversionDraft?.sourceStoryContent,
     input.board.sourceStoryContent,
@@ -320,11 +323,16 @@ export async function generateSingleSegmentPrompt(
     ...input.board.shots.flatMap((shot) => [
       shot.action,
       shot.prompt,
+      shot.nsfwContinuity?.clothingState,
+      shot.nsfwContinuity?.nudity,
       shot.nsfwContinuity?.contact,
       shot.nsfwContinuity?.actionStage,
       shot.nsfwContinuity?.residue,
+      ...Object.values(shot.visiblePrivatePartsByCharacter || {}).flat(),
     ]),
   );
+  const authorsNsfwActionDetail = (!input.purpose || input.purpose === 'initial')
+    && (!input.skipConversion || input.voiceFactScope === 'source-grounded-new-draft');
   const nsfwVideoActionRuleForRequest = (
     stage: SingleSegmentPromptStage,
     formatOnly: boolean,
@@ -332,7 +340,8 @@ export async function generateSingleSegmentPrompt(
   ): string => {
     if (!hasNsfwVideoActionSignal) return '';
     if (stage === 'translate') return MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE;
-    if (stage === 'convert' || canReplanStaging && !formatOnly && !serializationRepair) {
+    if (authorsNsfwActionDetail && (stage === 'convert' || stage === 'review')
+      && !formatOnly && !serializationRepair) {
       return MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE;
     }
     return MOSE_JIANGHU_NSFW_VIDEO_ACTION_PRESERVATION_RULE;

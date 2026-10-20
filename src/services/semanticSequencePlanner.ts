@@ -8,6 +8,8 @@ import { STORY_PACING_RULE } from '../storyPacing';
 import { STORY_CAUSALITY_RULE } from '../storyCausalityRules';
 import { VIDEO_SCENE_CONTEXT_RULE } from '../videoSceneContext';
 import { NOVEL_ACTION_SOURCE_RULE, NOVEL_ACTION_CONTINUITY_RULE } from '../novelActionDirection';
+import { MOSE_JIANGHU_NSFW_DETAIL_RULES, MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE } from '../nsfwPromptRules';
+import { hasNsfwDetailSignal } from '../promptConstraints';
 import type { SequenceDurationMode, TextApiConfig, VideoSequencePlan } from '../types';
 import { videoPacingWithoutCreativeRequirement } from '../videoCreativeDirection';
 import { requestTextModel } from './llm';
@@ -123,6 +125,12 @@ const SEMANTIC_SEQUENCE_AI_DURATION_RULE = [
 
 export const SEMANTIC_SEQUENCE_PLANNING_RULE = `${SEMANTIC_SEQUENCE_COMMON_RULE}\n${SEMANTIC_SEQUENCE_AI_DURATION_RULE}`;
 
+const SEMANTIC_SEQUENCE_NSFW_SCOPE_RULE = [
+  'NSFW语义分段范围：完整story已明确包含NSFW内容时，segments.content必须保留原剧情已有的具体动作阶段、人物与部位对应、姿势和支撑、衣物或裸露状态、接触变化、人物反应、声音依据及本窗结束状态，不得在分段时压缩成“亲密互动、缠绵、激烈动作、暧昧接触”等概括词。',
+  '同一连续事件跨窗时按真实进度分配：本窗实际发生的阶段写入本窗content、events和sceneStaging，未完成阶段由exitState/continuityPack传给下一窗；不得每段重新开始，也不得把后续阶段提前到前段。',
+  '只细化story已经成立的事实，不新增原文没有的动作、阶段、人物、对白或结果。sourceEvidence继续逐字保存当前段依据；content、events、sceneStaging和入口出口表达同一份分配，不输出规则名或审核说明。',
+].join('\n');
+
 /** Place the current whole-film assignment after source records as well as in
  * the system contract. Source paragraph/staging records are not old windows. */
 const semanticSequenceWindowInstruction = (input: SemanticSequencePlanningInput): string => [
@@ -190,7 +198,14 @@ export const requestSemanticSequencePlan = async (
   const snapshot = copySemanticSequencePlanningInput(input);
   const requestConfig = { ...config };
   const inputPayload = sourcePayload(snapshot);
-  const planningRule = semanticSequencePlanningRule(snapshot);
+  const planningRule = [
+    semanticSequencePlanningRule(snapshot),
+    ...(hasNsfwDetailSignal(snapshot.story) ? [
+      MOSE_JIANGHU_NSFW_DETAIL_RULES,
+      MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE,
+      SEMANTIC_SEQUENCE_NSFW_SCOPE_RULE,
+    ] : []),
+  ].join('\n\n');
   const fixedBudget = snapshot.durationMode === 'fixed'
     ? { totalDurationSec: snapshot.requestedTotalDurationSec!, segmentDurationSec: snapshot.segmentDurationSec }
     : undefined;

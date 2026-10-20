@@ -4066,7 +4066,10 @@ export const requestShotRecommendation = async (
       `精确镜头数 ${params.requiredShotCount} 少于固定分段网格所需的至少 ${internalHardBoundariesSec.length + 1} 镜。`,
     );
   }
-  const hasStoryboardNsfwSignal = hasNsfwDetailSignal(initialParams.story);
+  const currentSegmentNsfwEvidence = semanticContext?.segment?.semanticSource
+    ? JSON.stringify(semanticContext.segment.semanticSource)
+    : '';
+  const hasStoryboardNsfwSignal = hasNsfwDetailSignal(initialParams.story, currentSegmentNsfwEvidence);
   const nsfwDetailRule = hasStoryboardNsfwSignal ? MOSE_JIANGHU_NSFW_DETAIL_RULES : '';
   const nsfwVideoActionRule = hasStoryboardNsfwSignal ? MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE : '';
   let candidateResult = await requestTextModel(

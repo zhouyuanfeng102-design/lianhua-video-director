@@ -406,10 +406,25 @@ export const convertStoryboardDraftToFinal = async (
     sourceStoryContent,
     input.draft.extraRequirement,
     draftPrompt,
-    ...input.draft.shots.map((shot) => shot.action),
+    ...input.draft.shots.flatMap((shot) => [
+      shot.action,
+      shot.nsfwContinuity?.clothingState,
+      shot.nsfwContinuity?.nudity,
+      shot.nsfwContinuity?.contact,
+      shot.nsfwContinuity?.actionStage,
+      shot.nsfwContinuity?.residue,
+      ...Object.values(shot.visiblePrivatePartsByCharacter || {}).flat(),
+    ]),
   );
   const nsfwDetailRule = hasNsfwVideoActionSignal ? MOSE_JIANGHU_NSFW_DETAIL_RULES : '';
-  const nsfwVideoActionRule = hasNsfwVideoActionSignal ? MOSE_JIANGHU_NSFW_VIDEO_ACTION_PRESERVATION_RULE : '';
+  const nsfwVideoActionRule = hasNsfwVideoActionSignal
+    ? refreshConfirmedPrompt || limitedRepair
+      ? MOSE_JIANGHU_NSFW_VIDEO_ACTION_PRESERVATION_RULE
+      : MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE
+    : '';
+  const structuralRepairNsfwVideoActionRule = hasNsfwVideoActionSignal
+    ? MOSE_JIANGHU_NSFW_VIDEO_ACTION_PRESERVATION_RULE
+    : '';
   // Preserve authored source and plan data. Alias resolution, speaker
   // attribution and identity continuity belong to the model reading the full
   // story, not to a local whitelist or quotation/beat extraction heuristic.
@@ -564,7 +579,7 @@ export const convertStoryboardDraftToFinal = async (
   ].filter((value): value is string => Boolean(value)).map((value) => sharedRules.reduce(
     (text, rule) => text.split(rule).join(''), stripLegacyVideoActingCameraRules(stripLegacyVideoQuotaRules(value)),
   ).trim()).filter(Boolean))].join('\n\n');
-  const hardContract = [
+  const hardContractFor = (scopedNsfwVideoActionRule: string): string => [
     '以下为当前输出约定；旧预设中的裁句、固定字秒/动作阶段配额和强制换词要求不适用。',
     STORY_CAUSALITY_RULE,
     ADOPTED_VIDEO_EXPRESSION_RULE,
@@ -573,7 +588,7 @@ export const convertStoryboardDraftToFinal = async (
     audioContractRule, VIDEO_LOCAL_TIME_RULE, VIDEO_CONVERSION_FORMAT_RULE,
     VIDEO_DIALOGUE_STAGING_RULE, VIDEO_SPATIAL_CONTINUITY_RULE,
     VIDEO_STAGING_TRANSCRIPTION_RULE, VIDEO_PROMPT_FOCUS_RULE, VIDEO_WARDROBE_SCOPE_RULE,
-    nsfwVideoActionRule,
+    scopedNsfwVideoActionRule,
     ...(input.sequenceHandoff ? [VIDEO_SEQUENCE_TEXT_HANDOFF_RULE] : []),
     '源头分镜是本次摄影与排程的唯一决策依据：保持给定镜数、时间边界、景别、机位、运镜、观察对象及注意交接，不重新规划全片，不因导演风格或运镜选择为空另选摄影。先阅读 sourceStoryContent 全文，再由你自行识别人物本名、别名、代词指向、画面主体、画外说话人及完整对白。plannedSubject 是先前计划，不是允许名单；若名称或代词与原剧情不符，由你依据全文澄清身份，不借身份澄清改换镜头，不能因名称不在项目人物表中拒绝结果。',
     'characterIdentityFacts 和 globalContinuityFacts 是项目已保存的性别、物种、外观等资料，audioLedgerFacts 是已保存的声源、台词、时刻及声音备注，需结合全文理解并保持一致；资料缺失不能靠固定人类模板补写，未知声线不凭名字或画面前后顺序推断，画外说话人无需改成画面主体。',
@@ -587,6 +602,7 @@ export const convertStoryboardDraftToFinal = async (
     VIDEO_CONTINUOUS_CONVERSION_EXAMPLE,
     limitedRepairRule,
   ].filter(Boolean).join('\n\n');
+  const hardContract = hardContractFor(nsfwVideoActionRule);
   const systemPrompt = withVideoActionChoreographyScope([
     `<video_conversion_core_task>\n${coreTask}\n</video_conversion_core_task>`,
     `<video_conversion_converter_rules>\n${converterRules}\n</video_conversion_converter_rules>`,
@@ -668,7 +684,7 @@ export const convertStoryboardDraftToFinal = async (
     const structuralRepairSystemPrompt = withVideoActionChoreographyScope([
       `<video_conversion_core_task>\n${coreTask}\n</video_conversion_core_task>`,
       `<video_conversion_converter_rules>\n${converterRules}\n</video_conversion_converter_rules>`,
-      `<video_conversion_hard_contract>\n${hardContract}\n</video_conversion_hard_contract>`,
+      `<video_conversion_hard_contract>\n${hardContractFor(structuralRepairNsfwVideoActionRule)}\n</video_conversion_hard_contract>`,
       '<video_conversion_structural_repair_hard_contract>',
       '这是一次本地时轴/字段读取失败后的结构修复，不是本地内容判定。只修复 validationFailure 所指的缺失字段、缺镜、无效镜头时间头或结构；原响应 invalidCandidate 中已正确的镜头和可读正文应保留，不要求换词、固定语速或固定每镜台词布局。',
       '结合 sourceStoryContent 全文自行判断并修正内容；人物别名、对白、身份等不受本地白名单限制。镜内时刻必须区分全片坐标。只返回完整逐镜正文，不解释。这是唯一一次结构修复。',

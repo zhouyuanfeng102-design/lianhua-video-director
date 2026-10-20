@@ -3,6 +3,7 @@ import {
   requestSemanticSequencePlan, SEMANTIC_SEQUENCE_PLANNING_TAG, SemanticSequenceSelfAssessmentError,
 } from '../src/services/semanticSequencePlanner';
 import type { SemanticSequencePlannerProgress } from '../src/services/semanticSequencePlanner';
+import { MOSE_JIANGHU_NSFW_DETAIL_RULES, MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE } from '../src/nsfwPromptRules';
 import { SEMANTIC_SEQUENCE_FIT_STATUS_RULE, SemanticSequenceTechnicalError, validateSemanticSequencePlan } from '../src/semanticSequencePlan';
 import type { SemanticSequencePlanningInput, SemanticSequenceResponse } from '../src/semanticSequencePlan';
 import { requestTextModel, TextModelHttpError, TextModelResponseError } from '../src/services/llm';
@@ -117,6 +118,30 @@ test('valid generation is exactly one paid-model-shaped call, no separate review
     && event.durationMode === 'ai-estimated' && event.segmentDurationSec === 15
     && event.totalDurationSec === undefined && event.requiredSegmentCount === undefined
     && Number.isFinite(event.elapsedMs) && event.elapsedMs >= 0));
+});
+
+test('NSFW detail rules enter semantic segmentation once while ordinary stories stay unchanged', async () => {
+  const ordinaryRequests = install(() => textReply(response(1)));
+  await requestSemanticSequencePlan(config(), input(), undefined, options);
+  const ordinarySystem = prompt(ordinaryRequests[0], 'system');
+  assert.equal(ordinaryRequests.length, 1);
+  assert.equal(ordinarySystem.includes(MOSE_JIANGHU_NSFW_DETAIL_RULES), false);
+  assert.equal(ordinarySystem.includes(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE), false);
+
+  const request = input();
+  request.story = '林岚全裸坐在床边，胸前和下体可见湿痕，随后与伴侣发生明确性行为并持续推进。';
+  const authored = response(1);
+  authored.segments[0].content = request.story;
+  authored.segments[0].semanticSource.sourceEvidence = [{ text: request.story }];
+  const nsfwRequests = install(() => textReply(authored));
+  await requestSemanticSequencePlan(config(), request, undefined, options);
+  const nsfwSystem = prompt(nsfwRequests[0], 'system');
+  assert.equal(nsfwRequests.length, 1, 'NSFW segmentation retains the existing single-call path');
+  assert.equal(nsfwSystem.split(MOSE_JIANGHU_NSFW_DETAIL_RULES).length - 1, 1);
+  assert.equal(nsfwSystem.split(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE).length - 1, 1);
+  assert.match(nsfwSystem, /segments\.content必须保留原剧情已有的具体动作阶段/u);
+  assert.match(nsfwSystem, /本窗实际发生的阶段写入本窗content、events和sceneStaging/u);
+  assert.doesNotMatch(nsfwSystem, /年龄门禁|未满18|未成年人/u);
 });
 
 test('a consistent legacy segmentCount remains compatible without another model call', async () => {
