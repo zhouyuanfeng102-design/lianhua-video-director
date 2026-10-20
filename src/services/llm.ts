@@ -113,7 +113,7 @@ import {
   validateMasterTimelineSegmentGrid,
 } from '../masterTimeline';
 import { DEFAULT_FIRST_PERSON_SUBJECT } from '../semanticEvents';
-import { semanticSegmentStoryContent, type SemanticSegmentSourceContext } from '../semanticSequencePlan';
+import { SEMANTIC_SEGMENT_SOURCE_AUTHORITY, semanticSegmentStoryContent, type SemanticSegmentSourceContext } from '../semanticSequencePlan';
 import { normalizeGeneratedImageData } from '../generatedImageData';
 import { normalizeReferenceImageDataUrl, referenceImageFileName } from '../imageReferenceData';
 import { createImageApiRequestError } from '../imageApiError';
@@ -3269,10 +3269,16 @@ const storyboardSourcePlanningAuthority = (params: StoryboardPlanValidationConte
     : params.requiredSegmentDurationSec !== undefined ? 'unconfirmed-full-film' : 'single-clip',
   candidateStatus: 'unconfirmed-ai-draft',
   sourceFacts: 'preserve-events-verbatim-dialogue-speakers-order-and-causality',
+  performanceSource: 'sourceStory',
+  ...(semanticStoryboardSegmentDuration(params) !== undefined ? {
+    sourceRecordsRole: SEMANTIC_SEGMENT_SOURCE_AUTHORITY.sourceRecordsRole,
+    recordTimingRole: SEMANTIC_SEGMENT_SOURCE_AUTHORITY.recordTimingRole,
+    storyboardTimingRole: SEMANTIC_SEGMENT_SOURCE_AUTHORITY.storyboardTimingRole,
+  } : {}),
   shotCountAuthority: Number.isInteger(params.requiredShotCount) && (params.requiredShotCount as number) > 0
     ? 'user-fixed' : 'ai-auto',
   dialogueTimeBasis: 'shot-relative',
-  editableDraftTiming: ['shot-boundaries-inside-delivery-windows', 'complete-speech-intervals', 'camera-coverage'],
+  editableDraftTiming: ['shot-boundaries-inside-delivery-windows', 'action-intervals-and-simultaneous-responses', 'complete-speech-intervals', 'camera-coverage'],
 });
 
 /** Carry the same permission and original request through planning, review and
@@ -3793,16 +3799,17 @@ const STORYBOARD_AI_FULL_TEXT_REVIEW = [
 ].join('\n');
 
 const STORYBOARD_SEMANTIC_SOURCE_RULE = [
-  'semanticSource.sceneStaging是本段实际采用的场面关系与事件阶段。沿用sceneId、参与者与phase id，先从startState推进真实动作与motionPath/motionEndpoint至endState，再为该事件选择摄影并展开当时可见身份。切镜与特写继承同一状态，不从人物资料、风格或图像展示姿势另建空间；本段只推进已分配phase。contentOverridden=true时用户当前正文优先，不用旧记录恢复已删改的事件或状态；没有字段时在本次调用内按当前正文生成可选场面记录。',
-  '语义分段的sourceStory与sequenceSegmentContext.generationStoryContent是同一份完整本段生成正文，已经包含本段剧情及已分配对白。segment.content保留规划时的原始正文；semanticSource的sourceEvidence、events、dialogues是对应来源和归属证据，不是另一份待追加的剧情。events[].causality中的actor、target、action、result、evidence及certainty是AI依据原文整理的事件因果，结合证据保留行动来源与对象，不当作本地裁定事实或必须入画名单。相同对白在正文与证据中出现时只安排同一次发话，不重复朗读；每句原话、原说话人、语言、先后关系与跨段continuation按当前分配保留。contentOverridden=true时完整生成正文只采用用户编辑内容，不用旧semanticSource恢复已删改台词。',
-  'semanticSource.battleStaging 若存在，是本段已经采用的场面设计：按 sourceEventIds、行动组和阶段ID继承本段空间层、运动路径、触发/接触/受力、连续清剿或瞬杀目标、对白并行预算和进出状态，转入现有 space/action/direction/result/camera，不再压回“众人混战”或“挥一下全飞”。factLocks 与 stagingChoices 分别为模型记录的原文约束与编排选择，不当作新增原文证据；不从全文其他编排搬进本段动作，不把内部计划字段输出到普通稿或H3。contentOverridden=true时以用户当前正文为准，旧计划不恢复删改事件、攻击或对白；没有该字段的历史稿仍按当前正文正常规划。',
+  '本段演出范围以完整sourceStory（即sequenceSegmentContext.generationStoryContent）为准。semanticSource.events、sceneStaging及其phase是来源和连续状态记录，不是动作白名单；正文已分配的动作即使没有event/phase记录也必须在本段完成。记录内旧时窗只是尚未确认的排程参考，不能占满时长后排除正文后续动作，也不能把原本同步的攻防拆成先攻击数秒、再防守数秒。按完整正文在本段固定窗口内统一安排一次全部动作与对白，再从同一安排填写shots和sceneStaging，不建立两份竞争的时间合同。',
+  '沿用与本段正文相符的sceneId、参与者、已有phase id和连续状态，从真实startState经motionPath/motionEndpoint推进至endState，再选择摄影与当时可见身份；缺少的动作阶段在本次请求中随正文补入同一排程。切镜与特写继承同一状态，不从人物资料、风格或图像展示姿势另建空间。正文决定真实行动范围，入口与出口只是状态约束，不把出口提到的结果当作已经演完。contentOverridden=true时用户当前正文优先，不用旧记录恢复已删改的事件或状态。',
+  '语义分段的sourceStory与sequenceSegmentContext.generationStoryContent是同一份完整本段生成正文，已经包含本段剧情及已分配对白。segment.content保留规划时的原始正文；semanticSource的sourceEvidence、events、dialogues是对应来源和归属证据，不是另一份待追加的剧情，也不声明记录完整。events[].causality中的actor、target、action、result、evidence及certainty是AI依据原文整理的事件因果，结合证据保留行动来源与对象，不当作本地裁定事实或必须入画名单。相同对白在正文与证据中出现时只安排同一次发话，不重复朗读；每句原话、原说话人、语言、先后关系与跨段continuation按当前分配保留。contentOverridden=true时完整生成正文只采用用户编辑内容，不用旧semanticSource恢复已删改台词。',
+  'semanticSource.battleStaging 若存在，是本段已有的场面设计参考：继承与完整正文相符的空间层、运动路径、触发/接触/受力、连续清剿或瞬杀目标、对白并行关系和进出状态，转入现有 space/action/direction/result/camera，不再压回“众人混战”或“挥一下全飞”。sourceEventIds和阶段ID只用于追溯，不限制正文中的后续行动；旧阶段时窗服从本次完整正文的统一排程。factLocks 与 stagingChoices 分别为模型记录的原文约束与编排选择，不当作新增原文证据；不从全文其他编排搬进本段动作，不把内部计划字段输出到普通稿或H3。contentOverridden=true时以用户当前正文为准，旧计划不恢复删改事件、攻击或对白；没有该字段的历史稿仍按当前正文正常规划。',
   STORY_UNDERSTANDING_CONTEXT_RULE,
 ].join('\n');
 
 const STORYBOARD_SCENE_STAGING_OUTPUT_RULE = [
   NOVEL_ACTION_CONTINUITY_RULE,
   NOVEL_ACTION_FRAME_RULE,
-  `在本次同一响应内返回可选顶层sceneStaging数组，元素结构为${SCENE_STAGING_OUTPUT_SHAPE}。输入已有场面时沿用sceneId和阶段id；直接剧情生成且没有记录时，先建立本段连续场面再生成shots。worldRelations/participants/phases只记录本次采用的关系与事件，身体面向、目光对象、动作对象与移动路径/终点分开。元数据是模型选择，不是原文证据，不包含摄影或身份展示任务。`,
+  `在本次同一响应内返回可选顶层sceneStaging数组，元素结构为${SCENE_STAGING_OUTPUT_SHAPE}。先根据完整sourceStory确定连续场面与全部行动的同一份时间安排，再写shots及sceneStaging；输入已有场面时沿用相符的sceneId和阶段id，但旧phase的范围和时窗不限制完整正文。worldRelations/participants/phases只记录本次实际采用的关系与事件，身体面向、目光对象、动作对象与移动路径/终点分开。元数据是模型选择，不是原文证据，不包含摄影或身份展示任务。`,
   '将同一场面选择写入已有字段：space承载世界关系，direction承载身体/视线/动作对象，action/result承载全部真实行动与末态；action/performance及phase.action用自然时间安排关键行动组的时窗、完成点、同时关系和持续作用，不将镜长均分给准备、接触、收尾，也不把同时动作逐项排队。普通微动作不用逐关节或毫秒刻度。camera观察已安排的事件，身份细节服从可见范围。shots可附本镜sceneStaging子集，沿用sceneId与phase id；镜尾未完可直接续接，原文真实收手、整理、等待仍完整保留，不因速度删动作、减次数或改短固定视频。场面记录与正文表达同一过程，不把内部字段名写入视频正文。',
 ].join('\n');
 
@@ -4022,13 +4029,16 @@ export const requestShotRecommendation = async (
   };
   assertCurrent();
   const semanticContext = params.sequenceSegmentContext?.kind === 'semantic-segment-source-v1'
-    ? params.sequenceSegmentContext as unknown as Partial<SemanticSegmentSourceContext> : undefined;
+    ? { ...params.sequenceSegmentContext,
+      sourceAuthority: { ...SEMANTIC_SEGMENT_SOURCE_AUTHORITY },
+    } as unknown as Partial<SemanticSegmentSourceContext> : undefined;
   const generationStory = semanticContext?.generationStoryContent
     ?? (semanticContext?.segment ? semanticSegmentStoryContent({
       ...semanticContext.segment, contentOverridden: semanticContext.contentOverridden,
     }) : params.story);
   const initialParams: StoryboardPlanValidationContext = {
     ...params,
+    ...(semanticContext ? { sequenceSegmentContext: semanticContext as unknown as Record<string, unknown> } : {}),
     ...(params.sceneStaging !== undefined || !semanticContext?.contentOverridden && semanticContext?.segment?.semanticSource?.sceneStaging !== undefined ? {
       sceneStaging: normalizeSceneStagingList(params.sceneStaging ?? semanticContext?.segment?.semanticSource?.sceneStaging),
     } : {}),
@@ -4095,14 +4105,14 @@ export const requestShotRecommendation = async (
       'action写本镜全部真实发生的连续行为、关键交互及双方回应，包含取放、递接、行进、劳动、对话中断和战斗。明确次数、连续多次性质、实际收手与整理完整保留。已有具体演出沿用；尚未编排的已有事件在同一次请求内按detailed权限补足过程，不新增事件、动机或对白。必要不可见信息保留，不强行演成新动作。先安排全部行为、完整发话与同时关系，再决定镜长；已有固定窗口内写清这几秒哪些行动完成、哪些继续，不以删动作、减回合、缩短固定视频或一段笼统“快速”替代真实节拍，不按字数、固定阶段或每秒额度裁剪剧情。',
       nsfwDetailRule,
       nsfwVideoActionRule,
-      '涉及走跑、起跳、转身、攻击、格挡、推拉或负重时，写决定本次行为成立的支撑、重心、接触反馈与随动；普通转身不逐关节拆解，轻松动作不强制蓄力。本来短促的突进、虚晃、闪避自然实时完成，持续按压保持到受力下沉与脱开，不能变成碰肩即停或搀扶；限力不等于慢演，原文明示慢绕行只影响该段绕行。两手配合、提脚同时按压按原文并行，等待可与对方真实整理重叠；不把全部动作延长到镜尾，也不遗漏原定恢复动作。',
+      '涉及走跑、起跳、转身、攻击、格挡、推拉或负重时，写决定本次行为成立的支撑、重心、接触反馈与随动：支撑脚蹬地推动身体，迈出的脚落地承重后转移重心；接触传力后产生受力位移或脱开，不用双脚固定摆姿加身体平移代替移动。普通转身不逐关节拆解，轻松动作不强制蓄力。本来短促的突进、虚晃、闪避自然实时完成；来招尚在接近时闪避或格挡即同时发生，沿同一次接触完成卸力或反击，不让一方摆好招式等另一方开始回应。持续按压保持到受力下沉与脱开，不能变成碰肩即停或搀扶；限力不等于慢演，原文明示慢绕行只影响该段绕行。两手配合、提脚同时按压按原文并行，等待可与对方真实整理重叠；不把全部动作延长到镜尾，也不遗漏原定恢复动作。',
       AUDIO_PROMPT_RULE,
       DIALOGUE_DELIVERY_RULE,
       VIDEO_LOCAL_TIME_RULE,
       storyboardShotTimeRule(initialParams),
       DIALOGUE_LANGUAGE_RULE,
       'planningCreativeDirection 是用户在导演台选定的创作方向：按其实际适用范围体现导演、视觉、光影、材质和声音要求。用户明确指定镜数或具体摄影指令按其范围执行；普通风格中的快节奏、特写交替、快速衔接和多选运镜只是可用表达偏好，不构成逐项拍摄或新增切点的清单。先保持剧情与揭示顺序、行动和情绪可理解性，再选择少而有效的镜头与简单摄影；不为展示人物或武器另排介绍镜。',
-      ...(params.sequenceSegmentContext ? ['sequenceSegmentContext是已完成的本段语义分配，不是全片总稿。对照本段sourceEvidence、events及dialogues生成本段完整镜头；事件ID可跨段但只演当前phase，不重新演前段已完成事件，不移入后段剧情或对白。保留本段入口、出口及转场；previousPromptHandoff若存在，以上段最终提示词末端状态为衔接依据，约0.5秒短动作承接计入本段时长，最晚0.8秒推进本段新剧情，不重播整镜或已说完台词。明确换场/跳时按原文转场。镜数、镜头切换与运镜由你结合本段剧情及已选导演要求安排，不因为没有总稿而套固定跟拍。'] : []),
+      ...(params.sequenceSegmentContext ? ['sequenceSegmentContext是本段来源上下文，不是全片总稿。完整sourceStory决定本段须演出的全部行为与对白；sourceEvidence、events和phase帮助追溯，不能以记录遗漏或旧时窗为由删除正文行动。事件ID可跨段，但实际演出只推进本段正文，不重新演前段已完成事件，不移入后段剧情或对白。保留本段入口、出口及转场；previousPromptHandoff若存在，以上段最终提示词末端状态为衔接依据，约0.5秒短动作承接计入本段时长，最晚0.8秒推进本段新剧情，不重播整镜或已说完台词。明确换场/跳时按原文转场。镜数、镜头切换与运镜由你结合本段剧情及已选导演要求安排，不因为没有总稿而套固定跟拍。'] : []),
       ...(params.sequenceSegmentContext ? ['若sequenceSegmentContext.contentOverridden=true，segment.content已由用户明确编辑；以其中当前剧情和明确对白为准，旧semanticSource仅保留历史来源，不用于撤销用户改动或恢复被删除的台词。'] : []),
       ...(params.executionContext ? ['executionContext是当前视频连接的已知事实，与提示词格式独立；unknown表示未知，不从模型名称猜测输入或参数能力。不因这些资料增删动作、次数、对白或改变固定时长、当前规划权限，不把内部连接字段写入交付正文。'] : []),
       '每个 shots 项包含 startSec、endSec、sourceExcerpt、purpose、subject、action、camera、transition、lighting、sound、result。',
@@ -4131,7 +4141,7 @@ export const requestShotRecommendation = async (
         voiceFactScope: 'source-grounded-new-draft',
         planningCreativeDirection: buildVideoCreativeDirection(params),
         ...(initialParams.referenceContext ? { referenceContext: storyReferencePromptContext(initialParams.referenceContext) } : {}),
-        ...(params.sequenceSegmentContext ? { sequenceSegmentContext: params.sequenceSegmentContext } : {}),
+        ...(initialParams.sequenceSegmentContext ? { sequenceSegmentContext: initialParams.sequenceSegmentContext } : {}),
         ...(initialParams.sceneContext ? { sceneContext: initialParams.sceneContext } : {}),
         ...(initialParams.executionContext ? { executionContext: initialParams.executionContext } : {}),
         ...(initialParams.sceneStaging !== undefined ? { sceneStaging: initialParams.sceneStaging } : {}),
@@ -4190,7 +4200,7 @@ export const requestShotRecommendation = async (
           `由你检查每个镜头不超过 ${storyboardMaximumShotDuration(activeParams)} 秒。需要调整边界时，由你在完整动作或对白结果处重新安排，并同步校正该镜所有相对时间；程序不会本地截断镜头。`,
           'requiredSegmentDurationSec是每段足额交付的硬合同，不是软偏好。完整动作或对白需要跨段时，由你重新设计连续镜头、说话人和跨镜衔接，不修改所选段长、不留短尾、不删原文或添加填充剧情，不返回要求用户手工修复时间轴的说明。',
           'characterContinuity 和 planningCreativeDirection 继续约束身份、外貌、导演风格与摄影光影，不得在修复中遗失。',
-          ...(activeParams.sequenceSegmentContext ? ['sequenceSegmentContext只分配当前段的事件阶段、对白与衔接；不得借审核重演前段或引入后段。当contentOverridden=true时，当前segment.content是用户修改后的正文，以明确修改为准，不用旧semanticSource恢复已删改的台词或动作。'] : []),
+          ...(activeParams.sequenceSegmentContext ? ['sequenceSegmentContext中的完整generationStoryContent与sourceStory共同指向当前段完整正文；events、phase和旧时间安排只作辅助来源，不作为动作白名单。镜头与场面记录表达同一份完整排程；不得因记录缺失删掉正文动作，也不得借审核重演前段或引入后段。当contentOverridden=true时，当前正文是用户修改后的演出范围，以明确修改为准，不用旧semanticSource恢复已删改的台词或动作。'] : []),
           nsfwDetailRule,
           nsfwVideoActionRule,
           AUDIO_PROMPT_RULE,

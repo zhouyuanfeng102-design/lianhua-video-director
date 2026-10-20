@@ -183,35 +183,40 @@ const preparedStamp = (context: SequencePromptHandoffContext): SequencePromptHan
 export const buildSequencePromptHandoff = (
   project: HandoffProject, planId: string, segmentId: string,
   format: 'h3' | 'seedance' = 'h3',
+  previousPrompt: 'required' | 'when-available' = 'required',
 ): SequencePromptHandoffBuildResult => {
   const { plan, segment, previous, issue } = locateSegment(project, planId, segmentId);
   if (issue || !plan || !segment) return { issue };
   // The first segment has no preceding scene. No media dependency is created.
   if (!previous) return {};
+  // A selected segment can be authored independently. Only real, current
+  // predecessor text is consumed; absence never substitutes another segment.
+  const unavailable = (issue: string): SequencePromptHandoffBuildResult =>
+    previousPrompt === 'when-available' ? {} : { issue };
   const precedingBoards = project.storyboards.filter((board) => board.id === previous.storyboardId);
   const board = precedingBoards.length === 1 ? precedingBoards[0] : undefined;
   if (!board || board.id === plan.masterStoryboardId || board.sequencePlanId !== plan.id
     || board.segmentId !== previous.id || board.segmentIndex !== previous.index
     || !finitePositive(previous.durationSec) || board.durationSec !== previous.durationSec) {
-    return { issue: `第 ${previous.index} 段尚无正确关联的最终提示词，请先完成该段提示词；不会跳段或借用全片总稿。` };
+    return unavailable(`第 ${previous.index} 段尚无正确关联的最终提示词，请先完成该段提示词；不会跳段或借用全片总稿。`);
   }
   if (previous.status === 'stale') {
-    return { issue: `第 ${previous.index} 段剧情已修改，旧提示词尚未更新，请先完成该段提示词。` };
+    return unavailable(`第 ${previous.index} 段剧情已修改，旧提示词尚未更新，请先完成该段提示词。`);
   }
   if (board.promptPlan?.canonicalPrompt && board.promptPlan.canonicalPrompt !== board.finalPrompt) {
-    return { issue: `第 ${previous.index} 段的正文与生成快照不一致，请先更新该段最终提示词。` };
+    return unavailable(`第 ${previous.index} 段的正文与生成快照不一致，请先更新该段最终提示词。`);
   }
   let previousPromptKind: SequencePromptHandoffContext['previousPromptKind'];
   let previousFinalPrompt: string;
   if (format === 'seedance') {
     if (!currentSeedance(project, board)) {
-      return { issue: `第 ${previous.index} 段的中文 Seedance 稿已失效或尚未完整保存，请先更新该段 Seedance 提示词。` };
+      return unavailable(`第 ${previous.index} 段的中文 Seedance 稿已失效或尚未完整保存，请先更新该段 Seedance 提示词。`);
     }
     previousPromptKind = 'seedance';
     previousFinalPrompt = board.seedance25Output!.promptZh;
   } else if (text(board.officialPromptZh).trim()) {
     if (!hasCurrentOfficialH3Prompt(board)) {
-      return { issue: `第 ${previous.index} 段的中文H3稿已失效或尚未完整保存，请先更新该段提示词。` };
+      return unavailable(`第 ${previous.index} 段的中文H3稿已失效或尚未完整保存，请先更新该段提示词。`);
     }
     previousPromptKind = 'official-h3';
     previousFinalPrompt = board.officialPromptZh!;
@@ -221,7 +226,7 @@ export const buildSequencePromptHandoff = (
     previousPromptKind = 'canonical';
     previousFinalPrompt = board.finalPrompt;
   } else {
-    return { issue: `第 ${previous.index} 段尚未保存AI生成的最终中文提示词，请先完成该段；分镜草稿不作为最终衔接依据。` };
+    return unavailable(`第 ${previous.index} 段尚未保存AI生成的最终中文提示词，请先完成该段；分镜草稿不作为最终衔接依据。`);
   }
   const lastShot = lastPromptShot(previousFinalPrompt, previousPromptKind, previous.durationSec);
   const previousTailWindow = { startSec: Math.max(0, previous.durationSec - 2), endSec: previous.durationSec };

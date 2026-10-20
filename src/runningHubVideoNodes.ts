@@ -1,4 +1,5 @@
 import type { RunningHubVideoFieldControl, RunningHubVideoInputBinding, RunningHubVideoNodeCatalogEntry, RunningHubVideoNodeInfo, RunningHubVideoWorkflow } from './runningHubVideoTypes';
+import { normalizeH3ReferenceImageOrders, readH3ReferenceImageOrders } from './h3ReferenceImageOrder';
 
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const own = (value: object, key: string) => Object.prototype.hasOwnProperty.call(value, key);
@@ -74,7 +75,7 @@ export const normalizeRunningHubVideoLoraStrengthBindings = (value: unknown): Lo
   return result;
 };
 
-type NodeEvidence = Pick<RunningHubVideoNodeCatalogEntry, 'fieldType' | 'classType' | 'audioUpload' | 'loraStrengthBindings'>;
+type NodeEvidence = Pick<RunningHubVideoNodeCatalogEntry, 'fieldType' | 'classType' | 'audioUpload' | 'loraStrengthBindings' | 'h3ReferenceImages'>;
 /** Keep discovery evidence separate from display controls and wire values. */
 const nodeEvidence = (value: Record<string, unknown>): NodeEvidence => {
   let data = value.fieldData;
@@ -92,7 +93,8 @@ const nodeEvidence = (value: Record<string, unknown>): NodeEvidence => {
   return { ...(fieldType?.trim() ? { fieldType: fieldType.trim() } : {}),
     ...(classType?.trim() ? { classType: classType.trim() } : {}),
     ...(audioUpload !== undefined ? { audioUpload } : {}),
-    ...(own(value, 'loraStrengthBindings') ? { loraStrengthBindings: normalizeRunningHubVideoLoraStrengthBindings(value.loraStrengthBindings) ?? {} } : {}) };
+    ...(own(value, 'loraStrengthBindings') ? { loraStrengthBindings: normalizeRunningHubVideoLoraStrengthBindings(value.loraStrengthBindings) ?? {} } : {}),
+    ...(own(value, 'h3ReferenceImages') ? { h3ReferenceImages: normalizeH3ReferenceImageOrders(value.h3ReferenceImages) } : {}) };
 };
 
 export const normalizeRunningHubVideoFieldControls = (value: unknown): Record<string, RunningHubVideoFieldControl> => {
@@ -141,6 +143,11 @@ export const mergeRunningHubVideoNodeCatalog = (
   incoming: RunningHubVideoNodeCatalogEntry[],
 ): RunningHubVideoNodeCatalogEntry[] => {
   const result = normalizeRunningHubVideoNodeCatalog(existing || []);
+  // A fresh graph replaces link evidence even when its prompt source was
+  // removed. Ordinary nodeInfoList refreshes carry no graph marker and keep it.
+  if (incoming.some((node) => node.h3ReferenceImages !== undefined)) {
+    for (const node of result) if (node.h3ReferenceImages !== undefined) node.h3ReferenceImages = [];
+  }
   for (const node of normalizeRunningHubVideoNodeCatalog(incoming)) {
     const index = result.findIndex((entry) => keyOf(entry) === keyOf(node));
     if (index < 0) result.push(node);
@@ -304,6 +311,7 @@ export const parseRunningHubVideoNodes = (source: string): RunningHubVideoNodesR
       const entries = Object.entries(value);
       const graph = entries.length > 0 && entries.every(([, node]) => record(node) && typeof node.class_type === 'string' && record(node.inputs));
       if (graph) {
+        const h3ReferenceImages = readH3ReferenceImageOrders(value);
         const linkedLoraStrength = (nodeId: string, inputs: Record<string, unknown>, fieldName: string): RunningHubVideoInputBinding | undefined => {
           const link = inputs[fieldName];
           if (!Array.isArray(link) || link.length !== 2 || link[1] !== 0) return undefined;
@@ -319,7 +327,8 @@ export const parseRunningHubVideoNodes = (source: string): RunningHubVideoNodesR
           const node = rawNode as { class_type: string; inputs: Record<string, unknown>; _meta?: unknown };
           const description = record(node._meta) && typeof node._meta.title === 'string' ? node._meta.title : node.class_type;
           for (const [fieldName, inputValue] of Object.entries(node.inputs)) {
-            const evidence: NodeEvidence = { classType: node.class_type };
+            const evidence: NodeEvidence = { classType: node.class_type,
+              h3ReferenceImages: h3ReferenceImages.filter((order) => order.prompt.some((source) => source.nodeId === nodeId && source.inputName === fieldName)) };
             if (typeof inputValue === 'string' && /^(?:lora|loraname|loramodel|loramodelname|lorafile|lorafilename|lora模型|lora名称|lora文件|lora文件名)$/u.test(fieldName.toLowerCase().replace(/[\s_-]+/gu, ''))) {
               const strength = linkedLoraStrength(nodeId, node.inputs, 'strength_model');
               const clipStrength = linkedLoraStrength(nodeId, node.inputs, 'strength_clip');

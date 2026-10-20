@@ -53,6 +53,8 @@ export interface RunningHubVideoNodeCatalogEntry {
     strength?: RunningHubVideoInputBinding;
     clipStrength?: RunningHubVideoInputBinding;
   };
+  /** H3 consumer links retained from an API graph; an empty list clears older evidence. */
+  h3ReferenceImages?: import('./h3ReferenceImageOrder').H3ReferenceImageOrder[];
   control?: RunningHubVideoFieldControl;
 }
 export interface RunningHubVideoWorkflow {

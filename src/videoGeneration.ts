@@ -141,7 +141,7 @@ const sameFrozenMotionSources = (left: VideoGenerationSnapshot | undefined, righ
   return canonicalText((left?.videos || []).map(identity)) === canonicalText((right?.videos || []).map(identity));
 };
 const apiCredentialConfig = (config: Omit<VideoTaskApiConfig, 'apiKey'>) => Object.fromEntries(Object.entries(config)
-  .filter(([key]) => !['apiKey', 'id', 'name', 'createdAt', 'updatedAt', 'runningHubParameterControls', 'parameterCapabilities'].includes(key))
+  .filter(([key]) => !['apiKey', 'id', 'name', 'createdAt', 'updatedAt', 'runningHubParameterControls', 'runningHubH3ReferenceImages', 'parameterCapabilities'].includes(key))
   .map(([key, value]) => [key, key === 'runningHubMappedFields' && Array.isArray(value)
     ? value.map((field) => {
       if (!record(field) || field.kind !== 'image') return field;

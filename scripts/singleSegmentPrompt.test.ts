@@ -758,4 +758,41 @@ for (const { purpose, formatRepair } of [
   assert.equal(JSON.stringify(sourceBoard), sourceSnapshot, 'request preparation never rewrites existing saved prompts');
 }
 
+// A fresh independent draft must not retain a prior draft's alignment claim.
+{
+  const board: Storyboard = { ...longBoard, sequencePromptHandoff: {
+    version: 'sequence-prompt-handoff-v1', projectId: 'project', planId: longBoard.sequencePlanId!,
+    segmentId: longBoard.segmentId!, segmentIndex: 2, storyboardId: longBoard.id,
+    previousSegmentId: 'previous', previousSegmentIndex: 1, previousStoryboardId: 'previous-board',
+    previousPromptFingerprint: 'previous-prompt', sourceFingerprint: 'previous-evidence',
+    resultFingerprint: 'previous-result', openingOverlapSec: 0.5,
+  } };
+  const original = JSON.stringify(board);
+  const stages: SingleSegmentPromptStage[] = [];
+  const result = await generateSingleSegmentPrompt({ board, conversionDraft, context, converter,
+    sourceStoryContent: content, reviewWithAi: true, clean,
+    request: async (_system, user, stage) => {
+      stages.push(stage);
+      assert.ok(!user.includes('<sequence_text_handoff_data>'));
+      if (stage === 'convert') return convertedCanonical;
+      if (stage === 'review') {
+        const data = jsonBlock(user, 'video_staging_review_data');
+        assert.equal(data.sequenceHandoff, undefined);
+        const anchors = ['Identity: 旅人，黑色斗篷。', 'Identity: 阿青，青色短袍。'];
+        const prompt = (data.candidatePrompt || outputs[0].officialPromptZh!).replace('[Shot 1]', `[Shot 1] ${anchors.join(' ')}`);
+        return JSON.stringify({ h3Prompt: prompt,
+          identityBindings: { version: 1, characters: [hero, companion].map((person, index) => ({ characterId: person.id, name: person.name, referenceAnchor: anchors[index] })) },
+          characterParticipation: { version: 1, characters: [hero, companion].map((person) => ({ characterId: person.id, name: person.name, presence: 'visible', shotIndex: 1, evidence: person.name })) },
+        });
+      }
+      return mockEnglish(user);
+    },
+  });
+  assert.deepEqual(stages, ['convert', 'review', 'translate']);
+  assert.equal(result.sequencePromptHandoff, undefined);
+  assert.ok(result.officialPromptZh && result.officialPromptEn);
+  assert.equal(result.officialPromptEnSource, result.officialPromptZh);
+  assert.equal(JSON.stringify(board), original, 'the earlier saved draft is untouched');
+}
+
 console.log('single-segment Chinese delivery and single-request English document checks passed');

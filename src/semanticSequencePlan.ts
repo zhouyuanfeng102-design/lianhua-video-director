@@ -736,6 +736,16 @@ export const semanticSegmentStoryContent = (
   ].join('\n');
 };
 
+/** Request-only authority for old and new plans. Source records may be partial;
+ * they never replace the complete assigned prose or become a second timetable.
+ * No stored plan, event, phase or user-authored action is rewritten here. */
+export const SEMANTIC_SEGMENT_SOURCE_AUTHORITY = {
+  performanceSource: 'generationStoryContent',
+  sourceRecordsRole: 'supporting-evidence-not-action-allowlist',
+  recordTimingRole: 'unconfirmed-timing-hints',
+  storyboardTimingRole: 'one-complete-schedule-within-fixed-window',
+} as const;
+
 export interface SemanticSegmentSourceContext {
   kind: 'semantic-segment-source-v1';
   sourceStoryTitle: string;
@@ -746,6 +756,8 @@ export interface SemanticSegmentSourceContext {
   segment: SemanticSequenceResponseSegment;
   /** Complete request-only source; segment.content remains the saved AI prose. */
   generationStoryContent: string;
+  /** Optional for older request callers; current consumers apply this authority. */
+  sourceAuthority?: typeof SEMANTIC_SEGMENT_SOURCE_AUTHORITY;
   /** Read-only narrative context; never an extension of this segment's events. */
   storyUnderstandingContext?: {
     usage: 'understanding-only';
@@ -764,8 +776,9 @@ export interface SemanticSegmentSourceContext {
   shotCount?: number;
 }
 
-/** Assigned events/lines are the only performance scope. The full story is
- * separate read-only context for identity and causality, never segment prose. */
+/** The complete assigned prose/lines own performance scope. Event/phase records
+ * provide evidence, not a completeness claim or a second timing contract. The
+ * full story is read-only identity/causality context, never segment prose. */
 export const semanticSegmentSourceContext = (plan: VideoSequencePlan, segment: VideoSegment, sceneContext?: VideoSceneContext): SemanticSegmentSourceContext => {
   if (!isSemanticSequencePlan(plan) || !plan.semanticPlanningSnapshot || !segment.semanticSource
     || !plan.segments.some((item) => item.id === segment.id)) throw new SemanticSequenceTechnicalError(['缺少当前语义片段来源']);
@@ -782,6 +795,7 @@ export const semanticSegmentSourceContext = (plan: VideoSequencePlan, segment: V
     segment: { ...(copyStrings(segment as unknown as Record<string, unknown>, SEGMENT_TEXT_FIELDS) as Omit<SemanticSequenceResponseSegment, 'semanticSource'>),
       semanticSource: readSemanticSource(segment.semanticSource, '当前片段', plan.sourceStoryContent.length) },
     generationStoryContent: semanticSegmentStoryContent(segment),
+    sourceAuthority: { ...SEMANTIC_SEGMENT_SOURCE_AUTHORITY },
     storyUnderstandingContext: {
       usage: 'understanding-only', sourceStoryContent: plan.sourceStoryContent,
       ...(matchingOriginal ? { originalSourceContext: matchingOriginal } : {}),
@@ -790,7 +804,7 @@ export const semanticSegmentSourceContext = (plan: VideoSequencePlan, segment: V
         name: character.name, ...(character.id ? { id: character.id } : {}),
         ...(character.aliases ? { aliases: [...character.aliases] } : {}),
       })),
-      instruction: '本区全文及原始小说只用于理解人物指代、别名、行为意图、行动来源、比喻和跨段因果，不是本段演出清单。实际演出仅限本段已分配事件和对白，延续已采用的动作阶段、物品状态和人物反应，不搬入前后段新剧情，不重演已完成事件，不把未实施的意图变成完成动作，不提前揭示身份或未知原因。contentOverridden=true时以用户当前正文为准，不从旧证据或全文恢复用户已删除、修改的事件和对白。',
+      instruction: '本区全文及原始小说只用于理解人物指代、别名、行为意图、行动来源、比喻和跨段因果，不是本段演出清单。本段完整演出范围以generationStoryContent为准，semanticSource.events与sceneStaging是来源和连续状态记录，不是动作白名单；记录缺失的本段正文动作仍须演出，记录内旧phase时窗不能替代完整正文的统一排程。延续正文中的真实动作阶段、物品状态和人物反应，不搬入前后段新剧情，不重演已完成事件，不把未实施的意图变成完成动作，不提前揭示身份或未知原因。contentOverridden=true时以用户当前正文为准，不从旧证据或全文恢复用户已删除、修改的事件和对白。',
     },
     ...(segment.contentOverridden ? { contentOverridden: true } : {}),
     creativeDirection, pacing: copyPacing(snapshot.pacing), characterContinuity: copyCharacters(snapshot.characterContinuity),

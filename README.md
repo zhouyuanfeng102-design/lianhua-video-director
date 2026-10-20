@@ -4,13 +4,13 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的 Windows 桌面工作台。
 
-当前版本：**2.7.9** · 2026-10-20 · Windows 64 位 · 便携运行
+当前版本：**2.8.2** · 2026-10-20 · Windows 64 位 · 便携运行
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows 便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-2.7.9.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-2.8.2.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
 1. 下载上面的 EXE，放在可写入的文件夹里，双击运行，无需安装 Node.js。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
@@ -32,13 +32,14 @@
 - **自定义生图+反推图片提示词**：输入要求生成图片，或复用上传/资产库参考图，通过视觉 API 反推可复制的提示词与人物、物品、场景、风格详情。反推同步显示在聊天和资料任务，支持后台执行、停止、重试及项目保存恢复；原有生图支持原文直发或规则转换，结果自动入库。
 - **项目与资产管理**：管理图片、视频和音频，保存项目包、备份资料并导出提示词。
 
-## 最新更新 · v2.7.9
+## 最新更新 · v2.8.2
 
-- 已停止本地追踪、远端结果尚未确认的单条视频任务可以从列表删除。
-- 沿用批次任务的列表移除方式，保留原任务身份、提交记录、后续片段衔接关系及已有素材和视频。
-- 删除只清理本地任务列表，不代替远端取消，不重新提交任务或新增模型请求、自动重试。
+- 长剧情中可单独生成当前段，无需先完成上一段；有有效前稿时仍使用上一段真实末镜衔接。
+- 缺少有效前稿时，依据当前段原文和规划独立生成，不借用更早稿或全片稿，也不标记为已对齐。
+- 当前段重新生成与英文补全采用同样规则；顺序生成和显式衔接修复继续保留原有语义。
+- 保留此前修复与已有项目，不自动重写旧稿，不新增运行时校验、生成拦截、自动重试或模型请求。
 
-[查看本版完整说明](docs/releases/发布说明-2.7.9.md) · [历史版本归档](docs/releases/README.md)
+[查看本版完整说明](docs/releases/发布说明-2.8.2.md) · [历史版本归档](docs/releases/README.md)
 
 ## 从源码运行
 

@@ -7264,10 +7264,11 @@ export default function App() {
       : undefined;
     const requestExistingSegmentBoardSnapshot = JSON.stringify(existingSegmentBoard);
     const requestEpoch = workspaceEpochRef.current;
-    const requestHandoff = segmentForGeneration && override?.sequencePlanId && !fullTimeline
-      ? buildSequencePromptHandoff(stateRef.current.project, override.sequencePlanId, segmentForGeneration.id, requestPromptFormat)
-      : undefined;
     const requestBatchIdentity = sequenceBatchIdentityRef.current;
+    const previousPrompt = requestBatchIdentity ? 'required' : 'when-available';
+    const requestHandoff = segmentForGeneration && override?.sequencePlanId && !fullTimeline
+      ? buildSequencePromptHandoff(stateRef.current.project, override.sequencePlanId, segmentForGeneration.id, requestPromptFormat, previousPrompt)
+      : undefined;
     if (requestHandoff?.issue) {
       reportSequenceHandoffFailure(override!.sequencePlanId!, segmentForGeneration!, requestHandoff.issue);
       reportOverrideFailure(requestHandoff.issue);
@@ -7275,7 +7276,7 @@ export default function App() {
       return undefined;
     }
     const handoffSourceIsCurrent = (): boolean => {
-      if (!segmentForGeneration || !override?.sequencePlanId || fullTimeline) return true;
+      if (!requestHandoff?.context || !segmentForGeneration || !override?.sequencePlanId || fullTimeline) return true;
       const latest = buildSequencePromptHandoff(stateRef.current.project, override.sequencePlanId, segmentForGeneration.id, requestPromptFormat);
       return !latest.issue && latest.context?.sourceFingerprint === requestHandoff?.context?.sourceFingerprint;
     };
@@ -8569,7 +8570,11 @@ export default function App() {
     const evidenceFingerprint = (project: Project, board: Storyboard) => format === 'seedance'
       ? getOfficialSeedanceSourceFingerprint(buildOfficialSeedanceInput(project, board))
       : buildOfficialH3SourceFingerprint(board, officialH3ContextForStoryboard(project, board));
-    const handoff = plan && segment ? buildSequencePromptHandoff(snapshot.project, plan.id, segment.id, format) : undefined;
+    const savedHandoff = format === 'seedance' ? sourceBoard.seedance25Output?.sequencePromptHandoff : sourceBoard.sequencePromptHandoff;
+    const previousPrompt = batchIdentity || mode === 'continuity-repair' || mode === 'translate-english' && savedHandoff
+      ? 'required' : 'when-available';
+    const handoff = plan && segment && (mode !== 'translate-english' || savedHandoff)
+      ? buildSequencePromptHandoff(snapshot.project, plan.id, segment.id, format, previousPrompt) : undefined;
     if (handoff?.issue || mode === 'continuity-repair' && !handoff?.context) {
       if (handoff?.issue && plan && segment) reportSequenceHandoffFailure(plan.id, segment, handoff.issue);
       notify(handoff?.issue || "首段无需修复上段衔接。", "error"); return undefined;
@@ -8598,11 +8603,11 @@ export default function App() {
       if (plan && segment) {
         const livePlan = current.project.sequencePlans.find((entry) => entry.id === plan.id);
         const liveSegment = livePlan?.segments.find((entry) => entry.id === segment.id);
-        const liveHandoff = buildSequencePromptHandoff(current.project, plan.id, segment.id, format);
+        const liveHandoff = handoff?.context ? buildSequencePromptHandoff(current.project, plan.id, segment.id, format) : undefined;
         if (!livePlan || !liveSegment || liveSegment.locked || liveSegment.storyboardId !== board.id
           || sequenceStoryboardGenerationIdentity(projectId, livePlan.id, liveSegment, livePlan.segments.length)
             !== sequenceStoryboardGenerationIdentity(projectId, plan.id, segment, plan.segments.length)
-          || liveHandoff.issue || liveHandoff.context?.sourceFingerprint !== handoff?.context?.sourceFingerprint) return false;
+          || liveHandoff?.issue || liveHandoff?.context?.sourceFingerprint !== handoff?.context?.sourceFingerprint) return false;
       }
       return true;
     };
@@ -8730,12 +8735,14 @@ export default function App() {
     const snapshot = stateRef.current;
     const sourceHandoffStatus = getSequencePromptHandoffStatus(sourceBoard, snapshot.project);
     const requestBatchIdentity = sequenceBatchIdentityRef.current;
+    const previousPrompt = requestBatchIdentity || mode === 'continuity-repair' || mode === 'translate-english' && sourceBoard.sequencePromptHandoff
+      ? 'required' : 'when-available';
     if (mode === "translate-english" && sourceBoard.sequencePromptHandoff && sourceHandoffStatus.kind !== "current") {
       notify("上段末镜或本段中文已变化，请先修复本段文本衔接，再生成英文；旧稿保持不变。", "error");
       return false;
     }
     const requestHandoff = mode === "translate-english" && !sourceBoard.sequencePromptHandoff
-      ? undefined : buildSequencePromptHandoff(snapshot.project, plan.id, segment.id);
+      ? undefined : buildSequencePromptHandoff(snapshot.project, plan.id, segment.id, 'h3', previousPrompt);
     if (requestHandoff?.issue || mode === "continuity-repair" && !requestHandoff?.context) {
       if (requestHandoff?.issue) reportSequenceHandoffFailure(plan.id, segment, requestHandoff.issue);
       notify(requestHandoff?.issue || "首段没有上一段，无需修复开场衔接。", "error");
@@ -8778,7 +8785,7 @@ export default function App() {
         || requestEpoch !== workspaceEpochRef.current) return false;
       if (requestBatchIdentity && (sequenceBatchIdentityRef.current !== requestBatchIdentity || !sequenceOperationIsCurrent(requestBatchIdentity))) return false;
       const current = stateRef.current;
-      if (requestHandoff) {
+      if (requestHandoff?.context) {
         const liveHandoff = buildSequencePromptHandoff(current.project, plan.id, segment.id);
         if (liveHandoff.issue || liveHandoff.context?.sourceFingerprint !== requestHandoff.context?.sourceFingerprint) return false;
       }
@@ -9160,7 +9167,8 @@ export default function App() {
       format, promptProject,
     );
     if (promptAction.action === "complete") {
-      if (segment.index > 1 && linkedStoryboard && getSequencePromptHandoffStatus(linkedStoryboard, promptProject, format).kind !== "current") {
+      if (segment.index > 1 && linkedStoryboard && getSequencePromptHandoffStatus(linkedStoryboard, promptProject, format).kind !== "current"
+        && buildSequencePromptHandoff(promptProject, plan.id, segment.id, format).context) {
         await refreshSequenceSegmentOfficialPrompt(plan, segment, linkedStoryboard, promptContext, "continuity-repair");
         return;
       }

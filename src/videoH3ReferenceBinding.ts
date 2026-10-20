@@ -15,6 +15,8 @@ import { videoH3MediaModeContract, videoH3MediaModeIssue } from './videoH3MediaM
 import { assetReferenceLocationOwners } from './assetCharacterBinding';
 import { renderH3ReferenceExecution, type H3ReferenceExecutionCharacter } from './h3ReferenceExecution';
 import { videoMotionReferenceNumbers } from './videoMotionReferences';
+import { resolveRunningHubH3PictureNumbers } from './runningHubH3ReferenceImages';
+import { resolveComfyH3PictureNumbers } from './h3ReferenceImageOrder';
 export { collectVideoPictureReferenceNumbers } from './videoPictureReferences';
 export { videoReferenceCharacterOwners, videoReferenceCharacterBindingWarning } from './videoReferenceCharacters';
 
@@ -54,7 +56,7 @@ export interface PreparedVideoH3ReferenceDraft {
 }
 
 export type VideoH3ReferenceContext = Omit<VideoReferenceUsageContext, 'api'> & {
-  api?: VideoReferenceUsageContext['api'] & Pick<VideoTaskApiConfig, 'runningHubMappedFields' | 'requestTemplate' | 'rhtvMode'>
+  api?: VideoReferenceUsageContext['api'] & Pick<VideoTaskApiConfig, 'runningHubMappedFields' | 'runningHubH3ReferenceImages' | 'requestTemplate' | 'rhtvMode'>
     & Partial<Pick<VideoTaskApiConfig, 'baseUrl' | 'endpoint'>>;
 };
 
@@ -147,9 +149,8 @@ export const videoH3BindingForPrompt = (
     ...(!identities ? { identityBindingWarning: '原 H3 人物锚点资料损坏，仅按已保存的原图片清单同步编号；未猜测人物或改写剧情。' } : {}) };
 };
 
-/** Mirrors input serialization, not the dense upload loop. Picture N refers
- * to an explicitly mapped physical input for node workflows, and to the
- * actual array position for array APIs. Opaque templates are not guessed. */
+/** Picture N follows the model consumer's image order, which can differ from
+ * both the picker slots and the upload loop. Opaque graphs are not guessed. */
 export const videoH3PictureNumbers = (
   references: readonly VideoImageReference[], context: VideoH3ReferenceContext,
 ): { numbers?: number[]; warning?: string } => {
@@ -158,8 +159,9 @@ export const videoH3PictureNumbers = (
     return { warning: '参考图槽号无效，未猜测 H3 图片编号；请核对实际输入槽。' };
   }
   if (context.backend === 'comfyui') {
-    if (slots.every((slot) => context.workflow?.mapping.images[slot])) return { numbers: slots.map((slot) => slot + 1) };
-    return { warning: '当前 ComfyUI 输入映射不完整，未自动写入 H3 图片编号。' };
+    const numbers = context.workflow && resolveComfyH3PictureNumbers(context.workflow, slots);
+    if (numbers) return { numbers };
+    return { warning: '当前 ComfyUI 工作流未声明 H3 实际图片消费顺序，已保留正文，未按输入槽猜测图片编号。' };
   }
   const api = context.api;
   if (api?.provider === 'rhtv_web') {
@@ -168,11 +170,9 @@ export const videoH3PictureNumbers = (
   }
   if (api?.provider === 'minimax') return { warning: '当前接口只传首尾帧，不提供 H3 多人物 Picture 引用；未虚构人物图片编号。' };
   if (api?.provider === 'runninghub') {
-    const imageFields = api.runningHubMappedFields?.filter((field) => field.kind === 'image') || [];
-    if (imageFields.length && slots.every((slot) => imageFields.filter((field) => field.imageIndex === slot).length === 1)) {
-      return { numbers: slots.map((slot) => slot + 1), warning: runningHubPictureMappingInfo };
-    }
-    return { warning: 'RunningHub 缺少明确图片槽映射，未根据上传顺序猜测 H3 图片编号。' };
+    const numbers = resolveRunningHubH3PictureNumbers(api, slots);
+    if (numbers) return { numbers };
+    return { warning: 'RunningHub 工作流未声明 H3 实际图片消费顺序，已保留正文，未按输入槽或上传顺序猜测图片编号。' };
   }
   if (!api) return { warning: '尚未确定本次视频接口，H3 图片引用将在明确输入映射后同步。' };
   const template = api.requestTemplate?.trim();
@@ -310,6 +310,42 @@ const participationReferenceEdit = (
     text: ` Visual identity reference for ${label}: ${numbers.map((number) => `<Picture ${number}>`).join(', ')}.` };
 };
 
+interface VideoH3ReferenceUse {
+  role: ReferenceRole;
+  description?: readonly [string, string];
+}
+
+/** Custom storyboard pictures capture an existing action phase. Their picker
+ * positions do not turn a 3.5s / 13.5s pose into the opening / ending state.
+ * Actual boundary assets, explicit board boundaries and continuation tails
+ * keep their selected first/last use. Only request-local prose changes. */
+const videoH3ReferenceUses = (project: Project, draft: VideoGenerationDraft): VideoH3ReferenceUse[] => {
+  const board = project.storyboards.find((entry) => entry.id === draft.source?.storyboardId);
+  return draft.references.map((reference): VideoH3ReferenceUse => {
+    const asset = project.assets.find((entry) => entry.id === reference.assetId);
+    const boundary = reference.role === 'first-frame'
+      ? board?.firstFrameAssetId === reference.assetId || draft.automaticStoryboardFrames?.firstFrameAssetId === reference.assetId
+      : reference.role === 'last-frame'
+        ? board?.lastFrameAssetId === reference.assetId || draft.automaticStoryboardFrames?.lastFrameAssetId === reference.assetId : false;
+    if (!asset || asset.imageVariant !== 'storyboard-frame' || boundary
+      || asset.type === 'first-frame' || asset.type === 'last-frame'
+      || !['first-frame', 'middle-frame', 'last-frame', 'composition', 'motion', 'general', 'unknown'].includes(reference.role)) {
+      return { role: reference.role };
+    }
+    const sameBoard = board && asset.sourceStoryboardId === board.id;
+    const shot = sameBoard ? board.shots.find((entry) => entry.id === asset.sourceShotId) : undefined;
+    const time = sameBoard && typeof asset.imageFrameTimeSec === 'number' && Number.isFinite(asset.imageFrameTimeSec)
+      && asset.imageFrameTimeSec >= 0 ? asset.imageFrameTimeSec : undefined;
+    const zhPhase = time !== undefined ? `本段 ${time} 秒${shot ? `、第 ${shot.index} 镜` : ''}对应动作阶段`
+      : shot ? `本段第 ${shot.index} 镜对应动作阶段` : '图中对应动作阶段';
+    const enPhase = time !== undefined ? `the action phase at ${time}s in this clip${shot ? ` (Shot ${shot.index})` : ''}`
+      : shot ? `the action phase in Shot ${shot.index} of this clip` : 'the depicted action phase';
+    return { role: 'composition', description: [
+      `${zhPhase}的构图与空间参考`, `composition and spatial reference for ${enPhase}`,
+    ] };
+  });
+};
+
 /** Describe an explicitly selected image's use, never infer its subjects or
  * rewrite shot actions. These are composition references in multi-image
  * requests: a picker label does not prove first/last-frame conditioning in
@@ -318,6 +354,7 @@ const videoH3ReferenceUsageEdit = (
   prompt: string, references: readonly VideoImageReference[], numbers: readonly number[],
   language: 'zh' | 'en', authoredPictureNumbers: ReadonlySet<number>,
   rememberedRoles?: readonly ReferenceRole[], multiViewNumbers: readonly number[] = [],
+  referenceUses: readonly VideoH3ReferenceUse[] = [],
 ): VideoPictureReferenceEdit | undefined => {
   const uses: Partial<Record<ReferenceRole, readonly [string, string]>> = {
     'first-frame': ['开场构图参考', 'opening composition reference'],
@@ -336,8 +373,8 @@ const videoH3ReferenceUsageEdit = (
     const number = numbers[index];
     const ordinal = reference.role === 'middle-frame'
       ? videoMiddleFrameOrdinal(references, videoReferenceSlotIndex(reference, index), rememberedRoles) : undefined;
-    const use = ordinal ? [`中间帧 ${ordinal} 的过程构图与连续性参考`, `intermediate frame ${ordinal} progression composition and continuity reference`]
-      : uses[reference.role];
+    const use = referenceUses[index]?.description || (ordinal ? [`中间帧 ${ordinal} 的过程构图与连续性参考`, `intermediate frame ${ordinal} progression composition and continuity reference`]
+      : uses[reference.role]);
     return number && use && !authoredPictureNumbers.has(number)
       ? [`<Picture ${number}> ${use[language === 'zh' ? 0 : 1]}`] : [];
   });
@@ -587,6 +624,7 @@ const prepareVideoH3ReferenceDraftInternal = (
       return { ...event, ...(referenceAnchor !== undefined ? { referenceAnchor } : {}) };
     }) } : {}) };
   const executionMode = videoH3MediaModeContract(draft, context).mode;
+  const referenceUses = videoH3ReferenceUses(referenceProject, draft);
   const execution = !pictureSourceIssues.length && plan.numbers && !identityIssues.length
     && (Boolean(executionPerformance) || characterPictures.size > 0)
     && [...characterPictures.keys()].every((id) => identities.some((identity) => identity.characterId === id))
@@ -594,7 +632,7 @@ const prepareVideoH3ReferenceDraftInternal = (
     ? renderH3ReferenceExecution({ prompt, identities: executionIdentities, characterPictures,
       mode: executionMode === 'full-reference' ? 'full-reference' : 'integrated',
       language: binding.sourceLanguage || draft.source?.language,
-      pictureUses: draft.references.map((reference, index) => ({ number: plan.numbers![index], role: reference.role })) }) : undefined;
+      pictureUses: referenceUses.map((use, index) => ({ number: plan.numbers![index], role: use.role })) }) : undefined;
   if (execution) prompt = execution.prompt;
   // Serialize uses after any existing execution rendering, so a saved
   // performance plan cannot discard this request's image responsibilities.
@@ -615,7 +653,7 @@ const prepareVideoH3ReferenceDraftInternal = (
       return state?.status === 'bound' && state.slots.includes(number) ? [number] : [];
     });
     const usage = videoH3ReferenceUsageEdit(prompt, draft.references, plan.numbers, language,
-      authoredPictureNumbers, draft.referenceSlotRoles, multiViewNumbers);
+      authoredPictureNumbers, draft.referenceSlotRoles, multiViewNumbers, referenceUses);
     if (usage) prompt = prompt.slice(0, usage.start) + usage.text + prompt.slice(usage.end);
   }
   return { draft: { ...draft, prompt,

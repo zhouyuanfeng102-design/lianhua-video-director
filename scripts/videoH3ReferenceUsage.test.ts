@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { createInitialState } from '../src/storage';
 import { getH3PromptProtocolIssue, readH3PromptProtocol } from '../src/h3PromptProtocol';
-import { prepareVideoH3ReferenceDraft } from '../src/videoH3ReferenceBinding';
+import { prepareVideoH3ReferenceDraft, videoH3PictureNumbers } from '../src/videoH3ReferenceBinding';
+import { renderH3PerformancePlan } from '../src/h3PerformancePlan';
 import { buildVideoApiBody } from '../src/videoGenerationApi';
 import { moveVideoReference, removeVideoReference, videoReferenceSelection } from '../src/videoReferenceSlots';
 import type { Character, H3IdentityBindings, ReferenceAsset, Storyboard, VideoTaskApiConfig } from '../src/types';
@@ -22,6 +23,10 @@ const api: VideoTaskApiConfig = {
   ] }),
   runningHubMappedFields: [{ nodeId: '150', fieldName: 'value', kind: 'prompt' },
     ...imageNodes.map((nodeId, imageIndex) => ({ nodeId, fieldName: 'image', kind: 'image' as const, imageIndex }))],
+  runningHubH3ReferenceImages: [{ consumerNodeId: 'h3', images: imageNodes.map((nodeId, slotIndex) => ({
+    inputName: `ref_images.ref_image_${slotIndex}`, source: { nodeId, inputName: 'image' },
+    present: true, slotIndex, presentWhenUnselected: false,
+  })) }],
 };
 const asset = (id: string, role: ReferenceAsset['role'], type: ReferenceAsset['type']): ReferenceAsset => ({
   id, name: id, role, type, tags: [], dataUrl: 'data:image/png;base64,AAAA', createdAt: 1, updatedAt: 1,
@@ -63,6 +68,7 @@ const nodesFor = (draft: VideoGenerationDraft) => {
   const body = buildVideoApiBody(api, draft, draft.references.map((reference) => `uploaded/${reference.assetId}.png`));
   return new Map((body.nodeInfoList as Array<{ nodeId: string; fieldValue: unknown }>).map((entry) => [entry.nodeId, entry.fieldValue]));
 };
+const withoutSubjectTokens = (prompt: string) => prompt.replace(/<Subject \d+> /gu, '');
 
 test('空manifest五图的用途与人物身份到达实际RunningHub提示词节点，双语与镜头保持', () => {
   for (const language of ['zh', 'en'] as const) {
@@ -73,11 +79,11 @@ test('空manifest五图的用途与人物身份到达实际RunningHub提示词�
     assert.match(result.draft.prompt, language === 'en' ? /<Picture 1> opening composition reference/u : /<Picture 1> 开场构图参考/u);
     assert.match(result.draft.prompt, language === 'en' ? /<Picture 2> ending composition reference/u : /<Picture 2> 结束构图参考/u);
     assert.match(result.draft.prompt, language === 'en' ? /<Picture 3> environment layout and lighting reference/u : /<Picture 3> 场景空间与光照参考/u);
-    assert.match(result.draft.prompt, /Visual identity reference for 马雷: <Picture 4>/u);
-    assert.match(result.draft.prompt, /Visual identity reference for 绝死绝命: <Picture 5>/u);
-    assert.equal(result.draft.prompt.split(input.action).length, 3, 'the authored actions are unchanged');
+    assert.match(result.draft.prompt, /<Subject 1> is 马雷 referenced from <Picture 4>/u);
+    assert.match(result.draft.prompt, /<Subject 2> is 绝死绝命 referenced from <Picture 5>/u);
+    assert.equal(withoutSubjectTokens(result.draft.prompt).split(input.action).length, 3, 'the authored actions are unchanged');
     assert.deepEqual(readH3PromptProtocol(result.draft.prompt)?.shots, readH3PromptProtocol(input.draft.prompt)?.shots);
-    assert.equal(getH3PromptProtocolIssue(result.draft.prompt, input.draft.prompt, [1, 2, 3, 4, 5].map((n) => `<Picture ${n}>`)), undefined);
+    assert.equal(getH3PromptProtocolIssue(result.draft.prompt, result.draft.prompt, [1, 2, 3, 4, 5].map((n) => `<Picture ${n}>`)), undefined);
     assert.doesNotMatch(result.draft.prompt, /enforce.*frame|must match.*frame|强制.*关键帧|必须.*首帧/u);
     const nodes = nodesFor(result.draft);
     assert.equal(nodes.get('150'), result.draft.prompt);
@@ -89,12 +95,11 @@ test('空manifest五图的用途与人物身份到达实际RunningHub提示词�
   }
 });
 
-test('取消与重排按物理槽更新用途，通用数组仍使用实际发送序号', () => {
+test('取消只清空实际输入槽，Picture编号按模型仍接收的图片顺序更新', () => {
   const input = fixture(); const initial = prepare(input).draft;
   const removed = prepare(input, { ...initial, ...removeVideoReference(initial, 'opening') }).draft;
-  assert.doesNotMatch(removed.prompt, /<Picture 1>/u);
-  assert.match(removed.prompt, /<Picture 2> ending composition reference/u);
-  assert.match(removed.prompt, /<Picture 3> environment layout and lighting reference/u);
+  assert.match(removed.prompt, /<Picture 1> ending composition reference/u);
+  assert.match(removed.prompt, /<Picture 2> environment layout and lighting reference/u);
   const nodes = nodesFor(removed);
   assert.equal(nodes.get('141'), ''); assert.equal(nodes.get('142'), 'uploaded/ending.png');
   assert.equal(nodes.get('143'), 'uploaded/hall.png'); assert.equal(nodes.get('150'), removed.prompt);
@@ -134,7 +139,7 @@ test('手改、冻结重试、无来源及未声明图片槽顺序继续保留�
   assert.equal(prepare(input, frozen).draft, frozen);
   const noSource = { ...input.draft, source: undefined };
   assert.equal(prepare(input, noSource).draft.prompt, noSource.prompt);
-  assert.equal(prepare(input, input.draft, { ...api, runningHubMappedFields: undefined }).draft.prompt, input.draft.prompt);
+  assert.equal(prepare(input, input.draft, { ...api, runningHubH3ReferenceImages: undefined }).draft.prompt, input.draft.prompt);
 });
 
 test('六字段稿保持首镜与At切点，新增用途不污染对白或声音字面量', () => {
@@ -147,7 +152,9 @@ test('六字段稿保持首镜与At切点，新增用途不污染对白或声音
     .replace('撞击声', '原样<Picture 2>撞击声');
   const draft = { ...prepared, prompt: original, h3ReferenceBinding: { ...prepared.h3ReferenceBinding!, basePrompt: original, renderedPrompt: original } };
   const result = prepare(input, draft).draft;
-  assert.equal(getH3PromptProtocolIssue(result.prompt, original, [1, 2, 3, 4, 5].map((n) => `<Picture ${n}>`)), undefined);
+  assert.equal(getH3PromptProtocolIssue(result.prompt, original, [
+    ...[1, 2, 3, 4, 5].map((n) => `<Picture ${n}>`), '<Subject 1>', '<Subject 2>',
+  ]), undefined);
   assert.match(result.prompt, /<Picture 2> 结束构图参考/u, 'a protected literal is not an existing image binding');
   assert.match(result.prompt, /<sound>原样<Picture 2>撞击声<\/sound>/u);
   assert.deepEqual(readH3PromptProtocol(result.prompt)?.sections, readH3PromptProtocol(original)?.sections);
@@ -158,9 +165,95 @@ test('一图兼有明确人物身份与构图用途时两种职责都保留', ()
   input.draft.references[0].characterIds = ['mare', 'zesshi'];
   const result = prepare(input).draft;
   assert.match(result.prompt, /<Picture 1> opening composition reference/u);
-  assert.match(result.prompt, /Visual identity reference for 马雷: <Picture 1>, <Picture 4>/u);
-  assert.match(result.prompt, /Visual identity reference for 绝死绝命: <Picture 1>, <Picture 5>/u);
+  assert.match(result.prompt, /<Subject 1> is 马雷 referenced from <Picture 1>, <Picture 4>/u);
+  assert.match(result.prompt, /<Subject 2> is 绝死绝命 referenced from <Picture 1>, <Picture 5>/u);
   assert.equal(prepare(input, result).draft.prompt, result.prompt);
+});
+
+test('实际消费顺序同时驱动人物编号与图像用途，保持上传物理槽', () => {
+  const input = fixture();
+  const order = [5, 3, 4, 2, 0, 1];
+  const reordered = { ...api, runningHubH3ReferenceImages: [{ consumerNodeId: 'h3',
+    images: order.map((slotIndex) => api.runningHubH3ReferenceImages![0].images[slotIndex]),
+  }] };
+  assert.deepEqual(videoH3PictureNumbers(input.draft.references, { backend: 'api', api: reordered }).numbers, [4, 5, 3, 1, 2]);
+  const result = prepare(input, input.draft, reordered).draft;
+  assert.match(result.prompt, /<Picture 4> opening composition reference/u);
+  assert.match(result.prompt, /<Picture 5> ending composition reference/u);
+  assert.match(result.prompt, /<Picture 3> environment layout and lighting reference/u);
+  assert.match(result.prompt, /<Subject 1> is 马雷 referenced from <Picture 1>/u);
+  assert.match(result.prompt, /<Subject 2> is 绝死绝命 referenced from <Picture 2>/u);
+  const body = buildVideoApiBody(reordered, result, result.references.map((reference) => `uploaded/${reference.assetId}.png`));
+  const nodes = new Map((body.nodeInfoList as Array<{ nodeId: string; fieldValue: unknown }>).map((entry) => [entry.nodeId, entry.fieldValue]));
+  assert.equal(nodes.get('141'), 'uploaded/opening.png');
+  assert.equal(nodes.get('161'), 'uploaded/mare-image.png');
+  assert.equal(nodes.get('150'), result.prompt);
+});
+
+const phaseFixture = (language: 'zh' | 'en' = 'en') => {
+  const input = fixture(language);
+  for (const [index, time] of [3.5, 8.5, 13.5].entries()) {
+    Object.assign(input.project.assets[index], { type: 'reference', role: 'composition', imageVariant: 'storyboard-frame',
+      sourceStoryboardId: input.board.id, sourceShotId: `shot-${index + 1}`, imageFrameTimeSec: time,
+      imageFrameIndex: index + 1, imageFrameCount: 3 });
+    input.draft.references[index].role = (['first-frame', 'middle-frame', 'last-frame'] as const)[index];
+  }
+  input.board.shots = [1, 2, 3].map((index) => ({ id: `shot-${index}`, index })) as Storyboard['shots'];
+  return input;
+};
+
+test('3.5/8.5/13.5秒分镜图片按已有阶段与镜号描述，不再由槽位冒充开场结束', () => {
+  for (const language of ['zh', 'en'] as const) {
+    const input = phaseFixture(language); const before = structuredClone(input);
+    const result = prepare(input).draft;
+    for (const [index, time] of [3.5, 8.5, 13.5].entries()) {
+      assert.ok(result.prompt.includes(language === 'zh'
+        ? `<Picture ${index + 1}> 本段 ${time} 秒、第 ${index + 1} 镜对应动作阶段的构图与空间参考`
+        : `<Picture ${index + 1}> composition and spatial reference for the action phase at ${time}s in this clip (Shot ${index + 1})`));
+    }
+    assert.doesNotMatch(result.prompt, /opening composition|ending composition|开场构图|结束构图|intermediate frame 1 progression/u);
+    assert.equal(withoutSubjectTokens(result.prompt).split(input.action).length, 3);
+    assert.deepEqual(readH3PromptProtocol(result.prompt)?.shots, readH3PromptProtocol(input.draft.prompt)?.shots);
+    assert.equal(prepare(input, result).draft.prompt, result.prompt);
+    assert.deepEqual(input, before);
+  }
+});
+
+test('表演计划渲染也使用阶段语义，其他段落参考不冒用当前段时间', () => {
+  const input = phaseFixture();
+  const identities = input.board.h3IdentityBindingsEn!;
+  const rendered = renderH3PerformancePlan({ characters: identities.characters, language: 'en', plan: {
+    version: 1, timeBase: 'clip', descriptionLanguage: 'en',
+    characters: identities.characters.map((entry) => ({ characterId: entry.characterId, visualDescription: entry.name })),
+    shots: [{ shotIndex: 1, startSec: 0, visualDescription: input.action, events: [] }],
+    overallSoundscape: 'footsteps', nonDiegeticMusic: 'N/A',
+  } });
+  input.board.officialPromptEn = rendered.prompt; input.board.officialPromptEnSource = input.board.officialPromptZh;
+  input.board.h3IdentityBindingsEn = { version: 1, characters: rendered.characters, performance: rendered.plan, events: rendered.events };
+  input.draft.prompt = rendered.prompt;
+  const result = prepare(input).draft;
+  assert.match(result.prompt, /<Picture 1> composition and spatial reference for the action phase at 3\.5s/u);
+  assert.doesNotMatch(result.prompt, /opening composition|ending composition/u);
+  assert.ok(result.prompt.includes(input.action));
+  input.project.assets[0].sourceStoryboardId = 'different-clip';
+  const other = prepare(input).draft;
+  assert.match(other.prompt, /<Picture 1> composition and spatial reference for the depicted action phase/u);
+  assert.doesNotMatch(other.prompt, /action phase at 3\.5s/u);
+  delete input.project.assets[1].imageFrameTimeSec;
+  assert.match(prepare(input).draft.prompt, /<Picture 2> composition and spatial reference for the action phase in Shot 2/u);
+});
+
+test('明确分镜首尾绑定与真正尾帧续接仍保留边界用途', () => {
+  const input = phaseFixture();
+  input.board.firstFrameAssetId = input.draft.references[0].assetId;
+  input.board.lastFrameAssetId = input.draft.references[2].assetId;
+  const explicit = prepare(input).draft;
+  assert.match(explicit.prompt, /<Picture 1> opening composition reference/u);
+  assert.match(explicit.prompt, /<Picture 3> ending composition reference/u);
+  const tail = input.project.assets[0];
+  Object.assign(tail, { type: 'last-frame', role: 'last-frame', imageVariant: 'last-frame', sourceVideoAssetId: 'previous-video', sourceTimeSec: 15 });
+  delete input.board.firstFrameAssetId;
+  assert.match(prepare(input).draft.prompt, /<Picture 1> opening composition reference/u);
 });
 
 console.log(`${groups} H3 reference-use groups passed (synthetic fixtures and local request serialization only).`);

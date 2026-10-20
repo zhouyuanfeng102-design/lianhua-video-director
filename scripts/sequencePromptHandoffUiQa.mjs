@@ -72,6 +72,12 @@ const planStructure = (plan) => ({ ...plan, updatedAt: undefined, segments: plan
 const capture = async (name) => { await page.screenshot({ path: path.join(output, `${name}.png`), fullPage: false }); screenshots.push(`${name}.png`); };
 const enterDirector = async () => {
   await page.locator('.sidebar').getByRole('button', { name: '提示词导演台', exact: true }).click();
+  if (process.argv.includes('--independent-only')) {
+    const keepSnapshot = page.getByRole('button', { name: '继续使用旧快照', exact: true });
+    if (await keepSnapshot.isVisible()) await keepSnapshot.click();
+    const confirm = page.getByRole('button', { name: /^确认分段，进入.*单段导演$/u });
+    if (await confirm.isVisible()) await confirm.click();
+  }
   await page.locator('.director-all-sections').waitFor();
 };
 const installStoredFixture = async (fixture) => {
@@ -125,10 +131,14 @@ const installModelMock = async () => {
       const conversion = tagged(user, 'video_conversion_data');
       const review = tagged(user, 'video_staging_review_data');
       const englishReview = tagged(user, 'review_data');
+      let translationDocument;
+      if (process.argv.includes('--independent-only')) {
+        try { const data = JSON.parse(user); if (Array.isArray(data.slots)) translationDocument = data; } catch {}
+      }
       const handoff = tagged(user, 'sequence_text_handoff_data')?.sequenceHandoff
         || review?.sequenceHandoff || conversion?.sequenceHandoff || englishReview?.stagingContext?.sequenceHandoff;
       const kind = conversion ? 'convert' : review ? 'review' : englishReview ? 'english-review'
-        : /提示词翻译器/u.test(system) ? 'translate' : 'unexpected';
+        : translationDocument || /提示词翻译器/u.test(system) ? 'translate' : 'unexpected';
       assert.notEqual(kind, 'unexpected', `unexpected text request: ${system.slice(0, 80)}`);
       const segmentIndex = review?.segmentScope?.segmentIndex || conversion?.continuityContext?.segmentIndex
         || handoff?.segmentIndex || (phase === 'generate' ? 1 : 0);
@@ -148,7 +158,8 @@ const installModelMock = async () => {
         assert.ok(response.startsWith('【'), 'converter mock must return the actual per-shot canonical drafts');
       }
       else if (review) {
-        response = review.candidatePrompt;
+        response = review.candidatePrompt || (process.argv.includes('--independent-only')
+          ? `integrated_multimodal_description:\n[Shot 1] Identity: 师傅，青色长衣。 Identity: 徒弟，灰色长衣。 ${sourceParts[(segmentIndex - 1) * 2]}\n[Shot 2] At 00:07.500 ${sourceParts[(segmentIndex - 1) * 2 + 1]}\noverall_soundscape:\n山风与衣物摩擦声。\nnon_diegetic_music:\nN/A` : '');
         assert.ok(typeof response === 'string' && response.includes('[Shot 1]'));
         if (handoff) {
           const scene = handoff.segmentIndex === 2
@@ -159,7 +170,12 @@ const installModelMock = async () => {
         if (phase.startsWith('regenerate-')) {
           response = response.replace('[Shot 1]', `[Shot 1] QA_REGENERATED_${phase}_${++repairSerial}: 保持山道清晨侧光，双手与药草的位置清楚可见。`);
         }
-      } else if (englishReview) response = englishReview.candidateEnglishPrompt;
+        if (process.argv.includes('--independent-only')) response = JSON.stringify({ h3Prompt: response,
+          identityBindings: { version: 1, characters: [{ characterId: 'qa-teacher', name: '师傅', referenceAnchor: 'Identity: 师傅，青色长衣。' }, { characterId: 'qa-student', name: '徒弟', referenceAnchor: 'Identity: 徒弟，灰色长衣。' }] },
+          characterParticipation: { version: 1, characters: [{ characterId: 'qa-teacher', name: '师傅', presence: 'visible', shotIndex: 1, evidence: '师傅' }, { characterId: 'qa-student', name: '徒弟', presence: 'visible', shotIndex: 1, evidence: '徒弟' }] },
+        });
+      } else if (translationDocument) response = JSON.stringify({ slots: translationDocument.slots.map((slot) => ({ id: slot.id, text: translated(slot.sourceText) })) });
+      else if (englishReview) response = englishReview.candidateEnglishPrompt;
       else response = translated(user.split('\n\n<sequence_text_handoff_data>')[0]);
       if (['repair-english-failure', 'regenerate-english-failure'].includes(phase) && kind === 'english-review') response = '';
       if (held && kind === 'review' && segmentIndex === held.segmentIndex && !held.started) {
@@ -201,7 +217,7 @@ const seedFixture = async () => {
   await page.getByRole('button', { name: '确认全片导演参数，进入①全片规划', exact: true }).click();
   await page.waitForFunction((key) => JSON.parse(localStorage.getItem(key))?.project?.directorSettingsConfirmedFingerprint, storageKey);
   await page.goto(`${origin}${fixturePage}`, { waitUntil: 'domcontentloaded' });
-  await page.evaluate(async ({ key, sourceParts, story }) => {
+  await page.evaluate(async ({ key, sourceParts, story, independent }) => {
     const { buildLocalSequencePlan, extractStoryBeats, validateSequencePlan } = await import('/src/storySegmentation.ts');
     const { masterPromptConfirmationFingerprint } = await import('/src/masterTimeline.ts');
     const { sequencePlanReviewFingerprint } = await import('/src/sequencePlan.ts');
@@ -238,12 +254,21 @@ const seedFixture = async () => {
         continuityPack: '准确承接上段末镜动作，不改变左右关系和衣着', transitionHint: '下一段首镜保留约0.5秒同一交接动作的视觉重合', boundaryReason: '已确认完整镜头分配', status: 'planned', locked: false,
       });
     });
+    if (independent) {
+      plan.segmentationMode = 'natural';
+      plan.chapterId = project.activeChapterId;
+      const workspace = project.chapterWorkspaces[project.activeChapterId];
+      Object.assign(workspace.directorControls, { durationMode: 'fixed', totalDuration: 45, totalDurationTouched: true,
+        segmentationMode: 'natural', activePlanId: plan.id, activeSegmentId: plan.segments[0].id,
+        sequenceStage: 'direct', sequenceSettingsOpen: false });
+    }
     plan.masterPromptConfirmedAt = now; plan.masterPromptConfirmedFingerprint = masterPromptConfirmationFingerprint(plan, board);
     plan.reviewConfirmedAt = now; plan.reviewConfirmedFingerprint = sequencePlanReviewFingerprint(plan);
+    if (independent) project.chapterWorkspaces[project.activeChapterId].directorControls.confirmedSequencePlanFingerprint = plan.reviewConfirmedFingerprint;
     const issues = validateSequencePlan(plan, { requireMasterStoryboard: true, storyboards: [board] });
     if (issues.length) throw new Error(`Invalid QA plan: ${issues.join('; ')}`);
     project.storyboards = [board]; project.sequencePlans = [plan]; state.projects = [project]; localStorage.setItem(key, JSON.stringify(state));
-  }, { key: storageKey, sourceParts, story });
+  }, { key: storageKey, sourceParts, story, independent: process.argv.includes('--independent-only') });
   await page.goto(origin, { waitUntil: 'networkidle' }); await enterDirector();
 };
 
@@ -256,6 +281,61 @@ const run = async () => {
   await installModelMock(); await seedFixture();
   const before = await readState(); assertNoMedia(before);
   assert.equal(before.project.storyboards.length, 1, 'fixture has only the confirmed master; no segment prompt preexists');
+  if (process.argv.includes('--independent-only')) {
+    const choose = (index) => page.locator('.sequence-director-strip .sequence-segment-chip').nth(index - 1).click();
+    const waitForSegment = (index) => page.waitForFunction(({ key, index }) => {
+      const state = JSON.parse(localStorage.getItem(key));
+      const segment = state.project.sequencePlans[0].segments[index - 1];
+      const board = state.project.storyboards.find((entry) => entry.id === segment.storyboardId);
+      return segment.status === 'ready' && board?.officialPromptZh && board.officialPromptEn
+        && board.officialPromptEnSource === board.officialPromptZh && !board.officialPromptEnError;
+    }, { key: storageKey, index });
+    phase = 'independent-second';
+    await choose(2);
+    await page.getByRole('button', { name: '生成当前段MiniMax H3提示词', exact: true }).click();
+    await waitForSegment(2);
+    const independent = await readState(); assertNoMedia(independent);
+    const second = stateBoards(independent)[1];
+    assert.equal(stateBoards(independent)[0], undefined, 'the previous segment is not auto-generated');
+    assert.equal(second.sequencePromptHandoff, undefined, 'independent output does not claim predecessor alignment');
+    assert.deepEqual(requests.map((entry) => entry.kind), ['review', 'translate']);
+    assert.ok(requests.every((entry) => !entry.handoff), 'no master/earlier prompt is substituted as predecessor');
+    const expectedPlan = structuredClone(before.project.sequencePlans[0]);
+    expectedPlan.segments[1].storyboardId = second.id;
+    assert.deepEqual(planStructure(independent.project.sequencePlans[0]), planStructure(expectedPlan));
+    await capture('independent-second-ready');
+    const beforeCompleteClick = requests.length;
+    await page.getByRole('button', { name: '当前段MiniMax H3已生成', exact: true }).click();
+    assert.equal(requests.length, beforeCompleteClick, 'completed independent segment does not force a continuity request');
+    const translationFixture = structuredClone(independent);
+    const translationBoard = translationFixture.project.storyboards.find((entry) => entry.id === second.id);
+    translationBoard.officialPromptEn = ''; translationBoard.officialPromptEnSource = '';
+    translationBoard.officialPromptEnError = 'isolated English-only test';
+    phase = 'independent-english';
+    await installStoredFixture(translationFixture); await choose(2);
+    await page.getByRole('button', { name: '仅重试MiniMax H3英文', exact: true }).first().click();
+    await waitForSegment(2);
+    const translatedState = await readState();
+    assert.equal(stateBoards(translatedState)[1].officialPromptZh, second.officialPromptZh);
+    assert.deepEqual(requests.filter((entry) => entry.phase === phase).map((entry) => entry.kind), ['translate']);
+    assert.ok(requests.filter((entry) => entry.phase === phase).every((entry) => !entry.handoff));
+    phase = 'available-third'; await choose(3);
+    await page.getByRole('button', { name: '生成当前段MiniMax H3提示词', exact: true }).click();
+    await waitForSegment(3);
+    const following = await readState(); assertNoMedia(following);
+    const third = stateBoards(following)[2];
+    assert.equal(third.sequencePromptHandoff.previousStoryboardId, second.id);
+    const consumed = requests.filter((entry) => entry.phase === phase && entry.handoff);
+    assert.ok(consumed.length > 0);
+    assert.ok(consumed.every((entry) => entry.handoff.previousFinalPrompt === second.officialPromptZh));
+    assert.deepEqual(errors, []); assert.deepEqual(blockedRequests, []);
+    await capture('available-previous-third-ready');
+    const result = { passed: true, cases: ['generate selected segment without previous prompt', 'completed independent segment', 'English-only completion without previous prompt', 'use actual previous prompt when available'],
+      isolatedBrowserStorage: true, paidApiCalls: 0, requests, screenshots, errors };
+    fs.writeFileSync(path.join(output, 'independent-report.json'), JSON.stringify(result, null, 2));
+    console.log(JSON.stringify({ passed: true, cases: result.cases, report: path.join(output, 'independent-report.json') }));
+    return;
+  }
   await capture('before-three-segment-prompts');
   phase = 'cancel-initial-generation';
   let releaseInitial;

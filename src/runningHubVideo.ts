@@ -9,6 +9,7 @@ import { assertVideoReferenceSlots, videoReferenceSlotIndex } from './videoRefer
 import { resolveRunningHubVideoImageProtocol } from './runningHubImageProtocol';
 import { assertRunningHubPromptPictureSlots, isRunningHubH3AutoPromptInput, runningHubH3AutoPromptInput } from './runningHubPromptPictures';
 import { normalizeRunningHubGenerationExtras } from './runningHubGenerationExtras';
+import { compileRunningHubH3ReferenceImages } from './runningHubH3ReferenceImages';
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const own = (value: object, key: string): boolean => Object.prototype.hasOwnProperty.call(value, key);
@@ -522,6 +523,7 @@ export const compileRunningHubVideoApi = (config: RunningHubVideoConfig, workflo
   const baseUrl = base.toString().replace(/\/+$/u, '');
   let requestTemplate = workflow.requestTemplate;
   const imageProtocol = resolveRunningHubVideoImageProtocol(workflow);
+  const runningHubH3ReferenceImages = compileRunningHubH3ReferenceImages(workflow, imageProtocol.emptyImageValues);
   const runningHubMappedFields: NonNullable<VideoTaskApiConfig['runningHubMappedFields']> = [
     ...workflow.mapping.prompt.map((binding) => ({ nodeId: binding.nodeId, fieldName: binding.inputName, kind: 'prompt' as const })),
     ...workflow.mapping.images.map((binding, imageIndex) => ({ nodeId: binding.nodeId, fieldName: binding.inputName, kind: 'image' as const, imageIndex, emptyValue: imageProtocol.emptyImageValues[imageIndex] })),
@@ -558,6 +560,7 @@ export const compileRunningHubVideoApi = (config: RunningHubVideoConfig, workflo
     endpoint: `${baseUrl}/openapi/v2/run/${workflow.runKind}/${workflow.remoteId.trim()}`,
     runningHubAppId: workflow.remoteId.trim(), runningHubOutputNodeIds: workflow.outputNodeId?.trim() ? [workflow.outputNodeId.trim()] : [],
     runningHubImageRoles: workflow.mapping.images.map((binding) => binding.role || 'general'), runningHubMappedFields,
+    ...(runningHubH3ReferenceImages ? { runningHubH3ReferenceImages } : {}),
     ...(Object.keys(runningHubParameterControls).length ? { runningHubParameterControls } : {}),
     statusEndpointTemplate: `${baseUrl}/openapi/v2/query`, apiKey: config.apiKey,
     authHeader: 'Authorization', authScheme: 'Bearer', taskIdPath: 'taskId', statusPath: 'status', resultUrlPath: 'results.0.url', errorPath: 'errorMessage',

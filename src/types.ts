@@ -1651,6 +1651,8 @@ export interface VideoTaskApiConfig {
   runningHubOutputNodeIds?: string[];
   /** Ordered image-slot capacity; individual submissions may use fewer slots. */
   runningHubImageRoles?: ReferenceRole[];
+  /** Local H3 consumer order; never submitted as a cloud node override. */
+  runningHubH3ReferenceImages?: import('./h3ReferenceImageOrder').H3CompiledReferenceImageOrder[];
   runningHubMappedFields?: Array<{ nodeId: string; fieldName: string; kind: 'prompt' | 'image' | 'audio' | 'video' | 'image-count' | 'parameter'; imageIndex?: number; audioIndex?: number; videoIndex?: number; emptyValue?: '' | 'None' | 'example.png'; imageCountMode?: 'prefix'; imageCountSource?: 'explicit' | 'verified-app'; parameter?: string; originalValue?: unknown }>;
   /** Local controls for mapped parameters; never included in the cloud request body. */
   runningHubParameterControls?: Record<string, RunningHubVideoFieldControl>;

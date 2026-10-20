@@ -10,6 +10,8 @@ import {
   stampSequencePromptHandoff,
 } from '../src/sequencePromptHandoff';
 import { sourceContentHash } from '../src/sourceIntegrity';
+import { buildOfficialSeedanceInput } from '../src/seedanceSource';
+import { getOfficialSeedanceSourceFingerprint } from '../src/seedancePrompt';
 import { createInitialState, normalizeState } from '../src/storage';
 import { createStoryboardRevision, restoreStoryboardRevisionSnapshot } from '../src/storyboardVersions';
 import type { Project, Storyboard, VideoSegment, VideoSequencePlan } from '../src/types';
@@ -220,6 +222,58 @@ staleCanonical.storyboards[0].promptPlan = {
 };
 staleCanonical.storyboards[0].finalPrompt += '\n手工改动';
 assert.match(buildSequencePromptHandoff(staleCanonical, 'plan', 'segment-2').issue!, /快照不一致/u);
+
+// A manually selected segment may start from its own planned source when the
+// immediate predecessor has no usable final draft. Sequential generation and
+// explicit continuity repair retain the default requirement for that draft.
+const bothFormats = clone(project);
+bothFormats.storyboards[0].seedance25Output = {
+  targetId: 'seedance-2.5', promptZh: '师傅站在山道左侧，把手中药草递向右侧徒弟。镜头稳定，风声持续。',
+  durationSec: 15, sourceFingerprint: getOfficialSeedanceSourceFingerprint(
+    buildOfficialSeedanceInput(bothFormats, bothFormats.storyboards[0])),
+  referenceManifest: [], warnings: [], generatedAt: 1,
+};
+for (const format of ['h3', 'seedance'] as const) {
+  const available = buildSequencePromptHandoff(bothFormats, 'plan', 'segment-2', format);
+  assert.ok(available.context, `${format}: fixture has a current predecessor draft`);
+  assert.deepEqual(buildSequencePromptHandoff(bothFormats, 'plan', 'segment-2', format, 'when-available'), available,
+    `${format}: independent generation still consumes the same real predecessor when available`);
+  assert.deepEqual(buildSequencePromptHandoff(bothFormats, 'plan', 'segment-1', format, 'when-available'), {});
+
+  const unavailableCases: [string, (candidate: Project) => void][] = [
+    ['missing predecessor', (candidate) => { candidate.storyboards = candidate.storyboards.slice(1); }],
+    ['wrong plan association', (candidate) => { candidate.storyboards[0].sequencePlanId = 'another-plan'; }],
+    ['wrong segment association', (candidate) => { candidate.storyboards[0].segmentId = 'segment-3'; }],
+    ['master instead of predecessor', (candidate) => { candidate.sequencePlans[0].masterStoryboardId = previous.id; }],
+    ['stale predecessor source', (candidate) => { candidate.sequencePlans[0].segments[0].status = 'stale'; }],
+    ['no final target draft', (candidate) => {
+      if (format === 'seedance') candidate.storyboards[0].seedance25Output = undefined;
+      else {
+        candidate.storyboards[0].officialPromptZh = '';
+        candidate.storyboards[0].promptTrace!.mode = 'local-fallback';
+      }
+    }],
+    ['outdated final target draft', (candidate) => {
+      if (format === 'seedance') candidate.storyboards[0].seedance25Output!.sourceFingerprint = 'outdated-source';
+      else candidate.storyboards[0].officialPromptSource = 'outdated-source';
+    }],
+  ];
+  for (const [name, mutate] of unavailableCases) {
+    const candidate = clone(bothFormats);
+    mutate(candidate);
+    const before = JSON.stringify(candidate);
+    assert.ok(buildSequencePromptHandoff(candidate, 'plan', 'segment-2', format).issue, `${format}: ${name} stays required by default`);
+    assert.deepEqual(buildSequencePromptHandoff(candidate, 'plan', 'segment-2', format, 'when-available'), {},
+      `${format}: ${name} supplies no borrowed draft, stamp or blocker for independent generation`);
+    assert.equal(JSON.stringify(candidate), before, `${format}: ${name} leaves existing drafts untouched`);
+  }
+  assert.deepEqual(buildSequencePromptHandoff(noMiddle, 'plan', 'segment-3', format, 'when-available'), {},
+    `${format}: a missing middle draft never borrows the earlier finished segment`);
+  assert.match(buildSequencePromptHandoff(wrongIndex, 'plan', 'segment-2', format, 'when-available').issue!, /编号/u,
+    `${format}: optional predecessor text does not suppress malformed current plan identity`);
+  assert.ok(buildSequencePromptHandoff(bothFormats, 'missing-plan', 'segment-2', format, 'when-available').issue);
+  assert.ok(buildSequencePromptHandoff(bothFormats, 'plan', 'missing-segment', format, 'when-available').issue);
+}
 
 const revision = createStoryboardRevision(aligned as any, { createdAt: 2 });
 assert.deepEqual(revision.sequencePromptHandoff, aligned.sequencePromptHandoff);

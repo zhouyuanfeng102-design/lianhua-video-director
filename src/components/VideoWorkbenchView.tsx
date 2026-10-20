@@ -205,7 +205,8 @@ export function VideoWorkbenchView({ project, controller, onOpenVideoDirector, o
   const hasError = localError || controller.error;
   const available = Boolean(status?.available);
   const selectedRangeInvalid = Boolean(extractRange && (!Number.isFinite(extractRange.inSec) || !Number.isFinite(extractRange.outSec) || extractRange.inSec < 0 || extractRange.outSec <= extractRange.inSec || (sourceDuration && extractRange.outSec > sourceDuration + .01)));
-  const sourcePages = useWorkbenchNamePages(filteredVideos);
+  const sourceMetadata = (asset: ReferenceAsset) => `${chapterLabelForAsset(asset)} · ${asset.missing ? '原文件缺失' : formatTime(controller.probes[asset.id]?.durationSec || asset.durationSec) + ' · ' + (asset.width || '?') + '×' + (asset.height || '?')}`;
+  const sourcePages = useWorkbenchNamePages(filteredVideos, filteredVideos.map(sourceMetadata));
   const clipPages = usePagedItems(draft.clips);
   const framePages = usePagedItems(filteredFrames);
   const jobPages = usePagedItems([...controller.jobs].sort((a, b) => b.createdAt - a.createdAt));
@@ -494,8 +495,8 @@ export function VideoWorkbenchView({ project, controller, onOpenVideoDirector, o
             {sourcePages.items.map((asset) => <article key={asset.id} className={'vwb-source' + (sourcePages.wideNames.has(asset.id) ? ' vwb-source--full-width-name' : '') + (sourceId === asset.id ? ' selected' : '') + (selectedVideoIds.has(asset.id) ? ' checked' : '') + (asset.missing ? ' missing' : '')}>
               <input className="vwb-source-check" type="checkbox" aria-label={'选择素材 ' + asset.name} checked={selectedVideoIds.has(asset.id)} disabled={busy || !selectableWorkbenchVideo(asset)} onChange={(event) => { const checked = event.target.checked; setVideoSelection((selection) => selectWorkbenchVideoResults(selection, project.id, videos, [asset.id], checked)); setLocalNotice('已选素材按清单从上到下（新到旧）追加；预览、单独添加和多选勾选互不影响。'); }} />
               <button type="button" className="vwb-source-select vwb-source-cover" aria-label={'预览视频 ' + asset.name} onClick={() => chooseSource(asset)}><StaticThumbnail asset={asset} assets={project.assets} /></button>
-              <button type="button" className="vwb-source-select vwb-source-copy" onClick={() => chooseSource(asset)} aria-pressed={sourceId === asset.id} title={asset.name}><strong style={sourcePages.nameSizes[asset.id] ? { fontSize: sourcePages.nameSizes[asset.id] } : undefined}>{asset.name}</strong><small title={'来源章节：' + chapterLabelForAsset(asset)}>{chapterLabelForAsset(asset)} · {asset.missing ? '原文件缺失' : formatTime(controller.probes[asset.id]?.durationSec || asset.durationSec) + ' · ' + (asset.width || '?') + '×' + (asset.height || '?')}</small></button>
-              {sourcePages.wideNames.has(asset.id) && <small className="vwb-source-extra-meta">{asset.missing ? '原文件缺失' : formatTime(controller.probes[asset.id]?.durationSec || asset.durationSec) + ' · ' + (asset.width || '?') + '×' + (asset.height || '?')}</small>}
+              <button type="button" className="vwb-source-select vwb-source-copy" onClick={() => chooseSource(asset)} aria-pressed={sourceId === asset.id} title={asset.name}><strong style={sourcePages.nameSizes[asset.id] ? { fontSize: sourcePages.nameSizes[asset.id] } : undefined}>{asset.name}</strong><small title={'来源章节：' + chapterLabelForAsset(asset)}>{sourceMetadata(asset)}</small></button>
+              {sourcePages.wideNames.has(asset.id) && <small className="vwb-source-extra-meta">{sourceMetadata(asset)}</small>}
               <button type="button" className="vwb-icon-button vwb-source-add" title="单独加入时间线，不改变多选勾选" aria-label={'加入时间线 ' + asset.name} disabled={busy || !selectableWorkbenchVideo(asset) || !available} onClick={() => { void addVideoSources([asset.id], false); }}><Plus size={15} /></button>
             </article>)}
             {!filteredVideos.length && <div className="vwb-empty"><Film size={25} /><span>{videos.length ? '没有符合搜索条件的视频' : '导入视频，或到视频导演台生成。'}</span>{!videos.length && <button type="button" className="btn small" onClick={() => onOpenVideoDirector({})}>打开视频导演台</button>}</div>}
