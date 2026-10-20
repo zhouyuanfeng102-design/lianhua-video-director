@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { semanticSegmentIdentityReferenceIds } from '../src/semanticSegmentIdentityReferences';
 import { buildGlobalLock } from '../src/promptEngine';
-import type { Character, Scene, SemanticSegmentSource } from '../src/types';
+import { buildOfficialH3SubjectDefinitions } from '../src/officialPrompt';
+import { sourceContentHash } from '../src/sourceContentHash';
+import type { Character, Scene, SemanticSegmentSource, Storyboard } from '../src/types';
 
 const character = (id: string, name: string, aliases: string[] = []): Character => ({
   id, name, aliases, assetIds: [], gender: '女', apparentAge: '', race: '', appearance: '稳定人物外貌',
@@ -73,6 +75,55 @@ const input = (content: string, semanticSource = source()) => ({
   assert.deepEqual(semanticSegmentIdentityReferenceIds(input('阿卡利独自等候。', source({
     sourceEvidence: [{ text: '其他段人物与马雷同行。' }],
   }))), ['akali'], 'read-only source evidence is not a cast instruction');
+}
+
+{
+  const scoped = input('她向同伴摆手，随后转身。', source({
+    sceneStaging: [{ version: 1, sceneId: 'clearing',
+      participants: [{ id: 'local-mare', name: 'Mare', position: '队伍左侧' }],
+      phases: [{ id: 'reply', participantIds: ['local-mare', 'akali', 'deleted-id'], action: '同伴拒绝' }],
+    }],
+  }));
+  assert.deepEqual(semanticSegmentIdentityReferenceIds(scoped), ['mare', 'akali'],
+    'adopted local participant mappings and phase character IDs preserve silent named group members');
+  assert.deepEqual(semanticSegmentIdentityReferenceIds({ ...scoped, contentOverridden: true }), [],
+    'a replaced segment does not revive prior scene participants or phases');
+  assert.deepEqual(semanticSegmentIdentityReferenceIds(input('她对同伴发问。', source({
+    events: [{ id: 'challenge', description: '', causality: {
+      actor: '她', actorCharacterId: 'mare', target: '同伴', targetCharacterIds: ['akali', 'missing'],
+      action: '挑战', result: '被拒绝', evidence: '向同伴发问', certainty: 'explicit',
+    } }],
+  }))), ['mare', 'akali'], 'multiple explicit target identities survive an unnamed group target');
+  assert.deepEqual(semanticSegmentIdentityReferenceIds(input('她问了一声。', source({
+    dialogues: [{ id: 'question', speaker: '她', speakerCharacterId: 'mare', text: '可以吗？',
+      listenerCharacterIds: ['akali'], addressedCharacterIds: ['missing'] }],
+  }))), ['mare', 'akali'], 'source speaker and listener IDs do not require repeated names in prose');
+}
+
+{
+  const finalPrompt = '两位同伴安静地互相等待。';
+  const board = {
+    finalPrompt,
+    promptTrace: { mode: 'text-api', convertedPromptFingerprint: sourceContentHash(finalPrompt), shotPlanMode: 'ai-complete' },
+    sceneStaging: [{ version: 1, sceneId: 'clearing', participants: [{ id: mare.id }] }],
+    shots: [{ subject: '两位同伴', action: '互相等待', result: '', camera: '', prompt: '',
+      sceneStaging: [{ version: 1, sceneId: 'clearing', phases: [{ id: 'wait', participantIds: [akali.id] }] }] }],
+  } as unknown as Storyboard;
+  const before = structuredClone(board);
+  const definitions = buildOfficialH3SubjectDefinitions(board, { characters, assets: [] }, []);
+  assert.deepEqual(definitions.filter((entry) => entry.kind === 'character').map((entry) => entry.name), [mare.name, akali.name],
+    'adopted scene/shot identities reach official subject definitions despite unnamed group prose');
+  assert.deepEqual(board, before, 'identity definitions do not mutate the adopted source');
+  for (const edited of [
+    { ...board, finalPrompt: '空地无人。' },
+    { ...board, promptPlan: { canonicalPrompt: '空地无人。' } },
+    { ...board, sourceStale: true },
+    { ...board, promptTrace: { ...board.promptTrace, mode: 'local-fallback', convertedPromptFingerprint: undefined } },
+    { ...board, promptTrace: { ...board.promptTrace, shotPlanMode: 'locally-edited' } },
+  ] as Storyboard[]) {
+    assert.deepEqual(buildOfficialH3SubjectDefinitions(edited, { characters, assets: [] }, []), [],
+      'old board and shot participant IDs cannot revive actors after source, canonical or manual shot edits');
+  }
 }
 
 {

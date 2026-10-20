@@ -91,6 +91,10 @@ const assertSharedActionWindowRule = (system: string): void => {
   assert.match(system, /同一窗口可连续承接来自多个自然段的多个既有动作/u);
   assert.match(system, /不能把局部慢速扩散到整场/u);
   assert.match(system, /真实收手、整理、喘息与重新起势完整保留/u);
+  assert.match(system, /不得写D–D秒、0秒区间/u);
+  assert.match(system, /不能借重叠隐藏走路、取物、检查或坐下所需的过程/u);
+  assert.match(system, /持械姿势只用于已声明的身份、外观或材质连续性/u);
+  assert.match(system, /不授权在空手过程加入持械、兵刃接触、金属声或武器展示/u);
   assert.match(system, /不可把同时动作逐项排队/u);
   assert.match(system, /完整原话、说话人和发话先后直接嵌入对应动作与反应/u);
   assert.match(system, /正文和记录逐句对应，原字、语言、归属与continuation一致/u);
@@ -123,6 +127,9 @@ try {
     assert.equal(Object.hasOwn(aiPayload, key), false, `AI must not inherit ${key}`);
   }
   assertSharedActionWindowRule(prompt(aiCalls[0], 'system'));
+  assert.match(prompt(aiCalls[0], 'system'), /这不等于一个动作一个窗口或一个事件一个窗口/u);
+  assert.match(prompt(aiCalls[0], 'system'), /若现有N×D只能把末尾串行动作压成D–D秒、瞬移或只写结果，先重新调配尚未确认的完整行动/u);
+  assert.match(prompt(aiCalls[0], 'system'), /仍不足时增加所需的足额D秒窗口并在真实进度处切分/u);
   const exampleText = prompt(aiCalls[0], 'system').split('\n').find((line) => line.startsWith('{"reason":'));
   assert.ok(exampleText, 'the single response example is a complete JSON object');
   const example = JSON.parse(exampleText);
@@ -132,8 +139,10 @@ try {
   const finalInstruction = prompt(aiCalls[0], 'user').split('\n\n').slice(1).join('\n\n');
   assert.match(finalInstruction, /生成窗口D=15秒/u);
   assert.match(finalInstruction, /来源记录，不是已分好的视频段/u);
-  assert.match(finalInstruction, /reason与segments必须描述同一次实际时间安排/u);
+  assert.match(finalInstruction, /reason、segments\.content、events\.phase、sceneStaging及入口\/出口必须表达同一次完整时间安排/u);
   assert.match(finalInstruction, /不减少动作次数、不删除整理喘息/u);
+  assert.match(finalInstruction, /走向终点、取放检查及站稳落座都属于动作过程/u);
+  assert.match(finalInstruction, /串行动作都不能标成D–D秒或在D秒才启动却同时完成/u);
   assert.equal(story.split('\n\n').length, 6);
   assert.equal(aiPlan.segments.length, 1, 'N comes from returned windows, not source paragraphs or event count');
   assert.equal(aiPlan.totalDurationSec, 15);
@@ -165,6 +174,8 @@ try {
   assertSharedActionWindowRule(prompt(fixedCalls[0], 'system'));
   assert.match(prompt(fixedCalls[0], 'system'), /T=30秒/u);
   assert.match(prompt(fixedCalls[0], 'system'), /N=2段/u);
+  assert.match(prompt(fixedCalls[0], 'system'), /T、D、N固定后不得套用AI适配的加窗权限/u);
+  assert.match(prompt(fixedCalls[0], 'system'), /不能静默加长、越界完成或把动作移出用户固定范围/u);
   assert.match(prompt(fixedCalls[0], 'user').split('\n\n').slice(1).join('\n\n'), /全片T=30秒固定/u);
   assert.equal(fixedPlan.durationMode, 'fixed');
   assert.equal(fixedPlan.requestedTotalDurationSec, 30);

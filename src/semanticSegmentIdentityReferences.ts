@@ -1,4 +1,5 @@
 import { characterParticipationAliases } from './characterParticipation';
+import type { SceneStaging } from './sceneStaging';
 import type { Character, SemanticSegmentSource, VideoSegment } from './types';
 
 type IdentityCharacter = Pick<Character, 'id' | 'name'> & Partial<Pick<Character,
@@ -19,6 +20,37 @@ const containsAlias = (content: string, alias: string): boolean => (
     ? new RegExp(`(?<![A-Za-z0-9_])${escaped(alias)}(?![A-Za-z0-9_])`, 'iu').test(content)
     : content.includes(alias)
 );
+
+/** Adopted participants describe scene identity, not camera visibility. Local
+ * participant IDs can name the same saved character through an explicit name;
+ * a phase can also reference a stable character ID directly. */
+export const sceneStagingIdentityReferenceIds = (
+  characters: readonly IdentityCharacter[],
+  stages: readonly SceneStaging[],
+): string[] => {
+  const catalog = characters.filter((character) => !character.dossier?.archivedIntoCharacterId);
+  const knownIds = new Set(catalog.map((character) => character.id));
+  const aliases = catalog.map((character) => ({
+    id: character.id, aliases: characterParticipationAliases(character, catalog),
+  }));
+  const references = new Set<string>();
+  for (const stage of stages) {
+    const localIds = new Map<string, string>();
+    for (const participant of stage.participants || []) {
+      const id = knownIds.has(participant.id) ? participant.id
+        : aliases.find((character) => character.aliases.includes(participant.name?.trim() || participant.id))?.id;
+      if (id) {
+        localIds.set(participant.id, id);
+        references.add(id);
+      }
+    }
+    for (const phase of stage.phases || []) for (const participantId of phase.participantIds || []) {
+      const id = knownIds.has(participantId) ? participantId : localIds.get(participantId);
+      if (id) references.add(id);
+    }
+  }
+  return catalog.filter((character) => references.has(character.id)).map((character) => character.id);
+};
 
 /** Collect only identity facts already linked to this segment. Matching a
  * name supplies its saved identity; it does not decide whether that person is
@@ -55,10 +87,15 @@ export const semanticSegmentIdentityReferenceIds = (
       if (!causality) continue;
       if (causality.certainty !== 'unknown') addIdentity(causality.actorCharacterId, causality.actor);
       addIdentity(causality.targetCharacterId, causality.target);
+      for (const id of causality.targetCharacterIds || []) if (knownIds.has(id)) references.add(id);
     }
     for (const dialogue of input.segment.semanticSource?.dialogues || []) {
-      addIdentity(undefined, dialogue.speaker);
+      addIdentity(dialogue.speakerCharacterId, dialogue.speaker);
+      for (const id of [...(dialogue.listenerCharacterIds || []), ...(dialogue.addressedCharacterIds || [])]) {
+        if (knownIds.has(id)) references.add(id);
+      }
     }
+    for (const id of sceneStagingIdentityReferenceIds(catalog, input.segment.semanticSource?.sceneStaging || [])) references.add(id);
   }
   return catalog.filter((character) => references.has(character.id)).map((character) => character.id);
 };

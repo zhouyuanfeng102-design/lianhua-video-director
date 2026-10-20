@@ -7,6 +7,7 @@ import { seedanceChineseWriterRule } from '../src/seedancePromptRules';
 import { buildVideoPromptExecutionContext } from '../src/videoPromptExecutionContext';
 import { createInitialState } from '../src/storage';
 import { sourceContentHash } from '../src/sourceIntegrity';
+import { createSeedanceTranslationResponse } from './seedanceTranslationTestUtils';
 import type { Project, Storyboard } from '../src/types';
 
 // Local responses exercise the existing writer/translator, without a live API.
@@ -19,10 +20,10 @@ const prose = (body: string) => ['视频规格：15秒；16:9；720p；stereo。
   '主体连续性：甲黑衣，乙白衣。', '一句话概述：甲乙连续试探并接续攻防。', `连续时间轴：\n${body.replaceAll('@', '')}`,
   '全局约束：只有已有脚步、衣料、格挡声，无背景音乐。'].join('\n\n');
 const chinese = prose(retimed);
-const english = ['Video specification: 15 seconds; 16:9; 720p; stereo.', 'References and responsibilities: No external media.',
-  'Subject continuity: 甲 in black, 乙 in white.', 'One-sentence summary: 甲 and 乙 continue their sparring.',
-  'Continuous timeline:\n0–1.5 seconds: 甲 nods and raises the hands.\n1.5–4 seconds: 甲 feints and moves sideways while 乙 turns.\n4–15 seconds: 甲 throws three punches and sweeps low twice with the left leg. 乙 blocks and evades, maintaining right-palm pressure on the left shoulder until 甲 lowers and breaks free. During 8–9 seconds of this shot, 甲 says in Chinese, “请继续。”',
-  'Global constraints: Only existing footsteps, clothing and blocks; no background music.'].join('\n\n');
+const translateDescriptions = (user: string): string => createSeedanceTranslationResponse(user, ({ sourceText }) =>
+  sourceText.includes('三拳')
+    ? ' throws three punches and sweeps low twice with the left leg; the defender blocks and evades, keeping right-palm pressure on the left shoulder until the attacker lowers and breaks free. '
+    : ' translated description ');
 const base: Storyboard = {
   id: 'retiming', sceneId: 'scene', chapterId: 'chapter', workflow: 'drama', inputMode: 'text', durationSec: 15, durationPreset: '15s',
   shotMode: 'exact', shotCount: 3, pace: 'standard', aspectRatio: '16:9', resolution: '720p', audioMode: 'stereo',
@@ -69,7 +70,8 @@ for (const sequence of [false, true]) {
       }
       assert.equal(stage, 'translate');
       assert.ok(checkpoint, 'the common source and Chinese are saved together before English');
-      return english;
+      assert.equal(JSON.parse(user).sourcePrompt, chinese, 'English uses the accepted action retiming rather than its earlier schedule');
+      return translateDescriptions(user);
     } });
   assert.deepEqual(calls, ['review', 'translate']);
   assert.equal(JSON.stringify(board), before);
@@ -79,6 +81,10 @@ for (const sequence of [false, true]) {
   assert.deepEqual(result.shots.map((shot) => shot.sourceBeatIds), board.shots.map((shot) => shot.sourceBeatIds));
   actions.forEach((action) => assert.ok(result.seedance25Output!.promptZh.includes(action)));
   assert.match(result.seedance25Output!.promptEn!, /three punches|sweeps low twice/u);
+  assert.match(result.seedance25Output!.promptEn!, /0s-1\.5s[\s\S]*1\.5s-4s[\s\S]*4s-15s/u,
+    'the nonuniform accepted cuts remain in English source order');
+  assert.match(result.seedance25Output!.promptEn!, /8–9s[\s\S]*“请继续。”/u,
+    'the in-shot dialogue timing and original utterance are preserved locally');
   assert.ok(hasCurrentSeedancePrompt(project, result, 'en'), result.seedance25Output?.englishError);
   assert.equal(buildOfficialH3CompileInput(result, context).canonicalPrompt, retimed, 'H3 consumes the updated common source');
   assert.equal(result.officialPromptZh, board.officialPromptZh, 'historical H3 is not silently rewritten');
@@ -97,12 +103,12 @@ for (const sequence of [false, true]) {
     skipConversion: true, buildSeedanceInput, clean: (value) => value,
     request: async (system, user, stage) => {
       if (stage === 'review') { assert.match(system, /已有全部镜头起止值/u); assert.doesNotMatch(user, /"revisionScope": "current-segment-action-retiming"/u); return chinese; }
-      return english;
+      return translateDescriptions(user);
     } });
   assert.equal(preserved.finalPrompt, retimed);
   let translationCalls = 0;
   const translated = await generateSingleSegmentPrompt({ board: preserved, context, targetPromptFormat: 'seedance', mode: 'translate-english',
-    buildSeedanceInput, clean: (value) => value, request: async (_system, _user, stage) => { translationCalls += 1; assert.equal(stage, 'translate'); return english; } });
+    buildSeedanceInput, clean: (value) => value, request: async (_system, user, stage) => { translationCalls += 1; assert.equal(stage, 'translate'); return translateDescriptions(user); } });
   assert.equal(translationCalls, 1);
   assert.equal(translated.finalPrompt, retimed);
 }

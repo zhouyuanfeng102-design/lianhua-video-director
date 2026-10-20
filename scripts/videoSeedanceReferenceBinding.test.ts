@@ -113,6 +113,26 @@ await test('Markdown中文与英文Video specification/specs合法六节都只�
   }
 });
 
+await test('真实后置规格与仅文字声明在同一预览提交中同步，原稿与时间轴保留', () => {
+  const prompt = zh.replace('时长30秒，16:9，720p', '总时长30秒，16:9画幅，2K分辨率')
+    .replace('本次 referenceManifest 为空，没有实际映射的图片、视频、音频或 Clay Render 素材；不使用参考素材，也不依据未提供的图像像素补充画面细节。',
+      '本次未提供任何图片、视频或音频素材，全部人物与场景均以文字设定为准。');
+  const { project, board, draft } = fixture(prompt);
+  const parameters = { duration: 25, aspect_ratio: '9:16', resolution: '720p' };
+  const request = { ...draft, parameters };
+  const result = prepare(project, request);
+  assert.equal(result.draft.prompt.split('\n')[0], '视频规格：总时长25秒，画面比例9:16，分辨率720p，立体声。');
+  assertCurrentReferenceClaims(result.draft.prompt); assertStoryPreserved(result.draft.prompt, prompt);
+  assert.equal(stateFor(result, 'red').status, 'bound'); assert.equal(stateFor(result, 'white').status, 'bound');
+  const body = buildVideoApiBody({ ...api, endpoint: 'https://www.v6k.top/v1/videos' }, result.draft, [png, png]);
+  assert.equal(body.prompt, result.draft.prompt); assert.equal(body.resolution, '720p'); assert.equal(body.duration, 25);
+  assert.equal(body.aspect_ratio, '9:16'); assert.equal(board.seedance25Output?.promptZh, prompt);
+  assert.equal(prepare(project, result.draft).draft.prompt, result.draft.prompt);
+  const cleared = prepare(project, { ...result.draft, parameters: {} });
+  assert.equal(cleared.draft.prompt.split('\n')[0], prompt.split('\n')[0], 'clearing overrides renders from the authored source');
+  assertCurrentReferenceClaims(cleared.draft.prompt);
+});
+
 await test('共享六节定位保持UTF16坐标，兼容粗体并拒绝缺失、重复或乱序标题', () => {
   const quotedHeading = '“屏幕文字如下：\n参考素材与职责：只是台词，不是章节。”';
   const prompt = zh.replace('立体声。', '立体声。🌙').replace(dialogue, `${dialogue}${quotedHeading}`);
@@ -229,14 +249,26 @@ await test('非图片参考的原始职责保留并提示真实媒体上传边�
   assertStoryPreserved(result.draft.prompt, zh);
 });
 
-await test('手工修改与不可定位的参考章节保留正文/对白，显示冲突警告', () => {
+await test('手工修改保持原文，已证明来源不因缺六章而丢失人物关联', () => {
   const { project, draft } = fixture(); const first = prepare(project, draft);
   const manual = `${first.draft.prompt}\n我手工确认的补充要求。`;
   const edited = prepare(project, { ...first.draft, prompt: manual, references: [...refs()].reverse() });
   assert.equal(edited.draft.prompt, manual); assert.ok(edited.warnings.length); assert.equal(edited.issue, undefined);
   assert.notEqual(stateFor(edited, 'red').status, 'bound', 'a stale rendering is not reported as a current successful binding');
-  const missing = fixture(`未按六节编排的手稿。\n${timeline}`); const result = prepare(missing.project, missing.draft);
-  assert.equal(result.draft.prompt, missing.draft.prompt); assert.ok(result.warnings.length); assert.equal(result.issue, undefined);
+  for (const language of ['zh', 'en'] as const) {
+    const missing = fixture(`${language === 'zh' ? '未按六节编排的Seedance原稿。' : 'Saved Seedance source without six headings.'}\n${timeline}`, language);
+    const result = prepare(missing.project, missing.draft);
+    assert.ok(result.draft.prompt.startsWith(missing.draft.prompt)); assert.equal(result.issue, undefined);
+    assert.equal(stateFor(result, 'red').status, 'bound'); assert.equal(stateFor(result, 'white').status, 'bound');
+    assert.deepEqual(stateFor(result, 'red').slots, [1]); assert.deepEqual(stateFor(result, 'white').slots, [2]);
+    assert.ok(result.draft.prompt.includes(language === 'zh' ? '本次提交的参考图片：' : 'Reference images for this request:'));
+    assert.equal(prepare(missing.project, result.draft).draft.prompt, result.draft.prompt);
+    assert.equal(prepare(missing.project, { ...result.draft, references: [] }).draft.prompt, missing.draft.prompt);
+    const reordered = prepare(missing.project, { ...result.draft, references: [...refs()].reverse() });
+    assert.deepEqual(stateFor(reordered, 'red').slots, [2]); assert.deepEqual(stateFor(reordered, 'white').slots, [1]);
+    assert.equal(buildVideoApiBody(api, result.draft, [png, png]).prompt, result.draft.prompt);
+    assert.equal(missing.board.seedance25Output?.[language === 'zh' ? 'promptZh' : 'promptEn'], missing.draft.prompt);
+  }
 });
 
 await test('没有来源清单的真实图片编号仍待确认，不能借新选图猜旧号', () => {
@@ -384,9 +416,13 @@ await test('模拟任务提交/排队/保存重载与预览同稿，历史快照
   try {
     const preview = prepare(project, draft).draft; const first = await engine.start(preview);
     assert.equal(posts[0].prompt, preview.prompt); assert.deepEqual(posts[0].images, [png, png]);
-    const second = await engine.start({ ...preview, name: '排队的独立稿', parameters: { ...preview.parameters, duration: 29 } });
+    const secondDraft = { ...preview, name: '排队的独立稿', parameters: { ...preview.parameters, duration: 29 } };
+    const secondPreview = prepare(project, secondDraft).draft;
+    const second = await engine.start(secondDraft);
     const task = state.project.generationTasks.find((entry) => entry.id === second) as VideoGenerationTask;
-    assert.equal(posts.length, 1); assert.equal(task.videoJob!.snapshot.draft.prompt, preview.prompt);
+    assert.equal(posts.length, 1); assert.equal(task.videoJob!.snapshot.draft.prompt, secondPreview.prompt);
+    assert.match(secondPreview.prompt.split('\n')[0], /总时长29秒/u);
+    assert.ok(secondPreview.prompt.includes(timeline), 'request duration never retimes the authored dialogue or shots');
     const frozen = structuredClone(task.videoJob!.snapshot);
     preview.references.reverse(); state.project.characters[0].name = '后改的人物名'; state.project.assets[0].sourceEntityId = 'white';
     state.project.storyboards[0].seedance25Output!.promptZh = '后改的原稿';

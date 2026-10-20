@@ -20,7 +20,8 @@ import {
   stripContinuousAmbientBed,
 } from '../src/audioPromptPolicy';
 import { compileTargetPrompt, type PromptAdapterInput } from '../src/promptAdapters';
-import { H3_DIALOGUE_FORMAT_RULE } from '../src/h3PromptProtocol';
+import { H3_DIALOGUE_FORMAT_RULE, H3_FINAL_BODY_FORMAT_RULE } from '../src/h3PromptProtocol';
+import { H3_PERFORMANCE_DELIVERY_RULE } from '../src/h3IdentityBindings';
 import { VIDEO_DIALOGUE_STAGING_RULE } from '../src/videoConversionRules';
 import { SEEDANCE_CHINESE_WRITER_RULE } from '../src/seedancePromptRules';
 
@@ -34,6 +35,10 @@ assert.match(AUDIO_PROMPT_RULE, /不突出“啵”、夸张唇部弹响或贴�
 assert.doesNotMatch(AUDIO_PROMPT_RULE, /不把动作音压成不可闻|不能只用含糊的“极轻接触声”代替吻声/u);
 assert.match(AUDIO_PROMPT_RULE, /未发生、只是靠近、想吻或差点吻不能加吻声/u);
 assert.match(AUDIO_PROMPT_RULE, /不自动添加持续呼吸、ASMR或摩擦声/u);
+assert.match(NATURAL_ACTION_AUDIO_RULE, /当前时段实际发生的动作或发声.*对应人物或声源.*实际接触的双方表面及材质.*时刻决定拟音/u);
+assert.match(NATURAL_ACTION_AUDIO_RULE, /空手拳、掌、踢、擒抱、闪避与步法.*不能仅因武侠或剑客题材.*静置或携带的兵器.*持剑参考图.*出鞘、碰刃或金属撞击/u);
+assert.match(NATURAL_ACTION_AUDIO_RULE, /拿起、携带或查看一件兵器不等于兵器相撞.*没有实际碰撞就不写碰刃声/u);
+assert.match(NATURAL_ACTION_AUDIO_RULE, /确实出鞘、碰刃、撞击金属或硬物.*不机械禁用有真实依据的金属拟音/u);
 assert.equal(AUDIO_PROMPT_RULE.includes(STORY_DRIVEN_MUSIC_RULE), true, 'shared audio rule must expose evidence-based story music guidance');
 assert.match(STORY_DRIVEN_MUSIC_RULE, /剧情情绪转折、危险、追逐、回忆、亲密关系、胜利收束.*不是自动添加非叙事BGM的依据/u);
 assert.match(STORY_DRIVEN_MUSIC_RULE, /场景名称、天气、普通走动和风格预设.*不是自动添加非叙事BGM的依据/u);
@@ -53,15 +58,18 @@ assert.match(AUDIO_H3_DELIVERY_RULE, /audioMode为none.*不添加音乐、对白
 assert.match(AUDIO_H3_DELIVERY_RULE, /保持原有H3字段名称与顺序、对白及说话人，镜数与切点保持已确认排程/u);
 assert.match(AUDIO_H3_DELIVERY_RULE, /仅本次指令明确授权taskAuthority=current-segment-staging-replan时.*同时交付的修正canonicalPrompt.*固定段长与exact镜数仍不变/u);
 assert.match(AUDIO_H3_DELIVERY_RULE, /若本次明确是格式修复、参考图更新或上下段衔接修复.*不重新配乐/u);
-assert.match(AUDIO_H3_DELIVERY_RULE, /overall_soundscape写整段已有环境声、物理动作声与非语言人声的简短摘要/u);
+assert.match(AUDIO_H3_DELIVERY_RULE, /overall_soundscape只写整段简短的全局声学概括.*不是一次性事件清单或第二条音效轨/u);
 assert.match(AUDIO_H3_DELIVERY_RULE, /只有用户明确要求全片完全静音才写N\/A/u);
 assert.match(NATURAL_BACKGROUND_MUSIC_RULE, /新稿的默认无配乐不能覆盖历史已确认音乐/u);
 assert.match(AUDIO_H3_DELIVERY_RULE, /具体对白原字、唯一说话人、声源编号、逐镜无对白.*全部写在对应\[Shot N\]/u);
-assert.match(AUDIO_H3_DELIVERY_RULE, /不得在overall_soundscape中列Shot编号、对白复述、声源分配、镜内时序或长篇否定清单/u);
+assert.match(AUDIO_H3_DELIVERY_RULE, /局部拟音必须写在实际事件对应的\[Shot N\].*真实接触双方的材质.*本段时刻/u);
+assert.match(AUDIO_H3_DELIVERY_RULE, /不得在overall_soundscape中列Shot编号、对白复述、声源分配、镜内时序、具体器物材质或长篇否定清单/u);
 assert.match(AUDIO_H3_DELIVERY_RULE, /不得新增negative_prompt、negative、反向提示词或其它声音section/u);
 assert.match(AUDIO_TRANSLATION_SCOPE_RULE, /sourcePrompt为准.*无对白不抬升/u);
 assert.match(AUDIO_TRANSLATION_SCOPE_RULE, /N\/A原样保留.*不借新声音规则重写旧稿的混音方案/u);
+assert.match(AUDIO_TRANSLATION_SCOPE_RULE, /只保留源稿中每项声音已有的动作因果、发声对象、接触材质、时刻及字段作用域.*不因题材、视觉身份、道具或参考图重新推导拟音/u);
 assert.match(AUDIO_EXISTING_SCOPE_RULE, /只更新已有提示词中明确要求的非声音内容.*不得重新选配器/u);
+assert.match(AUDIO_EXISTING_SCOPE_RULE, /不因题材、视觉身份、道具或参考图重新推导拟音.*不把局部声音移入overall_soundscape或反向移回镜内/u);
 assert.equal(AUDIO_PROMPT_RULE.split(DIEGETIC_AUDIO_SCOPE_RULE).length - 1, 1,
   'planning, conversion and their existing repairs inherit one source-and-time scope rule');
 assert.match(DIEGETIC_AUDIO_SCOPE_RULE, /可见环境、明确可听的有源事件和有剧情理由的跨镜声床/u);
@@ -74,11 +82,24 @@ assert.match(DIEGETIC_AUDIO_SCOPE_RULE, /不把所有真实声音强制缩成短
 assert.match(DIEGETIC_AUDIO_SCOPE_RULE, /“轻微、低响、柔和、远处”只约束听感，不是持续时间授权/u);
 assert.match(DIEGETIC_AUDIO_SCOPE_RULE, /同一声源只安排一次.*不再在overall_soundscape中变成第二条全局铺底/u);
 assert.match(DIEGETIC_AUDIO_SCOPE_RULE, /没有.*持续底噪|无持续底噪.*局部动作声.*间隙安静/u);
+assert.match(DIEGETIC_AUDIO_SCOPE_RULE, /一次性声音.*具体动作、器物、材质和时刻.*只留在对应镜内/u);
+assert.match(DIEGETIC_AUDIO_SCOPE_RULE, /overall_soundscape不得按镜头顺序复述、列举或换词转述.*不得把后段事件抬成整段声景/u);
 assert.match(AUDIO_H3_DELIVERY_RULE, /局部环境声的出现、结束和听觉距离保留在对应镜内/u);
 assert.match(AUDIO_TRANSLATION_SCOPE_RULE, /出现与结束时段、相对本镜或本段的时间坐标.*前景或背景层级/u);
 assert.match(AUDIO_TRANSLATION_SCOPE_RULE, /不把局部事件改成贯穿全段的continuous\/throughout ambience/u);
 assert.match(AUDIO_TRANSLATION_SCOPE_RULE, /同一已确认跨镜声源保持原范围，不能一刀切删掉或改短/u);
 assert.match(AUDIO_EXISTING_SCOPE_RULE, /不延长局部声音、不提前引入后段声源.*不在镜内与overall_soundscape新增重复铺底/u);
+
+for (const rule of [H3_FINAL_BODY_FORMAT_RULE, H3_PERFORMANCE_DELIVERY_RULE]) {
+  assert.match(rule, /当前动作或发声对象.*实际接触.*材质.*时刻|当前动作或发声对象.*实际接触.*材质.*startSec\/endSec/u,
+    'H3 prompt and performance contracts ground new foley in the current event and material contact');
+  assert.match(rule, /武侠或剑客|武侠、剑客/u);
+  assert.match(rule, /拿起、携带或查看一件兵器.*不等于两件兵器相撞/u);
+  assert.match(rule, /overallSoundscape|overall_soundscape/u);
+  assert.match(rule, /不是一次性事件清单或第二条音效轨/u);
+  assert.match(rule, /不列具体动作、器物、材质或时刻/u);
+  assert.match(rule, /(?:不|不能)机械/u, 'real metal contact remains legal');
+}
 
 // Source contracts must reach both planners and final delivery without a new
 // request stage; voice descriptions in a draft are not confirmation evidence.

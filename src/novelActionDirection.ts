@@ -1,7 +1,10 @@
+import { STORY_GROUP_PARTICIPATION_RULE, STORY_TIME_RELATION_RULE } from './storySceneParticipationRules';
+
 /** Shared directing instructions. These shape existing model requests; they do
  * not inspect generated content, introduce a stage, or authorize new events. */
 export const NOVEL_ACTION_SOURCE_RULE = [
   'NOVEL_ACTION_SOURCE_V1：将小说理解为连续发生的场面，再编排其中已有行为；范围包含行进、起坐、取放、饮食、穿衣、开门、递接、搀扶、拥抱、观察、劳动、仪式、对话、情绪变化、追逐和战斗。先明确人物此刻在做什么、与谁或什么发生关系，以及原文有依据的目标、阻碍和触发；未知动机不猜成事实。',
+  STORY_GROUP_PARTICIPATION_RULE,
   '先区分实际事件与状态/约束：身份、服装、既有站姿、动作习惯、无兵刃、点到为止是辨认或行为约束，不各自另占动作时长；收手、稳住、拍土、整理衣带、重新摆架势若实际发生，则仍是完整保留的动作。一个旧事件条目同时包含原则与“又过几个照面”等真实行动时，只让原则约束这段行动，不删掉其中任何行动或回合。实际事件再区分已经发生、正在进行、想做、尝试、中断、否定、条件假设与回忆；“想推门”不等于门已开，“伸手又收回”不补成抓住，“若有人来就拔刀”不自动执行。沿用现有事件、阶段、结果与不确定性记录，不添加新表。',
   '区分事件发生、人物获知和观众获知的时刻。未知的开门者、伤害来源、尚未揭示身份继续未知；叙述者未看见不必等于观众永远看不见，但不得提前揭示原文刻意保留的悬念或把结果倒写成当时已知的原因。心理与必要设定可保留简短说明，不为“全部可见”硬加动作、闪回、同伴或台词。',
   '编排权限：仅为同一已有事件选择与剧情相容的站位、接近、操作、接触、停续、释放和衔接，保留全部实际动作、身份、人数、能力、道具、世界规则、动作性质、对白和结果。明确次数照录：“三步”保持三步，“第三步”仍在第三步触发；“几个照面”“接连攻防”保持其连续多次性质，不擅自定成两回合或缩成一次。detailed 模式可补足原文省略的实现过程，将选择写入已有 stagingAdditions/stagingChoices；faithful 模式仅展开原文有依据的过程，不指定未知左右、脚步、新姿势。已采用的具体演出沿用，只有尚未编排的已有事件需要展开；不新增冲突、拒绝、伤害、能力、动机或后续事件。',
@@ -14,6 +17,7 @@ export const NOVEL_ACTION_SOURCE_RULE = [
 
 export const NOVEL_ACTION_CONTINUITY_RULE = [
   'NOVEL_ACTION_CONTINUITY_V1：沿同一 sceneId、参与者和已采用 phase 继续已有行为。用现有 participants、worldRelations、phases.startState/action/endState 与 entryState/exitState/continuityPack 记录当前需要的身体姿态、位置、注意、接触对象、持物归属、物品开合/放置状态，以及行为完成、进行、等待或中断；无需新增固定字段或为填表补事件。',
+  STORY_TIME_RELATION_RULE,
   '切镜、分段或参考帧更换不重置人和物：接过的信仍归接收者，放下的杯仍在桌上，未完成伸手不变成已抓住，已获知信息不重复惊讶。同一事件可跨段，以当前完整本段正文确定实际推进范围；旧事件/phase记录是辅助依据，不能因漏记或旧秒数占满时长而排除正文后续动作。已完成的起手、接触、结果或对白不重播，也不导入其他段的新事件。镜尾可以仍在运动中，exitState记录正在转身、滑移或操作的进度；不因切镜额外添加收手、站稳或摆架势，原文真实发生的这些动作仍完整保留。下一镜从当前进度直接继续。原文明确跳时/换场时保留揭示顺序与跳过后的实际状态，不自行跳过已叙明的连续动作。',
   '用户当前正文及 contentOverridden 优先；旧场面记录只沿用仍适用部分，不能恢复用户删除的事件或用旧状态撤销修改。旧稿缺少结构时按其已有正文理解关系，不以补字段为由追加剧情、动作、请求或重试。',
 ].join('\n');

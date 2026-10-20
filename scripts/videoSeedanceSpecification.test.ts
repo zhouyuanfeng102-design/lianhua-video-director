@@ -21,11 +21,11 @@ Continuous timeline: 0–30 seconds, dialogue: "The screen is 2K and 16:9."
 Global constraints: retain actions and dialogue.`;
 const afterSpecification = (prompt: string): string => prompt.slice(prompt.indexOf('\n'));
 
-test('中文只同步本次分辨率和画幅，保留时长声音与其它五节', () => {
+test('中文同步本次时长分辨率和画幅，声音与其它五节不变', () => {
   const parameters = { resolution: '720p', aspect_ratio: '9:16', duration: 29 };
   const before = structuredClone(parameters);
   const result = render(zh, parameters, api);
-  assert.equal(result.prompt.split('\n')[0], '视频规格：时长30秒，画面9:16，分辨率720p，立体声。');
+  assert.equal(result.prompt.split('\n')[0], '视频规格：总时长29秒，画面比例9:16，分辨率720p，立体声。');
   assert.deepEqual(result.warnings, []);
   assert.equal(afterSpecification(result.prompt), afterSpecification(zh));
   assert.deepEqual(parameters, before);
@@ -49,15 +49,17 @@ test('规格内引用和对白不成为替换目标', () => {
   assert.ok(result.prompt.includes('“分辨率4K，画面4:3”；<d>分辨率8K，画面1:1</d>'));
   const onlyQuoted = zh.replace('画面16:9，分辨率2K', '“画面16:9，分辨率2K”');
   const quoted = render(onlyQuoted, { resolution: '720p', ratio: '9:16' }, api);
-  assert.equal(quoted.prompt, onlyQuoted);
-  assert.equal(quoted.warnings.length, 2);
+  assert.ok(quoted.prompt.includes('“画面16:9，分辨率2K”'));
+  assert.ok(quoted.prompt.includes('分辨率720p'));
+  assert.ok(quoted.prompt.includes('画面比例9:16'));
+  assert.deepEqual(quoted.warnings, []);
 });
 
 test('Markdown与CRLF格式保留，重复渲染不累加', () => {
   const prompt = zh.replace(/^(视频规格|参考素材与职责|主体连续性|一句话概述|连续时间轴|全局约束)：/gmu, '## $1\n\n').replace(/\n/gu, '\r\n');
   const parameters = { resolution: '720p', ratio: '1:1' };
   const first = render(prompt, parameters, api);
-  assert.ok(first.prompt.startsWith('## 视频规格\r\n\r\n时长30秒，画面1:1，分辨率720p，立体声。\r\n'));
+  assert.ok(first.prompt.startsWith('## 视频规格\r\n\r\n时长30秒，画面比例1:1，分辨率720p，立体声。\r\n'));
   assert.equal(render(first.prompt, parameters, api).prompt, first.prompt);
   assert.deepEqual(first.warnings, []);
 });
@@ -73,7 +75,7 @@ test('老李特价默认值与真实请求构造复用同一规则', () => {
   const result = render(zh, parameters, classic);
   const body = buildLaoliVideoApiBody(classic, { name: '', prompt: result.prompt, backend: 'api', parameters, references: [] }, []);
   assert.equal(body.resolution, '720p'); assert.equal(body.ratio, '9:16');
-  assert.match(result.prompt.split('\n')[0], /画面9:16，分辨率720p/u);
+  assert.match(result.prompt.split('\n')[0], /画面比例9:16，分辨率720p/u);
   assert.deepEqual(result.warnings, []);
 });
 
@@ -103,6 +105,34 @@ test('自定义模板与未明确协议保留原文并提示，损坏章节不�
   const malformed = zh.replace('主体连续性：', '未知章节：');
   const result = render(malformed, { resolution: '720p' }, api);
   assert.equal(result.prompt, malformed); assert.equal(result.warnings.length, 1);
+});
+
+test('真实中英文值在标签前的规格按有效参数渲染，原排程及备注逐字保留', () => {
+  const realZh = zh.replace('时长30秒，画面16:9，分辨率2K', '总时长30秒，16:9画幅，2K分辨率')
+    .replace('立体声。', '立体声；用户备注：“30秒与2K只是显示屏文字。”');
+  const realEn = en.replace('duration 30 seconds, aspect ratio 16:9, resolution 2K', 'Total duration 30s, 16:9 frame, 2K resolution')
+    .replace('stereo.', 'stereo. Note: \"30s and 2K are screen text.\"');
+  for (const [prompt, expected, note] of [
+    [realZh, '视频规格：总时长25秒，画面比例9:16，分辨率720p，立体声', '用户备注：“30秒与2K只是显示屏文字。”'],
+    [realEn, 'Video specification: duration 25 seconds, aspect ratio 9:16, resolution 720p, stereo', 'Note: \"30s and 2K are screen text.\"'],
+  ]) {
+    const result = render(prompt, { duration: 25, aspect_ratio: '9:16', resolution: '720p' }, api);
+    assert.ok(result.prompt.startsWith(expected));
+    assert.ok(result.prompt.includes(note));
+    assert.equal(afterSpecification(result.prompt), afterSpecification(prompt));
+    assert.deepEqual(result.warnings, []);
+    assert.equal(render(result.prompt, { duration: 25, aspect_ratio: '9:16', resolution: '720p' }, api).prompt, result.prompt);
+  }
+});
+
+test('未写出的有效技术参数直接渲染，不删除用户备注或推测未选择值', () => {
+  const source = zh.replace('时长30秒，画面16:9，分辨率2K，', '');
+  const result = render(source, { seconds: 12.5, resolution: '1080p' }, api);
+  assert.match(result.prompt.split('\n')[0], /总时长12\.5秒，分辨率1080p/u);
+  assert.doesNotMatch(result.prompt.split('\n')[0], /16:9/u);
+  assert.ok(result.prompt.includes('立体声。'));
+  assert.equal(afterSpecification(result.prompt), afterSpecification(source));
+  assert.deepEqual(result.warnings, []);
 });
 
 console.log(`Seedance specification: ${groups} focused groups passed.`);

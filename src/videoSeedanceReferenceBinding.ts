@@ -126,10 +126,11 @@ export const prepareVideoSeedanceReferenceDraft = (
   }
   const unknownTokens = unique(matches.filter((match) => imageNumber(match[0]) && unique((sources.get(tokenKey(match[0])) || []).map((entry) => entry.assetId)).length !== 1).map((match) => match[0]));
   if (!binding && (draft.references.length || matches.length)) warnings.push('本次 Seedance 正文已手动修改或缺少可证明的原稿来源，已保留正文；素材关联待确认。');
-  if (binding && !section && draft.references.length) warnings.push('Seedance 六个章节无法唯一定位，已保留参考说明；图片已选入，人物关联待确认。');
   if (unknownTokens.length) warnings.push(`${unknownTokens.join('、')} 缺少可证明的原素材对应，已保留原编号，未附加冲突图片引用；请核对当前参考说明。`);
   if (draft.references.length && !plan.numbers) warnings.push(plan.warning || '当前接口未明确 Seedance 图片引用顺序，已保留正文；人物关联待确认。');
-  const canAssociate = Boolean(binding && section && !unknownTokens.length && plan.numbers);
+  // Identity provenance and actual selected slots establish association. A
+  // legacy/free-form Seedance source need not have all six display headings.
+  const canAssociate = Boolean(binding && !unknownTokens.length && plan.numbers);
   const currentReferences: SeedanceCurrentReference[] = [];
   const lines: string[] = [];
   const selectedCharacters = new Map<string, { name: string; slots: number[]; associated: boolean }>();
@@ -202,14 +203,14 @@ export const prepareVideoSeedanceReferenceDraft = (
   }
   const noSourceAndNoMedia = !binding?.references.length && !draft.references.length
     && !draft.audioReferences?.length && !draft.videoReferences?.length;
+  const newline = basePrompt.includes('\r\n') ? '\r\n' : '\n';
+  const selectedBody = lines.length ? [ ...lines,
+    language === 'en' ? 'Use these images only for their stated visual purposes. Keep the existing timeline, appearances, actions and dialogue.'
+      : '以上图片仅按所述用途参考，出场、动作、衣着变化与对白沿用原时间轴。',
+  ].join(newline) : language === 'en' ? 'No images are selected for this request.' : '本次未选择图片参考素材。';
   if (canAssociate && section && !noSourceAndNoMedia) {
     const body = basePrompt.slice(section.start, section.end);
     const bodyEdits = edits.filter((edit) => edit.start >= section.start && edit.end <= section.end);
-    const newline = basePrompt.includes('\r\n') ? '\r\n' : '\n';
-    const selectedBody = lines.length ? [ ...lines,
-      language === 'en' ? 'Use these images only for their stated visual purposes. Keep the existing timeline, appearances, actions and dialogue.'
-        : '以上图片仅按所述用途参考，出场、动作、衣着变化与对白沿用原时间轴。',
-    ].join(newline) : language === 'en' ? 'No images are selected for this request.' : '本次未选择图片参考素材。';
     // A reference section can mix outdated input declarations with story facts.
     // Remove only proven conflicting declarations from this request copy; the
     // original source, quoted text and unrelated story facts remain intact.
@@ -233,7 +234,15 @@ export const prepareVideoSeedanceReferenceDraft = (
     for (let index = edits.length - 1; index >= 0; index -= 1) if (edits[index].start >= section.start && edits[index].end <= section.end) edits.splice(index, 1);
     edits.push({ start: section.start, end: section.end, text: replacement });
   }
-  const renderedPrompt = noSourceAndNoMedia ? basePrompt : applyEdits(basePrompt, edits);
+  let renderedPrompt = noSourceAndNoMedia ? basePrompt : applyEdits(basePrompt, edits);
+  if (canAssociate && !section && !noSourceAndNoMedia) {
+    // A proven source without standard headings keeps its authored narrative.
+    // Append the current uses once, always rebuilding from the saved base.
+    const current = cleanSeedanceReferenceClaims(renderedPrompt, {
+      hasImages: draft.references.length > 0, hasAudio: Boolean(draft.audioReferences?.length), hasVideo: Boolean(draft.videoReferences?.length),
+    }).text;
+    renderedPrompt = `${current}${newline}${newline}${language === 'en' ? 'Reference images for this request:' : '本次提交的参考图片：'}${newline}${selectedBody}`;
+  }
   const participation = resolveSeedanceCharacterParticipation(basePrompt, project.characters, board?.seedance25Output);
   const relevant = unique([
     ...participation.characters.filter((entry) => entry.presence !== 'mentioned').map((entry) => entry.characterId),
@@ -249,7 +258,7 @@ export const prepareVideoSeedanceReferenceDraft = (
     if (!name) return [];
     return [{ characterId, name, status: selected ? selected.associated ? 'bound' : 'pending' : 'unselected', slots: selected?.slots || [],
       ...(selected && !selected.associated ? { reason: !binding ? '原稿来源或手动编辑未确认，图片已选入，人物关联待确认。'
-        : plan.warning || '正文参考章节或本次图片编号未确认，人物关联待确认。' } : {}) }];
+        : plan.warning || '原素材对应或本次图片编号未确认，人物关联待确认。' } : {}) }];
   });
   const uniqueWarnings = unique(warnings);
   const outputBinding: VideoSeedanceReferenceBinding | undefined = binding ? {

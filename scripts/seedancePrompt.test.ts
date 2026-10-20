@@ -163,22 +163,23 @@ const englishFixture = [
 let translationCalls = 0;
 const promptEn = await translateSeedancePromptToEnglish({
   sourcePrompt: originalChinese,
-  request: async (system, user) => {
+  request: async (system, user, transport) => {
     translationCalls += 1;
     assert.ok(system.includes(SEEDANCE_ENGLISH_TRANSLATION_RULE));
     assert.ok(system.includes('STORY_CAUSALITY_TRANSLATION_V1'));
     assert.match(system, /不能把具名攻击目标泛化为前方\/战场/u);
     assert.match(system, /章节标题翻译为英文，不删除开头内容/u);
     assert.match(system, /对白.*原语言/u);
-    assert.match(user, /视频规格：时长 30 秒/u, 'the full specification must reach translation before the first timeline row');
-    assert.match(user, /参考素材与职责/u);
-    assert.match(user, /__LH_DIALOGUE_001__/u);
-    assert.ok(!user.includes(dialogue), 'the existing dialogue protection must also apply to Seedance');
-    return `\`\`\`text\n${englishFixture}\n\`\`\``;
+    const document = JSON.parse(user);
+    assert.equal(document.sourcePrompt, originalChinese, 'the full accepted source is available as context');
+    assert.doesNotMatch(user, /__LH_|__H3_/u, 'no inline placeholder preservation is delegated to the model');
+    assert.equal(transport?.sourceDocumentTranslation, true);
+    assert.ok(document.units.some((unit: { literals: Array<{ kind: string; text: string }> }) => unit.literals.some((literal) => literal.kind === 'dialogue' && literal.text.includes(dialogue))));
+    assert.ok(document.slots.every((slot: { sourceText: string; before: string; after: string }) => !slot.sourceText.includes(dialogue) && slot.before.length <= 80 && slot.after.length <= 80));
+    return JSON.stringify({ slots: document.slots.map((slot: { id: string }) => ({ id: slot.id, text: ' translated description ' })) });
   },
 });
 assert.equal(translationCalls, 1, 'on-demand English requires one translation request');
-assert.equal(promptEn, englishFixture, 'cleaning must retain the specification and references before the timeline');
 assert.match(promptEn, /^Video specification:/u);
 assert.match(promptEn, /References and responsibilities:/u);
 assert.deepEqual(promptEn.match(/@(?:Image|Audio|Video|Clay Render) \d+/gu), [
@@ -192,31 +193,28 @@ assert.notEqual(promptEn, bilingualResult.promptZh);
 assert.doesNotMatch(promptEn, /__LH_|integrated_multimodal_description|\[Shot\s+\d+\]/u);
 assert.equal(cleanSeedancePrompt(`\uFEFF\`\`\`markdown\n${englishFixture}\n\`\`\``), englishFixture);
 
-for (const [originalToken, changedToken] of [
-  ['@Image 1', '@Image 99'],
-  ['@Audio 1', '@Audio 2'],
-  ['@Video 1', '@Video 5'],
-  ['@Clay Render 1', '@Clay Render 4'],
-]) {
+for (const response of ['not JSON', '{}', '{"slots":[]}', '{"slots":[{"id":"slot-0001","text":""}]}']) {
+  let requests = 0;
   await assert.rejects(translateSeedancePromptToEnglish({
     sourcePrompt: originalChinese,
-    request: async () => englishFixture.replace(originalToken, changedToken),
-  }), /Seedance.*参考素材编号/u, `${originalToken} must not silently change during English translation`);
+    request: async () => { requests += 1; return response; },
+  }), /英文交付序列化失败/u);
+  assert.equal(requests, 1, 'unreadable delivery never starts a second model request');
 }
-await assert.rejects(translateSeedancePromptToEnglish({
-  sourcePrompt: originalChinese,
-  request: async () => englishFixture.replace(dialogue, 'Do not worry, I am here.'),
-}), /原语言对白/u, 'translating descriptions must not translate dialogue without authorization');
 assert.equal(bilingualResult.promptZh, originalChinese, 'translation failure must preserve the Chinese result for retry');
 
+let canceledRequests = 0;
 await assert.rejects(translateSeedancePromptToEnglish({
-  sourcePrompt: originalChinese,
-  request: async () => `${englishFixture}\n转换器输出：只返回JSON对象，不要输出规则解释。`,
-}), /Seedance 英文结果.*生成规则/u, 'translated rule echoes cannot replace a legitimate saved Chinese source');
+  sourcePrompt: originalChinese, isCurrent: () => false,
+  request: async () => { canceledRequests += 1; return '{}'; },
+}), { name: 'AbortError' });
+assert.equal(canceledRequests, 0);
+let current = true;
 await assert.rejects(translateSeedancePromptToEnglish({
-  sourcePrompt: originalChinese,
-  request: async () => `${englishFixture}\nConverter output: Return only a complete JSON object. Do not output rule explanations.`,
-}), /Seedance 英文结果.*生成规则/u, 'the same rule echo cannot bypass validation by being translated into English');
+  sourcePrompt: originalChinese, isCurrent: () => current,
+  request: async () => { canceledRequests += 1; current = false; return '{}'; },
+}), { name: 'AbortError' });
+assert.equal(canceledRequests, 1, 'a canceled result cannot be decoded or saved');
 let contaminatedSourceRequests = 0;
 await assert.rejects(translateSeedancePromptToEnglish({
   sourcePrompt: `${originalChinese}\n转换器输出：只返回JSON对象，不要输出规则解释。`,

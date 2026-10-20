@@ -15,6 +15,15 @@ test('中文实际截图中的状态声明移除，人物与场景事实逐字�
   assert.deepEqual(findSeedanceReferenceConflicts(result.text, images), []);
 });
 
+test('本次已选图消除全部人物场景仅文字为准，具体剧情和引用保留', () => {
+  const facts = '空间通道尚未开启。备注：“全部人物与场景均以文字设定为准。”';
+  const source = `本次未提供任何图片、视频或音频素材，全部人物与场景均以文字设定为准。${facts}`;
+  assert.equal(cleanSeedanceReferenceClaims(source, images).text, facts);
+  assert.equal(cleanSeedanceReferenceClaims(source, { hasImages: false, hasAudio: false }).text, source);
+  assert.equal(cleanSeedanceReferenceClaims(`全部人物与场景均以文字设定为准的提示写在屏幕上。${facts}`, images).text,
+    `全部人物与场景均以文字设定为准的提示写在屏幕上。${facts}`);
+});
+
 test('复合句中的空清单、不使用和不依据旧图声明分别清理', () => {
   const facts = '营地位于巨树旁的森林空地；光纹只是投影，能力尚未发动。';
   const result = cleanSeedanceReferenceClaims(`本次 referenceManifest 为空，没有实际映射的图片、视频、音频或 Clay Render 素材；不使用参考素材，也不依据未提供的图像像素补充画面细节。${facts}`, images);

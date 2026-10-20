@@ -62,7 +62,7 @@ import {
 } from './seedancePrompt';
 
 export type SingleSegmentPromptStage = 'convert' | 'review' | 'translate';
-export interface SingleSegmentPromptTransport { maxTokens: number }
+export interface SingleSegmentPromptTransport { maxTokens?: number; jsonObject?: true }
 
 export interface GenerateSingleSegmentPromptInput {
   board: Storyboard;
@@ -790,7 +790,7 @@ export async function generateSingleSegmentPrompt(
     }
     return source;
   };
-  const requestSeedance = async (system: string, user: string, stage: 'review' | 'translate'): Promise<string> => {
+  const requestSeedance = async (system: string, user: string, stage: 'review' | 'translate', sourceDocumentTranslation = false): Promise<string> => {
     assertCurrent();
     input.onStage?.(stage);
     assertCurrent();
@@ -810,7 +810,8 @@ export async function generateSingleSegmentPrompt(
       sourceUser += `\n\n<seedance_existing_delivery_data>\n${untrustedJson({ promptZh: input.board.seedance25Output?.promptZh || '',
         revisionScope: input.purpose === 'continuity-repair' ? 'adjacent-segment-continuity-only' : 'current-segment-dialogue-repair-within-confirmed-schedule' })}\n</seedance_existing_delivery_data>\n这是修复前的已保存目标稿，缺少目标稿时仅按本次公共修复结果保真编写。`;
     }
-    const response = await input.request(sourceSystem, sourceUser, stage);
+    const response = await input.request(sourceSystem, sourceUser, stage,
+      sourceDocumentTranslation ? { jsonObject: true } : undefined);
     assertCurrent();
     return response;
   };
@@ -824,8 +825,9 @@ export async function generateSingleSegmentPrompt(
     }
     try {
       const promptEn = await translateSeedancePromptToEnglish({ sourcePrompt: saved.promptZh,
+        sourceCharacters: input.context.characters,
         isCurrent: input.isCurrent,
-        request: (system, user) => requestSeedance(system, user, 'translate'),
+        request: (system, user, transport) => requestSeedance(system, user, 'translate', transport?.sourceDocumentTranslation),
       });
       assertCurrent();
       return { ...canonicalBoard, seedance25Output: { ...saved, promptEn,
@@ -845,7 +847,7 @@ export async function generateSingleSegmentPrompt(
     let requestStage: 'review' | 'translate' = 'review';
     let chineseCheckpoint = canonicalBoard;
     const output = await generateSeedanceBilingualOutput({ input: source, isCurrent: input.isCurrent,
-      request: (system, user) => requestSeedance(system, user, requestStage),
+      request: (system, user, transport) => requestSeedance(system, user, requestStage, transport?.sourceDocumentTranslation),
       ...(actionRetiming ? { onStaging: (delivery: import('./seedancePrompt').SeedanceStagingDelivery) => {
         assertCurrent();
         const synchronized = synchronizeAiAuthoredH3StagingDelivery(canonicalBoard,

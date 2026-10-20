@@ -205,9 +205,10 @@ assert.ok(remapped.draft.prompt.includes('甲说：“屏幕上是 @Image 1。�
 assert.deepEqual(mappedDraft.references.map((reference) => reference.assetId), ['image-b', 'image-a']);
 assert.equal(mappedDraft.prompt, mappedPrompt, 'preview mapping does not mutate the saved authored body');
 assert.equal(remapped.draft.source?.promptFingerprint, sourceContentHash(remapped.draft.prompt), 'the frozen submission fingerprint follows the actually rendered body');
-for (const token of ['@Video 1', '@Audio 1', '@Clay Render 1']) {
+for (const [token, inputType] of [['@Video 1', '视频'], ['@Audio 1', '音频'], ['@Clay Render 1', '该类型']]) {
   assert.ok(remapped.draft.prompt.includes(token));
-  assert.ok(remapped.warnings.some((warning) => warning.includes(token) && warning.includes('专用上传槽')), 'unimplemented media transport is explicitly advisory and never faked');
+  assert.ok(remapped.warnings.includes(`${token}：未对应本次已选的${inputType}参考输入，已保留原说明；请核对实际素材。`),
+    'an unselected media input stays explicitly advisory and is never faked as an attached reference');
 }
 const removed = prepareVideoSeedanceReferenceDraft(mappedProject, { ...remapped.draft, references: [mappedDraft.references[0]] }, { numbers: [1] });
 assert.ok(!removed.draft.prompt.includes('@Image 2：训练者甲'), 'a removed identity cannot leave a live token pointing at a different image');

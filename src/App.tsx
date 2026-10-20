@@ -8184,9 +8184,9 @@ export default function App() {
             runtimeFailureDetail = undefined;
             try {
               return await requestTextModel(
-                transport ? { ...state.settings.textApi, maxTokens: transport.maxTokens } : state.settings.textApi,
+                transport?.maxTokens !== undefined ? { ...state.settings.textApi, maxTokens: transport.maxTokens } : state.settings.textApi,
                 systemPrompt, userPrompt, undefined,
-                { disableThinking: true, ...(stage !== "translate" && conversionReferenceImages.length
+                { disableThinking: true, jsonObject: transport?.jsonObject, ...(stage !== "translate" && conversionReferenceImages.length
                   ? { referenceImages: conversionReferenceImages } : {}) },
               );
             } catch (error) {
@@ -8320,8 +8320,8 @@ export default function App() {
         maxOutputTokens: snapshot.settings.textApi.maxTokens,
         clean: cleanVideoPrompt, isCurrent,
         request: (system, user, _stage, transport) => requestTextModel(
-          transport ? { ...snapshot.settings.textApi, maxTokens: transport.maxTokens } : snapshot.settings.textApi, system, user,
-          operation.controller.signal, { disableThinking: true }),
+          transport?.maxTokens !== undefined ? { ...snapshot.settings.textApi, maxTokens: transport.maxTokens } : snapshot.settings.textApi, system, user,
+          operation.controller.signal, { disableThinking: true, jsonObject: transport?.jsonObject }),
       });
       if (!isCurrent()) return;
       if (mode === "translate-english" && result.officialPromptEnError) throw new Error(result.officialPromptEnError);
@@ -8422,8 +8422,8 @@ export default function App() {
         purpose: "character-dossier-refresh", mode: "generate", clean: cleanVideoPrompt, isCurrent,
         maxOutputTokens: snapshot.settings.textApi.maxTokens,
         request: (system, user, _stage, transport) => requestTextModel(
-          transport ? { ...snapshot.settings.textApi, maxTokens: transport.maxTokens } : snapshot.settings.textApi,
-          system, user, operation.controller.signal, { disableThinking: true }),
+          transport?.maxTokens !== undefined ? { ...snapshot.settings.textApi, maxTokens: transport.maxTokens } : snapshot.settings.textApi,
+          system, user, operation.controller.signal, { disableThinking: true, jsonObject: transport?.jsonObject }),
       });
       if (!isCurrent()) return;
       if (!hasCurrentOfficialH3Prompt(result, context)) throw new Error("新人物资料稿校验未通过，旧稿保持可恢复，仍标记待更新。");
@@ -8688,9 +8688,9 @@ export default function App() {
         request: async (system, user, _stage, transport) => {
           runtimeFailureDetail = undefined;
           try {
-            return await requestTextModel(transport
+            return await requestTextModel(transport?.maxTokens !== undefined
               ? { ...snapshot.settings.textApi, maxTokens: transport.maxTokens } : snapshot.settings.textApi,
-            system, user, operation.controller.signal, { disableThinking: true });
+            system, user, operation.controller.signal, { disableThinking: true, jsonObject: transport?.jsonObject });
           } catch (error) {
             runtimeFailureDetail = error;
             throw error;
@@ -8852,11 +8852,11 @@ export default function App() {
           : `第 ${segment.index} 段中文已通过校验，正在调用 API ${mode === "translate-english" ? "仅重试" : "生成"}英文版。`),
         maxOutputTokens: snapshot.settings.textApi.maxTokens,
         request: (systemPrompt, userPrompt, stage, transport) => requestTextModel(
-          transport ? { ...snapshot.settings.textApi, maxTokens: transport.maxTokens } : snapshot.settings.textApi,
+          transport?.maxTokens !== undefined ? { ...snapshot.settings.textApi, maxTokens: transport.maxTokens } : snapshot.settings.textApi,
           systemPrompt,
           userPrompt,
           operation.controller.signal,
-          { disableThinking: true, ...(stage !== "translate" && referenceImages.length ? { referenceImages } : {}) },
+          { disableThinking: true, jsonObject: transport?.jsonObject, ...(stage !== "translate" && referenceImages.length ? { referenceImages } : {}) },
         ),
       });
       const refreshedChinesePrompt = refreshedOfficialBoard.officialPromptZh || "";
@@ -13923,8 +13923,10 @@ function DirectorView(ctx: AppContext) {
     const textApi = state.settings.textApi;
     return translateSeedancePromptToEnglish({
       sourcePrompt,
+      sourceCharacters: state.project.characters,
       isCurrent,
-      request: (system, user) => requestTextModel(textApi, system, user, undefined, { disableThinking: true }),
+      request: (system, user, transport) => requestTextModel(textApi, system, user, undefined,
+        { disableThinking: true, jsonObject: transport?.sourceDocumentTranslation }),
     });
   };
   const seedanceSaveStaleMessage = "当前项目、章节或分镜已变化，Seedance 提示词未保存，请在当前分镜重新生成。";
@@ -13993,10 +13995,11 @@ function DirectorView(ctx: AppContext) {
     try {
       const output = await generateSeedanceBilingualOutput({
         input: requestInput, isCurrent,
-        request: async (system, user) => {
+        request: async (system, user, transport) => {
           requestFailure = undefined;
           try {
-            return await requestTextModel(textApi, system, user, undefined, { disableThinking: true });
+            return await requestTextModel(textApi, system, user, undefined,
+              { disableThinking: true, jsonObject: transport?.sourceDocumentTranslation });
           } catch (error) {
             requestFailure = error;
             throw error;

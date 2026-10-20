@@ -7,6 +7,9 @@ import {
   translateSeedancePromptToEnglish,
 } from '../src/seedancePrompt';
 import type { Seedance25Output } from '../src/types';
+import { createSeedanceTranslationResponse } from './seedanceTranslationTestUtils';
+import { STORY_SCENE_EXPRESSION_PRESERVATION_RULE } from '../src/storySceneParticipationRules';
+import { resolveSeedanceCharacterParticipation } from '../src/characterParticipation';
 
 // All requests are local doubles. These cases verify the actual writer and
 // checkpoint boundaries, without evaluating or submitting generated videos.
@@ -57,6 +60,7 @@ let writerRequests = 0;
 const written = await generateOfficialSeedancePrompt({ input, request: async (system, user) => {
   writerRequests += 1;
   assert.match(system, /Seedance/u, 'the Chinese model request has a Seedance contract');
+  assert.ok(system.includes(STORY_SCENE_EXPRESSION_PRESERVATION_RULE));
   assert.match(system, /连续|概括/u, 'the writer receives continuous-action expression guidance');
   assert.match(system, /少数|关键|记忆点/u, 'the writer is guided to select important contacts rather than enumerate every punch');
   assert.ok(user.includes('sceneStaging') && user.includes('bodyFacing'), 'adopted relations reach the existing writer call');
@@ -95,55 +99,39 @@ assert.match(failure.englishError || '', /mock English endpoint unavailable/u);
 assert.match(saved?.englishError || '', /mock English endpoint unavailable/u);
 
 let retryRequests = 0;
-const damagedCandidate = english.replace(dialogue, '__LH_DIALOGUE_999__')
-  .replace('【7.5s-15s】', '【8s-15s】').replace('@Image 2', '@Image 99');
-const recovered = await translateSeedancePromptToEnglish({ sourcePrompt: saved!.promptZh, request: async (system, user) => {
+const recovered = await translateSeedancePromptToEnglish({ sourcePrompt: saved!.promptZh,
+  sourceCharacters: input.subjectDefinitions.map((character) => ({ id: character.name, name: character.name })),
+  request: async (system, user, transport) => {
   retryRequests += 1;
   assert.match(system, /Seedance/u);
   assert.ok(!/必须[^\n]*(?:\[Shot|<Subject|<Picture)/u.test(system));
   assert.match(system, /起止值|小数秒/u, 'translation preserves the confirmed timing');
-  assert.equal(user, chinese, 'the translator receives the complete approved source without masking');
+  assert.equal(JSON.parse(user).sourcePrompt, chinese, 'the complete approved source remains readable context');
   assert.doesNotMatch(user, /__LH_/u, 'dialogue and reference labels never become private placeholder tokens');
-  assert.match(system, /完整、未遮蔽/u);
-  return english;
+  assert.equal(transport?.sourceDocumentTranslation, true);
+  return createSeedanceTranslationResponse(user);
 } });
-assert.equal(retryRequests, 1, 'valid English-only retry makes one full-source translation without routine AI review');
-assert.equal(recovered, english);
+assert.equal(retryRequests, 1, 'English-only generation makes one request without automatic repair');
+assert.match(recovered, /^Video specification:/u);
+assert.ok(recovered.includes('林霜') && recovered.includes('里尤洛'), 'explicit identities are assembled from the source');
 assert.equal(saved!.promptZh, chinese, 'English failure and retry keep the approved Chinese checkpoint untouched');
 assert.ok(recovered.includes(`“${dialogue}”`) && recovered.includes('【7.5s-15s】'), 'delivery keeps original dialogue language and fractional time boundaries');
 
-// Only a concrete delivery defect starts one repair, with the full original
-// and untouched candidate. Local code never restores tokens or shifts times.
-const invalidEnglish = [damagedCandidate,
-  english.replace(dialogue, 'Leave the left side to me!'),
-  english.replace('【7.5s-15s】', '【8s-15s】'),
-  english.replace('@Image 2', '@Image 99'),
-  english.replace('Subject continuity:', 'subject_definitions:'),
-  JSON.stringify({ h3Prompt: english }),
-  english.replace(dialogue, '__LH_DIALOGUE_999'),
-];
+// An unreadable/missing translation cannot overwrite the Chinese checkpoint
+// or launch another paid request. These are response decoding cases.
+const invalidEnglish = [english, '{', '{"slots":[]}', '{"slots":[{"id":"unknown","text":"translated"}]}'];
 for (const candidate of invalidEnglish) {
   let calls = 0;
-  const repaired = await translateSeedancePromptToEnglish({ sourcePrompt: chinese, request: async (system, user) => {
+  await assert.rejects(translateSeedancePromptToEnglish({ sourcePrompt: chinese, request: async (_system, user) => {
     calls += 1;
-    if (calls === 1) { assert.equal(user, chinese); return candidate; }
-    const data = JSON.parse(user.match(/<seedance_translation_repair_data>\n([\s\S]+)\n<\/seedance_translation_repair_data>/u)![1]);
-    assert.equal(data.sourcePrompt, chinese, 'repair sees the same complete Chinese checkpoint');
-    assert.equal(data.candidateEnglishPrompt, candidate, 'the damaged candidate is never locally rewritten');
-    assert.match(data.deliveryIssue, /内部占位符|对白|时间范围|编号|H3|自然语言/u);
-    assert.match(system, /仅修复上一次英文交付/u);
-    assert.doesNotMatch(system, /H3_IDENTITY_BINDINGS/u, 'Seedance repair cannot become H3 metadata generation');
-    return english;
-  } });
-  assert.equal(repaired, english);
-  assert.equal(calls, 2, 'only invalid delivery adds one repair request');
+    assert.equal(JSON.parse(user).sourcePrompt, chinese);
+    return candidate;
+  } }), /Seedance 英文交付序列化失败/u);
+  assert.equal(calls, 1, 'invalid delivery does not trigger another model request');
 }
 
-// A damaged candidate is not saved before repair. A final transport
-// error or invalid delivery stays an English-only failure, with no
-// silent text editing, automatic retry loop or rollback of approved Chinese.
 for (const finalDelivery of [
-  new Error('mock English repair endpoint unavailable'), ...invalidEnglish,
+  new Error('mock English endpoint unavailable'), ...invalidEnglish,
 ]) {
   let calls = 0;
   let chineseCheckpoint: Seedance25Output | undefined;
@@ -152,53 +140,44 @@ for (const finalDelivery of [
     calls += 1;
     if (calls === 1) return chinese;
     assert.equal(chineseCheckpoint?.promptZh, chinese);
-    assert.equal(englishWrites, 0, 'the damaged candidate cannot save before repair completes');
-    if (calls === 2) {
-      assert.equal(user, chinese);
-      return damagedCandidate;
-    }
-    assert.equal(calls, 3, 'there is only one repair attempt');
+    assert.equal(englishWrites, 0);
+    assert.equal(JSON.parse(user).sourcePrompt, chinese);
+    assert.equal(calls, 2, 'one Chinese request and one English request');
     if (finalDelivery instanceof Error) throw finalDelivery;
     return finalDelivery;
   }, onChinese: (output) => { chineseCheckpoint = structuredClone(output); return true; },
   onEnglish: (output) => { englishWrites += 1; chineseCheckpoint = structuredClone(output); return true; } });
-  assert.equal(calls, 3, 'repair failure starts no extra paid request');
+  assert.equal(calls, 2, 'English failure starts no extra paid request');
   assert.equal(englishWrites, 1);
   assert.equal(result.promptZh, chinese);
   assert.equal(result.promptEn, undefined);
-  assert.match(result.englishError || '', /mock English repair endpoint unavailable|内部占位符|参考素材编号|对白|时间范围|H3|自然语言/u);
+  assert.match(result.englishError || '', /mock English endpoint unavailable|Seedance 英文交付序列化失败/u);
   assert.equal(chineseCheckpoint?.promptZh, chinese, 'the approved Chinese checkpoint remains available after final English failure');
 }
 
 const allReferencesSource = chinese.replace('@Image 2：石柱空间（左右位置与遮挡）。',
   '@Image 2：石柱空间（左右位置与遮挡）。\n@Video 1：枪杆动作；@Audio 1：对白声线；@Clay Render 1：场地体积。');
-const allReferencesEnglish = english.replace('@Image 2: stone pillar (positions and occlusion).',
-  '@Image 2: stone pillar (positions and occlusion).\n@Video 1: spear motion; @Audio 1: dialogue voice; @Clay Render 1: spatial volume.');
 let allReferenceCalls = 0;
-assert.equal(await translateSeedancePromptToEnglish({ sourcePrompt: allReferencesSource, request: async (_system, user) => {
+const allReferencesEnglish = await translateSeedancePromptToEnglish({ sourcePrompt: allReferencesSource, request: async (_system, user) => {
   allReferenceCalls += 1;
-  assert.equal(user, allReferencesSource, 'all Seedance reference types reach translation with exact IDs');
-  return `\`\`\`text\n${allReferencesEnglish}\n\`\`\``;
-} }), allReferencesEnglish);
-assert.equal(allReferenceCalls, 1, 'ordinary text fences do not invoke H3 JSON repair or an extra request');
+  assert.equal(JSON.parse(user).sourcePrompt, allReferencesSource);
+  return `\`\`\`json\n${createSeedanceTranslationResponse(user)}\n\`\`\``;
+} });
+assert.deepEqual(allReferencesEnglish.match(/@(?:Image|Video|Audio|Clay Render)\s+\d+/gu),
+  ['@Image 1', '@Image 2', '@Video 1', '@Audio 1', '@Clay Render 1']);
+assert.equal(allReferenceCalls, 1, 'JSON fences do not invoke H3 repair or an extra request');
 
 // Natural-language timing can use equivalent seconds or timecode spelling.
 // These are translations of the same cuts, not a reason for a paid repair.
-for (const sourceRange of ['从第0秒到第7.5秒', '00:00–00:07.5', '0 sec to 7.5 sec']) {
+for (const [sourceRange, renderedRange] of [
+  ['第0秒到第7.5秒', '0s–7.5s'], ['00:00–00:07.5', '00:00–00:07.5'], ['0 sec to 7.5 sec', '0 sec to 7.5 sec'],
+]) {
   let calls = 0;
   const result = await translateSeedancePromptToEnglish({ sourcePrompt: chinese.replace('0s-7.5s', sourceRange),
-    request: async () => { calls += 1; return english; } });
-  assert.equal(result, english);
+    request: async (_system, user) => { calls += 1; return createSeedanceTranslationResponse(user); } });
+  assert.ok(result.includes(renderedRange), 'source time values are assembled outside translated prose');
   assert.equal(calls, 1, `equivalent timing ${sourceRange} needs no repair`);
 }
-let naturalHeadingCalls = 0;
-const naturalHeadings = english.replace('One-sentence summary:', 'summary:')
-  .replace('【0s-7.5s】', 'At 00:00.000–00:07.500: ');
-assert.equal(await translateSeedancePromptToEnglish({ sourcePrompt: chinese, request: async () => {
-  naturalHeadingCalls += 1;
-  return naturalHeadings;
-} }), naturalHeadings);
-assert.equal(naturalHeadingCalls, 1, 'generic summary heading and timecode alone do not make a Seedance draft H3');
 
 let refusedCheckpointRequests = 0;
 await assert.rejects(generateSeedanceBilingualOutput({ input, request: async () => { refusedCheckpointRequests += 1; return chinese; }, onChinese: () => false, onEnglish: () => { assert.fail('stale Chinese must not permit an English save'); } }), /旧|变化|失效|过期|取消|已切换|保存|current|stale/iu);
@@ -216,15 +195,15 @@ assert.equal(isSeedanceOutputSaveRequestCurrent(identity, { ...identity }, finge
 assert.equal(isSeedanceOutputSaveRequestCurrent(identity, { ...identity }, fingerprint, `${fingerprint}-edited-reference`), false, 'same storyboard timestamp cannot hide changed reference/source evidence');
 assert.equal(isSeedanceOutputSaveRequestCurrent(identity, { ...identity, workspaceEpoch: 3 }, fingerprint, fingerprint), false, 'switching away and back cannot let the old workspace request write');
 
-for (const staleAt of [2, 3]) {
+for (const invalidResponse of [false, true]) {
   let staleEnglishWrites = 0; let staleCalls = 0; let live = true; let checkpoint: Seedance25Output | undefined;
-  await assert.rejects(generateSeedanceBilingualOutput({ input, isCurrent: () => live, request: async () => {
+  await assert.rejects(generateSeedanceBilingualOutput({ input, isCurrent: () => live, request: async (_system, user) => {
     staleCalls += 1;
     if (staleCalls === 1) return chinese;
-    if (staleCalls === staleAt) live = false;
-    return staleCalls === 2 && staleAt === 3 ? damagedCandidate : english;
+    live = false;
+    return invalidResponse ? '{' : createSeedanceTranslationResponse(user);
   }, onChinese: (output) => { checkpoint = structuredClone(output); return true; }, onEnglish: () => { staleEnglishWrites += 1; return true; } }), /旧|变化|失效|过期|取消|已切换|current|stale/iu);
-  assert.equal(staleCalls, staleAt, 'stale translation or repair prevents all later API calls');
+  assert.equal(staleCalls, 2, 'a stale translation prevents all later calls, even with an unreadable response');
   assert.equal(checkpoint?.promptZh, chinese);
   assert.equal(staleEnglishWrites, 0, 'an English response from a replaced workspace cannot overwrite its saved Chinese checkpoint');
 }
@@ -252,4 +231,46 @@ const literalOutput = await generateOfficialSeedancePrompt({ input: literalInput
   request: async () => chinese.replace(dialogue, literal) });
 assert.ok(literalOutput.promptZh.includes(`“${literal}”`), 'quoted dialogue that names a rule is preserved');
 
-console.log('Seedance writer: full-source English translation and bounded AI repair, exact reference IDs, dialogue/fractional-time preservation, Chinese checkpoints, English-only failure/retry, cancellation and invalid-delivery retention passed (mock text requests only).');
+// A silent group member and two distinct time relations survive the target
+// writer boundary. This exercises transport/participation, not model quality.
+const forestCast = ['吴小观', '夏娃', '龙娘', '熊娘', '塔菲', '西里斯'].map((name, index) => ({ id: `forest-${index}`, name }));
+const forestSource = '数天后夏娃修复归来拥抱吴小观。又过一些日子，吴小观独自清点奖励，随后向龙娘和熊娘请求较量，两人笑着拒绝。塔菲站在附近。西里斯更晚才来。';
+const forestTimeline = [
+  '0秒至8秒，数天后，修复完成的夏娃从战舰走出拥抱吴小观，两人在空地相拥。',
+  '8秒至19秒，相拥画面淡出，以同一营地的光影流逝过渡到一些日子后的空地；吴小观独自盘坐清点奖励。',
+  '19秒至30秒，吴小观起身走向龙娘和熊娘。龙娘抱胸站在左侧微笑拒绝，熊娘站在龙娘身旁笑着摇头；塔菲站在另一侧静静看着吴小观。四人保持各自身份。',
+].join('\n');
+const forestPrompt = [
+  '视频规格：总时长30秒，16:9画幅，2K分辨率，立体声。',
+  '参考素材与职责：本次未提供图片。',
+  '主体连续性：吴小观穿黑色便服；夏娃银白长发；龙娘穿黑色皮衣；熊娘棕色头发；塔菲保持已知身份。',
+  '一句话概述：夏娃归来相拥，之后吴小观清点奖励，请求较量遭龙娘和熊娘拒绝。',
+  `连续时间轴：\n${forestTimeline}`,
+  '全局约束：保留两处时间定位及每个人的独立身份，无对白。',
+].join('\n\n');
+let forestCalls = 0;
+const forestResult = await generateOfficialSeedancePrompt({
+  input: { ...input, references: [], canonicalPrompt: forestTimeline,
+    subjectDefinitions: forestCast.slice(0, 5).map(({ name }) => ({ name, kind: 'character' as const })),
+    sourceEvidence: { sourceStoryContent: forestSource,
+      sceneStaging: [{ version: 1, sceneId: 'forest', participants: forestCast.slice(0, 5),
+        phases: [{ id: 'refusal', participantIds: ['forest-0', 'forest-2', 'forest-3', 'forest-4'],
+          action: '吴小观请求较量，龙娘与熊娘笑着拒绝，塔菲旁观' }] }] } },
+  request: async (system, user) => {
+    forestCalls += 1;
+    assert.ok(system.includes(STORY_SCENE_EXPRESSION_PRESERVATION_RULE));
+    const source = JSON.parse(user.match(/<seedance_source_data>\s*([\s\S]*?)\s*<\/seedance_source_data>/u)![1]);
+    assert.equal(source.canonicalPrompt, forestTimeline);
+    assert.equal(source.sourceEvidence.sourceStoryContent, forestSource);
+    assert.deepEqual(source.sourceEvidence.sceneStaging[0].phases[0].participantIds, ['forest-0', 'forest-2', 'forest-3', 'forest-4']);
+    return forestPrompt;
+  },
+});
+assert.equal(forestCalls, 1);
+assert.equal(forestResult.promptZh, forestPrompt);
+const forestParticipation = resolveSeedanceCharacterParticipation(forestResult.promptZh, forestCast);
+assert.deepEqual(new Set(forestParticipation.characters.filter((entry) => entry.presence === 'visible').map((entry) => entry.name)),
+  new Set(['吴小观', '夏娃', '龙娘', '熊娘', '塔菲']));
+assert.ok(!forestParticipation.characters.some((entry) => entry.name === '西里斯'));
+
+console.log('Seedance writer: single-request description translation, source-owned references/dialogue/timing, Chinese checkpoints, English-only failure, cancellation and invalid-delivery retention passed (mock text requests only).');

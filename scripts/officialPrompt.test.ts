@@ -26,6 +26,7 @@ import type { PromptReferenceInput } from '../src/promptAdapters';
 import { publicVideoContinuityLock } from '../src/videoPrivateScope';
 import { sourceContentHash } from '../src/sourceIntegrity';
 import { readH3PromptProtocol } from '../src/h3PromptProtocol';
+import { H3_EXISTING_SOUND_SUMMARY_ZH } from '../src/h3DeliverySections';
 
 const makeShot = (overrides: Partial<VideoShot> = {}): VideoShot => ({
   id: 'shot-1',
@@ -1240,7 +1241,8 @@ assert.equal(refreshedLegacyBoard.promptPlan?.canonicalPrompt, legacySegmentCano
 assert.match(refreshedLegacyBoard.officialPromptZh || '', /第0\.2s后撤脚步/u);
 assert.doesNotMatch(refreshedLegacyBoard.officialPromptZh || '', /第(?:15\.3|19\.2|20\.8|24|25|27)s/u);
 assert.match(refreshedLegacyBoard.officialPromptZh || '', /第20秒再出发/u, 'quoted dialogue numbers must remain unchanged');
-assert.match(refreshedLegacyBoard.officialPromptZh || '', /overall_soundscape: N\/A\n\nnon_diegetic_music: N\/A/u);
+assert.ok((refreshedLegacyBoard.officialPromptZh || '').endsWith(`overall_soundscape: ${H3_EXISTING_SOUND_SUMMARY_ZH}\n\nnon_diegetic_music: N/A`),
+  'missing global ambience keeps the existing local sounds and quiet gaps; it does not mute the authored sound events');
 assert.equal(hasCurrentOfficialH3Prompt(refreshedLegacyBoard, context), true);
 for (const oldVersion of ['official-h3-v1:', 'official-h3-v2:', 'official-h3-v3:', 'official-h3-v4:', 'official-h3-v5:', 'official-h3-v6:']) {
   const oldCompilerArtifact = {
@@ -1292,7 +1294,8 @@ assert.deepEqual(refreshedNoiseBoard.targetOutput?.parameters, legacyNoiseBoard.
 assert.doesNotMatch(refreshedNoiseBoard.officialPromptZh || '', /溪流持续|continuous damp forest floor noise/u);
 assert.match(refreshedNoiseBoard.officialPromptZh || '', /第0\.2s后撤脚步/u, 'discrete action sounds stay in their original shot');
 assert.match(refreshedNoiseBoard.officialPromptZh || '', /第20秒再出发/u, 'spoken dialogue must remain intact');
-assert.match(refreshedNoiseBoard.officialPromptZh || '', /overall_soundscape: N\/A\n\nnon_diegetic_music: N\/A/u);
+assert.ok((refreshedNoiseBoard.officialPromptZh || '').endsWith(`overall_soundscape: ${H3_EXISTING_SOUND_SUMMARY_ZH}\n\nnon_diegetic_music: N/A`),
+  'removing an automatic ambience bed keeps the local dialogue and effects audible without adding music');
 assert.equal(refreshedNoiseBoard.officialPromptEn, '', 'the old English noise prompt must not survive a changed Chinese delivery');
 assert.equal(refreshedNoiseBoard.officialPromptEnSource, '');
 assert.equal(hasCurrentOfficialH3Prompt(refreshedNoiseBoard, context), true);

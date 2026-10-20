@@ -1,6 +1,28 @@
 import assert from 'node:assert/strict';
 import { formatUserFacingError } from '../src/userFacingError';
 
+for (const seedanceDiagnostic of [
+  'Seedance 英文翻译改变或遗漏了已确认时间范围，中文稿已保留，请仅重试英文。',
+  'Seedance 英文翻译遗漏或改变了原语言对白，中文稿已保留，请仅重试英文。',
+  'Seedance 英文未返回完整自然语言正文，中文稿已保留，请仅重试英文。',
+  'Seedance 英文翻译的 JSON 数据无法读取，中文稿已保留。',
+]) {
+  for (const input of [seedanceDiagnostic, new Error(seedanceDiagnostic),
+    `Error invoking remote method 'lianhua:http-request': Error: ${seedanceDiagnostic}`]) {
+    const shown = formatUserFacingError(input);
+    assert.equal(shown, seedanceDiagnostic, 'the known format name must not hide its concrete Chinese diagnostic');
+    assert.equal(formatUserFacingError(shown), shown, 'saved Seedance diagnostics survive repeated presentation');
+  }
+  assert.equal(formatUserFacingError(`${seedanceDiagnostic}附加原因：Unexpected vendor wobble`),
+    `${seedanceDiagnostic}附加原因：服务返回了未识别的错误，暂时无法确定具体原因。`,
+    'recognizing Seedance must not allow unrelated English response prose');
+}
+const seedanceHttpError = Object.freeze({ message: 'Seedance 英文生成请求失败：Unexpected vendor wobble', status: 502 });
+assert.equal(formatUserFacingError(seedanceHttpError),
+  'Seedance 英文生成请求失败：服务返回了未识别的错误，暂时无法确定具体原因（上游服务响应异常（HTTP 502））。');
+assert.equal(seedanceHttpError.message, 'Seedance 英文生成请求失败：Unexpected vendor wobble',
+  'presentation leaves the stored original untouched');
+
 for (const localH3 of [
   'AI交付identityBindings格式无效，不能静默丢弃已声明的绑定记录。',
   'AI交付第1镜shotMetadata缺少明确的来源、可见范围或连续性字段，须由AI完整返回，不能由本地猜测合并。',

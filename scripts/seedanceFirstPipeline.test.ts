@@ -6,6 +6,7 @@ import { createInitialState } from '../src/storage';
 import { sourceContentHash } from '../src/sourceIntegrity';
 import { bindStoryboardImageAsset, buildStoryboardImageRequests } from '../src/storyboardImages';
 import { buildSequencePromptHandoff, getSequencePromptHandoffStatus } from '../src/sequencePromptHandoff';
+import { createSeedanceTranslationResponse } from './seedanceTranslationTestUtils';
 import type { ConverterPreset, Project, Storyboard, VideoSequencePlan } from '../src/types';
 
 // Real shared pipeline, local text doubles only. No generation/video request.
@@ -48,13 +49,30 @@ const written = (candidate: Storyboard) => [
   '全局约束：\n保持地图位置和旅人甲的站位连续，不添加对白。',
 ].join('\n\n');
 const english = [
-  'Video specification: 5 seconds; 16:9; 720p; stereo.',
+  'Video specification: Duration 5s; 16:9; 720p; stereo.',
   'References and responsibilities:\n@Image 1: the map, its paper and placement in the hall.',
   'Subject continuity:\nThe traveler stays beside the map.',
   'One-sentence summary:\nThe traveler points at the map and lowers their hand.',
   'Continuous timeline:\n【0s-5s】The traveler raises one hand toward the map and lowers it; fixed medium shot; natural light; no dialogue or sound.',
   'Global constraints:\nKeep the map and the traveler in the same hall.',
 ].join('\n\n');
+const translateDescriptions = (user: string): string => createSeedanceTranslationResponse(user, ({ sourceText }) => {
+  const descriptions: Record<string, string> = {
+    '时长': ' Duration ',
+    '；画面比例': '; ',
+    '；分辨率': '; ',
+    'p；声音stereo。': 'p; stereo.',
+    '：大厅地图的纸张样式与墙面位置。': ': the map, its paper and placement in the hall.',
+    '旅人甲保持在地图前。': 'The traveler stays beside the map.',
+    '旅人甲指向地图后放下手。': 'The traveler points at the map and lowers their hand.',
+    '保持地图位置和旅人甲的站位连续，不添加对白。': 'Keep the map and the traveler in the same hall.',
+  };
+  if (sourceText in descriptions) return descriptions[sourceText];
+  if (sourceText.includes('主体：旅人甲')) return `${sourceText.startsWith('】') ? '】' : ''}The traveler raises one hand toward the map and lowers it; fixed medium shot; natural light; no dialogue or sound.`;
+  // The continuity-repair fixture splits the first-shot action at its fixed
+  // 0.5-second handoff point; this mock supplies only that existing description.
+  return ' continue the confirmed hand movement ';
+});
 const initial = JSON.stringify({ board, project });
 const options: GenerateSingleSegmentPromptInput = { board, context, converter, targetPromptFormat: 'seedance',
   buildSeedanceInput, clean: (value) => value.trim(), hasImageInputs: true, now: () => 100 };
@@ -77,7 +95,7 @@ const generated = await generateSingleSegmentPrompt({ ...options,
     assert.equal(value.seedance25Output?.promptEn, undefined);
     stages.push('chinese-saved');
   },
-  request: async (system, user, stage) => {
+  request: async (system, user, stage, transport) => {
     stages.push(stage);
     if (stage === 'convert') return canonical;
     if (stage === 'review') {
@@ -95,7 +113,11 @@ const generated = await generateSingleSegmentPrompt({ ...options,
     }
     assert.ok(chineseCheckpoint, 'async Chinese checkpoint must finish before translation');
     assert.match(system, /Seedance/u);
-    return english;
+    assert.equal(JSON.parse(user).sourcePrompt, chineseCheckpoint.seedance25Output!.promptZh,
+      'translation receives exactly the Chinese draft that was saved');
+    assert.equal(transport?.jsonObject, true);
+    assert.equal(transport?.maxTokens, undefined, 'translation uses the configured output limit');
+    return translateDescriptions(user);
   },
 });
 assert.deepEqual(stages, ['convert', 'canonical-saved', 'review', 'chinese-saved', 'translate']);
@@ -136,7 +158,7 @@ retryStages = [];
 const recovered = await generateSingleSegmentPrompt({ ...options, board: partial, mode: 'translate-english',
   onQualifiedCanonical: () => assert.fail('English-only retry must not reconvert'),
   onQualifiedChinese: () => assert.fail('English-only retry must not rewrite Chinese'),
-  request: async (_system, _user, stage) => { retryStages.push(stage); return english; },
+  request: async (_system, user, stage) => { retryStages.push(stage); return translateDescriptions(user); },
 });
 assert.deepEqual(retryStages, ['translate']);
 assert.ok(hasCurrentSeedancePrompt(project, recovered, 'en'));
@@ -162,7 +184,7 @@ const legacyEnglish = await generateSingleSegmentPrompt({ ...options, board: leg
   buildSeedanceInput: (candidate) => buildOfficialSeedanceInput(legacyImageProject, candidate),
   onQualifiedCanonical: () => assert.fail('legacy English retry must not reconvert'),
   onQualifiedChinese: () => assert.fail('legacy English retry must not rewrite Chinese'),
-  request: async (_system, _user, stage) => { legacyEnglishCalls.push(stage); return english; },
+  request: async (_system, user, stage) => { legacyEnglishCalls.push(stage); return translateDescriptions(user); },
 });
 assert.deepEqual(legacyEnglishCalls, ['translate']);
 assert.equal(legacyEnglish.seedance25Output?.sourceFingerprint, legacyImageFingerprint);
@@ -252,7 +274,7 @@ const repaired = await generateSingleSegmentPrompt({ ...options, board: current,
       assert.match(user, /seedance_existing_delivery_data/u);
       return written({ ...current, finalPrompt: repairedCanonical });
     }
-    return english.replace('【0s-5s】', '【0s-2s】').replace('fixed medium shot;', 'fixed medium shot;\n【2s-5s】The hand lowers;');
+    return translateDescriptions(user);
   },
 });
 assert.deepEqual(continuityCalls, ['convert', 'review', 'translate']);

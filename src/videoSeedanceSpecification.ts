@@ -6,14 +6,17 @@ import { maskVideoPictureReferenceLiterals } from './videoPictureReferences';
 interface SpecificationResult { prompt: string; warnings: string[] }
 interface TextEdit { start: number; end: number; text: string }
 export type VideoSeedanceSpecificationApi = Partial<Pick<VideoTaskApiConfig, 'provider' | 'model' | 'baseUrl' | 'endpoint' | 'requestTemplate'>>;
-type SpecificationField = 'resolution' | 'aspect_ratio';
-const fieldLabel = (field: SpecificationField): string => field === 'resolution' ? '分辨率' : '画面比例';
+type SpecificationField = 'duration' | 'resolution' | 'aspect_ratio';
 const hasOverride = (parameters: Record<string, unknown>): boolean =>
-  ['resolution', 'aspect_ratio', 'ratio'].some((key) => parameters[key] !== undefined);
+  ['duration', 'seconds', 'resolution', 'aspect_ratio', 'ratio'].some((key) => parameters[key] !== undefined);
 
 /** Only concrete request values are eligible. Never interpolate free-form
  * parameter text into a prompt, or invent defaults from UI suggestions. */
 const specificationValue = (field: SpecificationField, value: unknown): string | undefined => {
+  if (field === 'duration') {
+    const number = typeof value === 'number' || typeof value === 'string' && value.trim() ? Number(value) : NaN;
+    return Number.isFinite(number) && number > 0 ? String(number) : undefined;
+  }
   if (typeof value !== 'string' || value !== value.trim()) return undefined;
   if (field === 'resolution') return /^(?:[1-9]\d*(?:\.\d+)?[pk]|[1-9]\d*\s*[x×]\s*[1-9]\d*|auto|original)$/iu.test(value) ? value : undefined;
   if (/^(?:auto|original)$/iu.test(value)) return value;
@@ -21,32 +24,56 @@ const specificationValue = (field: SpecificationField, value: unknown): string |
   return ratio && Number(ratio[1]) > 0 && Number(ratio[2]) > 0 ? value : undefined;
 };
 
-const fieldEdits = (masked: string, field: SpecificationField, value: string): TextEdit[] => {
-  const number = '[1-9]\\d*(?:\\.\\d+)?';
-  const token = field === 'resolution'
-    ? `(?:${number}\\s*[pk]|[1-9]\\d*\\s*[x×]\\s*[1-9]\\d*)`
-    : `(?:${number}\\s*[:∶]\\s*${number})`;
-  const namedValue = `(?:${token}|按(?:项目|当前|接口|工作流)设置|保留原值|默认(?:值)?|auto|original|default)`;
-  const label = field === 'resolution' ? '(?:分辨率|(?:output\\s+)?resolution)'
-    : '(?:画面比例|画幅(?:比例)?|宽高比|画面|比例|aspect(?:\\s+ratio)?|ratio)';
-  const edits: TextEdit[] = [];
-  const named = new RegExp(`(${label}[ \\t]*[:：=]?[ \\t]*)(${namedValue})(?![A-Za-z0-9_])`, 'giu');
-  for (const match of masked.matchAll(named)) {
-    edits.push({ start: match.index! + match[1].length, end: match.index! + match[0].length, text: value });
-  }
-  // Old prompts also use comma-separated specifications without field names.
-  // Match a whole specification item, never arbitrary numbers in prose.
-  const bare = new RegExp(`(^|[,，;；。\\r\\n])([ \\t]*)(${token})(?=[ \\t]*(?:[,，;；。\\r\\n]|$))`, 'gimu');
-  for (const match of masked.matchAll(bare)) {
-    const start = match.index! + match[1].length + match[2].length;
-    if (!edits.some((edit) => edit.start === start)) edits.push({ start, end: start + match[3].length, text: value });
-  }
-  return edits;
+const labels: Record<SpecificationField, RegExp> = {
+  duration: /总时长|时长|持续时间|(?:total\s+)?duration|(?:running|run)\s*time/giu,
+  resolution: /分辨率|(?:output\s+)?resolution/giu,
+  aspect_ratio: /画面比例|画幅(?:比例)?|宽高比|画面|比例|aspect(?:\s+ratio)?|ratio|frame/giu,
 };
+const tokens: Record<SpecificationField, RegExp> = {
+  duration: /\d+(?:\.\d+)?\s*(?:秒|seconds?\b|secs?\b|s\b)/iu,
+  resolution: /[1-9]\d*(?:\.\d+)?\s*[pk]\b|[1-9]\d*\s*[x×]\s*[1-9]\d*/iu,
+  aspect_ratio: /[1-9]\d*(?:\.\d+)?\s*[:∶]\s*[1-9]\d*(?:\.\d+)?/u,
+};
+const defaultValue = /按(?:项目|当前|接口|工作流)设置|保留原值|默认(?:值)?|auto|original|default/iu;
+
+/** Read complete technical items as data, independent of value/label order.
+ * User notes and literal payloads are not specification fields. The selected
+ * request value is then rendered from one fixed zh/en vocabulary. */
+const specificationItems = (body: string): Array<TextEdit & { field: SpecificationField; value?: string }> => {
+  const masked = maskVideoPictureReferenceLiterals(body);
+  const items: Array<TextEdit & { field: SpecificationField; value?: string }> = [];
+  let start = 0;
+  const ends = [...masked.matchAll(/[,，;；。\r\n]|[.!?](?=\s|$)/gu)].map((match) => match.index!);
+  for (const end of [...ends, body.length]) {
+    const raw = body.slice(start, end);
+    const text = raw.trim();
+    const offset = start + raw.indexOf(text);
+    if (text && body.slice(start, end) === masked.slice(start, end)) {
+      for (const field of ['duration', 'aspect_ratio', 'resolution'] as const) {
+        const withoutLabel = text.replace(labels[field], '');
+        const token = tokens[field].exec(withoutLabel) || (withoutLabel !== text ? defaultValue.exec(withoutLabel) : null);
+        if (!token) continue;
+        const remainder = withoutLabel.slice(0, token.index) + withoutLabel.slice(token.index + token[0].length);
+        if (!/^[\s:：=为是*_-]*$/u.test(remainder)) continue;
+        const value = field === 'duration' ? token[0].match(/^\d+(?:\.\d+)?/u)?.[0]
+          : token[0].replace(/\s/gu, '').replace('∶', ':');
+        items.push({ start: offset, end: offset + text.length, text, field, value });
+        break;
+      }
+    }
+    start = end + 1;
+  }
+  return items;
+};
+
+const renderField = (field: SpecificationField, value: string, language: 'zh' | 'en'): string => language === 'en'
+  ? field === 'duration' ? `duration ${value} seconds` : field === 'aspect_ratio' ? `aspect ratio ${value}` : `resolution ${value}`
+  : field === 'duration' ? `总时长${value}秒` : field === 'aspect_ratio' ? `画面比例${value}` : `分辨率${value}`;
 
 /** Pure request-only render. Callers establish source provenance and always
  * start from the authored prompt when parameters change or are cleared.
- * Duration, audio, quoted literals and the other five sections stay exact. */
+ * Request duration is a specification, never permission to retime the story.
+ * Audio, quoted literals, user notes and the other five sections stay exact. */
 export const renderVideoSeedanceSpecification = (
   prompt: string, parameters: Record<string, unknown>, api?: VideoSeedanceSpecificationApi,
 ): SpecificationResult => {
@@ -66,6 +93,12 @@ export const renderVideoSeedanceSpecification = (
   }
   const warnings: string[] = [];
   const values: Partial<Record<SpecificationField, string>> = {};
+  const duration = effective.seconds ?? effective.duration;
+  if (duration !== undefined && (effective.seconds === undefined || effective.duration === undefined
+    || Number(effective.seconds) === Number(effective.duration))) {
+    const value = specificationValue('duration', duration);
+    if (value) values.duration = value;
+  }
   if (effective.resolution !== undefined) {
     const value = specificationValue('resolution', effective.resolution);
     if (value) values.resolution = value;
@@ -79,14 +112,25 @@ export const renderVideoSeedanceSpecification = (
     else warnings.push('本次画面比例不是可明确同步的规格值，已保留原稿画面比例。');
   }
   if (!Object.keys(values).length) return { prompt, warnings };
-  const section = readSeedanceSections(prompt)?.sections.specification;
+  const parsed = readSeedanceSections(prompt);
+  const section = parsed?.sections.specification;
   if (!section) return { prompt, warnings: [...warnings, '无法唯一定位 Seedance 视频规格章节，已保留正文；请核对本次请求参数。'] };
-  const masked = maskVideoPictureReferenceLiterals(prompt).slice(section.start, section.end);
+  const body = prompt.slice(section.start, section.end);
+  const items = specificationItems(body);
   const edits: TextEdit[] = [];
+  const missing: string[] = [];
   for (const [field, value] of Object.entries(values) as Array<[SpecificationField, string]>) {
-    const replacements = fieldEdits(masked, field, value);
-    if (!replacements.length) warnings.push(`视频规格中没有可明确替换的${fieldLabel(field)}字段，已保留原文。`);
-    else edits.push(...replacements);
+    const matches = items.filter((item) => item.field === field);
+    const text = renderField(field, value, parsed!.language);
+    if (!matches.length) missing.push(text);
+    else for (const item of matches) {
+      if (item.value?.toLowerCase() !== value.replace(/\s/gu, '').toLowerCase()) edits.push({ ...item, text });
+    }
+  }
+  if (missing.length) {
+    const start = body.search(/\S/u);
+    edits.push({ start: Math.max(start, 0), end: Math.max(start, 0),
+      text: `${missing.join(parsed!.language === 'en' ? ', ' : '，')}${parsed!.language === 'en' ? '. ' : '。'}` });
   }
   let rendered = prompt;
   for (const edit of edits.sort((left, right) => right.start - left.start)) {

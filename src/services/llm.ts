@@ -58,6 +58,7 @@ import { VIDEO_ACTION_CHOREOGRAPHY_RULE, VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_
 import { SPATIAL_COORDINATE_RULE, SPATIAL_CONTINUITY_REVIEW_RULE } from '../spatialContinuityRules';
 import { normalizeSceneStagingList, SCENE_STAGING_OUTPUT_SHAPE, type SceneStaging } from '../sceneStaging';
 import { NOVEL_ACTION_SOURCE_RULE, NOVEL_ACTION_CONTINUITY_RULE, NOVEL_ACTION_FRAME_RULE } from '../novelActionDirection';
+import { STORY_VISIBLE_TIME_TRANSITION_RULE } from '../storySceneParticipationRules';
 import { getStoryPreparationParagraphs, normalizeStoryPreparationResult, type StoryPreparationResult } from '../storyPreparationReview';
 import {
   STORY_VISUAL_ENGINE_VERSION,
@@ -1556,6 +1557,7 @@ const storyVisualBatches = (paragraphs: StoryVisualActionPlan['sourceParagraphs'
 
 const STORY_VISUAL_PLAN_OUTPUT = [
   '第一阶段：理解剧情并建立事实动作表，不写画面正文。通读完整原文与已有状态，理解当前focusParagraphIds，完整记录每个实际行动及其次数、对白、因果、必要设定和心理判断；状态、习惯、限力、无兵刃等原则附着于相应action/phases/result或summary，不单独当作耗时动作，也不删掉同句中真实发生的几个照面、收手或整理。明确三步仍是三步，未定量的多次行动不擅定次数；同时发生的动作直接在phases写清同时，受压后下沉、脱开后释放等保留先后。实际执行、意图、尝试、中断、条件、否定和回忆按原意区分；不采用未知编排，不把未发生动作写成已发生，不重复其他批次事件。',
+  '事件表完整保留已有请求、共同拒绝、笑容与旁观反应，actor/target/action写出上下文已经确定的成员及其角色，不用“被拒绝后转身”替代群体回应本身；不确定成员仍用原称呼并说明未知。时间跳跃写入它所连接事件的action/phases或状态，相关sourceParagraphIds/evidence保留能说明前后时间关系的原文，不只留在全文summary，也不把经过数日独立扩写为未发生的生活事件。',
   '只返回一个 JSON 对象：{"version":1,"summary":"全段人物关系、空间位置、持物、伤势和因果的简短状态摘要（约600字以内），明确未知","events":[{"id":"e1","sourceParagraphIds":["p1"],"evidence":"来自对应段落的一段逐字连续原文","actor":"动作发出者/说话人，未知留空或用原称呼","target":"作用对象，原文无对象留空","action":"原文事实事件，不写编排新动作","phases":["有原文依据的起始状态/发力/路径/接触或落空/反应/终态"],"result":"已发生结果，未知留空","uncertainties":["不可确定的身份、方向或结论"]}]}。',
   'sourceParagraphIds 只能使用数据中稳定编号，evidence 使用能证明本事件的最短连续原句片段（通常20–80字），必须逐字来自对应原文，不使用省略号拼接，不复制整个长段或全文。每项事件由原文支撑，不遗漏后段、对白、设定和未能直接拍摄的因果。summary 不得将推测确定化。不要返回 sourceParagraphs，程序保留原文；不要代码围栏或额外文字。',
   `可在同一对象内返回sceneStaging数组，元素结构为${SCENE_STAGING_OUTPUT_SHAPE}。本阶段只记录原文已有的世界关系与事件阶段，不作未知调度选择；场面延续时沿用precedingSceneStaging的sceneId及参与者id。没有相关事实时省略，不能从人物身份图或原作知识推定朝向、路径和落点。`,
@@ -1567,7 +1569,7 @@ const STORY_VISUAL_BODY_OUTPUT = [
   '按当前行为写清必要的启动、执行、路径、接触或落空、停续、反应和终态，动作与事件逐一对应，保留必要不可见信息和完整原对白；简单动作无需人为增长。detailed 将同一既有行为中相容的操作、双人配合、调度和衔接列在 stagingAdditions，并自然融入正文；faithful 无依据的编排留空且不写入正文。actionPlan 中身份、能力、原因和结果未知仍保持未知；仅握持、移动路线、接触方式或空间关系未写时，detailed 可选择相容的表现方式并标为编排，不把未知当成不设计动作的理由。',
   'sourceParagraphs 是本批实际覆盖的原文片段；sourceStart/sourceEnd（若有）只是原段内的请求预算切分位置，不是新的事件或人物状态。同一事件依据可能横跨相邻批次：只表达本批原文实际覆盖的动作阶段，承接 precedingVisualParagraphs 的状态，不重播前批完整攻击、对白或结果，也不提前演出后批反应。',
   '只返回一个 JSON 对象：{"paragraphs":[{"id":"v1","sourceParagraphIds":["p1"],"eventIds":["e1"],"text":"自然中文正文段落，包含此时发生的原对白，不输出栏目或镜头信息","stagingAdditions":["本段采用、原文未指定的具体动作或群体调度；未补充则空数组"]}]}。',
-  `paragraph可增加sceneStaging对象，结构为${SCENE_STAGING_OUTPUT_SHAPE}。同一连续场面沿用actionPlan.sceneStaging与precedingVisualParagraphs中已有sceneId、参与者id与phase id，当前段只推进相应事件阶段；换场才建立另一sceneId。participants的position/bodyFacing/gazeTarget/actionTarget分别绑定具名关系，phases的startState/action/motionPath/motionEndpoint/endState记录同一动作及末态，不把移动方向写成身体面向。sourceEventIds/eventId只引用实际采用的actionPlan事件；faithful仅记录有依据的关系，detailed所选未知调度列入stagingAdditions。它是模型场面选择，不是摄影表、原著新增事实或必填表；旧battleStaging只在已有时承接。`,
+  `paragraph可增加sceneStaging对象，结构为${SCENE_STAGING_OUTPUT_SHAPE}。同一连续场面沿用actionPlan.sceneStaging与precedingVisualParagraphs中已有sceneId、参与者id与phase id，当前段只推进相应事件阶段；换场时另建sceneId，同一地点跳时即使沿用sceneId也在阶段状态中保留时间间隔，重新说明该时刻有依据的在场关系。participants的position/bodyFacing/gazeTarget/actionTarget分别绑定具名关系，phases的startState/action/motionPath/motionEndpoint/endState记录同一动作及末态，不把移动方向写成身体面向。sourceEventIds/eventId只引用实际采用的actionPlan事件；faithful仅记录有依据的关系，detailed所选未知调度列入stagingAdditions。它是模型场面选择，不是摄影表、原著新增事实或必填表；旧battleStaging只在已有时承接。`,
   'ID 稳定，sourceParagraphIds/eventIds 只引用数据中存在且本段实际采用的依据。事实和编排均融入可读正文，编排说明单独留在 stagingAdditions。返回前在本次响应内部自检动作主体/目标/动词、次序、命中结果、状态连续、对白全文与原语种和归属；不输出自检报告。',
 ].join('\n');
 
@@ -3809,6 +3811,7 @@ const STORYBOARD_SEMANTIC_SOURCE_RULE = [
 const STORYBOARD_SCENE_STAGING_OUTPUT_RULE = [
   NOVEL_ACTION_CONTINUITY_RULE,
   NOVEL_ACTION_FRAME_RULE,
+  STORY_VISIBLE_TIME_TRANSITION_RULE,
   `在本次同一响应内返回可选顶层sceneStaging数组，元素结构为${SCENE_STAGING_OUTPUT_SHAPE}。先根据完整sourceStory确定连续场面与全部行动的同一份时间安排，再写shots及sceneStaging；输入已有场面时沿用相符的sceneId和阶段id，但旧phase的范围和时窗不限制完整正文。worldRelations/participants/phases只记录本次实际采用的关系与事件，身体面向、目光对象、动作对象与移动路径/终点分开。元数据是模型选择，不是原文证据，不包含摄影或身份展示任务。`,
   '将同一场面选择写入已有字段：space承载世界关系，direction承载身体/视线/动作对象，action/result承载全部真实行动与末态；action/performance及phase.action用自然时间安排关键行动组的时窗、完成点、同时关系和持续作用，不将镜长均分给准备、接触、收尾，也不把同时动作逐项排队。普通微动作不用逐关节或毫秒刻度。camera观察已安排的事件，身份细节服从可见范围。shots可附本镜sceneStaging子集，沿用sceneId与phase id；镜尾未完可直接续接，原文真实收手、整理、等待仍完整保留，不因速度删动作、减次数或改短固定视频。场面记录与正文表达同一过程，不把内部字段名写入视频正文。',
 ].join('\n');
@@ -4100,7 +4103,7 @@ export const requestShotRecommendation = async (
       VIDEO_PROMPT_FOCUS_RULE,
       VIDEO_PRIVATE_SCOPE_SELECTION_RULE,
       '每镜 sourceExcerpt 可填写你从完整 sourceStory 中自行选择的原文依据；该字段只帮助用户追溯，不是本地内容覆盖门禁。不要把改写文字冒充逐字原文；无需填写本地句子 ID。',
-      '同时自行填写 space（空间关系）、performance（可见表演）、direction（朝向）和 dialogue（每句完整原对白及本镜相对起止区间，无对白写“无”）。程序直接排版你的字段，不会替你从 action 抽台词、按字数重排对白时间、猜测说话人、补写动作/镜头/光影/音效。action 中保留完整动作与发生顺序，sound 中保留你根据剧情判断的声音。',
+      '同时自行填写 space（空间关系）、performance（可见表演）、direction（朝向）和 dialogue（每句完整原对白及本镜相对起止区间，无对白写“无”）。程序直接排版你的字段，不会替你从 action 抽台词、按字数重排对白时间、猜测说话人、补写动作/镜头/光影/音效。action 中保留完整动作与发生顺序，sound 只写当前镜实际可听且有事件或接触依据的声音，交代发声对象、接触材质与随动作起止的关系；不从题材、风格、参考图或静置/携带的道具推导拟音。',
       STORYBOARD_SCENE_STAGING_OUTPUT_RULE,
       'dialogue 在每句原话旁直接注明完整说话人、项目已知身份、画内/背影/画外声源及相对起止时刻；有原剧情或用户确认的声线时才附具体音色，没有特殊声线要求时保持项目已知的性别与基本发声身份，不为填“声音身份”自行补造少年音、男声、音高或特殊音色。怯懦、结巴、低声和喊叫只表达本句表演，不能改变人物声音身份；本轮候选自行补出的声线不是用户确认事实。身份资料用于辨认，是否出场或发声仍由本段剧情决定。未获授权的其他人物在该句期间不发该句、不做同步说话口型。',
       STORYBOARD_STABLE_SUBJECT_CONTRACT,

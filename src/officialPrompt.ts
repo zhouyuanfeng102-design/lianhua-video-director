@@ -19,6 +19,7 @@ import { resolveModelProfile } from './modelProfiles';
 import { orderReferencedAssets, usesNsfwDetailMode } from './promptEngine';
 import { sourceContentHash } from './sourceContentHash';
 import { characterVoiceIdentityFacts, type CurrentCharacterVoiceFacts } from './characterVoiceFacts';
+import { sceneStagingIdentityReferenceIds } from './semanticSegmentIdentityReferences';
 import {
   OFFICIAL_H3_SOURCE_VERSION,
   OFFICIAL_H3_PRIVATE_SCOPE_REVISION,
@@ -325,6 +326,16 @@ export const buildOfficialH3SubjectDefinitions = (
   const entityEvidence = officialH3EntityEvidence(board);
   const dynamicClothing = officialH3HasDynamicClothing(board);
   const characters = (context.characters || []).filter((character) => !character.dossier?.archivedIntoCharacterId);
+  // Manual story/shot edits retain historical staging for provenance. Only
+  // the existing current conversion trace can pair it with this canonical
+  // body; deleted characters must not reappear from those historical IDs.
+  const currentStaging = !board.sourceStale && board.promptTrace?.mode === 'text-api'
+    && board.promptTrace.shotPlanMode !== 'locally-edited'
+    && board.promptTrace.convertedPromptFingerprint === sourceContentHash(canonicalPromptSource(board));
+  // Identity context is not a cast mandate or a claim of camera visibility.
+  const stagedIdentityIds = new Set(currentStaging ? sceneStagingIdentityReferenceIds(characters, [
+    ...(board.sceneStaging || []), ...board.shots.flatMap((shot) => shot.sceneStaging || []),
+  ]) : []);
   for (const character of characters) {
     const displayName = characterVariantDisplayName(character) || character.name;
     const characterBase = String((character as Character & { baseName?: string; variantOf?: string }).baseName
@@ -341,8 +352,8 @@ export const buildOfficialH3SubjectDefinitions = (
     // “泰罗” is a substring of “泰罗·女性形态”. Once a concrete form is
     // present in this board, suppress the legacy bare card instead of leaking
     // its reference/appearance into the transformed shot.
-    if (hasSpecificSiblingEvidence && !characterVariantFormLabel(character)) continue;
-    if (!entityEvidence.includes(displayName) && !entityEvidence.includes(character.name)) continue;
+    if (hasSpecificSiblingEvidence && !characterVariantFormLabel(character) && !stagedIdentityIds.has(character.id)) continue;
+    if (!stagedIdentityIds.has(character.id) && !entityEvidence.includes(displayName) && !entityEvidence.includes(character.name)) continue;
     const directIds = referencedIdsForEntity(character.id, character.assetIds, references);
     const visualReferences = references.filter((reference) => (
       clean(reference.mediaType).toLowerCase() !== 'audio'
