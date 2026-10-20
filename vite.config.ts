@@ -50,7 +50,7 @@ export default defineConfig({
           // Keep their dependency-free definitions out of domain: otherwise
           // generation-contracts -> domain -> generation-contracts evaluates
           // the frame rule before its binding is initialized and blanks startup.
-          if (['novelActionDirection.ts', 'novelActionLegacyRequestRules.ts']
+          if (['novelActionDirection.ts', 'novelActionLegacyRequestRules.ts', 'storySceneParticipationRules.ts']
             .some((file) => normalized.endsWith(`/src/${file}`))) return 'novel-action-rules';
           // These catalogs initialize constants from videoInteractionRules at
           // module scope. Keep both sides of that dependency in the same leaf

@@ -4,13 +4,13 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的 Windows 桌面工作台。
 
-当前版本：**2.8.8** · 2026-10-21 · Windows 64 位 · 便携运行
+当前版本：**2.9.0** · 2026-10-21 · Windows 64 位 · 便携运行
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows 便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-2.8.8.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-2.9.0.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
 1. 下载上面的 EXE，放在可写入的文件夹里，双击运行，无需安装 Node.js。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
@@ -32,14 +32,14 @@
 - **自定义生图+反推图片提示词**：输入要求生成图片，或复用上传/资产库参考图，通过视觉 API 反推可复制的提示词与人物、物品、场景、风格详情。反推同步显示在聊天和资料任务，支持后台执行、停止、重试及项目保存恢复；原有生图支持原文直发或规则转换，结果自动入库。
 - **项目与资产管理**：管理图片、视频和音频，保存项目包、备份资料并导出提示词。
 
-## 最新更新 · v2.8.8
+## 最新更新 · v2.9.0
 
-- 画面转化、分段和 Seedance 保留有据群体成员及各自行为；场面身份继续传递，区分在场、入画与仅被提及。
-- 分别传递每次时间跳跃，现有导演步骤安排可见转场，Seedance 保留已采用的镜界和前后状态。
-- 实际提示词的时长、比例和分辨率跟随本次视频请求参数；明确的人物参考关联不再依赖固定标题，清理冲突的纯文字声明。
-- 不新增按钮、运行时校验、审核、拦截、重试或模型请求；保留此前声音、动作时长与英译修复。
+- 长剧情模式移除结果区右上角重复的“重新生成 Seedance”按钮，统一使用左下“重新生成本段 Seedance 提示词”。
+- 单段模式保留右上入口，原有生成调用与保存流程不变。
+- 生成任务页将“章节范围”移到标题行右上方，下方只保留三项任务分类，并调整窄屏布局。
+- 不新增按钮、模型请求或运行时校验；保留此前启动白屏修复。
 
-[查看本版完整说明](docs/releases/发布说明-2.8.8.md) · [历史版本归档](docs/releases/README.md)
+[查看本版完整说明](docs/releases/发布说明-2.9.0.md) · [历史版本归档](docs/releases/README.md)
 
 ## 从源码运行
 

@@ -16201,7 +16201,7 @@ function DirectorView(ctx: AppContext) {
                         >
                           复制
                         </Button>
-                        {directorPromptFormat === "seedance" && seedanceOutputFresh && <Button small
+                        {productionMode !== "sequence" && directorPromptFormat === "seedance" && seedanceOutputFresh && <Button small
                           icon={<RefreshCw size={14} />} disabled={seedancePromptBusy || busy || sequenceBatchRunning}
                           onClick={() => void generateSeedanceOfficialPrompt()}>{seedancePromptBusy ? "生成中…" : "重新生成 Seedance"}</Button>}
                       </div>
@@ -25601,7 +25601,7 @@ function GenerationTasksView(ctx: AppContext) {
   return (
     <div className="grid jobs-view">
       <div className="section-heading generation-jobs-heading">
-        <div>
+        <div className="generation-jobs-title">
           <div className="eyebrow">GENERATION JOBS</div>
           <h2>生成任务</h2>
         </div>
@@ -25609,19 +25609,19 @@ function GenerationTasksView(ctx: AppContext) {
           <p>图片、视频和资料任务分开查看，状态与操作互不混杂。</p>
           <span className="field-hint">{chapterFilter === "all" ? "显示全项目任务" : `当前范围 ${chapterFilteredTasks.length} 项`} · 后台任务持续运行</span>
         </div>
+        <label className="generation-task-scope">
+          <span>章节范围</span>
+          <select value={chapterFilter} onChange={(event) => setChapterFilter(event.target.value)} aria-label="任务章节筛选">
+            <option value="all">全项目 · 全部章节</option>
+            {state.project.sourceDocuments.map((chapter) => <option key={chapter.id} value={chapter.id}>
+              {chapter.name}{chapter.archived ? "（已归档）" : ""}
+            </option>)}
+            <option value="shared">项目共享 / 历史任务</option>
+          </select>
+        </label>
       </div>
       <Card className="soft generation-task-browser">
         <div className="generation-task-toolbar">
-          <label className="generation-task-scope">
-            <span>章节范围</span>
-            <select value={chapterFilter} onChange={(event) => setChapterFilter(event.target.value)} aria-label="任务章节筛选">
-              <option value="all">全项目 · 全部章节</option>
-              {state.project.sourceDocuments.map((chapter) => <option key={chapter.id} value={chapter.id}>
-                {chapter.name}{chapter.archived ? "（已归档）" : ""}
-              </option>)}
-              <option value="shared">项目共享 / 历史任务</option>
-            </select>
-          </label>
           <div className="generation-task-tabs" role="tablist" aria-label="任务分类">
             {(["image", "video", "autofill"] as const).map((category) => {
               const meta = taskCategoryMeta[category];

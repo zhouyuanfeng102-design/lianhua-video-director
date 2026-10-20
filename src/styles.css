@@ -621,19 +621,19 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
 .batch-toolbar .compact-check { min-height: 28px; margin: 0; }
 .revision-panel { margin-top: 8px; padding: 7px; border: 1px solid var(--line); border-radius: 7px; background: #fff; display: grid; gap: 5px; }
 .jobs-view { min-width: 0; gap: 6px; container-type: inline-size; }
-.generation-jobs-heading { min-width: 0; min-height: 34px; margin: 0; justify-content: flex-start; gap: 16px; }
+.generation-jobs-heading { min-width: 0; min-height: 34px; margin: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr) minmax(240px, 320px); grid-template-areas: "title context scope"; align-items: center; gap: 6px 16px; }
 .generation-jobs-heading > div { min-width: 0; }
-.generation-jobs-heading > div:first-child { flex: 0 0 auto; }
+.generation-jobs-title { grid-area: title; }
 .generation-jobs-heading .eyebrow { font-size: clamp(8px, .75cqi, calc(9px * var(--ui-font-scale, 1))); line-height: 1.2; }
 .generation-jobs-heading h2 { font-size: clamp(12px, 1.15cqi, calc(13px * var(--ui-font-scale, 1))); line-height: 1.3; }
 .generation-jobs-heading p { margin: 0; font-size: clamp(9px, .9cqi, calc(10px * var(--ui-font-scale, 1))); line-height: 1.3; overflow-wrap: anywhere; }
-.generation-jobs-context { display: grid; gap: 2px; }
+.generation-jobs-context { grid-area: context; display: grid; gap: 2px; }
 .generation-jobs-context .field-hint { font-size: clamp(8px, .8cqi, calc(9px * var(--ui-font-scale, 1))); line-height: 1.25; overflow-wrap: anywhere; }
 .generation-task-browser { min-width: 0; display: grid; gap: 6px; padding: 8px; }
-.generation-task-toolbar { min-width: 0; display: grid; grid-template-columns: minmax(250px, 1fr) minmax(0, 2fr); align-items: center; gap: 12px; }
-.generation-task-scope { min-width: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 7px; font-size: clamp(10px, 1cqi, calc(11px * var(--ui-font-scale, 1))); line-height: 1.25; }
+.generation-task-toolbar { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
+.generation-task-scope { grid-area: scope; min-width: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); align-items: center; gap: 7px; font-size: clamp(10px, 1cqi, calc(11px * var(--ui-font-scale, 1))); line-height: 1.25; }
 .generation-task-scope > span { white-space: nowrap; }
-.generation-task-scope select { min-width: 0; min-height: 30px; padding: 3px 7px; font-size: inherit; line-height: 1.25; }
+.generation-task-scope select { width: 100%; min-width: 0; max-width: 100%; min-height: 30px; padding: 3px 7px; font-size: inherit; line-height: 1.25; text-overflow: ellipsis; }
 .generation-task-tabs {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -682,9 +682,11 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
 .generation-task-category-summary strong { font-size: clamp(10px, 1cqi, calc(11px * var(--ui-font-scale, 1))); line-height: 1.25; }
 .generation-task-category-summary .field-hint { margin-top: 1px; font-size: clamp(8px, .8cqi, calc(9px * var(--ui-font-scale, 1))); line-height: 1.3; }
 .generation-task-category-summary > .btn { flex: 0 0 auto; min-height: 28px; padding: 3px 7px; gap: 5px; font-size: clamp(10px, 1cqi, calc(11px * var(--ui-font-scale, 1))); line-height: 1.2; }
-@container (max-width: 640px) {
-  .generation-task-toolbar { grid-template-columns: minmax(0, 1fr); gap: 6px; }
-  .generation-jobs-heading { align-items: flex-start; gap: 10px; }
+@container (max-width: 800px) {
+  .generation-jobs-heading { grid-template-columns: minmax(0, 1fr) minmax(220px, 300px); grid-template-areas: "title scope" "context context"; gap: 4px 12px; }
+}
+@container (max-width: 460px) {
+  .generation-jobs-heading { grid-template-columns: minmax(0, 1fr); grid-template-areas: "title" "context" "scope"; gap: 6px; }
 }
 .job-request { min-height: 180px; margin-top: 9px; font-family: Consolas, monospace; font-size: calc(11px * var(--ui-font-scale, 1)); }
 .job-list { display: grid; gap: 7px; min-height: 0; overflow: auto; }
