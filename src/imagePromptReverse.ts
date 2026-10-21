@@ -11,6 +11,7 @@ import { requestImagePromptReverse } from './services/llm';
 import { createImagePromptReverseTask, GenerationTaskCancelledError, isGenerationTaskCancelledError,
   isGenerationTaskRevoked, patchImagePromptReverseTask, revokeImagePromptReverseTask } from './generationTasks';
 import { getSafeErrorDiagnostics } from './errorDiagnostics';
+import { withTextApiUsageContext } from './textApiUsage';
 
 export { imagePromptReverseStatusLabel } from './generationTasks';
 export interface ImagePromptReverseContext extends CustomImageGenerationContext {
@@ -134,7 +135,9 @@ export const submitImagePromptReverse = async (ctx: ImagePromptReverseContext,
   input: ImagePromptReverseSubmission): Promise<string | undefined> => {
   const initial = ctx.getState();
   const projectId = initial.project.id;
-  const api = cloneImageBatchConfig(initial.settings.visionApi);
+  const api = withTextApiUsageContext(cloneImageBatchConfig(initial.settings.visionApi), {
+    projectId, projectName: initial.project.name, connectionName: '视觉 API',
+  }, 'image-prompt-reverse');
   const submissionKey = JSON.stringify([projectId, input.referenceAssetId, input.customRequirement || '']);
   if (submissions.has(submissionKey) || initial.project.generationTasks.some((task) => task.kind === 'image-prompt-reverse'
     && ['queued', 'running'].includes(task.status) && task.referenceAssetId === input.referenceAssetId
@@ -182,9 +185,11 @@ export const stopImagePromptReverse = (ctx: ImagePromptReverseContext, source: I
 export const retryImagePromptReverse = async (ctx: ImagePromptReverseContext,
   source: ImagePromptReverseTask): Promise<string | undefined> => {
   const initial = ctx.getState();
-  const api = cloneImageBatchConfig(initial.settings.visionApi);
   const project = findOwner(initial, source);
   if (!project) { ctx.notify('原图片反推任务已不存在。', 'error'); return undefined; }
+  const api = withTextApiUsageContext(cloneImageBatchConfig(initial.settings.visionApi), {
+    projectId: project.id, projectName: project.name, connectionName: '视觉 API',
+  }, 'image-prompt-reverse');
   const live = project.generationTasks.find((task) => task.id === source.id);
   if (live?.kind !== 'image-prompt-reverse' || ['queued', 'running'].includes(live.status)) return undefined;
   if (project.generationTasks.some((task) => task.kind === 'image-prompt-reverse'

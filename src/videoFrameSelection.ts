@@ -2,6 +2,7 @@ import { requestTextModel } from './services/llm';
 import { VIDEO_TAIL_FRAME_MAX_ATTEMPTS, VideoTailFrameProtocolError, videoTailFrameRetryDecision,
   type VideoTailFrameAiAttempt } from './videoTailFrameRetry';
 import type { TextApiConfig } from './types';
+import { withTextApiUsageContext, type TextApiUsageContext } from './textApiUsage';
 import type {
   WorkbenchExtractedFrame, WorkbenchFrameRequest, WorkbenchFrameResult, WorkbenchMediaSource,
 } from './videoWorkbenchTypes';
@@ -44,6 +45,8 @@ export interface VideoTailFrameSelectionInput {
   source: WorkbenchMediaSource;
   /** Only the explicitly configured vision API. No fallback to another model. */
   config: TextApiConfig;
+  /** Request-owned accounting metadata; never copied into saved video tasks. */
+  usageContext?: TextApiUsageContext;
   previousPrompt: string;
   nextPrompt: string;
   storyContext?: string;
@@ -203,12 +206,12 @@ export const prepareVideoTailFrameImage = async (dataUrl: string, signal?: Abort
 };
 
 export const recommendVideoTailFrame = async (
-  input: Pick<VideoTailFrameSelectionInput, 'config' | 'previousPrompt' | 'nextPrompt' | 'storyContext' | 'signal' | 'onProgress' | 'onBeforeAI' | 'requireAiSelection' | 'maxAiAttempts'>
+  input: Pick<VideoTailFrameSelectionInput, 'config' | 'usageContext' | 'previousPrompt' | 'nextPrompt' | 'storyContext' | 'signal' | 'onProgress' | 'onBeforeAI' | 'requireAiSelection' | 'maxAiAttempts'>
     & { candidates: readonly VisionCandidate[] },
   dependencies: VideoTailFrameSelectionDependencies = {},
 ): Promise<VideoTailFrameSelectionSummary> => {
   assertActive(input.signal);
-  const config = { ...input.config };
+  const config = withTextApiUsageContext(input.config, input.usageContext || {}, 'video-frame-selection');
   const candidates = input.candidates.map((candidate) => ({ ...candidate }));
   const last = candidates.find((candidate) => candidate.isLastFrame);
   if (!last) throw new Error('没有可核对的真实尾帧，无法安全回退。');
@@ -339,7 +342,11 @@ export const extractVideoTailFrameSelection = async (
     input.onProgress?.(selection.warning || `AI 已选中 ${selection.selectedTimeSec.toFixed(3)} 秒画面：${selection.reason}`);
     return { frame: selected.frame, candidates, selection };
   };
-  const config = { ...input.config };
+  const config = withTextApiUsageContext(input.config, {
+    ...input.usageContext, projectId: input.projectId,
+    operationId: input.usageContext?.operationId || input.jobId,
+    connectionName: '视觉 API',
+  }, 'video-frame-selection');
   const unavailable = (warning: string): VideoTailFrameSelectionResult => {
     if (input.requireAiSelection) throw new Error(`${warning}；尚未应用衔接帧，不会自动改用原尾帧。请重试 AI 选帧。`);
     return complete(fallbackSummary(candidates, warning));

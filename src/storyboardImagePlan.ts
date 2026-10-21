@@ -138,7 +138,7 @@ export const requestStoryboardImageFramePlan = async (
     originalResponse = await options.request(
       repairAttempt === 0 ? IMAGE_FRAME_PLAN_SYSTEM
         : `${IMAGE_FRAME_PLAN_SYSTEM}\n上一份返回存在可读取结构问题。请基于完整原资料修复已指出的问题，并返回包含完整 requestedImageCount 项的 {"frames":[...]}；不要只返回差异，不要要求用户手工修复。`,
-      JSON.stringify({ requestedImageCount: count, source,
+      JSON.stringify({ source, requestedImageCount: count,
         ...(repairAttempt === 0 ? {} : { originalResponse, structuralError, repairAttempt }) }),
     );
     abortIfStale(options);

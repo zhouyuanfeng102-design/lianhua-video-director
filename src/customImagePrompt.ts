@@ -65,8 +65,8 @@ export const requestCustomImagePrompt = async (
     `<selected_image_rule>\n${input.rule.systemPrompt}\n${input.rule.outputRules}\n</selected_image_rule>`,
     IMAGE_STORY_SPATIAL_STATE_RULE,
     `本次输出格式：${format}。`,
-    `本次输出尺寸：${input.width} × ${input.height} 像素。`,
     '只返回最终生图提示词文本，不要解释、代码块或 JSON。',
+    `本次输出尺寸：${input.width} × ${input.height} 像素。`,
   ].join('\n');
   const converted = await requestTextModel(apiText, systemPrompt, input.userPrompt, input.signal);
   return assertValidFinalImagePrompt(converted, input.rule.format, input.userPrompt);

@@ -6,6 +6,7 @@ import type {
   TargetParameters,
 } from './promptAdapters';
 import type { TranslateVideoPromptToEnglishOptions } from './promptTranslation';
+import { orderSemanticPromptContext, orderTextPromptData } from './textPromptLayout';
 import { STORY_CAUSALITY_TRANSLATION_RULE } from './storyCausalityRules';
 import { AUDIO_TRANSLATION_SCOPE_RULE, DIALOGUE_VOICE_IDENTITY_TRANSLATION_RULE, VOICE_PROFILE_TRANSLATION_PRESERVATION_RULE } from './audioPromptPolicy';
 import { VIDEO_ACTING_CAMERA_TRANSLATION_RULE } from './videoActingCameraRules';
@@ -400,16 +401,17 @@ export const generateOfficialSeedancePrompt = async ({ input, request, isCurrent
   const sequenceContext = adoptedSourceEvidence.sequenceSegmentContext;
   if (sequenceContext && typeof sequenceContext === 'object' && !Array.isArray(sequenceContext)) {
     const { creativeDirection: _planningPreferences, ...adoptedContext } = sequenceContext as Record<string, unknown>;
-    expressionSourceEvidence.sequenceSegmentContext = adoptedContext;
+    expressionSourceEvidence.sequenceSegmentContext = orderSemanticPromptContext(adoptedContext);
   }
-  const evidence = {
+  const evidence = orderTextPromptData({
     taskAuthority: input.stagingAuthority ? 'current-segment-staging-replan' : 'preserve-confirmed-schedule',
     ...(input.stagingAuthority ? { revisionScope: input.stagingAuthority } : {}),
     ...(input.existingPrompt ? { candidatePrompt: input.existingPrompt } : {}),
     ...(input.executionContext ? { executionContext: input.executionContext } : {}),
     voiceFactScope: input.voiceFactScope || 'source-grounded-new-draft',
     canonicalPrompt: input.canonicalPrompt,
-    sourceEvidence: expressionSourceEvidence,
+    sourceEvidence: orderTextPromptData(expressionSourceEvidence,
+      ['sequenceSegmentContext', 'characterIdentityFacts', 'currentCharacterVoiceFacts', 'globalContinuityFacts', 'sourceStoryContent']),
     ...(input.sceneContext ? { sceneContext: structuredClone(input.sceneContext) } : {}),
     specification: { durationSec: metadata.durationSec, aspectRatio: input.aspectRatio, resolution: input.resolution, audioMode: input.audioMode },
     subjectDefinitions: (input.subjectDefinitions || []).map((subject) => {
@@ -421,7 +423,7 @@ export const generateOfficialSeedancePrompt = async ({ input, request, isCurrent
     referenceManifest: metadata.referenceManifest.assets,
     shotPrivateDetails: input.shotPrivateDetails || [],
     constraints: visibleSeedanceConstraints(input.constraints),
-  };
+  }, ['sourceEvidence', 'subjectDefinitions', 'constraints']);
   const nsfwVideoActionRule = hasNsfwDetailSignal(
     input.nsfwDetail ? 'NSFW' : '',
     input.canonicalPrompt,

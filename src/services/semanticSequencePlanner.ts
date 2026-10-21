@@ -1,4 +1,6 @@
 import { DIALOGUE_LANGUAGE_RULE } from '../audioPromptPolicy';
+import { orderTextPromptData } from '../textPromptLayout';
+import { withTextApiUsageContext } from '../textApiUsage';
 import {
   copySemanticSequencePlanningInput, materializeSemanticSequencePlan, parseSemanticSequenceResponse,
   SemanticSequenceTechnicalError, SEMANTIC_SEQUENCE_FIT_STATUS_RULE,
@@ -154,9 +156,9 @@ const requiredFixedSegmentCount = (input: SemanticSequencePlanningInput): number
 const semanticSequencePlanningRule = (input: SemanticSequencePlanningInput): string => input.durationMode !== 'fixed'
   ? SEMANTIC_SEQUENCE_PLANNING_RULE
   : [
-      `本阶段durationAdjustmentPolicy=fixed-total-duration，durationMode=fixed：用户自定义全片总时长T=${input.requestedTotalDurationSec}秒，每段D=${input.segmentDurationSec}秒，已确定N=${requiredFixedSegmentCount(input)}段。T、D、N均固定；成功结果的segments数组必须实际完整输出${requiredFixedSegmentCount(input)}项，每段完整D秒，总长精确T秒，不另外填写segmentCount。不能擅自增减段数或更改总时长。`,
       '固定模式沿用下述共同的全片动作时间安排与窗口分配规则，只额外受T、D、N约束：在固定T秒内安排完整事件、原话和必要反应，调整尚未确认的窗口归属，不删招、减回合、丢真实整理喘息或改短T。结合完整制作要求自然安排发话与动作，不按字数、句数、固定语速或最低镜数套公式，不靠抢话、声音重叠、零时长末点事件或机械加速朗读硬塞预算，不用凝视、换景、空镜或重复结尾填时。首轮回答内先调整全片未确认的分配，不能因第一次局部安排拥挤就认定固定时长做不到；T、D、N固定后不得套用AI适配的加窗权限，确实仍无法给完整串行动作安排自然过程时按下述失败诊断返回insufficient，不能静默加长、越界完成或把动作移出用户固定范围。',
       SEMANTIC_SEQUENCE_COMMON_RULE,
+      `本阶段durationAdjustmentPolicy=fixed-total-duration，durationMode=fixed：用户自定义全片总时长T=${input.requestedTotalDurationSec}秒，每段D=${input.segmentDurationSec}秒，已确定N=${requiredFixedSegmentCount(input)}段。T、D、N均固定；成功结果的segments数组必须实际完整输出${requiredFixedSegmentCount(input)}项，每段完整D秒，总长精确T秒，不另外填写segmentCount。不能擅自增减段数或更改总时长。`,
       '固定模式的失败诊断例外：上述完整segments与片段字段要求用于成功结果。若本次内部重新分配后仍未排好完整剧情，明确返回fitStatus=insufficient，并用非空reason说明具体冲突的发话或必须串行动作；这只是本次规划失败的自评，不宣称已经证实客观最低时长。失败结果可以只返回reason、fitStatus，或令segments为空数组，不必为失败诊断凑齐N段。固定模式不会自动拿相同预算重新完整生成，不能靠加段、删对白或谎报成功处理失败。',
     ].join('\n');
 
@@ -165,7 +167,7 @@ const envelope = (tag: string, value: unknown): string => `${tag}=${JSON.stringi
   .replace(/</gu, '\\u003c').replace(/>/gu, '\\u003e').replace(/&/gu, '\\u0026')
   .replace(/\u2028/gu, '\\u2028').replace(/\u2029/gu, '\\u2029')}`;
 
-const sourcePayload = (input: SemanticSequencePlanningInput) => ({
+const sourcePayload = (input: SemanticSequencePlanningInput) => orderTextPromptData({
   title: input.title, story: input.story, segmentDurationSec: input.segmentDurationSec,
   directorSettingsFingerprint: input.directorSettingsFingerprint,
   creativeDirection: input.creativeDirection, pacing: videoPacingWithoutCreativeRequirement(input.pacing),
@@ -181,7 +183,7 @@ const sourcePayload = (input: SemanticSequencePlanningInput) => ({
     requiredSegmentCount: requiredFixedSegmentCount(input),
     durationAdjustmentPolicy: 'fixed-total-duration',
   } : { durationAdjustmentPolicy: 'ai-chooses-segment-count' }),
-});
+}, ['story', 'originalSourceContext', 'characterContinuity', 'creativeDirection', 'pacing', 'title']);
 
 export const requestSemanticSequencePlan = async (
   config: TextApiConfig,
@@ -199,7 +201,7 @@ export const requestSemanticSequencePlan = async (
   };
   assertCurrent();
   const snapshot = copySemanticSequencePlanningInput(input);
-  const requestConfig = { ...config };
+  const requestConfig = withTextApiUsageContext(config, {}, 'sequence-semantic-planning');
   const inputPayload = sourcePayload(snapshot);
   const planningRule = [
     semanticSequencePlanningRule(snapshot),

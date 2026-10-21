@@ -137,7 +137,7 @@ export const repairH3IdentityBindings = async (input: RepairH3IdentityBindingsIn
     throw new H3IdentityRepairError('本次人物图片绑定修复没有可用请求预算，原稿保持不变。', 0);
   }
   const payload = JSON.stringify({
-    sourcePrompt: prompt, characters, identityBindings: existing, repairTargets,
+    characters, sourcePrompt: prompt, identityBindings: existing, repairTargets,
     retainedIdentityBindings: existing.characters,
     insertionIdentityDeclarations: repairTargets.map((id) => ({ characterId: id,
       sentence: insertionDeclaration(characterMap.get(id)!, existing.characters.find((binding) => binding.characterId === id), input.language) })),

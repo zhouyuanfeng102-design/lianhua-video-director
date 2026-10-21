@@ -71,11 +71,11 @@ export const comicSourceDataPrompt = (
   '<comic_source_data>',
   JSON.stringify({
     comicSettings: settings,
+    identityContext,
     images: [
       ...pages.map((page, index) => ({ imageIndex: index + 1, role: 'comic', referenceId: page.referenceId, number: page.number, pageOrder: index + 1 })),
       ...(options?.identityReferences || []).map((reference, index) => ({ imageIndex: pages.length + index + 1, role: 'identity_reference', referenceId: reference.referenceId, number: reference.number })),
     ],
-    identityContext,
   }),
   '</comic_source_data>',
 ].join('\n');

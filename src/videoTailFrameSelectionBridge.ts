@@ -55,6 +55,11 @@ export const selectProjectVideoTailFrame = async (
   const config = { ...input.getState().settings.visionApi };
   const result = await select({
     desktop: input.desktop, jobId: input.jobId, projectId, source: { ...source }, config, signal,
+    usageContext: {
+      projectId, projectName: project.name, chapterId: plan?.chapterId,
+      chapterName: project.sourceDocuments.find((chapter) => chapter.id === plan?.chapterId)?.name,
+      segmentIndex: next?.index,
+    },
     previousPrompt, nextPrompt: context.prompt,
     requireAiSelection: context.requireAiSelection,
     storyContext: JSON.stringify({

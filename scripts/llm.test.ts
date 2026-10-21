@@ -5093,7 +5093,7 @@ test('full-source bible enrichment gives characters, locations and props the com
     installDesktopHttpFake((payload) => {
       const body = JSON.parse(payload.body || '{}') as { messages: Array<{ role: string; content: string }> };
       const user = body.messages.find((message) => message.role === 'user')?.content || '';
-      const match = user.match(/^需要补全的(人物|地点|道具)名称：(\[[^\n]*\])/u);
+      const match = user.match(/\n\n需要补全的(人物|地点|道具)名称：(\[[^\n]*\])$/u);
       assert.ok(match);
       const label = match[1];
       const names = JSON.parse(match[2]) as string[];
@@ -5113,7 +5113,10 @@ test('full-source bible enrichment gives characters, locations and props the com
       const marker = '完整剧情原文：';
       const markerIndex = user.indexOf(marker);
       assert.ok(markerIndex >= 0);
-      assert.equal(user.slice(markerIndex + marker.length), source,
+      const namesMarker = `\n\n需要补全的${request.label}名称：`;
+      const sourceEnd = user.lastIndexOf(namesMarker);
+      assert.ok(sourceEnd > markerIndex, 'current target names must follow the shared source block');
+      assert.equal(user.slice(markerIndex + marker.length, sourceEnd), source,
         `${request.label} attempt ${request.attempt} must retain all original text, including pronoun/alias passages and the ending`);
       const system = request.body.messages.filter((message) => message.role === 'system').map((message) => message.content).join('\n');
       assert.ok(!system.includes(source), 'whole-story data must not be moved into the system instructions');
@@ -5164,7 +5167,7 @@ test('full-source bible enrichment keeps all fifty-one AI-selected objects while
     installDesktopHttpFake((payload) => {
       const body = JSON.parse(payload.body || '{}') as { messages: Array<{ role: string; content: string }> };
       const user = body.messages.find((message) => message.role === 'user')?.content || '';
-      const match = user.match(/^需要补全的(人物|地点|道具)名称：(\[[^\n]*\])/u);
+      const match = user.match(/\n\n需要补全的(人物|地点|道具)名称：(\[[^\n]*\])$/u);
       assert.ok(match);
       const label = match[1];
       const names = JSON.parse(match[2]) as string[];
@@ -5492,7 +5495,15 @@ test('image asset autofill accepts gender and tells AI how to derive human, anim
   );
 
   assert.deepEqual(result, { gender: '女' });
-  assert.match(requestBody, /只补齐这些字段[^\n]*gender/u);
+  const payload = JSON.parse(requestBody) as { messages: Array<{ role: string; content: string }> };
+  const system = payload.messages.find((message) => message.role === 'system')?.content || '';
+  const user = payload.messages.find((message) => message.role === 'user')?.content || '';
+  const requestData = user.match(/<asset_autofill_request>\s*([\s\S]*?)\s*<\/asset_autofill_request>/u);
+  assert.ok(requestData);
+  assert.deepEqual(JSON.parse(requestData[1]), {
+    assetKind: 'character', requestFields: ['gender'], responseShape: { gender: '补齐内容' },
+  });
+  assert.match(system, /只补齐 requestFields 列出的空白字段.*不得返回、改写或推断其他字段/u);
   assert.match(
     requestBody,
     /(?:人物|人类|人形)[^\n。]*男[^\n。]*女/u,
@@ -5521,7 +5532,14 @@ test('character autofill accepts an explicit empty prop field without returning 
   assert.deepEqual(currentForm, originalForm);
   const payload = JSON.parse(requests[0]) as { messages: Array<{ role: string; content: string }> };
   const system = payload.messages.find((message) => message.role === 'system')?.content || '';
-  assert.match(system, /只补齐这些字段：props/u);
+  const user = payload.messages.find((message) => message.role === 'user')?.content || '';
+  const requestData = user.match(/<asset_autofill_request>\s*([\s\S]*?)\s*<\/asset_autofill_request>/u);
+  assert.ok(requestData);
+  assert.deepEqual(JSON.parse(requestData[1]), {
+    assetKind: 'character', requestFields: ['props'], responseShape: { props: '补齐内容' },
+  });
+  assert.match(system, /只补齐 requestFields 列出的空白字段.*不得返回、改写或推断其他字段/u);
+  assert.match(system, /已有非空内容均是用户确定的资料，禁止改写/u);
   assert.match(system, /人物表单 props 只填全文与当前资料明确的长期装备/u);
   assert.match(system, /没有则返回空字符串/u);
   assert.match(system, /不按剑或食物等类别一刀切/u);
@@ -5773,7 +5791,16 @@ test('image asset autofill returns requested non-empty fields and fills inferred
     height: '约162cm',
   });
   assert.match(requestBody, /不可信项目资料/u);
-  assert.match(requestBody, /只补齐这些字段[^：:]*[：:].*appearance.*outfit/u);
+  const payload = JSON.parse(requestBody) as { messages: Array<{ role: string; content: string }> };
+  const system = payload.messages.find((message) => message.role === 'system')?.content || '';
+  const user = payload.messages.find((message) => message.role === 'user')?.content || '';
+  const requestData = user.match(/<asset_autofill_request>\s*([\s\S]*?)\s*<\/asset_autofill_request>/u);
+  assert.ok(requestData);
+  assert.deepEqual(JSON.parse(requestData[1]), {
+    assetKind: 'character', requestFields: ['appearance', 'outfit', 'age', 'actualAge', 'height'],
+    responseShape: { appearance: '补齐内容', outfit: '补齐内容', age: '补齐内容', actualAge: '补齐内容', height: '补齐内容' },
+  });
+  assert.match(system, /只补齐 requestFields 列出的空白字段.*不得返回、改写或推断其他字段/u);
   assert.match(requestBody, /age[^。]*外观年龄/u);
   assert.match(requestBody, /actualAge[^。]*实际年龄/u);
   assert.match(requestBody, /height[^。]*身高\/高度/u);
@@ -6138,7 +6165,13 @@ test('character private-profile autofill requests only blank gender-applicable f
   const payload = JSON.parse(requestBody) as { messages?: Array<{ role?: string; content?: string }> };
   const systemPrompt = payload.messages?.find((item) => item.role === 'system')?.content || '';
   const userPrompt = payload.messages?.find((item) => item.role === 'user')?.content || '';
-  assert.match(systemPrompt, /本次目标字段[^\n]*nsfwFullBody[^\n]*nsfwVulva[^\n]*nsfwAnus/u);
+  const requestData = userPrompt.match(/<private_profile_request>\s*([\s\S]*?)\s*<\/private_profile_request>/u);
+  assert.ok(requestData);
+  const fieldContract = JSON.parse(requestData[1]) as { requestFields: string[]; responseShape: Record<string, string> };
+  assert.deepEqual(fieldContract.requestFields, ['nsfwFullBody', 'nsfwVulva', 'nsfwAnus']);
+  assert.deepEqual(Object.keys(fieldContract.responseShape), fieldContract.requestFields);
+  assert.match(systemPrompt, /本次目标字段以 private_profile_request 的 requestFields 为准/u);
+  assert.match(systemPrompt, /只包含这些目标字段，不能根据资料扩展集合或改写已有非空字段/u);
   assert.doesNotMatch(systemPrompt, /nsfwBreasts|nsfwPenis|nsfwScrotum/u);
   assert.equal(exactOccurrenceCount(systemPrompt, MOSE_JIANGHU_PRIVATE_PROFILE_RULES), 1);
   assert.equal(exactOccurrenceCount(systemPrompt, MOSE_JIANGHU_NSFW_IMAGE_PROMPT_RULE), 0);

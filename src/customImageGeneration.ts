@@ -17,6 +17,7 @@ import { readGeneratedImageDimensions } from './imageDimensions';
 import { getSafeErrorDiagnostics } from './errorDiagnostics';
 import { resolveImageAssetRegenerationTask } from './imageRegeneration';
 import { validateRunningHubImageConfig, selectedRunningHubImageWorkflow } from './runningHubImage';
+import { withTextApiUsageContext } from './textApiUsage';
 
 type Update = (updater: (state: AppState) => AppState) => void;
 type ImageGenerationResult = Awaited<ReturnType<typeof requestImageModel>>;
@@ -252,7 +253,9 @@ export const submitCustomImage = async (ctx: CustomImageGenerationContext, input
     const size = resolveImageOutputSize(input.sizePreference, { width: 1024, height: 1024 }, api, 'reference');
     if (size.issue) throw new Error(`生图分辨率无效：${size.issue}`);
     const promptMode = input.promptMode || 'raw';
-    const textApi = cloneImageBatchConfig(initial.settings.textApi);
+    const textApi = withTextApiUsageContext(cloneImageBatchConfig(initial.settings.textApi), {
+      projectId, projectName: initial.project.name, connectionName: '文本 API',
+    }, 'image-custom-convert');
     const ruleSelection = promptMode === 'rules'
       ? captureCustomImageRule(initial.imagePromptRules.ruleSets, input.ruleSetId || '', api) : undefined;
     if (promptMode === 'rules') validateTextApi(textApi);
@@ -336,7 +339,9 @@ export const retryCustomImageTask = async (
     if (reconvert && customImageInput.promptMode !== 'rules') throw new Error('原任务未选择规则，请在自定义生图栏选择规则后创建新任务。');
     if (reconvert && !customImageInput.ruleSelection) throw new Error('原任务规则快照缺失，不能使用当前规则代替。');
     if (!reconvert && !source.prompt.trim()) throw new Error('原任务没有最终提示词，请创建新任务。');
-    const textApi = cloneImageBatchConfig(initial.settings.textApi);
+    const textApi = withTextApiUsageContext(cloneImageBatchConfig(initial.settings.textApi), {
+      projectId: project.id, projectName: project.name, connectionName: '文本 API',
+    }, 'image-custom-convert');
     if (reconvert) validateTextApi(textApi);
     const currentProject = ownerProject(ctx.getState(), project.id);
     if (!currentProject || (live ? !currentProject.generationTasks.some((task) => task.id === source.id && task.createdAt === source.createdAt)

@@ -303,6 +303,8 @@ import {
   type RecoveryStatus,
 } from "./storage";
 import { isProjectLibraryReference, projectLibraryReferenceOf } from "./projectLibraryRuntime";
+import { CacheAnalysisPanel } from "./components/CacheAnalysisPanel";
+import { withTextApiUsageContext, type TextApiUsageContext } from "./textApiUsage";
 import {
   detectNsfwCharacterNames,
   fetchAvailableModels,
@@ -627,6 +629,22 @@ type RuleCenterTab =
   | "styles"
   | "image-rules"
   | "image-presets";
+
+/** Bind only the owning request snapshot; background work must not follow the active project. */
+const textApiForProject = (
+  config: AppState["settings"]["textApi"],
+  project: Project,
+  scope: TextApiUsageContext & { board?: Storyboard } = {},
+) => {
+  const { board, ...context } = scope;
+  const chapterId = context.chapterId ?? board?.chapterId;
+  return withTextApiUsageContext(config, {
+    connectionName: "文本 API", ...context,
+    projectId: project.id, projectName: project.name,
+    chapterId, chapterName: project.sourceDocuments.find((chapter) => chapter.id === chapterId)?.name,
+    segmentIndex: context.segmentIndex ?? board?.segmentIndex,
+  });
+};
 
 /**
  * Older project snapshots persisted the H3 target as `h3` or `minimaxh3`.
@@ -4266,7 +4284,9 @@ export default function App() {
           camera: savedStyle.camera, lighting: savedStyle.lighting, sound: savedStyle.sound },
         cameraTerms, lightingTerms, extraRequirement,
       });
-      const result = { ...await requestSemanticSequencePlan(snapshot.settings.textApi, {
+      const result = { ...await requestSemanticSequencePlan(textApiForProject(snapshot.settings.textApi, snapshot.project, {
+        chapterId: requestChapterId, operationId: progressContext.operationId,
+      }), {
         title: storyName.trim() || "未命名剧情",
         story: sourceStory,
         originalSourceContext: matchingStoryVisualConversion(snapshot.project, requestChapterId, sourceStory),
@@ -4505,7 +4525,7 @@ export default function App() {
       if (needsDurationEstimate) {
         if (!textApiConfigured) throw new Error("请先配置文本 API 后再按当前节奏进行 AI 估时；已有时长和计划保持不变，不使用本地估算替代。");
         estimate = await requestStoryDurationEstimate(
-          planningState.settings.textApi,
+          textApiForProject(planningState.settings.textApi, planningState.project, { chapterId: activeChapter(planningState.project)?.id }),
           { title: requestStoryTitle, story: sourceStory, beats: semanticBeats, pacing: requestPacing,
             segmentDurationSec: requestSegmentDurationSec },
           requestController.signal,
@@ -5241,7 +5261,7 @@ export default function App() {
       };
       let validatedCompletedPlan: VideoSequencePlan | undefined;
       const aiPlan = await requestAiStorySegmentation(
-        current.settings.textApi,
+        textApiForProject(current.settings.textApi, current.project, { board: masterStoryboard }),
         {
           title: livePlan.sourceStoryTitle,
           story: sourceStory,
@@ -6513,7 +6533,7 @@ export default function App() {
     }
     const key = `${source.project.id}:${chapterId}:${referenceId}`;
     if (storyReferenceRecognitionControllersRef.current.has(key)) return;
-    const config = { ...source.settings.visionApi };
+    const config = textApiForProject(source.settings.visionApi, source.project, { chapterId, connectionName: "视觉 API" });
     if (!config.enabled || !config.vision || !config.baseUrl.trim() || !config.model.trim()) {
       notify("AI识图需要启用并配置支持图片输入的识图 API。", "error"); setView("settings"); return;
     }
@@ -6577,7 +6597,7 @@ export default function App() {
     if (references.some((reference) => reference.enabled && reference.sourceRole !== "comic" && !reference.analysis)) {
       notify("请先完成普通人物、场景参考图的 AI 识图，再与漫画一起生成剧情。", "error"); return;
     }
-    const config = { ...source.settings.visionApi };
+    const config = textApiForProject(source.settings.visionApi, source.project, { chapterId, connectionName: "视觉 API" });
     if (!config.enabled || !config.vision || !config.baseUrl.trim() || !config.model.trim()) {
       notify("漫画识别需要启用并配置支持多图输入的识图 API。", "error"); setView("settings"); return;
     }
@@ -6725,6 +6745,9 @@ export default function App() {
       return;
     }
     const expansionState = stateRef.current;
+    const requestTextApi = textApiForProject(expansionState.settings.textApi, expansionState.project, {
+      chapterId: activeChapter(expansionState.project)?.id,
+    });
     let referenceContext: StoryReferenceContext | undefined;
     try { referenceContext = buildStoryReferenceContext(expansionState.project); }
     catch (error) { notify(error instanceof Error ? error.message : "请先完成参考图识别。", "error"); return; }
@@ -6817,10 +6840,10 @@ export default function App() {
         },
       };
       const preparationResult = options?.paragraphId && existingReview
-        ? await requestStoryVisualParagraphRewrite(expansionState.settings.textApi, originalSource, existingReview.result,
+        ? await requestStoryVisualParagraphRewrite(requestTextApi, originalSource, existingReview.result,
           options.paragraphId, requestController.signal, expansionPreset, preparationContext)
         : await requestStoryPreparationWithReview(
-        expansionState.settings.textApi,
+        requestTextApi,
         originalSource,
         requestController.signal,
         expansionPreset,
@@ -6997,7 +7020,7 @@ export default function App() {
     try {
       const catalog = buildChapterEntityCatalog(originalProject);
       const visualConversion = matchingStoryVisualConversion(originalProject, chapterId, sourceStory);
-      let rawAnalysis = await requestStoryAnalysis(analysisState.settings.textApi, sourceStory, requestController.signal, {
+      let rawAnalysis = await requestStoryAnalysis(textApiForProject(analysisState.settings.textApi, originalProject, { chapterId }), sourceStory, requestController.signal, {
         entityCatalog: catalog, chapterId, referenceContext,
         visualConversion,
         onProgress: (completed, total) => { if (isAnalysisCurrent()) notify(`正在解析“${sourceStoryName}”：${completed}/${total} 部分，原文将完整处理。`); },
@@ -7236,6 +7259,9 @@ export default function App() {
     }
     const requestProjectId = state.project.id;
     const requestChapterId = activeChapter(state.project)?.id;
+    const requestTextApi = textApiForProject(state.settings.textApi, state.project, {
+      chapterId: requestChapterId, segmentIndex: segmentForGeneration?.index,
+    });
     const requestStoryReferenceFingerprint = storyReferenceFingerprint(state.project, requestChapterId);
     const chapterStoryReferenceContext = sourceScenesForGeneration.find((scene) => scene.storyReferenceContext)?.storyReferenceContext
       || sceneForGeneration.storyReferenceContext;
@@ -7491,7 +7517,7 @@ export default function App() {
         runtimeFailureStage = "storyboard-director";
         try {
           const modelDecision = await requestDirectorDecision(
-            state.settings.textApi,
+            requestTextApi,
             segmentGenerationSource.sourceStoryContent,
             generationExtraRequirement,
             localDecision.workflow,
@@ -7638,7 +7664,7 @@ export default function App() {
         };
       } else {
         const modelPlan = await requestShotRecommendation(
-          state.settings.textApi,
+          requestTextApi,
           {
             executionContext: videoPromptExecutionForStoryboard(state.project, state.settings, undefined,
               { chapterId: requestChapterId, sequencePlanId: sourcePlanForGeneration?.id }),
@@ -8185,7 +8211,7 @@ export default function App() {
             runtimeFailureDetail = undefined;
             try {
               return await requestTextModel(
-                transport?.maxTokens !== undefined ? { ...state.settings.textApi, maxTokens: transport.maxTokens } : state.settings.textApi,
+                withTextApiUsageContext(transport?.maxTokens !== undefined ? { ...requestTextApi, maxTokens: transport.maxTokens } : requestTextApi, {}, stage),
                 systemPrompt, userPrompt, undefined,
                 { disableThinking: true, jsonObject: transport?.jsonObject, ...(stage !== "translate" && conversionReferenceImages.length
                   ? { referenceImages: conversionReferenceImages } : {}) },
@@ -8261,6 +8287,7 @@ export default function App() {
     const snapshot = stateRef.current;
     const sourceBoard = snapshot.project.storyboards.find((board) => board.id === boardId);
     const context = officialH3ContextForStoryboard(snapshot.project, sourceBoard);
+    const requestTextApi = textApiForProject(snapshot.settings.textApi, snapshot.project, { board: sourceBoard });
     if (!sourceBoard || !sourceBoard.shots.length
       || (mode === "translate-english" && !hasCurrentOfficialH3Prompt(sourceBoard, context))) {
       notify("请先生成当前有效的中文提示词。", "error");
@@ -8320,8 +8347,8 @@ export default function App() {
         purpose: mode === "dialogue-repair" ? "dialogue-repair" : undefined,
         maxOutputTokens: snapshot.settings.textApi.maxTokens,
         clean: cleanVideoPrompt, isCurrent,
-        request: (system, user, _stage, transport) => requestTextModel(
-          transport?.maxTokens !== undefined ? { ...snapshot.settings.textApi, maxTokens: transport.maxTokens } : snapshot.settings.textApi, system, user,
+        request: (system, user, stage, transport) => requestTextModel(
+          withTextApiUsageContext(transport?.maxTokens !== undefined ? { ...requestTextApi, maxTokens: transport.maxTokens } : requestTextApi, {}, stage), system, user,
           operation.controller.signal, { disableThinking: true, jsonObject: transport?.jsonObject }),
       });
       if (!isCurrent()) return;
@@ -8385,6 +8412,7 @@ export default function App() {
     const snapshot = stateRef.current;
     const board = snapshot.project.storyboards.find((item) => item.id === boardId);
     if (!board?.characterDossierDirty) return;
+    const requestTextApi = textApiForProject(snapshot.settings.textApi, snapshot.project, { board });
     const plan = snapshot.project.sequencePlans.find((item) => item.id === board.sequencePlanId);
     const segment = plan?.segments.find((item) => item.id === board.segmentId && item.storyboardId === board.id);
     if (board.sequencePlanId && (segment?.locked || (!segment && plan?.masterStoryboardId !== board.id))) {
@@ -8422,8 +8450,8 @@ export default function App() {
           references: getSingleSegmentReferences(board, context), chapterId: board.chapterId }),
         purpose: "character-dossier-refresh", mode: "generate", clean: cleanVideoPrompt, isCurrent,
         maxOutputTokens: snapshot.settings.textApi.maxTokens,
-        request: (system, user, _stage, transport) => requestTextModel(
-          transport?.maxTokens !== undefined ? { ...snapshot.settings.textApi, maxTokens: transport.maxTokens } : snapshot.settings.textApi,
+        request: (system, user, stage, transport) => requestTextModel(
+          withTextApiUsageContext(transport?.maxTokens !== undefined ? { ...requestTextApi, maxTokens: transport.maxTokens } : requestTextApi, {}, stage),
           system, user, operation.controller.signal, { disableThinking: true, jsonObject: transport?.jsonObject }),
       });
       if (!isCurrent()) return;
@@ -8468,6 +8496,7 @@ export default function App() {
       || language === "en" && !hasCurrentOfficialH3EnglishPrompt(sourceBoard, context)) {
       throw new Error("当前语言的提示词已失效，请先生成有效提示词。");
     }
+    const requestTextApi = textApiForProject(snapshot.settings.textApi, snapshot.project, { board: sourceBoard, stage: "identity-repair" });
     const plan = snapshot.project.sequencePlans.find((item) => item.id === sourceBoard.sequencePlanId);
     const segment = plan?.segments.find((item) => item.id === sourceBoard.segmentId);
     if (sourceBoard.sequencePlanId && (!segment || segment.storyboardId !== boardId || segment.locked)) {
@@ -8514,7 +8543,7 @@ export default function App() {
         bindings: targetLanguage === "zh" ? sourceBoard.h3IdentityBindings : sourceBoard.h3IdentityBindingsEn,
         characters: context.characters || [], language: targetLanguage === "zh" ? "中文" : "英文",
         targetCharacterIds: repairTargetIds, isCurrent,
-        request: (system, user) => requestTextModel(snapshot.settings.textApi, system, user,
+        request: (system, user) => requestTextModel(requestTextApi, system, user,
           operation.controller.signal, { disableThinking: true }),
       });
       const zh = language === "zh" ? await repair("zh") : undefined;
@@ -8552,6 +8581,7 @@ export default function App() {
   ): Promise<Storyboard | undefined> => {
     if (sequencePromptRefreshRef.current || busy || hasActiveStoryboardBuild()) return undefined;
     const snapshot = stateRef.current;
+    const requestTextApi = textApiForProject(snapshot.settings.textApi, snapshot.project, { board: sourceBoard, segmentIndex: segment?.index });
     if (!canUseFinalPromptConverter(snapshot.settings.textApi)) {
       notify("请先启用并配置文本 API，已保存分镜和提示词保持不变。", "error");
       return undefined;
@@ -8686,11 +8716,11 @@ export default function App() {
             : mode === 'action-retiming' ? '正在重排当前段动作节奏，保留全部动作、次数、对白和段长。'
               : stage === 'convert' ? '正在修复当前段公共分镜衔接。' : `正在编写${label}中文提示词。`);
         },
-        request: async (system, user, _stage, transport) => {
+        request: async (system, user, stage, transport) => {
           runtimeFailureDetail = undefined;
           try {
-            return await requestTextModel(transport?.maxTokens !== undefined
-              ? { ...snapshot.settings.textApi, maxTokens: transport.maxTokens } : snapshot.settings.textApi,
+            return await requestTextModel(withTextApiUsageContext(transport?.maxTokens !== undefined
+              ? { ...requestTextApi, maxTokens: transport.maxTokens } : requestTextApi, {}, stage),
             system, user, operation.controller.signal, { disableThinking: true, jsonObject: transport?.jsonObject });
           } catch (error) {
             runtimeFailureDetail = error;
@@ -8734,6 +8764,7 @@ export default function App() {
       return Boolean(await refreshDerivedTargetPrompt(sourceBoard, mode, plan, segment, format));
     if (sequencePromptRefreshRef.current || busy || hasActiveStoryboardBuild()) return false;
     const snapshot = stateRef.current;
+    const requestTextApi = textApiForProject(snapshot.settings.textApi, snapshot.project, { board: sourceBoard, segmentIndex: segment.index });
     const sourceHandoffStatus = getSequencePromptHandoffStatus(sourceBoard, snapshot.project);
     const requestBatchIdentity = sequenceBatchIdentityRef.current;
     const previousPrompt = requestBatchIdentity || mode === 'continuity-repair' || mode === 'translate-english' && sourceBoard.sequencePromptHandoff
@@ -8853,7 +8884,7 @@ export default function App() {
           : `第 ${segment.index} 段中文已通过校验，正在调用 API ${mode === "translate-english" ? "仅重试" : "生成"}英文版。`),
         maxOutputTokens: snapshot.settings.textApi.maxTokens,
         request: (systemPrompt, userPrompt, stage, transport) => requestTextModel(
-          transport?.maxTokens !== undefined ? { ...snapshot.settings.textApi, maxTokens: transport.maxTokens } : snapshot.settings.textApi,
+          withTextApiUsageContext(transport?.maxTokens !== undefined ? { ...requestTextApi, maxTokens: transport.maxTokens } : requestTextApi, {}, stage),
           systemPrompt,
           userPrompt,
           operation.controller.signal,
@@ -10357,6 +10388,7 @@ export default function App() {
             </div>
           ))}
           <div className="sidebar-utility-stack">
+            <CacheAnalysisPanel projectId={state.project.id} />
             <button
               type="button"
               className="update-log-trigger"
@@ -13887,7 +13919,7 @@ function DirectorView(ctx: AppContext) {
   const seedanceOutputFresh = Boolean(directorResultStoryboard && ctx.promptDirectorReads.seedanceReady(directorResultStoryboard));
   const seedanceEnglishPromptValid = Boolean(directorResultStoryboard && ctx.promptDirectorReads.seedanceReady(directorResultStoryboard, "en"));
   const translateSeedancePrompt = async (sourcePrompt: string, isCurrent: () => boolean): Promise<string> => {
-    const textApi = state.settings.textApi;
+    const textApi = textApiForProject(state.settings.textApi, state.project, { board: directorResultStoryboard, stage: "seedance-english-prompt" });
     return translateSeedancePromptToEnglish({
       sourcePrompt,
       sourceCharacters: state.project.characters,
@@ -13953,7 +13985,7 @@ function DirectorView(ctx: AppContext) {
     let requestIdentity = seedanceLiveSaveIdentity(getCurrentState().project.storyboards.find((board) => board.id === directorResultStoryboard.id) || directorResultStoryboard);
     const requestFingerprint = getOfficialSeedanceSourceFingerprint(requestInput);
     const isCurrent = () => isSeedanceSaveCurrent(requestIdentity, requestFingerprint);
-    const textApi = state.settings.textApi;
+    const textApi = textApiForProject(state.settings.textApi, state.project, { board: directorResultStoryboard });
     let requestFailure: unknown;
     const errorContext = { projectId: requestIdentity.projectId, projectName: state.project.name,
       provider: textApi.provider, model: textApi.model, endpoint: textApi.baseUrl };
@@ -13965,7 +13997,7 @@ function DirectorView(ctx: AppContext) {
         request: async (system, user, transport) => {
           requestFailure = undefined;
           try {
-            return await requestTextModel(textApi, system, user, undefined,
+            return await requestTextModel(withTextApiUsageContext(textApi, {}, transport?.sourceDocumentTranslation ? "seedance-english-prompt" : "seedance-chinese-prompt"), system, user, undefined,
               { disableThinking: true, jsonObject: transport?.sourceDocumentTranslation });
           } catch (error) {
             requestFailure = error;
@@ -14138,7 +14170,9 @@ function DirectorView(ctx: AppContext) {
     if (busy || directorLookRequestRef.current || directorLookAutofillBusy || directorLookUploading) return;
     const textApi = state.settings.textApi;
     const hasReferenceImage = Boolean(directorLookReferenceAssetId);
-    const analysisApi = hasReferenceImage ? state.settings.visionApi : textApi;
+    const analysisApi = textApiForProject(hasReferenceImage ? state.settings.visionApi : textApi, state.project, {
+      chapterId: directorLookChapterId, connectionName: hasReferenceImage ? "视觉 API" : "文本 API",
+    });
     if (hasReferenceImage && (!analysisApi.enabled || !analysisApi.vision || !analysisApi.baseUrl.trim() || !analysisApi.model.trim())) {
       notify("参考图分析需要视觉 API。请先在 API 设置中启用视觉模型并填写地址、模型。", "error");
       setView("settings");
@@ -14358,7 +14392,7 @@ function DirectorView(ctx: AppContext) {
         return;
       }
     }
-    const textApi = { ...state.settings.textApi };
+    const textApi = textApiForProject(state.settings.textApi, state.project, { board: sourceBoard });
     if (!textApi.enabled || !textApi.baseUrl.trim() || !textApi.model.trim()) {
       const error = new Error("分镜图片必须先由文本模型转换成最终生图提示词。请先启用并配置文本 API；本次没有调用图像模型。");
       notify(error.message, "error");
@@ -14591,7 +14625,7 @@ function DirectorView(ctx: AppContext) {
           onRepair: (detail, progress) => {
             if (imagePlanningIsCurrent()) notify(`AI 正在修复 ${requestedImageCount} 张图片的规划结构（${progress?.attempt ?? 1}/${progress?.maxAttempts ?? 3}）：${getSafeErrorDiagnostics(detail).message} 尚未提交生图。`);
           },
-          request: (system, user) => { assertImagePlanningCurrent(); return requestTextModel(textApi, system, user, undefined, { disableThinking: true }); },
+          request: (system, user) => { assertImagePlanningCurrent(); return requestTextModel(withTextApiUsageContext(textApi, {}, "image-frame-plan"), system, user, undefined, { disableThinking: true }); },
         });
         assertImagePlanningCurrent();
         imageBatchStage = "image-preparation";
@@ -18906,7 +18940,7 @@ function ImageWorkbenchView(ctx: AppContext) {
              ];
   const completeAssetDetails = async () => {
     if (autofillBusy || activeAutofillTaskIdRef.current) return;
-    const textApi = state.settings.textApi;
+    const textApi = textApiForProject(state.settings.textApi, state.project);
     if (!textApi.enabled || !textApi.baseUrl.trim() || !textApi.model.trim()) {
       notify("请先在 API 设置中启用并填写文本模型 API 地址和模型名称。", "error");
       setView("settings");
@@ -19511,7 +19545,7 @@ function ImageWorkbenchView(ctx: AppContext) {
     const requestBusyEpoch = getBusyEpoch();
     try {
       const analysis = await requestVisionAnalysis(
-        state.settings.visionApi,
+        textApiForProject(state.settings.visionApi, state.project, { connectionName: "视觉 API" }),
         assetKind,
         uploadedPreview,
       );
@@ -19612,7 +19646,7 @@ function ImageWorkbenchView(ctx: AppContext) {
       const issue = validateRunningHubImageConfig(requestedImageApi, requestedUseReferenceImage && requestedUploadedPreview ? 1 : 0);
       if (issue) { notify(issue, "error"); setView("settings"); return; }
     }
-    const requestedTextApi = cloneImageBatchConfig(state.settings.textApi);
+    const requestedTextApi = textApiForProject(cloneImageBatchConfig(state.settings.textApi), state.project, { operationId: requestedBatchId });
     const requestedImagePromptAssetKind: ImagePromptAssetKind =
       requestedNsfwPrivatePart
         ? "character-private"
@@ -20202,7 +20236,7 @@ function ImageWorkbenchView(ctx: AppContext) {
       setView("settings");
       return;
     }
-    const textApi = { ...state.settings.textApi };
+    const textApi = textApiForProject(state.settings.textApi, state.project, { board: sourceBoard });
     if (!textApi.enabled || !textApi.baseUrl.trim() || !textApi.model.trim()) {
       notify("分镜图片必须先由文本模型转换成最终生图提示词。请先配置文本 API。", "error");
       setView("settings");
@@ -24356,7 +24390,10 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
     }
     const source = resolveImageRegenerationSource(effectiveTask, state.project);
     regenerationSource = source;
-    const textApi = { ...state.settings.textApi };
+    const textApi = textApiForProject(state.settings.textApi, state.project, {
+      board: state.project.storyboards.find((board) => board.id === (effectiveTask.sourceStoryboardId
+        || (effectiveTask.assetKind === "storyboard" ? effectiveTask.sourceEntityId : undefined))),
+    });
     const promptKind: ImagePromptAssetKind = privateRegeneration
       ? "character-private"
       : effectiveTask.assetKind === "character" && (effectiveTask.imageVariant === "turnaround" || effectiveTask.imageVariant === "five-view")
@@ -26087,7 +26124,7 @@ function SettingsView(ctx: AppContext) {
   const testConnection = async () => {
     setTesting(true);
     try {
-      const result = await testTextConnection(settings.textApi);
+      const result = await testTextConnection(textApiForProject(settings.textApi, state.project, { stage: "api-connection" }));
       notify(`文本模型连接成功：${result.slice(0, 80)}`);
     } catch (error) {
       notify(error instanceof Error ? error.message : "连接失败", "error");

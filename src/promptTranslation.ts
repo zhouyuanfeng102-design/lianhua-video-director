@@ -309,8 +309,8 @@ export const translateVideoPromptToEnglish = async ({
     const document = buildPromptTranslationDocument({ sourcePrompt, identityBindings, sourceCharacters, sourceDialogues, sourceEvents });
     const response = await checkedRequest(VIDEO_PROMPT_ENGLISH_DOCUMENT_TRANSLATION_SYSTEM_PROMPT,
       JSON.stringify({
-        sourcePrompt: document.sourcePrompt,
         characters: document.characters,
+        sourcePrompt: document.sourcePrompt,
         utterances: document.utterances,
         events: document.events,
         ...(document.sourceEvents ? { sourceEvents: document.sourceEvents } : {}),

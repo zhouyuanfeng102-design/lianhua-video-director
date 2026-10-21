@@ -865,7 +865,9 @@ export class VideoGenerationEngine {
           const mediaSource = { assetId: source.sourceVideoAssetId, relativePath: source.sourceRelativePath, expectedChecksum: source.sourceChecksum };
           if (aiAssisted && (selection?.status !== 'started' || retry && dependency.requireAiSelection) && this.options.selectTailFrame) {
             const owner = allProjects(this.options.getState()).find((project) => project.id === job.snapshot.projectId);
-            const storyContext = owner?.sequencePlans.find((plan) => plan.id === dependency.sequencePlanId)?.sourceStoryContent;
+            const sourcePlan = owner?.sequencePlans.find((plan) => plan.id === dependency.sequencePlanId);
+            const storyContext = sourcePlan?.sourceStoryContent;
+            const chapterId = job.snapshot.draft.source?.chapterId ?? sourcePlan?.chapterId;
             // Old snapshots never silently acquire a larger paid budget. An
             // explicit strict retry authorizes a fresh bounded run without
             // rewriting the immutable original dependency definition.
@@ -875,6 +877,11 @@ export class VideoGenerationEngine {
             let startedSelection: VideoTailSelectionPreparation | undefined;
             const result = await this.options.selectTailFrame({
               desktop: this.options.desktop, jobId: extractionJobId, projectId: job.snapshot.projectId,
+              usageContext: {
+                projectId: job.snapshot.projectId, projectName: owner?.name, chapterId,
+                chapterName: owner?.sourceDocuments.find((chapter) => chapter.id === chapterId)?.name,
+                segmentIndex: dependency.segmentIndex,
+              },
               source: mediaSource, previousPrompt: predecessor!.videoJob!.snapshot.draft.prompt,
               nextPrompt: job.snapshot.draft.prompt, storyContext, signal: selectionController.signal,
               requireAiSelection: dependency.requireAiSelection,
@@ -2691,8 +2698,16 @@ export class VideoGenerationEngine {
           // Historical chains retain their frozen AI contract. New local
           // chains must not acquire a vision dependency just by continuing.
           if (!this.options.selectTailFrame || !this.options.desktop?.extractWorkbenchFrames) throw new Error('AI 选帧服务暂不可用，未生成新的后段视频。');
+          const promptSource = tasks[0].videoJob!.snapshot.draft.source;
+          const chapterId = promptSource?.chapterId ?? state.project.sequencePlans.find((entry) =>
+            entry.id === (promptSource?.sequencePlanId || tasks[0].sequencePlanId))?.chapterId;
           const selection = await this.options.selectTailFrame({
             desktop: this.options.desktop, jobId: id('video_continue_tail'), projectId: state.project.id,
+            usageContext: {
+              projectId: state.project.id, projectName: state.project.name, chapterId,
+              chapterName: state.project.sourceDocuments.find((chapter) => chapter.id === chapterId)?.name,
+              segmentIndex: promptSource?.segmentIndex ?? tasks[0].segmentIndex,
+            },
             source,
             previousPrompt: firstParent.parent.videoJob!.snapshot.draft.prompt, nextPrompt: tasks[0].videoJob!.snapshot.draft.prompt,
             requireAiSelection: true, signal: controller.signal, onBeforeAI: async () => { check(); },

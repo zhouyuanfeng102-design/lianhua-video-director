@@ -24,6 +24,7 @@ import { imagePromptOutputSpecificationRule } from './imageGeneration';
 import { authoredStoryboardImageSourceFingerprint, failImagePreparationTasks, updateImagePreparationTasks } from './imageTaskPreparation';
 import { sourceContentHash } from './sourceContentHash';
 import { selectedRunningHubImageWorkflow, validateRunningHubImageConfig } from './runningHubImage';
+import { withTextApiUsageContext } from './textApiUsage';
 
 type Update = (updater: (state: AppState) => AppState) => void;
 
@@ -111,7 +112,11 @@ export const generateDirectStoryboardImages = async (
   const board = cloneImageBatchConfig(liveBoard);
   const requested = cloneImageBatchConfig(options);
   const projectContextSnapshot = { projectId, projectName: initial.project.name };
-  const textApi = cloneImageBatchConfig(initial.settings.textApi);
+  const textApi = withTextApiUsageContext(cloneImageBatchConfig(initial.settings.textApi), {
+    ...projectContextSnapshot, chapterId: board.chapterId,
+    chapterName: initial.project.sourceDocuments.find((chapter) => chapter.id === board.chapterId)?.name,
+    segmentIndex: board.segmentIndex, connectionName: '文本 API',
+  }, 'image-prompt-convert');
   const textErrorContext: DirectStoryboardImageErrorDetail['context'] = {
     ...projectContextSnapshot, provider: textApi.provider, model: textApi.model, endpoint: textApi.baseUrl,
   };
@@ -350,7 +355,7 @@ export const generateDirectStoryboardImages = async (
         onRepair: () => { if (sourceIsCurrent()) announce(`AI 正在修复 ${requested.count} 张静帧的返回结构，尚未提交生图。`); },
         request: (system, user) => {
           assertSourceCurrent();
-          return (ctx.requestText || requestTextModel)(textApi, system, user, undefined, { disableThinking: true });
+          return (ctx.requestText || requestTextModel)(withTextApiUsageContext(textApi, {}, 'image-frame-plan'), system, user, undefined, { disableThinking: true });
         },
       });
       assertSourceCurrent();
