@@ -150,7 +150,7 @@ import { StoryboardImageOutputSizeControls } from "./components/StoryboardImageO
 import { readGeneratedImageDimensions } from "./imageDimensions";
 import { getComfyImageSizeOverrideSupport } from "./comfyui";
 import type { StoryPreparationResult } from "./storyPreparationReview";
-import { matchingStoryVisualConversion, rememberStoryVisualConversion, storyVisualPreparationFingerprint } from "./storyVisualConversion";
+import { matchingStoryVisualConversion, rememberStoryVisualConversion, storyVisualPreparationFingerprint, storyVisualOriginalSource } from "./storyVisualConversion";
 import type { StoryVisualDetailMode } from "./storyVisualAction";
 import { VideoGenerationSettings } from "./components/VideoGenerationSettings";
 import { useVideoGenerationController } from "./useVideoGenerationController";
@@ -2066,7 +2066,7 @@ export default function App() {
     projectId: string; chapterId: string; before: string; after: string;
   } | null>(null);
   const [pendingStoryReview, setPendingStoryReview] = useState<{
-    id: string; projectId: string; chapterId: string; before: string; sourceName: string;
+    id: string; projectId: string; chapterId: string; before: string; sourceName: string; originalSource?: string;
     workspaceEpoch: number; result: StoryPreparationResult;
     referenceFingerprint: string; settingsFingerprint: string; storyReferenceContext?: StoryReferenceContext;
   } | null>(null);
@@ -6741,6 +6741,10 @@ export default function App() {
     }
     const sourceStory = storyInput;
     const sourceStoryName = storyName;
+    const originalSource = requestMode === "optimize"
+      ? options?.paragraphId && existingReview ? existingReview.originalSource || existingReview.before
+        : storyVisualOriginalSource(expansionState.project, activeChapter(expansionState.project)?.id, sourceStory)
+      : sourceStory;
     const requestDetailMode = storyVisualDetailModeRef.current;
     const requestSettingsFingerprint = storyVisualPreparationFingerprint(expansionState, requestDetailMode);
     if (options?.paragraphId && (!existingReview
@@ -6803,11 +6807,11 @@ export default function App() {
         },
       };
       const preparationResult = options?.paragraphId && existingReview
-        ? await requestStoryVisualParagraphRewrite(expansionState.settings.textApi, sourceStory, existingReview.result,
+        ? await requestStoryVisualParagraphRewrite(expansionState.settings.textApi, originalSource, existingReview.result,
           options.paragraphId, requestController.signal, expansionPreset, preparationContext)
         : await requestStoryPreparationWithReview(
         expansionState.settings.textApi,
-        sourceStory,
+        originalSource,
         requestController.signal,
         expansionPreset,
         requestMode,
@@ -6828,7 +6832,7 @@ export default function App() {
       if (requestMode === "optimize") {
         const review = {
           id: options?.paragraphId && existingReview ? existingReview.id : createId("story_review"), projectId: requestProjectId, chapterId: requestChapterId,
-          before: sourceStory, sourceName: sourceStoryName,
+          before: sourceStory, sourceName: sourceStoryName, originalSource,
           workspaceEpoch: requestEpoch, result: preparationResult,
           referenceFingerprint: requestReferenceFingerprint, storyReferenceContext: referenceContext,
           settingsFingerprint: requestSettingsFingerprint,
@@ -6903,7 +6907,7 @@ export default function App() {
     }
     const snapshot = {
       id: review.id, chapterId: review.chapterId, sourceName: review.sourceName,
-      sourceText: review.before, resultText: review.result.text, createdAt: Date.now(),
+      sourceText: review.originalSource || review.before, resultText: review.result.text, createdAt: Date.now(),
       referenceFingerprint: review.referenceFingerprint, storyReferenceContext: review.storyReferenceContext,
       actionPlan: review.result.actionPlan, paragraphs: review.result.paragraphs,
       engineVersion: review.result.engineVersion, detailMode: review.result.detailMode,
@@ -6982,9 +6986,10 @@ export default function App() {
     setBusy(true);
     try {
       const catalog = buildChapterEntityCatalog(originalProject);
+      const visualConversion = matchingStoryVisualConversion(originalProject, chapterId, sourceStory);
       let rawAnalysis = await requestStoryAnalysis(analysisState.settings.textApi, sourceStory, requestController.signal, {
         entityCatalog: catalog, chapterId, referenceContext,
-        visualConversion: matchingStoryVisualConversion(originalProject, chapterId, sourceStory),
+        visualConversion,
         onProgress: (completed, total) => { if (isAnalysisCurrent()) notify(`正在解析“${sourceStoryName}”：${completed}/${total} 部分，原文将完整处理。`); },
       });
       if (!isAnalysisCurrent()) return;
@@ -7031,7 +7036,7 @@ export default function App() {
         nsfwCharacterNames: [],
       };
       if (seed.characters.length || seed.locations.length || seed.props.length) {
-        if (sourceStory.length > 16000 && !referenceContext) {
+        if (visualConversion?.actionPlan?.scenes?.length || sourceStory.length > 16000 && !referenceContext) {
           incompleteEnrichmentKinds = [seed.characters.length ? "人物" : "", seed.locations.length ? "地点" : "", seed.props.length ? "道具" : ""].filter(Boolean);
         } else try {
           const enriched = await requestStoryBibleEnrichment(analysisState.settings.textApi, sourceStory, seed, requestController.signal, { fullSourceContext: true, referenceContext });
@@ -10790,7 +10795,7 @@ export default function App() {
       {storyReviewOpen && pendingStoryReview?.projectId === state.project.id && (
         <StoryPreparationReviewDialog
           key={pendingStoryReview.id}
-          original={pendingStoryReview.before}
+          original={pendingStoryReview.originalSource || pendingStoryReview.before}
           result={pendingStoryReview.result}
           stale={storyReviewStale}
           fontScalePercent={uiFontScalePercent}

@@ -32,6 +32,21 @@ export const matchingStoryVisualConversion = (
     ), undefined);
 };
 
+/** Follow only an explicit adopted-draft lineage. Edited text is a new source,
+ * so a user's manual changes are never silently replaced with an old novel. */
+export const storyVisualOriginalSource = (
+  project: Pick<Project, 'storyVisualConversions'>, chapterId: string | undefined, story: string,
+): string => {
+  let source = story;
+  const visited = new Set<string>();
+  for (let entry = matchingStoryVisualConversion(project, chapterId, source); entry && !visited.has(entry.id);
+    entry = matchingStoryVisualConversion(project, chapterId, source)) {
+    visited.add(entry.id);
+    source = entry.sourceText;
+  }
+  return source;
+};
+
 /** Called only after the user adopts the result. Keep the untrimmed input and
  * returned text so review and restore never fabricate an earlier manuscript. */
 export const rememberStoryVisualConversion = (

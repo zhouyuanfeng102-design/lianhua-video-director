@@ -56,6 +56,9 @@ export function StoryPreparationReviewDialog({
   const mountedRef = useRef(true);
   callbacksRef.current = { onClose };
   const paragraphs = getStoryPreparationParagraphs(result);
+  const sceneCount = result.actionPlan?.scenes?.length ?? 0;
+  const reviewItemUnit = sceneCount ? '场' : '段';
+  const reviewItemCount = sceneCount || paragraphs.length;
   const hasParagraphs = paragraphs.length > 0;
   const [tab, setTab] = useState<ReviewTab>(hasParagraphs && !sourceOnly ? 'actions' : 'comparison');
   const [selectedParagraphId, setSelectedParagraphId] = useState(paragraphs[0]?.id ?? '');
@@ -172,8 +175,8 @@ export function StoryPreparationReviewDialog({
         <div className="sr-review-heading">
           <h2 id={titleId}>{sourceOnly ? '画面描述 · 转化来源' : 'AI 画面描述转化 · 结果审阅'}</h2>
           <p id={descriptionId}>{sourceOnly
-            ? '当前画面描述对应的处理前原文与已采用结果，可查看和复制。'
-            : '查看 AI 返回的画面描述、动作理解与编排补充。采用后放入编辑区，当前原文尚未改动。'}</p>
+            ? `当前${sceneCount ? '场景稿' : '画面描述'}对应的处理前原文与已采用结果，可查看和复制。`
+            : `查看 AI 返回的${sceneCount ? '场景稿' : '画面描述'}、动作理解与编排补充。采用后放入编辑区，当前原文尚未改动。`}</p>
         </div>
         <button type="button" className="btn sr-review-later" onClick={onClose}>{sourceOnly ? '关闭' : '稍后查看'}</button>
       </header>
@@ -184,17 +187,17 @@ export function StoryPreparationReviewDialog({
           tabIndex={activeTab === 'comparison' ? 0 : -1} onClick={() => setTab('comparison')} onKeyDown={onTabKeyDown}>全文对照</button>
         {hasParagraphs && <button type="button" className="btn" role="tab" id={`${actionsId}-tab`}
           data-review-tab="actions" aria-selected={activeTab === 'actions'} aria-controls={actionsId}
-          tabIndex={activeTab === 'actions' ? 0 : -1} onClick={() => setTab('actions')} onKeyDown={onTabKeyDown}>分段与 AI 依据（{paragraphs.length}）</button>}
+          tabIndex={activeTab === 'actions' ? 0 : -1} onClick={() => setTab('actions')} onKeyDown={onTabKeyDown}>{sceneCount ? '场景' : '分段'}与 AI 依据（{reviewItemCount}）</button>}
       </div>
 
       {!sourceOnly && (onRegenerate || onDetailModeChange || busy) && <div className="sr-review-conversion-tools">
         {onDetailModeChange && <label className="sr-review-detail-mode">转化细节
           <select aria-label="转化细节" value={currentDetailMode} disabled={busy}
             onChange={(event) => onDetailModeChange(event.target.value === 'faithful' ? 'faithful' : 'detailed')}>
-            <option value="faithful">忠实细化</option><option value="detailed">详细动作与编排</option>
+            <option value="faithful">忠实细化</option><option value="detailed">细致动作与打斗</option>
           </select>
         </label>}
-        <span className="sr-review-tool-note">{currentDetailMode === 'faithful' ? '细化原文已有动作，保留未确定信息。' : '细化动作过程，必要编排会列入补充说明。'}</span>
+        <span className="sr-review-tool-note">{currentDetailMode === 'faithful' ? '细化原文已有动作，保留未确定信息。' : '细化普通动作与打斗过程，原文事实不变；必要编排列入补充说明。'}</span>
         {onRegenerate && <button type="button" className="btn small" data-review-regenerate disabled={busy}
           onClick={() => { if (!busy) onRegenerate(); }}>重新转化</button>}
       </div>}
@@ -235,30 +238,30 @@ export function StoryPreparationReviewDialog({
           </div>
         </section> : <section className="sr-review-paragraphs" id={actionsId} role="tabpanel" aria-labelledby={`${actionsId}-tab`}>
           <div className="sr-review-paragraph-toolbar">
-            <span>共 {paragraphs.length} 段 · 依据与编排说明由 AI 返回</span>
+            <span>共 {reviewItemCount} {reviewItemUnit} · 依据与编排说明由 AI 返回</span>
           </div>
           <div className="sr-review-paragraph-layout">
-            <nav className="sr-review-paragraph-nav" aria-label="转化段落">
+            <nav className="sr-review-paragraph-nav" aria-label={sceneCount ? '转化场景' : '转化段落'}>
               {paragraphs.map((paragraph) => <button type="button" key={paragraph.id}
                 className="sr-review-paragraph-link" data-review-paragraph={paragraph.id}
                 aria-current={selectedParagraph?.id === paragraph.id ? 'true' : undefined}
                 onClick={() => setSelectedParagraphId(paragraph.id)}>
-                <span className="sr-review-paragraph-index">第 {paragraphs.indexOf(paragraph) + 1} 段</span>
+                <span className="sr-review-paragraph-index">第 {paragraphs.indexOf(paragraph) + 1} {reviewItemUnit}</span>
                 <span className="sr-review-paragraph-excerpt">{paragraph.text}</span>
               </button>)}
             </nav>
             {selectedParagraph ? <article className="sr-review-paragraph-detail" data-review-selected-paragraph={selectedParagraph.id}>
               <div className="sr-review-paragraph-heading">
-                <strong>第 {paragraphs.indexOf(selectedParagraph) + 1} 段</strong>
+                <strong>第 {paragraphs.indexOf(selectedParagraph) + 1} {reviewItemUnit}</strong>
                 {!sourceOnly && onRewriteParagraph && <button type="button" className="btn small" data-review-rewrite={selectedParagraph.id}
-                  disabled={actionDisabled} onClick={() => { if (!actionDisabled) onRewriteParagraph(selectedParagraph.id); }}>只重做这一段</button>}
+                  disabled={actionDisabled} onClick={() => { if (!actionDisabled) onRewriteParagraph(selectedParagraph.id); }}>只重做这一{reviewItemUnit}</button>}
               </div>
               <div className="sr-review-paragraph-comparison">
                 <section className="sr-review-prose-column"><h3>AI 返回的原文依据</h3>
-                  <div className="sr-review-prose" tabIndex={0} aria-label="本段原文依据">{paragraphSources(selectedParagraph) || '模型未提供本段依据。'}</div>
+                  <div className="sr-review-prose" tabIndex={0} aria-label={`本${reviewItemUnit}原文依据`}>{paragraphSources(selectedParagraph) || `模型未提供本${reviewItemUnit}依据。`}</div>
                 </section>
-                <section className="sr-review-prose-column"><h3>转化后的画面描述</h3>
-                  <div className="sr-review-prose" tabIndex={0} aria-label="本段画面描述">{selectedParagraph.text}</div>
+                <section className="sr-review-prose-column"><h3>转化后的{sceneCount ? '场景稿' : '画面描述'}</h3>
+                  <div className="sr-review-prose" tabIndex={0} aria-label={sceneCount ? '本场场景稿' : '本段画面描述'}>{selectedParagraph.text}</div>
                 </section>
               </div>
               {selectedEvents.length > 0 && <details className="sr-review-event-facts" open>
@@ -271,12 +274,12 @@ export function StoryPreparationReviewDialog({
                   {detailText(event.uncertainties) && <p className="sr-review-event-uncertainty"><span>未确定：</span>{detailText(event.uncertainties)}</p>}
                 </div>)}
               </details>}
-              <section className={`sr-review-staging${selectedParagraph.stagingAdditions.length ? ' has-additions' : ''}`} aria-label="本段编排补充">
+              <section className={`sr-review-staging${selectedParagraph.stagingAdditions.length ? ' has-additions' : ''}`} aria-label={`本${reviewItemUnit}编排补充`}>
                 <h3>编排补充 <span>（由 AI 声明）</span></h3>
                 {selectedParagraph.stagingAdditions.length ? <ul>{selectedParagraph.stagingAdditions.map((addition, index) => <li key={index}>{addition}</li>)}</ul>
-                  : <p>本段未声明编排补充。</p>}
+                  : <p>本{reviewItemUnit}未声明编排补充。</p>}
               </section>
-            </article> : <div className="sr-review-empty" role="status">暂无可显示的段落。</div>}
+            </article> : <div className="sr-review-empty" role="status">暂无可显示的{sceneCount ? '场景' : '段落'}。</div>}
           </div>
         </section>}
       </div>

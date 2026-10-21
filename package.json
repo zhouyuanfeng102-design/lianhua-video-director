@@ -1,12 +1,13 @@
 {
   "name": "lianhua-video-director",
-  "version": "2.9.0",
+  "version": "2.9.1",
   "productName": "莲华视频导演台",
   "private": true,
   "description": "莲华视频导演台：从小说到连续视频分镜与提示词",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
+    "deliver:2.9.1": "node scripts/createDelivery.mjs",
     "deliver:2.9.0": "node scripts/createDelivery.mjs",
     "deliver:2.8.9": "node scripts/createDelivery.mjs",
     "deliver:2.8.8": "node scripts/createDelivery.mjs",
