@@ -8,6 +8,8 @@ import { officialH3ContextForStoryboard } from './officialH3Context';
 import { videoH3BindingForPrompt } from './videoH3ReferenceBinding';
 import { chapterBoards, chapterIdForPlan, chapterIdForStoryboard } from './chapters';
 import { addDefaultVideoCharacterReferences } from './videoDefaultCharacterReferences';
+import { assetReferenceLocationOwners } from './assetCharacterBinding';
+import { hasUsableStoryboardReferencePixels } from './storyboardImages';
 import type { AutomaticVideoTailConfiguration } from './videoTailReference';
 import {
   canUseNsfwPrivateProfileAssetForStoryboardShot,
@@ -359,6 +361,36 @@ const automaticCustomStoryboardImageIds = (board: Storyboard, project: Project):
   return ids;
 };
 
+/** Current scene bindings can point to a parsed scene or directly to a saved
+ * location. Semantic segments keep the latter in sceneStaging; their virtual
+ * source scene need not carry locationIds. Use those IDs, never prose guesses. */
+const defaultStoryboardLocationReferenceIds = (board: Storyboard, project: Project, selectedIds: readonly string[]): string[] => {
+  const sceneIds = new Set([board.sceneId, ...(board.sourceSceneIds || []),
+    ...(board.sceneStaging || []).map((entry) => entry.sceneId)]);
+  const scenes = new Map([...(board.sourceSceneSnapshots || []), ...project.scenes].map((scene) => [scene.id, scene]));
+  const locationIds = new Set([...sceneIds, ...[...sceneIds].flatMap((id) => {
+    const scene = scenes.get(id);
+    return scene ? [...(scene.locationIds || []), ...(scene.locationId ? [scene.locationId] : [])] : [];
+  })]);
+  const assetsById = new Map(project.assets.map((asset) => [asset.id, asset]));
+  const covered = new Set(selectedIds.flatMap((id) => {
+    const asset = assetsById.get(id);
+    return asset ? assetReferenceLocationOwners(project, asset).map((location) => location.id) : [];
+  }));
+  return project.locations.filter((location) => locationIds.has(location.id) && !covered.has(location.id)).flatMap((location) => {
+    const candidates = [...new Set([...location.assetIds,
+      ...project.assets.filter((asset) => asset.referenceEntityBinding?.kind === 'location'
+        && asset.referenceEntityBinding.entityId === location.id)
+        .sort((left, right) => right.updatedAt - left.updatedAt).map((asset) => asset.id)])];
+    const asset = candidates.map((id) => assetsById.get(id)).find((entry) => entry
+      && hasUsableStoryboardReferencePixels(entry) && !isNsfwPrivateProfileAsset(entry)
+      && !['first-frame', 'last-frame'].includes(entry.type)
+      && !['first-frame', 'last-frame', 'storyboard-frame', 'snapshot', 'grid'].includes(entry.imageVariant || '')
+      && assetReferenceLocationOwners(project, entry).some((owner) => owner.id === location.id));
+    return asset ? [asset.id] : [];
+  });
+};
+
 /** Copies one saved segment, never rewrites its text or mutates the storyboard. */
 export const applyVideoPromptChoice = (
   draft: VideoGenerationDraft, choice: VideoPromptChoice, project: Project, includeReferences: boolean,
@@ -380,21 +412,29 @@ export const applyVideoPromptChoice = (
   };
   next.h3ReferenceBinding = videoH3BindingForPrompt(project, next);
   if (!includeReferences) return next;
+  const manifestReferenceIds = choice.promptFormat === 'seedance'
+    ? (board.seedance25Output?.referenceManifest || []).flatMap((entry) => typeof entry.id === 'string' ? [entry.id] : []) : [];
   const explicitReferenceIds = new Set([
+    ...manifestReferenceIds,
     ...(board.globalReferenceAssetIds || []),
     ...(board.firstFrameAssetId ? [board.firstFrameAssetId] : []),
     ...(board.lastFrameAssetId ? [board.lastFrameAssetId] : []),
   ]);
   const automaticCustomImageIds = automaticCustomStoryboardImageIds(board, project);
-  const referenceIds = choice.promptFormat === 'seedance'
-    ? (board.seedance25Output?.referenceManifest || []).flatMap((entry) => typeof entry.id === 'string' ? [entry.id] : [])
-    : [
+  // The saved manifest describes authoring-time inputs. Current board bindings
+  // also include frames created afterwards; copy those into this video draft
+  // without changing the saved prompt or manifest. Keep manifest order first.
+  const referenceIds = [
+    ...manifestReferenceIds,
     ...(board.globalReferenceAssetIds || []), ...(board.promptPlan?.referenceAssetIds || []),
     ...(board.promptTrace?.referenceAssetIds || []),
     ...board.shots.flatMap((shot) => shot.referenceAssetIds || []),
     ...(board.firstFrameAssetId ? [board.firstFrameAssetId] : []),
     ...(board.lastFrameAssetId ? [board.lastFrameAssetId] : []),
   ].filter((id) => explicitReferenceIds.has(id) || !automaticCustomImageIds.has(id));
+  if (choice.promptFormat === 'seedance') referenceIds.push(...defaultStoryboardLocationReferenceIds(
+    board, project, [...next.references.map((reference) => reference.assetId), ...referenceIds],
+  ));
   const assetsById = new Map(project.assets.map((asset) => [asset.id, asset]));
   const scopedPrivateAssetIds = new Set<string>();
   const allowPrivateForShot = (assetId: string, shot: Storyboard['shots'][number] | undefined) => {
@@ -451,7 +491,7 @@ export const applyVideoPromptChoice = (
     ...(withReferences.references.some((reference) => reference.assetId === board.lastFrameAssetId && reference.role === 'last-frame')
       ? { lastFrameAssetId: board.lastFrameAssetId } : {}),
   };
-  return choice.promptFormat === 'seedance' ? withReferences : addDefaultVideoCharacterReferences(project, withReferences);
+  return addDefaultVideoCharacterReferences(project, withReferences);
 };
 
 /** Sidebar entry copies the current saved prompt into an empty chapter editor.

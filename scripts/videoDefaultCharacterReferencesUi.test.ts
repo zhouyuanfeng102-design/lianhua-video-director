@@ -9,6 +9,9 @@ import { buildOfficialH3SourceFingerprint } from '../src/officialPrompt';
 import { officialH3ContextForStoryboard } from '../src/officialH3Context';
 import { getVideoApiImageCapacity } from '../src/videoImageCapacity';
 import { stampCharacterParticipation } from '../src/characterParticipation';
+import { buildOfficialSeedanceInput } from '../src/seedanceSource';
+import { getOfficialSeedanceSourceFingerprint } from '../src/seedancePrompt';
+import type { VideoPromptFormat } from '../src/videoGenerationTypes';
 import type { Character, Project, ReferenceAsset, Storyboard, VideoSequencePlan } from '../src/types';
 
 type Props = Record<string, any>;
@@ -85,7 +88,7 @@ function harness(name: 'Batch' | 'Picker', props: Props) {
   return { render, dispose: () => slots.forEach((slot) => slot.cleanup?.()) };
 }
 
-function fixture() {
+function fixture(format: VideoPromptFormat) {
   const state = createInitialState();
   const makeCharacter = (id: string, name: string): Character => ({ id, name, gender: '', apparentAge: '成年', race: '人类', appearance: '', outfit: '',
     signatureProps: '', personality: '', motionHabits: '', anchor: '', negativeContinuity: '', assetIds: [`image-${id}`] });
@@ -124,11 +127,42 @@ function fixture() {
       narrativePurpose: '', entryState: '', exitState: '', transitionHint: '', storyboardId: board.id, status: 'ready' })) };
   project.storyboards = boards; project.sequencePlans = [plan];
   boards.forEach((board) => { board.officialPromptSource = buildOfficialH3SourceFingerprint(board, officialH3ContextForStoryboard(project, board)); });
+  if (format === 'seedance') {
+    boards.forEach((board, index) => {
+      const cast = index === 1 ? current : [other];
+      const prompt = [
+        '视频规格：时长10秒，画幅16:9，分辨率720p，立体声。',
+        '参考素材与职责：本段未提供图片参考。',
+        `主体连续性：${cast.map((character) => `${character.name}为成年人物，身穿灰色外套`).join('。')}。`,
+        `一句话概述：${cast.map((character) => character.name).join('、')}在石桥上会面。`,
+        `连续时间轴：0至10秒，${cast.map((character) => `${character.name}站在石桥上`).join('；')}。`,
+        '全局约束：保留人物和站位，无对白。',
+      ].join('\n');
+      board.seedance25Output = { targetId: 'seedance-2.5', promptZh: prompt, durationSec: 10,
+        referenceManifest: [], sourceFingerprint: '', warnings: [], generatedAt: 1 };
+    });
+    // Pictures were generated after the text; its saved manifest is still empty.
+    for (const role of ['first-frame', 'last-frame'] as const) {
+      const asset: ReferenceAsset = { id: role, name: role, type: role, role, referenceRole: role,
+        mediaType: 'image', mimeType: 'image/png', source: 'generated', sourceStoryboardId: boards[1].id,
+        imageVariant: role, url: `https://fixture.invalid/${role}.png`, tags: [], createdAt: 2, updatedAt: 2 };
+      project.assets.push(asset);
+      if (role === 'first-frame') boards[1].firstFrameAssetId = asset.id;
+      else boards[1].lastFrameAssetId = asset.id;
+    }
+    project.locations = [{ id: 'bridge-location', name: '石桥', description: '', timeWeather: '', lighting: '', palette: '', fixedProps: '', anchor: '', assetIds: ['bridge-image'] },
+      { id: 'other-location', name: '别段场景', description: '', timeWeather: '', lighting: '', palette: '', fixedProps: '', anchor: '', assetIds: ['other-scene-image'] }];
+    project.assets.push(...project.locations.map((location): ReferenceAsset => ({ id: location.assetIds[0], name: location.name,
+      type: 'location', role: 'scene', referenceRole: 'scene', sourceEntityKind: 'location', sourceEntityId: location.id,
+      mediaType: 'image', url: `https://fixture.invalid/${location.id}.png`, tags: [], createdAt: 2, updatedAt: 2 })));
+    boards[1].sceneStaging = [{ version: 1, sceneId: 'bridge-location' }];
+    boards.forEach((board) => { board.seedance25Output!.sourceFingerprint = getOfficialSeedanceSourceFingerprint(buildOfficialSeedanceInput(project, board)); });
+  }
   const settings = { ...state.settings, videoBackend: 'api' as const, videoSource: 'api' as const, activeVideoApiProfileId: null, videoApiProfiles: [],
     videoTaskApi: { ...state.settings.videoTaskApi, enabled: true, provider: 'generic' as const, model: 'capacity-not-read', apiKey: '',
       baseUrl: 'https://fixture.invalid', endpoint: '/generate', requestTemplate: '', parameterCapabilities: undefined } };
   assert.equal(getVideoApiImageCapacity(settings.videoTaskApi), undefined, 'the fixture has no advertised image count limit');
-  return { project, settings, current, other };
+  return { project, settings, current, other, format };
 }
 
 const originalFetch = globalThis.fetch;
@@ -136,13 +170,19 @@ let apiCalls = 0, taskStarts = 0;
 globalThis.fetch = async () => { apiCalls += 1; throw new Error('Default reference selection must not call text, vision, image or video APIs'); };
 const cleanups: Array<() => void> = [];
 try {
-  const value = fixture(), originalProject = structuredClone(value.project);
+ for (const format of ['h3', 'seedance'] as const) {
+  const value = fixture(format), originalProject = structuredClone(value.project);
   const snapshots: VideoDirectorBatchDraft[] = [];
   const controller = { start: async () => { taskStarts += 1; throw new Error('No task may be started'); },
     startBatch: async () => { taskStarts += 1; throw new Error('No batch may be started'); } };
   const props = { project: value.project, settings: value.settings, controller, initialDraft: emptyVideoDraft(value.settings),
     initialParameterText: '{}', onSubmittingChange: () => {}, onBatchDraftChange: (draft: VideoDirectorBatchDraft) => snapshots.push(structuredClone(draft)) };
   const batch = harness('Batch', props); cleanups.push(batch.dispose);
+  if (format === 'seedance') {
+    const selector = nodesOf(batch.render()).find((entry) => entry.type === 'select' && entry.props['aria-label'] === '批量提示词格式');
+    assert.ok(selector, 'real batch format selector is present');
+    selector.props.onChange({ target: { value: format } }); batch.render();
+  }
   assert.deepEqual(snapshots.at(-1)?.referenceOverrides || {}, {}, 'untouched rows have no manual selection override');
   const openPicker = (parent = batch, segmentIndex = 2) => {
     button(parent.render(), `第 ${segmentIndex} 段选择参考图`).props.onClick();
@@ -161,23 +201,27 @@ try {
   };
   const apply = async (ui: ReturnType<typeof harness>, parent = batch) => { await button(ui.render(), '使用本段图片').props.onClick(); parent.render(); };
   const imageIds = value.current.map((character) => character.assetIds[0]);
+  const expectedIds = format === 'seedance' ? [...imageIds, 'first-frame', 'last-frame', 'bridge-image'] : imageIds;
+  const firstCharacterSlot = format === 'seedance' ? 4 : 1;
 
   let picker = openPicker();
-  assert.deepEqual(selectedIds(picker), imageIds, 'opening segment 2 preselects its four bound character images without global/shot/frame images');
+  assert.deepEqual(selectedIds(picker), expectedIds, `${format}: opening segment 2 preselects its identities and explicit later frames`);
   assert.deepEqual(characterChips(picker).map((chip) => [chip.props['data-character-id'], chip.props['data-reference-status']]),
     value.current.map((character) => [character.id, 'bound']), 'each visible segment character is associated with its own selected image');
-  characterChips(picker).forEach((chip, index) => assert.match(textOf(chip), new RegExp(`已选.*已关联图片 ${index + 1}`, 'u')));
+  characterChips(picker).forEach((chip, index) => assert.match(textOf(chip), new RegExp(`已选.*已关联图片 ${index + firstCharacterSlot}`, 'u')));
   assert.equal(pictureNodes(picker).find((entry) => entry.props['aria-label'] === `选择图片 ${value.other.name}人物图`)?.props['aria-pressed'], false,
     'another segment character remains available for manual selection but never enters defaults');
   assert.equal(pictureNodes(picker).filter((entry) => entry.props['aria-pressed']).every((entry) => nodesOf(entry).some((child) => child.type === 'img')), true,
     'selected reference cards render their matching character thumbnails');
   await apply(picker);
-  assert.deepEqual(snapshots.at(-1)?.referenceOverrides['segment-2'].map((reference) => reference.assetId), imageIds);
+  const applied = snapshots.at(-1)?.referenceOverrides['segment-2'];
+  assert.deepEqual(applied?.map((reference) => reference.assetId), format === 'seedance' ? ['first-frame', 'last-frame', 'bridge-image', ...imageIds] : imageIds);
+  if (format === 'seedance') assert.deepEqual(applied?.slice(0, 2).map((reference) => reference.role), ['first-frame', 'last-frame']);
 
   picker = openPicker();
-  assert.deepEqual(selectedIds(picker), imageIds, 'confirming and reopening retains all four selected references');
+  assert.deepEqual(selectedIds(picker), expectedIds, 'confirming and reopening retains selected references');
   button(component(picker.render(), 'VideoReferencePickerPanels').props.images, '取消选择图片 白露人物图').props.onClick();
-  const remaining = imageIds.filter((id) => id !== 'image-c');
+  const remaining = expectedIds.filter((id) => id !== 'image-c');
   assert.deepEqual(selectedIds(picker), remaining);
   assert.equal(characterChips(picker).find((chip) => chip.props['data-character-id'] === 'c')?.props['data-reference-status'], 'unselected');
   await apply(picker);
@@ -199,7 +243,8 @@ try {
   assert.deepEqual(selectedIds(openPicker(restored, 1)), [value.other.assetIds[0]], 'clearing segment 2 does not remove another segment defaults');
   assert.equal(apiCalls, 0); assert.equal(taskStarts, 0); assert.deepEqual(value.project.generationTasks, []);
   assert.deepEqual(value.project, originalProject, 'opening, selecting, clearing and confirming never change project assets, source H3 or segment records');
-  console.log('PASS default video character references: four selected identities, per-segment binding, manual removals and persistent empty overrides; no API/task/H3 changes.');
+  console.log(`PASS ${format} default video references: identities${format === 'seedance' ? ' and later frames despite empty manifest' : ''}, per-segment binding, manual removals and persistent empty overrides; no API/task/source changes.`);
+ }
 } finally {
   cleanups.reverse().forEach((dispose) => dispose());
   globalThis.fetch = originalFetch;

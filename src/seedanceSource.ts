@@ -1,4 +1,4 @@
-import { buildOfficialH3CompileInput, buildOfficialH3References, buildOfficialH3SubjectDefinitions } from './officialPrompt';
+import { buildOfficialH3References, buildOfficialH3ShotPrivateDetails, buildOfficialH3SubjectDefinitions } from './officialPrompt';
 import { officialH3ContextForStoryboard } from './officialH3Context';
 import { getOfficialSeedanceSourceFingerprint, hasMatchingSeedanceSourceFingerprint, type OfficialSeedancePromptInput } from './seedancePrompt';
 import { getVideoPromptInstructionLeak } from './videoPromptInstructionLeak';
@@ -47,7 +47,7 @@ export const buildOfficialSeedanceInput = (project: Project, board: Storyboard):
     sceneContext: buildVideoSceneContext({ board, locations: context.locations, scenes: project.scenes,
       assets: context.assets, references, chapterId: board.chapterId }),
     subjectDefinitions: buildOfficialH3SubjectDefinitions(board, context, references),
-    shotPrivateDetails: buildOfficialH3CompileInput(board, context).shotPrivateDetails,
+    shotPrivateDetails: buildOfficialH3ShotPrivateDetails(board, context),
     detailMode: 'director', targetId: 'seedance-2.5',
     constraints: board.promptPlan?.constraints || [board.globalLock, board.extraRequirement ? `制作要求：${board.extraRequirement}` : ''].filter(Boolean),
     sourceEvidence: {

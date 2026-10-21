@@ -208,6 +208,7 @@ import {
   type SeedanceOutputSaveIdentity,
 } from "./seedancePrompt";
 import { assertCurrentSeedancePrompt, buildOfficialSeedanceInput, hasCurrentSeedancePrompt } from "./seedanceSource";
+import { createPromptDirectorReadCache, type PromptDirectorReadCache } from "./promptDirectorReadCache";
 import { getVideoPromptInstructionLeak } from "./videoPromptInstructionLeak";
 import {
   OFFICIAL_H3_TARGET_ID,
@@ -1877,6 +1878,15 @@ export default function App() {
   const editorProject = useMemo(() => chapterScopeProject(state.project), [state.project]);
   const currentChapter = activeChapter(state.project);
   const currentChapterId = currentChapter?.id || "";
+  // Saving the selected segment only replaces chapterWorkspaces/the project
+  // wrapper. Keep source reads through that save; real source edits and chapter
+  // switches still replace them. Depend on the original collections because
+  // chapterScopeProject creates new filtered arrays even for a controls-only save.
+  const promptDirectorReads = useMemo(() => createPromptDirectorReadCache(chapterScopeProject(state.project)), [
+    state.project.id, currentChapterId, state.project.sourceDocuments,
+    state.project.scenes, state.project.storyboards, state.project.sequencePlans,
+    state.project.assets, state.project.characters, state.project.locations, state.project.props,
+  ]);
   const initialSequencePlan = editorProject.sequencePlans?.[0];
   const initialDirectorSettingsSnapshot = useMemo(() => parseDirectorSettingsFingerprint(
     initialSequencePlan?.semanticPlanningSnapshot?.directorSettingsFingerprint
@@ -9907,6 +9917,7 @@ export default function App() {
     setView("assets");
   };
   const appContext = {
+    promptDirectorReads,
     directorStoryboard,
     selectDirectorMode,
     setDirectorPromptSelection,
@@ -11191,6 +11202,7 @@ type BackgroundStateDispatch = (
 ) => void;
 
 interface AppContext {
+  promptDirectorReads: PromptDirectorReadCache;
   directorStoryboard: Storyboard | undefined;
   selectDirectorMode: (mode: ProductionMode) => void;
   setDirectorPromptSelection: React.Dispatch<React.SetStateAction<DirectorPromptSelection | undefined>>;
@@ -12319,34 +12331,27 @@ function StoryView(ctx: AppContext) {
 function SequenceFilmstrip({
   plan,
   project,
+  reads,
   activeSegmentId,
   onSelect,
   generationPromptFormat,
 }: {
   plan?: VideoSequencePlan;
   project: Project;
+  reads: PromptDirectorReadCache;
   activeSegmentId: string;
   onSelect: (segmentId: string) => void;
   generationPromptFormat?: "h3" | "seedance";
 }) {
   const targetFormat = generationPromptFormat || plan?.generationPromptFormat || "h3";
-  const handoffStatuses = useMemo(() => new Map(project.storyboards.map((board) => [board.id, getSequencePromptHandoffStatus(board, project, targetFormat)])),
-    [project.id, project.sequencePlans, project.storyboards, targetFormat]);
   if (!plan) return null;
   return (
     <div className="sequence-filmstrip" role="tablist" aria-label="全片视频段">
       {plan.segments.map((segment) => {
         const storyboard = project.storyboards.find((board) => board.id === segment.storyboardId);
-        const promptAction = resolveSequenceSegmentPromptAction(
-          segment,
-          project.storyboards,
-          plan.id,
-          officialH3ContextForStoryboard(project, storyboard),
-          targetFormat,
-          project,
-        );
+        const promptAction = reads.promptAction(plan, segment, targetFormat);
         const statusLabel = sequenceSegmentPromptStatusLabel(segment, promptAction.action, targetFormat);
-        const handoffStatus = storyboard && handoffStatuses.get(storyboard.id);
+        const handoffStatus = storyboard && reads.handoff(storyboard, targetFormat);
         return (
         <button
           key={segment.id}
@@ -12495,17 +12500,7 @@ function SequencePlannerPanel(ctx: AppContext) {
     : [];
   const activeFitStatus = activeSequencePlan?.fitStatus;
   const activeSegmentPromptAction = activeSequencePlan && activeSequenceSegment
-    ? resolveSequenceSegmentPromptAction(
-      activeSequenceSegment,
-      state.project.storyboards,
-      activeSequencePlan.id,
-      officialH3ContextForStoryboard(
-        state.project,
-        state.project.storyboards.find((board) => board.id === activeSequenceSegment.storyboardId),
-      ),
-      generationPromptFormat,
-      state.project,
-    )
+    ? ctx.promptDirectorReads.promptAction(activeSequencePlan, activeSequenceSegment, generationPromptFormat)
     : undefined;
   const planStatusText = planIssues.length
     ? `当前计划提醒：${planIssues[0]}`
@@ -13095,6 +13090,7 @@ function SequencePlannerPanel(ctx: AppContext) {
           <SequenceFilmstrip
             plan={activeSequencePlan}
             project={state.project}
+            reads={ctx.promptDirectorReads}
             activeSegmentId={activeSegmentId}
             onSelect={chooseSequenceSegment}
             generationPromptFormat={generationPromptFormat}
@@ -13860,18 +13856,8 @@ function DirectorView(ctx: AppContext) {
     setDirectorLookPreview(undefined);
   };
   const [directorPane, setDirectorPane] = useState<"references" | "result">("result");
-  const officialPromptContext = useMemo<OfficialH3ProjectContext | undefined>(() => {
-    if (!directorResultStoryboard) return undefined;
-    return officialH3ContextForStoryboard(state.project, directorResultStoryboard);
-  }, [
-    directorResultStoryboard,
-    state.project.sequencePlans,
-    state.project.assets,
-    state.project.characters,
-    state.project.locations,
-    state.project.props,
-    state.project.scenes,
-  ]);
+  const officialPromptContext = directorResultStoryboard
+    ? ctx.promptDirectorReads.officialContext(directorResultStoryboard) : undefined;
   const hasCurrentOfficialPrompt = Boolean(
     directorResultStoryboard
     && officialPromptContext
@@ -13879,21 +13865,12 @@ function DirectorView(ctx: AppContext) {
   );
   const savedOfficialH3Warnings = storyboardH3DeliveryWarnings(directorResultStoryboard, promptLanguage);
   const activeSequencePromptAction = productionMode === "sequence" && activeSequencePlan
-    ? resolveSequenceSegmentPromptAction(
-      activeSequenceSegment,
-      state.project.storyboards,
-      activeSequencePlan.id,
-      officialPromptContext || officialH3ContextForStoryboard(state.project, directorResultStoryboard),
-      generationPromptFormat,
-      state.project,
-    )
+    ? ctx.promptDirectorReads.promptAction(activeSequencePlan, activeSequenceSegment, generationPromptFormat)
     : undefined;
-  const activeSequenceHandoff = useMemo(() => productionMode === "sequence" && directorResultStoryboard
-    ? getSequencePromptHandoffStatus(directorResultStoryboard, state.project, generationPromptFormat) : undefined,
-    [productionMode, directorResultStoryboard, state.project.id, state.project.sequencePlans, state.project.storyboards, generationPromptFormat]);
-  const activeSequenceHandoffEvidence = useMemo(() => productionMode === "sequence" && activeSequencePlan && activeSequenceSegment
-    ? buildSequencePromptHandoff(state.project, activeSequencePlan.id, activeSequenceSegment.id, generationPromptFormat) : undefined,
-    [productionMode, activeSequencePlan, activeSequenceSegment, state.project.id, state.project.sequencePlans, state.project.storyboards, generationPromptFormat]);
+  const activeSequenceHandoff = productionMode === "sequence" && directorResultStoryboard
+    ? ctx.promptDirectorReads.handoff(directorResultStoryboard, generationPromptFormat) : undefined;
+  const activeSequenceHandoffEvidence = productionMode === "sequence" && activeSequencePlan && activeSequenceSegment
+    ? ctx.promptDirectorReads.handoffEvidence(activeSequencePlan, activeSequenceSegment, generationPromptFormat) : undefined;
   const validOfficialPrompt = hasCurrentOfficialPrompt
     ? directorResultStoryboard?.officialPromptZh || ""
     : "";
@@ -13912,9 +13889,8 @@ function DirectorView(ctx: AppContext) {
     ? directorResultStoryboard?.englishPrompt || "" : "";
   const [seedancePromptBusy, setSeedancePromptBusy] = useState(false);
   const [seedancePromptError, setSeedancePromptError] = useState("");
-  const seedancePromptInput = useMemo(() => directorResultStoryboard
-    ? buildOfficialSeedanceInput(state.project, directorResultStoryboard) : undefined,
-  [directorResultStoryboard, state.project]);
+  const seedancePromptInput = directorResultStoryboard
+    ? ctx.promptDirectorReads.seedanceInput(directorResultStoryboard) : undefined;
   const seedanceOutput = directorResultStoryboard?.seedance25Output;
   const seedanceChineseIssue = seedanceOutput
     ? getVideoPromptInstructionLeak(seedanceOutput.promptZh)
@@ -13922,8 +13898,8 @@ function DirectorView(ctx: AppContext) {
   const seedanceEnglishIssue = seedanceOutput?.promptEn
     ? getVideoPromptInstructionLeak(seedanceOutput.promptEn)
     : undefined;
-  const seedanceOutputFresh = Boolean(directorResultStoryboard && hasCurrentSeedancePrompt(state.project, directorResultStoryboard));
-  const seedanceEnglishPromptValid = Boolean(directorResultStoryboard && hasCurrentSeedancePrompt(state.project, directorResultStoryboard, "en"));
+  const seedanceOutputFresh = Boolean(directorResultStoryboard && ctx.promptDirectorReads.seedanceReady(directorResultStoryboard));
+  const seedanceEnglishPromptValid = Boolean(directorResultStoryboard && ctx.promptDirectorReads.seedanceReady(directorResultStoryboard, "en"));
   const translateSeedancePrompt = async (sourcePrompt: string, isCurrent: () => boolean): Promise<string> => {
     const textApi = state.settings.textApi;
     return translateSeedancePromptToEnglish({
@@ -15449,6 +15425,7 @@ function DirectorView(ctx: AppContext) {
                 <SequenceFilmstrip
                   plan={activeSequencePlan}
                   project={state.project}
+                  reads={ctx.promptDirectorReads}
                   activeSegmentId={activeSegmentId}
                   onSelect={chooseSequenceSegment}
                   generationPromptFormat={generationPromptFormat}
@@ -15990,13 +15967,7 @@ function DirectorView(ctx: AppContext) {
                           busy
                           || sequenceSettingsOpen
                           || !activeSequencePlanReadyForGeneration
-                          || pendingSequencePromptSegmentIds(
-                            activeSequencePlan,
-                            state.project.storyboards,
-                            (storyboard) => officialH3ContextForStoryboard(state.project, storyboard),
-                            generationPromptFormat,
-                            state.project,
-                          ).length === 0
+                          || ctx.promptDirectorReads.pendingSegmentIds(activeSequencePlan, generationPromptFormat).length === 0
                         }
                         onClick={() => void generateAllSequenceSegments(activeSequencePlan)}
                       >

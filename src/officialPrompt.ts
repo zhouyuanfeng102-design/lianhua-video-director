@@ -438,6 +438,18 @@ export const buildOfficialH3SubjectDefinitions = (
   return bindVerifiedGeneratedH3CharacterReferences(definitions, references);
 };
 
+/** Shared shot-scoped facts do not require building a full H3 prompt input. */
+export const buildOfficialH3ShotPrivateDetails = (
+  board: Pick<Storyboard, 'shots'>,
+  context: Pick<OfficialH3ProjectContext, 'characters'>,
+): NonNullable<PromptAdapterInput['shotPrivateDetails']> => board.shots.flatMap((shot, index) => selectedVideoPrivateFacts(
+  context.characters || [], shot.visiblePrivatePartsByCharacter,
+).map((fact) => ({
+  shotIndex: index + 1,
+  subjectName: fact.name,
+  description: characterNsfwProfileText(fact.profile, fact.parts),
+})));
+
 export const buildOfficialH3CompileInput = (
   board: Storyboard,
   context: OfficialH3ProjectContext,
@@ -469,13 +481,7 @@ export const buildOfficialH3CompileInput = (
     ...(voiceIdentityFacts.length ? { voiceIdentityFacts } : {}),
     ...(voiceIdentityFacts.length || context.currentCharacterVoiceFacts?.some((fact) => fact.voiceProfile)
       ? { currentCharacterVoiceFacts: context.currentCharacterVoiceFacts } : {}),
-    shotPrivateDetails: board.shots.flatMap((shot, index) => selectedVideoPrivateFacts(
-      context.characters || [], shot.visiblePrivatePartsByCharacter,
-    ).map((fact) => ({
-      shotIndex: index + 1,
-      subjectName: fact.name,
-      description: characterNsfwProfileText(fact.profile, fact.parts),
-    }))),
+    shotPrivateDetails: buildOfficialH3ShotPrivateDetails(board, context),
     targetId: OFFICIAL_H3_TARGET_ID,
     detailMode: 'concise',
     nsfwDetail: usesNsfwDetailMode(sourceText, board.extraRequirement || '') || undefined,
