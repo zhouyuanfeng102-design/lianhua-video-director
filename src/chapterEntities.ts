@@ -12,6 +12,9 @@ export interface ChapterEntityCatalogEntry {
   baseName?: string;
   formLabel?: string;
   description?: string;
+  details?: Record<string, string>;
+  lockedFields?: string[];
+  useStory?: boolean;
 }
 export interface ChapterEntityCatalog {
   characters: ChapterEntityCatalogEntry[];
@@ -47,21 +50,44 @@ const entityAliases = (record: EntityRecord | ChapterEntityCatalogEntry): string
 ]);
 const catalogKey = (kind: ChapterEntityKind): keyof ChapterEntityCatalog => kind === 'character' ? 'characters' : kind === 'location' ? 'locations' : 'props';
 
-/** A compact shared identity directory. Full chapter text is never truncated. */
-export const buildChapterEntityCatalog = (project: Pick<Project, 'characters' | 'locations' | 'props'>): ChapterEntityCatalog => {
-  const entry = (record: Character | Location | Prop, kind: ChapterEntityKind): ChapterEntityCatalogEntry => {
+const chapterEntityFields: Record<ChapterEntityKind, readonly string[]> = {
+  character: ['gender', 'apparentAge', 'actualAge', 'height', 'race', 'morphology', 'bodyPlan', 'appearance',
+    'outfit', 'signatureProps', 'personality', 'motionHabits', 'anchor', 'negativeContinuity'],
+  location: ['description', 'timeWeather', 'lighting', 'palette', 'fixedProps', 'anchor'],
+  prop: ['category', 'material', 'appearance', 'effect', 'stateRules'],
+};
+const formFieldFor = (field: string): string => ({ signatureProps: 'props', apparentAge: 'age', motionHabits: 'motion' }[field] || field);
+
+/** Carry ordinary dossier fields, including blanks, in the existing analysis
+ * request so an identity match does not imply a completed visual design. */
+export const chapterEntityDetails = (record: object, kind: ChapterEntityKind): Record<string, string> => {
+  const source = record as Record<string, unknown>;
+  return Object.fromEntries(chapterEntityFields[kind].map((field) => [field, typeof source[field] === 'string' ? source[field] : '']));
+};
+
+/** Shared identity and field context; excludes assets and unrelated metadata. */
+export const buildChapterEntityCatalog = (project: Pick<Project, 'characters' | 'locations' | 'props'> | ChapterEntityCatalog): ChapterEntityCatalog => {
+  const entry = (record: Character | Location | Prop | ChapterEntityCatalogEntry, kind: ChapterEntityKind): ChapterEntityCatalogEntry => {
     const source = record as unknown as Record<string, unknown>;
+    const details = chapterEntityDetails('details' in record && record.details ? record.details : record, kind);
+    const dossier = 'dossier' in record ? record.dossier : undefined;
     return {
       id: record.id, name: canonicalName(record, kind), aliases: entityAliases(record),
       ...(text(source.baseCharacterId) ? { baseCharacterId: text(source.baseCharacterId) } : {}),
       ...(text(source.baseName) ? { baseName: text(source.baseName) } : {}),
       ...(text(source.formLabel) ? { formLabel: text(source.formLabel) } : {}),
-      description: [source.race, source.bodyPlan, source.appearance, source.description, source.material]
-        .map(text).filter(Boolean).join('；').slice(0, 220),
+      description: [details.race, details.bodyPlan, details.appearance, details.description, details.material]
+        .map(text).filter(Boolean).join('；').slice(0, 220) || text(source.description),
+      details,
+      lockedFields: strings([
+        ...('lockedFields' in record ? record.lockedFields || [] : []),
+        ...chapterEntityFields[kind].filter((field) => isDossierFieldConfirmed(dossier, formFieldFor(field))),
+      ]),
+      useStory: dossier?.useStory !== false && (!('useStory' in record) || record.useStory !== false),
     };
   };
   return {
-    characters: project.characters.filter((record) => !record.dossier?.archivedIntoCharacterId).map((record) => entry(record, 'character')),
+    characters: project.characters.filter((record) => !('dossier' in record && record.dossier?.archivedIntoCharacterId)).map((record) => entry(record, 'character')),
     locations: project.locations.map((record) => entry(record, 'location')),
     props: project.props.map((record) => entry(record, 'prop')),
   };
@@ -97,7 +123,7 @@ export const resolveChapterAnalysisEntities = (
   input: StoryAnalysisResponse,
   projectOrCatalog: Pick<Project, 'characters' | 'locations' | 'props'> | ChapterEntityCatalog,
 ): { analysis: StoryAnalysisResponse; conflicts: ChapterEntityConflict[] } => {
-  const catalog = buildChapterEntityCatalog(projectOrCatalog as Pick<Project, 'characters' | 'locations' | 'props'>);
+  const catalog = buildChapterEntityCatalog(projectOrCatalog);
   const conflicts: ChapterEntityConflict[] = [];
   const maps = new Map<ChapterEntityKind, Map<string, Record<string, unknown>>>();
   const normalize = (value: unknown, kind: ChapterEntityKind): Record<string, unknown> => {
@@ -145,7 +171,6 @@ export const resolveChapterAnalysisEntities = (
 };
 
 const protectedRecordFields = new Set(['id', 'name', 'assetIds', 'aliases', 'sourceChapterIds', 'dossier', 'existingEntityId', 'baseCharacterId']);
-const formFieldFor = (field: string): string => ({ signatureProps: 'props', apparentAge: 'age', motionHabits: 'motion' }[field] || field);
 
 /** Chapter parsing only adds or fills unlocked blanks; another chapter's
  * absence never removes a shared entity or changes a confirmed empty field. */

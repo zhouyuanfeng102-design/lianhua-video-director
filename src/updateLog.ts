@@ -11,6 +11,16 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "2.9.5",
+    releasedAt: "2026-10-21",
+    title: "修复解析后人物与地点资料漏补",
+    highlights: [
+      "解析时一并补充本章人物和地点的空白资料，已有身份记录也能继续完善，结构化画面稿包含出场与画外人物。",
+      "保留已有人物设计、手动确认字段与禁用剧情设置，长文各部分沿用已获得的资料，并保存场景对象中返回的详细描述。",
+      "继续使用原来的“解析并补全”按钮，不增加运行时校验、自动重试或模型请求。",
+    ],
+  },
+  {
     version: "2.9.4",
     releasedAt: "2026-10-21",
     title: "恢复 Seedance 本段参考图预选",

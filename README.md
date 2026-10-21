@@ -4,13 +4,13 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的 Windows 桌面工作台。
 
-当前版本：**2.9.4** · 2026-10-21 · Windows 64 位 · 便携运行
+当前版本：**2.9.5** · 2026-10-21 · Windows 64 位 · 便携运行
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows 便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-2.9.4.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-2.9.5.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
 1. 下载上面的 EXE，放在可写入的文件夹里，双击运行，无需安装 Node.js。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
@@ -32,17 +32,17 @@
 - **自定义生图+反推图片提示词**：输入要求生成图片，或复用上传/资产库参考图，通过视觉 API 反推可复制的提示词与人物、物品、场景、风格详情。反推同步显示在聊天和资料任务，支持后台执行、停止、重试及项目保存恢复；原有生图支持原文直发或规则转换，结果自动入库。
 - **项目与资产管理**：管理图片、视频和音频，保存项目包、备份资料并导出提示词。
 
-## 最新更新 · v2.9.4
+## 最新更新 · v2.9.5
 
-- 修复 Seedance 视频草稿没有预选参考图的问题，带入本段已绑定的首尾帧、人物图及明确关联的场景图。
-- 保留已有图片清单顺序，手动取消、清空或改选后按本次选择保存；不因模型图片容量未知而清空默认选图。
-- 不改写源稿或历史任务，不增加校验、审核、拦截、自动重试或模型请求。
+- 修复“解析并补全”保留人物、地点名单却遗漏详细资料的问题，已有空白资料也在原分析请求中补充。
+- 结构化画面稿的出场、画外人物及地点一起整理；长文各部分沿用已获得的资料，保存模型在场景对象中返回的详细描述。
+- 保留已有设计、手动确认字段和禁用剧情设置，不增加按钮、运行时校验、自动重试或模型请求。
 
-已有剧情、提示词及生成任务保持原样，更新后进入视频导演台选择本段参考图即可。
+更新后在原章节点击现有的“解析并补全”，即可按新流程完善资料；更新程序本身不改写项目存档。
 
 本版定向测试结果见发布说明，测试不调用真实模型或提交视频生成。
 
-[查看本版完整说明](docs/releases/发布说明-2.9.4.md) · [历史版本归档](docs/releases/README.md)
+[查看本版完整说明](docs/releases/发布说明-2.9.5.md) · [历史版本归档](docs/releases/README.md)
 
 ## 从源码运行
 

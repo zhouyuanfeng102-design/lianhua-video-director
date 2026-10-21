@@ -857,7 +857,7 @@ export const buildStoryAnalysisCompletionNotice = (
       tone: 'error',
     };
   }
-  return { text: `AI 增强完成：${counts}；人物、地点、道具详细资料已完整补全。` };
+  return { text: `AI 增强完成：${counts}；已保存本次返回的人物、地点、道具资料。` };
 };
 
 const SEQUENCE_SEGMENT_METADATA_FIELDS = [

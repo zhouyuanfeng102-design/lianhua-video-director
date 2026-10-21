@@ -7021,6 +7021,17 @@ export default function App() {
         referenceAssetIds: scene.referenceAssetIds,
       })).filter((scene) => scene.content.trim());
       if (!blocks.length) throw new Error("AI 未返回可读取的场景内容，本章原有结果未改动。");
+      // Scene-level ordinary dossiers are part of the same AI response. Keep
+      // their details when the model puts an entity only inside its scene.
+      const sceneCharacterItems = analysisResponse.scenes.flatMap((scene) => scene.characters || [])
+        .filter((item) => item && typeof item === "object").map((item) => {
+          const { nsfwProfile: _privateProfile, ...ordinary } = item as Record<string, unknown>;
+          return ordinary;
+        });
+      const sceneLocationItems = analysisResponse.scenes.map((scene) => scene.location)
+        .filter((item) => item && typeof item === "object") as Array<Record<string, unknown>>;
+      const scenePropItems = analysisResponse.scenes.flatMap((scene) => scene.props || [])
+        .filter((item) => item && typeof item === "object") as Array<Record<string, unknown>>;
       const characterItems = (analysisResponse.characters || []).filter((item) => typeof item === "object") as Array<Record<string, unknown>>;
       const locationItems = (analysisResponse.locations || []).filter((item) => typeof item === "object") as Array<Record<string, unknown>>;
       const propItems = (analysisResponse.props || []).filter((item) => typeof item === "object") as Array<Record<string, unknown>>;
@@ -7033,40 +7044,15 @@ export default function App() {
           sourceChapterIds: [chapterId],
         };
       };
-      let incompleteEnrichmentKinds: string[] = [];
-      let enrichmentError: unknown = null;
-      // Analysis already returns detailed dossiers. Only newly introduced,
-      // incomplete entities need another pass; shared records are never redesigned.
-      const missingNew = (items: Array<Record<string, unknown>>, fields: string[]) => items.filter((item) => !item.existingEntityId
-        && fields.some((field) => typeof item[field] !== "string" || !String(item[field]).trim())).map((item) => String(item.name || "")).filter(Boolean);
-      const seed = {
-        characters: missingNew(characterItems, ["gender", "appearance", "race", "anchor"]),
-        locations: missingNew(locationItems, ["description", "lighting", "anchor"]),
-        props: missingNew(propItems, ["material", "appearance"]),
-        nsfwCharacterNames: [],
-      };
-      if (seed.characters.length || seed.locations.length || seed.props.length) {
-        if (visualConversion?.actionPlan?.scenes?.length || sourceStory.length > 16000 && !referenceContext) {
-          incompleteEnrichmentKinds = [seed.characters.length ? "人物" : "", seed.locations.length ? "地点" : "", seed.props.length ? "道具" : ""].filter(Boolean);
-        } else try {
-          const enriched = await requestStoryBibleEnrichment(analysisState.settings.textApi, sourceStory, seed, requestController.signal, { fullSourceContext: true, referenceContext });
-          if (!isAnalysisCurrent()) return;
-          characterItems.push(...enriched.characters as Array<Record<string, unknown>>);
-          locationItems.push(...enriched.locations as Array<Record<string, unknown>>);
-          propItems.push(...enriched.props as Array<Record<string, unknown>>);
-          incompleteEnrichmentKinds = enriched.incompleteKinds;
-        } catch (error) {
-          if (isAbortError(error) || !isAnalysisCurrent()) return;
-          enrichmentError = error; incompleteEnrichmentKinds = ["新增资料"];
-        }
-      }
-      const charactersByName = mergeCharacterEnrichmentDetails(characterItems);
-      const locationsByName = mergeEntityEnrichmentDetails(locationItems);
-      const propsByName = mergeEntityEnrichmentDetails(propItems);
+      // Ordinary dossiers are filled in the original analysis response for
+      // every source format and identity. No follow-up completion request.
+      const charactersByName = mergeCharacterEnrichmentDetails([...sceneCharacterItems, ...characterItems]);
+      const locationsByName = mergeEntityEnrichmentDetails([...sceneLocationItems, ...locationItems]);
+      const propsByName = mergeEntityEnrichmentDetails([...scenePropItems, ...propItems]);
       const characterRecords: Character[] = names.characters.map((name) => {
         const detail = charactersByName.get(name) || {};
         return {
-          id: createId("character"), name, ...identity(characterItems, name),
+          id: createId("character"), name, ...identity([...characterItems, ...sceneCharacterItems], name),
           baseName: detail.baseName || undefined, formLabel: detail.formLabel || undefined,
           variantOf: detail.variantOf || undefined, transformationType: detail.transformationType || undefined,
           gender: detail.gender || "", apparentAge: detail.apparentAge || "", actualAge: detail.actualAge || "", height: detail.height || "",
@@ -7078,12 +7064,12 @@ export default function App() {
       });
       const locationRecords: Location[] = names.locations.map((name) => {
         const detail = locationsByName.get(name) || {};
-        return { id: createId("location"), name, ...identity(locationItems, name), description: detail.description || "", timeWeather: detail.timeWeather || "",
+        return { id: createId("location"), name, ...identity([...locationItems, ...sceneLocationItems], name), description: detail.description || "", timeWeather: detail.timeWeather || "",
           lighting: detail.lighting || "", palette: detail.palette || "", fixedProps: detail.fixedProps || "", anchor: detail.anchor || "", assetIds: [] };
       });
       const propRecords: Prop[] = names.props.map((name) => {
         const detail = propsByName.get(name) || {};
-        return { id: createId("prop"), name, ...identity(propItems, name), category: detail.category || "剧情道具", material: detail.material || "",
+        return { id: createId("prop"), name, ...identity([...propItems, ...scenePropItems], name), category: detail.category || "剧情道具", material: detail.material || "",
           appearance: detail.appearance || "", effect: detail.effect || "", stateRules: detail.stateRules || "", assetIds: [] };
       });
       if (!isAnalysisCurrent()) return;
@@ -7150,7 +7136,7 @@ export default function App() {
       }
       const completion = buildStoryAnalysisCompletionNotice({ requestedAi: true, sceneCount: nextScenes.length,
         characterCount: names.characters.length, locationCount: names.locations.length,
-        incompleteKinds: incompleteEnrichmentKinds, analysisError: null, enrichmentError });
+        incompleteKinds: [], analysisError: null, enrichmentError: null });
       notify(`“${sourceStoryName}”${completion.text} 共用资料已复用，其他章节保持不变。`, completion.tone);
     } catch (error) {
       if (isAbortError(error) || !isAnalysisCurrent()) return;
