@@ -1067,6 +1067,12 @@ export const requestTextModel = async (
     disableThinking?: boolean;
     /** Opt-in structured output for JSON callers; plain-text/H3 callers keep their protocol. */
     jsonObject?: boolean;
+    /** Optional OpenAI-compatible JSON Schema constraint for providers that support it. */
+    jsonSchema?: {
+      name: string;
+      schema: Record<string, unknown>;
+      strict?: boolean;
+    };
     systemPromptLayers?: string[];
     finalInstruction?: string;
     /** Callers select the model and vision capability; transport preserves every supplied image. */
@@ -1148,7 +1154,13 @@ export const requestTextModel = async (
           { role: 'user', content: userContent },
         ],
         ...(shouldDisableThinking ? { thinking: { type: 'disabled' } } : {}),
-        ...(options?.jsonObject ? { response_format: { type: 'json_object' } } : {})
+        ...(options?.jsonSchema
+          ? { response_format: { type: 'json_schema', json_schema: {
+              name: options.jsonSchema.name,
+              strict: options.jsonSchema.strict ?? false,
+              schema: options.jsonSchema.schema,
+            } } }
+          : options?.jsonObject ? { response_format: { type: 'json_object' } } : {})
       };
   const usageRequest = signal?.aborted ? undefined : beginTextApiRequest(config);
   let usageStatus: TextApiUsageRecord['status'] = 'succeeded';

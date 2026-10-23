@@ -11,6 +11,16 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "2.9.7",
+    releasedAt: "2026-10-23",
+    title: "修复 Gemini 语义分段结构缺失",
+    highlights: [
+      "修复 Gemini 语义分段返回缺少 semanticSource 对象，导致任务报错并停止的问题。",
+      "语义分段请求明确声明现有解析器所需的嵌套结构和必需字段，保留原有单次模型请求与完整语义资料。",
+      "不新增运行时校验、内容审核、生成拦截、自动重试或模型请求。",
+    ],
+  },
+  {
     version: "2.9.6",
     releasedAt: "2026-10-22",
     title: "文字 API 共享前缀优化与缓存命中分析",

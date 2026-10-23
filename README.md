@@ -4,13 +4,13 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的 Windows 桌面工作台。
 
-当前版本：**2.9.6** · 2026-10-22 · Windows 64 位 · 便携运行
+当前版本：**2.9.7** · 2026-10-23 · Windows 64 位 · 便携运行
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows 便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-2.9.6.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-2.9.7.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
 1. 下载上面的 EXE，放在可写入的文件夹里，双击运行，无需安装 Node.js。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
@@ -32,17 +32,17 @@
 - **自定义生图+反推图片提示词**：输入要求生成图片，或复用上传/资产库参考图，通过视觉 API 反推可复制的提示词与人物、物品、场景、风格详情。反推同步显示在聊天和资料任务，支持后台执行、停止、重试及项目保存恢复；原有生图支持原文直发或规则转换，结果自动入库。
 - **项目与资产管理**：管理图片、视频和音频，保存项目包、备份资料并导出提示词。
 
-## 最新更新 · v2.9.6
+## 最新更新 · v2.9.7
 
-- 调整文字 API 请求顺序，让固定规则和已有共享资料优先排列，改善可复用前缀；不新增模型请求、预热或自动重试。
-- 新增本机“缓存命中分析”，查看最近 1000 次文字 API 请求的用量、缓存命中、耗时和状态，并按项目、模型、阶段筛选。
-- 统计仅保存在本机，不记录 API 密钥、接口地址、提示词正文或图片；未知缓存数据与真实 0% 分开显示。
+- 修复使用 Gemini 模型进行语义分段时返回缺少 `semanticSource` 对象，导致分段任务失败的问题。
+- 为 Gemini 请求提供现有分段解析器需要的结构化输出契约，保留原有单次请求流程。
+- 不新增运行时校验、内容审核、生成拦截、自动重试或模型请求。
 
-实际缓存比例由服务端、模型和中转接口返回情况决定，不承诺固定命中率；更新程序不改写项目存档。
+本版修复针对 Gemini 语义分段结构；更新程序不改写项目存档。
 
 本版定向测试结果见发布说明，测试不调用真实模型或提交视频生成。
 
-[查看本版完整说明](docs/releases/发布说明-2.9.6.md) · [历史版本归档](docs/releases/README.md)
+[查看本版完整说明](docs/releases/发布说明-2.9.7.md) · [历史版本归档](docs/releases/README.md)
 
 ## 从源码运行
 

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {
-  requestSemanticSequencePlan, SEMANTIC_SEQUENCE_PLANNING_TAG, SemanticSequenceSelfAssessmentError,
+  requestSemanticSequencePlan, SEMANTIC_SEQUENCE_PLANNING_TAG, SEMANTIC_SEQUENCE_RESPONSE_SCHEMA, SemanticSequenceSelfAssessmentError,
 } from '../src/services/semanticSequencePlanner';
 import type { SemanticSequencePlannerProgress } from '../src/services/semanticSequencePlanner';
 import { MOSE_JIANGHU_NSFW_DETAIL_RULES, MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE } from '../src/nsfwPromptRules';
@@ -13,7 +13,7 @@ type HttpPayload = { url: string; headers?: Record<string, string>; body?: strin
 type HttpResult = { status: number; body: string };
 type RequestBody = {
   model?: string; temperature?: number; max_tokens?: number;
-  thinking?: { type: string }; response_format?: { type: string };
+  thinking?: { type: string }; response_format?: { type: string; json_schema?: { name: string; strict?: boolean; schema?: Record<string, unknown> } };
 };
 const tests: Array<{ name: string; run: () => void | Promise<void> }> = [];
 const test = (name: string, run: () => void | Promise<void>) => tests.push({ name, run });
@@ -271,6 +271,24 @@ test('semantic DeepSeek requests opt into JSON and disable thinking while retain
     }
     assert.equal(JSON.stringify(selected), before);
   }
+});
+
+test('Gemini semantic requests constrain the required nested source object without adding a second call', async () => {
+  const selected = { ...config(), model: 'gemini-3.8-flash' };
+  const requests = install(() => textReply(response(1)));
+  await requestSemanticSequencePlan(selected, input(), undefined, options);
+  assert.equal(requests.length, 1);
+  const format = wire(requests[0]).response_format;
+  assert.equal(format?.type, 'json_schema');
+  assert.equal(format?.json_schema?.name, 'semantic_sequence_plan');
+  assert.equal(format?.json_schema?.strict, false);
+  assert.deepEqual(format?.json_schema?.schema, SEMANTIC_SEQUENCE_RESPONSE_SCHEMA);
+  const schema = format?.json_schema?.schema as Record<string, any>;
+  assert.deepEqual(schema.required, ['reason', 'fitStatus', 'segments']);
+  assert.deepEqual(schema.properties.segments.items.required, [
+    'title', 'content', 'summary', 'narrativePurpose', 'entryState', 'exitState', 'transitionHint', 'boundaryReason', 'continuityPack', 'semanticSource',
+  ]);
+  assert.deepEqual(schema.properties.segments.items.properties.semanticSource.required, ['sourceEvidence', 'events', 'dialogues']);
 });
 
 test('JSON mode remains opt-in for ordinary text requests and is never sent to native Claude', async () => {
