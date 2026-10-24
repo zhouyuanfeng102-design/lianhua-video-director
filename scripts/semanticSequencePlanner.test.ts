@@ -3,7 +3,7 @@ import {
   requestSemanticSequencePlan, SEMANTIC_SEQUENCE_PLANNING_TAG, SEMANTIC_SEQUENCE_RESPONSE_SCHEMA, SemanticSequenceSelfAssessmentError,
 } from '../src/services/semanticSequencePlanner';
 import type { SemanticSequencePlannerProgress } from '../src/services/semanticSequencePlanner';
-import { MOSE_JIANGHU_NSFW_DETAIL_RULES, MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE } from '../src/nsfwPromptRules';
+import { LIANHUA_NSFW_CREATIVE_GUIDANCE, LIANHUA_NSFW_FIXED_PREFIX, MOSE_JIANGHU_NSFW_DETAIL_RULES, MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE } from '../src/nsfwPromptRules';
 import { SEMANTIC_SEQUENCE_FIT_STATUS_RULE, SemanticSequenceTechnicalError, validateSemanticSequencePlan } from '../src/semanticSequencePlan';
 import type { SemanticSequencePlanningInput, SemanticSequenceResponse } from '../src/semanticSequencePlan';
 import { requestTextModel, TextModelHttpError, TextModelResponseError } from '../src/services/llm';
@@ -125,8 +125,10 @@ test('NSFW detail rules enter semantic segmentation once while ordinary stories 
   await requestSemanticSequencePlan(config(), input(), undefined, options);
   const ordinarySystem = prompt(ordinaryRequests[0], 'system');
   assert.equal(ordinaryRequests.length, 1);
+  assert.ok(ordinarySystem.startsWith(LIANHUA_NSFW_FIXED_PREFIX));
   assert.equal(ordinarySystem.includes(MOSE_JIANGHU_NSFW_DETAIL_RULES), false);
   assert.equal(ordinarySystem.includes(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE), false);
+  assert.equal(prompt(ordinaryRequests[0], 'user').includes(LIANHUA_NSFW_CREATIVE_GUIDANCE), false);
 
   const request = input();
   request.story = '林岚全裸坐在床边，胸前和下体可见湿痕，随后与伴侣发生明确性行为并持续推进。';
@@ -137,8 +139,10 @@ test('NSFW detail rules enter semantic segmentation once while ordinary stories 
   await requestSemanticSequencePlan(config(), request, undefined, options);
   const nsfwSystem = prompt(nsfwRequests[0], 'system');
   assert.equal(nsfwRequests.length, 1, 'NSFW segmentation retains the existing single-call path');
-  assert.equal(nsfwSystem.split(MOSE_JIANGHU_NSFW_DETAIL_RULES).length - 1, 1);
+  assert.ok(nsfwSystem.startsWith(LIANHUA_NSFW_FIXED_PREFIX));
+  assert.equal(nsfwSystem.includes(MOSE_JIANGHU_NSFW_DETAIL_RULES), false);
   assert.equal(nsfwSystem.split(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE).length - 1, 1);
+  assert.equal(prompt(nsfwRequests[0], 'user').includes(LIANHUA_NSFW_CREATIVE_GUIDANCE), true);
   assert.match(nsfwSystem, /segments\.content必须保留原剧情已有的具体动作阶段/u);
   assert.match(nsfwSystem, /本窗实际发生的阶段写入本窗content、events和sceneStaging/u);
   assert.doesNotMatch(nsfwSystem, /年龄门禁|未满18|未成年人/u);
@@ -458,7 +462,8 @@ test('fixed 90-second generation sends an explicit six-window contract and saves
   assert.equal(requests.length, 1);
   assert.match(prompt(requests[0], 'system'), new RegExp(SEMANTIC_SEQUENCE_PLANNING_TAG));
   const rule = prompt(requests[0], 'system');
-  assert.ok(rule.indexOf('T=90秒') < rule.indexOf('你是原文语义分段规划器'), 'fixed budget precedes shared prose');
+  assert.ok(rule.indexOf('固定模式沿用下述共同的全片动作时间安排') < rule.indexOf('你是原文语义分段规划器'), 'fixed budget precedes shared prose');
+  assert.match(rule, /T=90秒/u);
   assert.match(rule, /AI适配与固定总时长共同采用先排整片、后切窗口/u);
   assert.match(rule, /完整原话、说话人和发话先后直接嵌入对应动作与反应/u);
   assert.match(rule, /正文和记录逐句对应，原字、语言、归属与continuation一致/u);

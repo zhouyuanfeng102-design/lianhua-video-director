@@ -7,6 +7,7 @@ import {
   AUDIO_TRANSLATION_SCOPE_RULE,
   DIEGETIC_AUDIO_SCOPE_RULE,
   DIALOGUE_DELIVERY_RULE,
+  DIALOGUE_PERFORMANCE_TIMING_RULE,
   DIALOGUE_VOICE_IDENTITY_RULE,
   DIALOGUE_VOICE_IDENTITY_TRANSLATION_RULE,
   LEGACY_DIALOGUE_VOICE_IDENTITY_RULE_V1_8_9,
@@ -65,6 +66,11 @@ assert.match(AUDIO_H3_DELIVERY_RULE, /具体对白原字、唯一说话人、声
 assert.match(AUDIO_H3_DELIVERY_RULE, /局部拟音必须写在实际事件对应的\[Shot N\].*真实接触双方的材质.*本段时刻/u);
 assert.match(AUDIO_H3_DELIVERY_RULE, /不得在overall_soundscape中列Shot编号、对白复述、声源分配、镜内时序、具体器物材质或长篇否定清单/u);
 assert.match(AUDIO_H3_DELIVERY_RULE, /不得新增negative_prompt、negative、反向提示词或其它声音section/u);
+assert.match(AUDIO_H3_DELIVERY_RULE, /可辨词句只来自原剧情明确的对白事件.*动作、画面、人物资料、声音说明与整体声景中的文字都不是台词/u);
+assert.match(AUDIO_H3_DELIVERY_RULE, /非词汇笑声、哭声、咳嗽等也不能扩成可辨词句/u);
+assert.match(DIALOGUE_PERFORMANCE_TIMING_RULE, /每句.*开始至结束的发话区间.*整句须完整落在该区间内/u);
+assert.match(DIALOGUE_PERFORMANCE_TIMING_RULE, /换人发话时明确上一句何时结束、下一句何时开始.*仅原剧情明确抢话、重叠或齐声/u);
+assert.match(DIALOGUE_PERFORMANCE_TIMING_RULE, /旧确认稿若仅给发话起点.*不借本规则补造结束时间、重新排程/u);
 assert.match(AUDIO_TRANSLATION_SCOPE_RULE, /sourcePrompt为准.*无对白不抬升/u);
 assert.match(AUDIO_TRANSLATION_SCOPE_RULE, /N\/A原样保留.*不借新声音规则重写旧稿的混音方案/u);
 assert.match(AUDIO_TRANSLATION_SCOPE_RULE, /只保留源稿中每项声音已有的动作因果、发声对象、接触材质、时刻及字段作用域.*不因题材、视觉身份、道具或参考图重新推导拟音/u);
@@ -100,6 +106,9 @@ for (const rule of [H3_FINAL_BODY_FORMAT_RULE, H3_PERFORMANCE_DELIVERY_RULE]) {
   assert.match(rule, /不列具体动作、器物、材质或时刻/u);
   assert.match(rule, /(?:不|不能)机械/u, 'real metal contact remains legal');
 }
+assert.match(H3_PERFORMANCE_DELIVERY_RULE, /按原剧情和已有角色关系把实际听者写入listenerCharacterIds/u);
+assert.match(H3_PERFORMANCE_DELIVERY_RULE, /身体、头部与视线朝向谁.*摄影机取景方向单独描述/u);
+assert.match(H3_PERFORMANCE_DELIVERY_RULE, /每个vocal只归属实际发生的事件和镜头及其时间范围/u);
 
 // Source contracts must reach both planners and final delivery without a new
 // request stage; voice descriptions in a draft are not confirmation evidence.

@@ -27,7 +27,7 @@ import type {
   VideoSequencePlan,
 } from '../types';
 import type { VideoPromptExecutionContext } from '../videoPromptExecutionContext';
-import { beginTextApiRequest, recordTextApiResponse, finishTextApiRequest, withTextApiUsageContext, type TextApiUsageRecord } from '../textApiUsage';
+import { beginTextApiRequest, readTextApiUsageStage, recordTextApiResponse, finishTextApiRequest, withTextApiUsageContext, type TextApiUsageRecord } from '../textApiUsage';
 import { requestRunningHubImage } from './runningHubImage';
 import {
   MAX_SEQUENCE_SEGMENT_DURATION_SEC,
@@ -79,14 +79,15 @@ import { AUDIO_PROMPT_RULE, DIALOGUE_DELIVERY_RULE, DIALOGUE_LANGUAGE_RULE, DIAL
 import {
   MOSE_JIANGHU_PRIVATE_IMAGE_PROMPT_RULE,
   MOSE_JIANGHU_PRIVATE_PROFILE_RULES,
-  MOSE_JIANGHU_NSFW_DIRECTOR_LOOK_RULE,
   MOSE_JIANGHU_NSFW_ANATOMICAL_DETAIL_RULES,
   MOSE_JIANGHU_NSFW_DETAIL_RULES,
+  MOSE_JIANGHU_NSFW_DIRECTOR_LOOK_RULE,
   MOSE_JIANGHU_NSFW_IMAGE_CONVERTER_RULE,
   MOSE_JIANGHU_NSFW_IMAGE_PROMPT_RULE,
   MOSE_JIANGHU_NSFW_PROMPT_RULE,
   MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE,
   MOSE_JIANGHU_NSFW_WRITING_RULES,
+  frameNsfwTextRequest,
 } from '../nsfwPromptRules';
 import { hasNsfwDetailSignal } from '../promptConstraints';
 import { orderSemanticPromptContext, orderTextPromptData } from '../textPromptLayout';
@@ -1108,11 +1109,18 @@ export const requestTextModel = async (
   const requestedSystemLayers = Array.isArray(options?.systemPromptLayers)
     ? options.systemPromptLayers.map((item) => item.trim()).filter(Boolean)
     : [];
-  const systemPromptLayers = requestedSystemLayers.length > 0
+  const requestedLayers = requestedSystemLayers.length > 0
     ? requestedSystemLayers
     : [systemPrompt];
   const finalInstruction = options?.finalInstruction?.trim() || '';
-  const finalUserPrompt = [userPrompt, finalInstruction].filter(Boolean).join('\n\n');
+  const framed = frameNsfwTextRequest({
+    stage: readTextApiUsageStage(config),
+    systemLayers: requestedLayers,
+    userPrompt,
+    finalInstruction,
+  });
+  const systemPromptLayers = framed.systemLayers;
+  const finalUserPrompt = [framed.userPrompt, framed.finalInstruction].filter(Boolean).join('\n\n');
   const referenceImages = textModelReferenceImages(options?.referenceImages);
   const userContent = referenceImages.length
     ? [
@@ -1532,12 +1540,10 @@ const requestStoryVisualText = async (
   // Conversion has its own scene protocol. The literary expansion preset is
   // still used by expand, but must not reintroduce prose-only/adaptation goals.
   void rules;
-  const source = String(data.sourceTextOrRequirement || '');
   const systemPrompt = [
     '你是中文剧情动作编辑，依据完整故事理解事件与身体行动。',
     STORY_VISUAL_ACTION_CONTRACT,
     context?.referenceContext ? STORY_REFERENCE_CONTEXT_RULE : '',
-    hasNsfwDetailSignal(source) ? MOSE_JIANGHU_NSFW_DETAIL_RULES : '',
   ].filter(Boolean).join('\n\n');
   // These are this request's facts, not a retained copy from an earlier run.
   // Keep batch-local text/state behind the already supplied shared material.
@@ -1855,9 +1861,6 @@ export const requestStoryPreparationWithReview = async (
   const targetLengthGuidance = normalizedTargetCharacters === undefined
     ? `${targetMinimum}-${targetMaximum} 个中文字符左右；这是篇幅建议，以剧情完整、无重复为准`
     : `约 ${normalizedTargetCharacters} 个中文字符；允许自然浮动，不要求精确等于该数字，优先保证剧情完整、连贯和有效信息，不要为了凑字数重复内容`;
-  const nsfwDetailRule = hasNsfwDetailSignal(source)
-    ? MOSE_JIANGHU_NSFW_DETAIL_RULES
-    : '';
   const modeContract = [
     '<story_preparation_mode_contract>',
     optimizing
@@ -1964,7 +1967,6 @@ export const requestStoryPreparationWithReview = async (
       ...(presetPrompt
         ? [corePrompt, `${presetPrompt}\n\n${modeContract}`]
         : [`${corePrompt}\n\n${modeContract}`]),
-      nsfwDetailRule,
     ].filter(Boolean),
     finalInstruction: outputProtocolPrompt,
   };
@@ -4160,7 +4162,6 @@ export const requestShotRecommendation = async (
     ? JSON.stringify(semanticContext.segment.semanticSource)
     : '';
   const hasStoryboardNsfwSignal = hasNsfwDetailSignal(initialParams.story, currentSegmentNsfwEvidence);
-  const nsfwDetailRule = hasStoryboardNsfwSignal ? MOSE_JIANGHU_NSFW_DETAIL_RULES : '';
   const nsfwVideoActionRule = hasStoryboardNsfwSignal ? MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE : '';
   let candidateResult = await requestTextModel(
     config,
@@ -4192,8 +4193,6 @@ export const requestShotRecommendation = async (
       STORYBOARD_STABLE_SUBJECT_CONTRACT,
       'characterContinuity 包含项目人物的普通身份、身体、性格、动作习惯和稳定衣物道具基准。人物出镜时必须保持对应 name、baseName、formLabel、variantOf、transformationType、gender、race、appearance 和身份 anchor。没有剧情明确形态转换时不得改变性别、物种或身体结构；如果全文明确发生转换，必须在对应镜头使用具体“谁·什么形态”的 name，并只使用该形态的资料，不把原始形态与转化形态合并。personality/motionHabits/height 只辅助选择当前剧情相容的行为方式，signatureProps 不是必用道具或能力发动指令。outfit 是没有剧情变化时继承的穿着基准；当前原文明示换装或已确认进入状态不同时，由你按真实时间顺序保持该变化，不强行恢复资料中的旧衣着。不要求把字段名写进 JSON，也不要把整份身份资料复写为每镜画面。',
       'action写本镜全部真实发生的连续行为、关键交互及双方回应，包含取放、递接、行进、劳动、对话中断和战斗。明确次数、连续多次性质、实际收手与整理完整保留。已有具体演出沿用；尚未编排的已有事件在同一次请求内按detailed权限补足过程，不新增事件、动机或对白。必要不可见信息保留，不强行演成新动作。先安排全部行为、完整发话与同时关系，再决定镜长；已有固定窗口内写清这几秒哪些行动完成、哪些继续，不以删动作、减回合、缩短固定视频或一段笼统“快速”替代真实节拍，不按字数、固定阶段或每秒额度裁剪剧情。',
-      nsfwDetailRule,
-      nsfwVideoActionRule,
       '涉及走跑、起跳、转身、攻击、格挡、推拉或负重时，写决定本次行为成立的支撑、重心、接触反馈与随动：支撑脚蹬地推动身体，迈出的脚落地承重后转移重心；接触传力后产生受力位移或脱开，不用双脚固定摆姿加身体平移代替移动。普通转身不逐关节拆解，轻松动作不强制蓄力。本来短促的突进、虚晃、闪避自然实时完成；来招尚在接近时闪避或格挡即同时发生，沿同一次接触完成卸力或反击，不让一方摆好招式等另一方开始回应。持续按压保持到受力下沉与脱开，不能变成碰肩即停或搀扶；限力不等于慢演，原文明示慢绕行只影响该段绕行。两手配合、提脚同时按压按原文并行，等待可与对方真实整理重叠；不把全部动作延长到镜尾，也不遗漏原定恢复动作。',
       AUDIO_PROMPT_RULE,
       DIALOGUE_DELIVERY_RULE,
@@ -4214,6 +4213,7 @@ export const requestShotRecommendation = async (
         ? `本次只生成当前语义视频段的镜头，完整连续覆盖本段0–${params.durationSec}秒；每镜时长不超过本段${params.durationSec}秒，镜数由你决定，不套旧15秒单镜上限，不依赖本地拆镜、补尾或截断。`
         : `每个 master shot 的时长不得超过 ${params.requiredSegmentDurationSec ?? MAX_SEQUENCE_SEGMENT_DURATION_SEC} 秒；长剧情后续只能把完整 master shot 打包成视频段，绝不能依赖后续本地拆镜或截断镜头。`,
       storyboardShotTimeRule(initialParams),
+      ...(nsfwVideoActionRule ? [nsfwVideoActionRule] : []),
     ].join('\n'),
     [
       '<storyboard_planning_data>',
@@ -4294,8 +4294,6 @@ export const requestShotRecommendation = async (
           'requiredSegmentDurationSec是每段足额交付的硬合同，不是软偏好。完整动作或对白需要跨段时，由你重新设计连续镜头、说话人和跨镜衔接，不修改所选段长、不留短尾、不删原文或添加填充剧情，不返回要求用户手工修复时间轴的说明。',
           'characterContinuity 和 planningCreativeDirection 继续约束身份、外貌、导演风格与摄影光影，不得在修复中遗失。',
           ...(activeParams.sequenceSegmentContext ? ['sequenceSegmentContext中的完整generationStoryContent与sourceStory共同指向当前段完整正文；events、phase和旧时间安排只作辅助来源，不作为动作白名单。镜头与场面记录表达同一份完整排程；不得因记录缺失删掉正文动作，也不得借审核重演前段或引入后段。当contentOverridden=true时，当前正文是用户修改后的演出范围，以明确修改为准，不用旧semanticSource恢复已删改的台词或动作。'] : []),
-          nsfwDetailRule,
-          nsfwVideoActionRule,
           AUDIO_PROMPT_RULE,
           DIALOGUE_DELIVERY_RULE,
           VIDEO_LOCAL_TIME_RULE,
@@ -4304,6 +4302,7 @@ export const requestShotRecommendation = async (
           '请在同一次回答中完成校验和所有可确定的修复。aiReview.status 使用 passed 或 revised，summary 简述实际校验/修复；只有原文确有无法确定的歧义才用 needs_review，但仍保留完整可读方案。',
           '无论原稿是否需要修改，都只返回完整严格 JSON 对象及完整 shots，不得只返回“通过”、错误清单或局部补丁。',
           '每个 shots 项必须包含 startSec、endSec、sourceExcerpt、purpose、subject、action、camera、transition、lighting、sound、result；同时保留 space、performance、direction、dialogue 等原有字段。不要 Markdown、解释或代码围栏。',
+          ...(nsfwVideoActionRule ? [nsfwVideoActionRule] : []),
         ].filter(Boolean).join('\n'),
         `<storyboard_ai_review_data>\n${serializeUntrustedPromptData(storyboardPromptData({
           sourceStory: activeParams.story,
@@ -4425,8 +4424,6 @@ export const requestShotRecommendation = async (
           VIDEO_PRIVATE_SCOPE_SELECTION_RULE,
           '修复时继续遵守 characterContinuity 中的性别、物种与外观事实，不得省略后产生相反性别或雌雄设定。',
           '保留原文已成立的可见动作与表演，已完成状态只继承、不重新执行；按完整剧情自然安排节奏和必要修复，不为满足固定动作阶段数或字数额度删剧情、删对白，人体动作保持支撑、重心与接触反馈合理。',
-          nsfwDetailRule,
-          nsfwVideoActionRule,
           AUDIO_PROMPT_RULE,
           DIALOGUE_DELIVERY_RULE,
           VIDEO_LOCAL_TIME_RULE,
@@ -4440,6 +4437,7 @@ export const requestShotRecommendation = async (
           '每镜包含 startSec、endSec、sourceExcerpt、purpose、subject、action、camera、transition、lighting、sound、result；sourceExcerpt 是你从全文中自主选择的原文依据，不要求覆盖每个本地片段 ID。',
           'space、performance、direction、dialogue 由你直接给出，兼容原方案未提供这些字段。原对白的归属和时刻由你结合全文安排，程序不再本地抽取或按字数分配。',
           '只返回一个完整严格 JSON 对象，不要 Markdown、解释、代码围栏或额外对象。',
+          ...(nsfwVideoActionRule ? [nsfwVideoActionRule] : []),
         ].filter(Boolean).join('\n');
     let repairResponse: string;
     try {
@@ -4939,9 +4937,6 @@ const requestStoryAnalysisChunk = async (
   if (signal?.aborted) throw createAbortError();
   if (!story.trim()) throw new Error('请先输入需要解析并补全的完整剧情');
   const storyHasNsfw = hasNsfwDetailSignal(story);
-  const nsfwDetailRule = storyHasNsfw
-    ? MOSE_JIANGHU_NSFW_DETAIL_RULES
-    : '';
   const nsfwProfileSchema = storyHasNsfw
     ? ',"nsfwProfile":{"fullBody":"稳定裸体全身外貌与比例","breasts":"女性胸部稳定外观（适用时）","vulva":"女性外阴稳定外观（适用时）","anus":"后庭稳定外观（适用时）","penis":"男性外生殖器稳定外观，阴茎与阴囊作为同一局部锚点（适用时）"}'
     : '';
@@ -4955,7 +4950,6 @@ const requestStoryAnalysisChunk = async (
     options.entityCatalog ? '已有资料目录为同一项目共用的身份与视觉设计。能明确对应已有实体时，返回该记录的 existingEntityId，name 使用其标准名称，aliases 记录本章明确使用的别名；不要另建一份。普通换装、伤病和情绪只写场景 content/summary。重大身体或年龄阶段变化可建立新形态并返回 baseCharacterId 指向原人物，禁止用原人物 existingEntityId 覆盖旧形态；无法确认同一身份时省略 existingEntityId，绝不编造 ID。同名但不是同一实体时使用原文明示的区分称谓；无法区分则保留事实等待用户确认。' : '',
     options.entityCatalog ? '已有资料目录中的 details 是逐字段的现有资料；existingEntityId 只表示已确定身份，不表示资料已经完整。本部分涉及的已有实体也须返回完整资料对象：沿用 details 中已有的非空内容，结合本部分剧情补齐尚未填写的普通字段，不要因为目录里已经有名字或简短 description 就跳过。lockedFields 是已确认字段，包含确认留空的字段，原值必须保留；useStory=false 的资料仅沿用身份与现有内容，不用剧情补写。目录中未涉及本部分的实体不要重新设计或加入本场角色。' : '',
     '在读完全文后，按地点、时间、人物关系或明显事件变化确定全局可拍摄场景边界，保持真实事件顺序并覆盖全文，不能因篇幅长遗漏后段。保留每个场景的关键原文，不要编造剧情。',
-    nsfwDetailRule,
     `实体名称必须是跨场景可复用的稳定名称：第一人称叙事若原文没有给主角姓名，统一命名为“${DEFAULT_FIRST_PERSON_SUBJECT}”，不得把“我”保存为人物名。`,
     '根据完整前后文统一同一人的姓名和别名：同一人物的“师傅、师姐、道侣”等称呼、真名、昵称与代词不要分别建立人物；能确认真名就统一使用该真名，未给真名则保留可靠稳定称谓，无法确认同人时不要猜测合并。每个场景引用同一套全局标准名称。',
     '人物名称只写真实姓名、稳定称谓或原文明示的稳定群体名称；“她们、他们、我们、她、他、我”只是代词，不能仅凭代词另外建立人物或群体。先从完整上下文找到实际对应人物，再引用其全局名称。',

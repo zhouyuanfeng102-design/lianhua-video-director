@@ -109,6 +109,19 @@ test('does not flag ordinary short refrains as source corruption', () => {
   );
 });
 
+test('does not flag generated action summaries followed by their prose expansions', () => {
+  const text = [
+    '动作过程：林舟沿着旧车站的站台走向候车室；他在入口处停下，抬手推开半掩的木门；门轴发出轻响，屋里的灯光照亮桌面；他先检查窗边的灰尘，再翻看放在柜台上的登记簿；确认最后一页仍停在昨夜的记录后，把簿册放回原位；接着走到墙边，取下挂钩上的钥匙，打开里间的门；他查看门后堆放的箱子，确认没有人躲藏，随后关门并把钥匙挂回去；最后回到候车室入口，等候同伴赶来汇合',
+    '过程细化：林舟沿着旧车站的站台走向候车室。他在入口处停下，抬手推开半掩的木门，门轴发出轻响，屋里的灯光照亮桌面。他先检查窗边的灰尘，再翻看放在柜台上的登记簿。确认最后一页仍停在昨夜的记录后，把簿册放回原位。接着走到墙边，取下挂钩上的钥匙，打开里间的门。他查看门后堆放的箱子，确认没有人躲藏，随后关门并把钥匙挂回去。最后回到候车室入口，等候同伴赶来汇合。',
+  ].join('\n');
+
+  assert.deepEqual(
+    detectSourceIntegrityIssues(text),
+    [],
+    'action summary and prose expansion are two generated fields for one event',
+  );
+});
+
 test('keep-first removes only the reported duplicate after an explicit resolution call', () => {
   const text = `${fullLengthRegressionParagraph}\n\n${fullLengthRegressionParagraph}`;
   const issue = detectSourceIntegrityIssues(text)

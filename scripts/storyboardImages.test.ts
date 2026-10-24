@@ -2237,6 +2237,20 @@ assert.ok(!spatialFirst.conversionSource.includes(h3SpatialTexts[1]), 'the first
 assert.doesNotMatch(spatialFirst.conversionSource, /旧镜尾结果/u);
 assert.match(spatialFirst.conversionSource, /第一镜开始边界的入口状态；首镜后续动作尚未发生/u);
 assert.ok(spatialLast.conversionSource.includes(h3SpatialTexts[1]));
+const conflictingTailStructureBoard = {
+  ...spatialBoard,
+  shots: spatialBoard.shots.map((shot, offset) => offset === 1 ? {
+    ...shot,
+    subject: '冲突结构化主体：阿莲面向镜头',
+    space: '冲突结构化空间：阿莲站在镜头正前方',
+    direction: '冲突结构化朝向：阿莲正面对镜头',
+    camera: '冲突结构化机位：镜头正对阿莲',
+  } : shot),
+};
+const [, conflictingTail] = buildStoryboardImageRequests(conflictingTailStructureBoard, 'boundary-frames');
+assert.ok(conflictingTail.conversionSource.includes(h3SpatialTexts[1]));
+assert.doesNotMatch(conflictingTail.conversionSource, /冲突结构化(?:主体|空间|朝向|机位)/u,
+  'an H3-backed tail frame must not receive independent structured composition or direction that can override its final shot');
 const spatialFrames = h3SpatialShots.flatMap((shot, offset) => [
   { sourceShotId: shot.id, description: `第${offset + 1}镜入口：阿莲在画面左侧，守卫在画面右侧，沿用最终H3原机位。`, timeSec: shot.startSec + 0.2 },
   { sourceShotId: shot.id, description: `第${offset + 1}镜中途：只推进原动作，阿莲自身右手保持原接触归属，不另改视点。`, timeSec: shot.startSec + 1.2 },
@@ -2302,6 +2316,14 @@ const spatialAnchor = buildStoryboardImageAssetVisualAnchor(spatialBoard, spatia
 assert.ok(spatialAnchor.includes(h3SpatialTexts[0]));
 assert.ok(spatialAnchor.includes(spatialFrames[0].description));
 assert.match(spatialAnchor, /不是对已生成像素的重新观测/u);
+const conflictingTailAnchor = buildStoryboardImageAssetVisualAnchor(
+  conflictingTailStructureBoard,
+  conflictingTail,
+  spatialContext,
+);
+assert.ok(conflictingTailAnchor.includes(h3SpatialTexts[1]), 'tail visual anchor keeps the final H3 shot');
+assert.doesNotMatch(conflictingTailAnchor, /冲突结构化(?:主体|空间|朝向|机位)/u,
+  'tail visual anchor must not reintroduce structured direction that the request excluded');
 
 const boundaryRequests = buildStoryboardImageRequests(storyboard, 'boundary-frames');
 assert.equal(boundaryRequests.length, 2);

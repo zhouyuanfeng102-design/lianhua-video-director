@@ -417,7 +417,6 @@ export const convertStoryboardDraftToFinal = async (
       ...Object.values(shot.visiblePrivatePartsByCharacter || {}).flat(),
     ]),
   );
-  const nsfwDetailRule = hasNsfwVideoActionSignal ? MOSE_JIANGHU_NSFW_DETAIL_RULES : '';
   const nsfwVideoActionRule = hasNsfwVideoActionSignal
     ? refreshConfirmedPrompt || limitedRepair
       ? MOSE_JIANGHU_NSFW_VIDEO_ACTION_PRESERVATION_RULE
@@ -548,7 +547,6 @@ export const convertStoryboardDraftToFinal = async (
 
   const coreTask = [
     VIDEO_CONVERSION_STORY_RULE,
-    nsfwDetailRule,
     limitedRepair
       ? limitedRepairRule
       : refreshConfirmedPrompt

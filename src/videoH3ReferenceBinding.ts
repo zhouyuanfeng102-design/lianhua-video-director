@@ -2,7 +2,7 @@ import type { Character, H3IdentityBindings, H3PerformancePlan, Location, Projec
 import type { VideoGenerationDraft, VideoImageReference } from './videoGenerationTypes';
 import type { VideoReferenceUsageContext } from './videoReferenceUsage';
 import { videoMiddleFrameOrdinal, videoReferenceSlotIndex } from './videoReferenceSlots';
-import { getH3IdentityBindingIssues, normalizeH3IdentityBindings } from './h3IdentityBindings';
+import { getH3IdentityBindingIssues, normalizeH3IdentityBindings, type H3IdentityBindingIssue } from './h3IdentityBindings';
 import { officialH3ContextForStoryboard } from './officialH3Context';
 import { characterParticipationAliases, resolvePromptCharacterParticipation, resolveStoryboardCharacterParticipation } from './characterParticipation';
 import { videoReferenceCharacterOwners, videoReferenceCharacterBindingWarning, type VideoCharacterReferenceState } from './videoReferenceCharacters';
@@ -493,6 +493,14 @@ const prepareVideoH3ReferenceDraftInternal = (
   }
   const identities = binding.identities.characters || [];
   const identityIssues = getH3IdentityBindingIssues(binding.basePrompt, binding.identities, referenceProject.characters);
+  // An old H3 can contain the same authored identity sentence more than once
+  // (for example in both the definitions and a shot).  That damages the text
+  // locator, but it does not undo a proven characterId -> asset association.
+  // Keep the locator warning while allowing this request's explicit selection
+  // to carry the picture binding forward.
+  const recoverableIdentityIssue = (identity: H3IdentityBindings['characters'][number] | undefined, issues: H3IdentityBindingIssue[]): boolean =>
+    identity !== undefined && issues.length === 1 && issues[0].code === 'anchor-ambiguous'
+      && Boolean(identity.referenceAnchor.trim()) && binding.basePrompt.includes(identity.referenceAnchor);
   const pictureNumbers = new Map<number, number[] | null>();
   // A six-field prompt may already cite pictures in definitions/retention or
   // shot prose. All such tokens must have an unambiguous saved manifest; do
@@ -567,11 +575,12 @@ const prepareVideoH3ReferenceDraftInternal = (
     const numbers = characterPictures.get(identity.characterId) || [];
     if (!numbers.length) continue;
     const issues = identityIssues.filter((issue) => issue.characterId === identity.characterId);
-    if (issues.length) {
+    if (issues.length && !recoverableIdentityIssue(identity, issues)) {
       const reason = `人物“${identity.name || '未命名'}”的 H3 身份锚点已失效：${unique(issues.map((issue) => issue.message)).join('；')}。本次未绑定该人物图片，未猜测或改写其剧情。`;
       warnings.push(reason); markPending(identity.characterId, reason);
       continue;
     }
+    if (issues.length) warnings.push(`人物“${identity.name || '未命名'}”的身份句重复；沿用已确认人物ID和本次明确选图关联，不改写剧情。`);
     const end = binding.basePrompt.indexOf(identity.referenceAnchor) + identity.referenceAnchor.length;
     edits.push({ start: end, end,
       text: ` Visual identity reference for ${identity.name}: ${numbers.map((number) => `<Picture ${number}>`).join(', ')}.` });
@@ -625,7 +634,9 @@ const prepareVideoH3ReferenceDraftInternal = (
     }) } : {}) };
   const executionMode = videoH3MediaModeContract(draft, context).mode;
   const referenceUses = videoH3ReferenceUses(referenceProject, draft);
-  const execution = !pictureSourceIssues.length && plan.numbers && !identityIssues.length
+  const blockingIdentityIssues = identityIssues.filter((issue) => !characterPictures.has(issue.characterId)
+    || !recoverableIdentityIssue(identities.find((identity) => identity.characterId === issue.characterId)!, identityIssues.filter((candidate) => candidate.characterId === issue.characterId)));
+  const execution = !pictureSourceIssues.length && plan.numbers && !blockingIdentityIssues.length
     && (Boolean(executionPerformance) || characterPictures.size > 0)
     && [...characterPictures.keys()].every((id) => identities.some((identity) => identity.characterId === id))
     && (Boolean(executionPerformance) || executionMode === 'full-reference')

@@ -1473,12 +1473,14 @@ export const buildStoryboardImageAssetVisualAnchor = (
     ] : []),
     line('AI 选定的本张静帧', request.imageFrameDescription),
     ...characterLines,
-    line('本镜画面主体与站位', shot.subject),
-    line('结构化镜头空间关系（H3未明确处的补充依据）', shot.space),
-    line('结构化镜头人物朝向与运动方向（H3未明确处的补充依据）', shot.direction),
-    line('结构化镜头机位（H3未明确处的补充依据）', shot.camera),
-    line('本镜可见动作', request.imageFrameIndex ? '' : purpose === 'first-frame' ? firstFrameActionCue(shot) : shot.action),
-    line('本镜可见结果', request.imageFrameIndex || purpose === 'first-frame' ? '' : shot.result),
+    ...(purpose === 'last-frame' && officialShot ? [] : [
+      line('本镜画面主体与站位', shot.subject),
+      line('结构化镜头空间关系（H3未明确处的补充依据）', shot.space),
+      line('结构化镜头人物朝向与运动方向（H3未明确处的补充依据）', shot.direction),
+      line('结构化镜头机位（H3未明确处的补充依据）', shot.camera),
+      line('本镜可见动作', request.imageFrameIndex ? '' : purpose === 'first-frame' ? firstFrameActionCue(shot) : shot.action),
+      line('本镜可见结果', request.imageFrameIndex || purpose === 'first-frame' ? '' : shot.result),
+    ]),
     line(purpose === 'first-frame' ? '首帧入镜裸露状态' : '目标画面裸露状态', currentNsfwState?.nudity),
     line(purpose === 'first-frame' ? '首帧入镜衣物状态' : '目标画面衣物状态', currentNsfwState?.clothingState),
     line(purpose === 'first-frame' ? '首帧入镜关键接触' : '目标画面关键接触', currentNsfwState?.contact),
@@ -1518,10 +1520,11 @@ const buildRequest = (
     : purpose === 'last-frame'
       ? [
           '帧位要求：这是视频尾帧，取最后一镜动作完成后的最终状态。',
+          ...(officialShot ? ['尾帧的最终站位、人物朝向、视线与机位以最终 H3 末镜为唯一画面依据；旧结构化镜头字段只作连续性资料，不覆盖该镜头。'] : []),
           line('最后一镜权威画面描述', authoritativeDescription),
-          ...shotPromptLines(shot, total),
-          line('承接上一镜的可见结果', previousShot?.result),
-          line('动作完成后的可见结果', shot.result),
+          ...(officialShot ? [] : shotPromptLines(shot, total)),
+          line(officialShot ? '上一镜的可见结果（连续性背景）' : '承接上一镜的可见结果', previousShot?.result),
+          ...(officialShot ? [] : [line('动作完成后的可见结果', shot.result)]),
         ]
       : customFrame?.imageFrameIndex
         ? [
@@ -1576,9 +1579,11 @@ const buildRequest = (
       ] : []),
       ...(previousShot ? [
         line('上一镜权威画面原文（只承接末状态与空间，不重复上一镜动作）', authoritativeShotDescription(storyboard, previousShot)),
-        line('上一镜结构化空间（最终 H3 未明确处的补充）', previousShot.space),
-        line('上一镜结构化朝向（最终 H3 未明确处的补充）', previousShot.direction),
-        line('上一镜结构化机位（最终 H3 未明确处的补充）', previousShot.camera),
+        ...(purpose === 'last-frame' && officialShot ? [] : [
+          line('上一镜结构化空间（最终 H3 未明确处的补充）', previousShot.space),
+          line('上一镜结构化朝向（最终 H3 未明确处的补充）', previousShot.direction),
+          line('上一镜结构化机位（最终 H3 未明确处的补充）', previousShot.camera),
+        ]),
       ] : []),
       ...continuityContext.lines,
       ...sharedPromptLines(storyboard, purpose),

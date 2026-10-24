@@ -32,10 +32,13 @@ import { defaultStoryExpansionPresets } from '../src/storage';
 import {
   MOSE_JIANGHU_PRIVATE_IMAGE_PROMPT_RULE,
   MOSE_JIANGHU_PRIVATE_PROFILE_RULES,
+  LIANHUA_NSFW_CREATIVE_GUIDANCE,
+  LIANHUA_NSFW_FIXED_PREFIX,
   MOSE_JIANGHU_NSFW_DIRECTOR_LOOK_RULE,
   MOSE_JIANGHU_NSFW_DETAIL_RULES,
   MOSE_JIANGHU_NSFW_IMAGE_CONVERTER_RULE,
   MOSE_JIANGHU_NSFW_IMAGE_PROMPT_RULE,
+  MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE,
 } from '../src/nsfwPromptRules';
 import {
   buildImagePromptConverterSystemPrompt,
@@ -1704,8 +1707,19 @@ test('AI storyboard planning injects the complete NSFW rules once only for an NS
     const userPrompt = payload.messages?.find((message) => message.role === 'user')?.content || '';
     assert.equal(
       exactOccurrenceCount(systemPrompt, MOSE_JIANGHU_NSFW_DETAIL_RULES),
+      0,
+      `${item.label} storyboard planning keeps the stable prefix instead of a mid-prompt detail block`,
+    );
+    assert.ok(systemPrompt.startsWith(LIANHUA_NSFW_FIXED_PREFIX), `${item.label} storyboard system starts with the shared prefix`);
+    assert.equal(
+      exactOccurrenceCount(systemPrompt, MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE),
       item.expectedRuleCount,
-      `${item.label} storyboard planning must receive the complete NSFW rule block ${item.expectedRuleCount} time(s)`,
+      `${item.label} storyboard video action rule stays at the end only for an adult scene`,
+    );
+    assert.equal(
+      userPrompt.includes(LIANHUA_NSFW_CREATIVE_GUIDANCE),
+      item.expectedRuleCount === 1,
+      `${item.label} creative guidance follows the user data only for an adult scene`,
     );
     assert.equal(
       systemPrompt.includes(item.story),
@@ -2476,9 +2490,11 @@ test('director look autofill preserves model-authored fields without a local ref
   const firstPayload = JSON.parse(payloads[0]?.body || '{}') as { messages?: Array<{ role?: string; content?: string }> };
   const firstSystem = firstPayload.messages?.find((item) => item.role === 'system')?.content || '';
   assert.equal(exactOccurrenceCount(firstSystem, MOSE_JIANGHU_NSFW_DIRECTOR_LOOK_RULE), 1);
+  assert.ok(firstSystem.startsWith(LIANHUA_NSFW_FIXED_PREFIX));
+  assert.equal(firstSystem.includes(LIANHUA_NSFW_CREATIVE_GUIDANCE), false, 'director look does not receive prose guidance');
   assert.doesNotMatch(
     firstSystem,
-    /18\s*岁|年龄|成年|未成年|\badult\b|\bminor\b|\bchild\b|\bteen\b/iu,
+    /未满\s*18|未成年|\bminor\b|\bchild\b|\bteen\b|年龄门禁/iu,
     'director look NSFW analysis must not add an age-gate rule',
   );
   assert.equal(payloads.length, 1);
@@ -3544,8 +3560,14 @@ test('story analysis injects the complete NSFW rules once only for NSFW source d
     const userPrompt = payload.messages?.find((message) => message.role === 'user')?.content || '';
     assert.equal(
       exactOccurrenceCount(systemPrompt, MOSE_JIANGHU_NSFW_DETAIL_RULES),
-      item.expectedRuleCount,
-      `${item.label} story analysis must receive the complete NSFW rule block ${item.expectedRuleCount} time(s)`,
+      0,
+      `${item.label} story analysis keeps the stable prefix instead of a mid-prompt detail block`,
+    );
+    assert.ok(systemPrompt.startsWith(LIANHUA_NSFW_FIXED_PREFIX), `${item.label} story analysis starts with the shared prefix`);
+    assert.equal(
+      userPrompt.includes(LIANHUA_NSFW_CREATIVE_GUIDANCE),
+      item.expectedRuleCount === 1,
+      `${item.label} creative guidance follows the analysis data only for an adult scene`,
     );
     assert.equal(
       systemPrompt.includes(item.story),
@@ -5249,8 +5271,8 @@ test('story bible enrichment scopes private data by NSFW participation without a
       nsfwCharacterNames: ['阿莲'],
     });
     assert.equal(Boolean(result.characters[0]?.nsfwProfile), expectProfile);
-    if (expectProfile) assert.match(requestBody, /私密档案目标人物|nsfwProfile/u);
-    else assert.doesNotMatch(requestBody, /私密档案目标人物|nsfwProfile/u);
+    if (expectProfile) assert.match(requestBody, /私密档案目标人物/u);
+    else assert.doesNotMatch(requestBody, /私密档案目标人物/u);
   }
 });
 

@@ -3,7 +3,7 @@ import { requestStoryPreparation, requestStoryPreparationWithReview, requestStor
 import { STORY_VISUAL_ENGINE_VERSION } from '../src/storyVisualAction';
 import { fixturePlan, fixtureParagraphs, readStoryVisualData, type CapturedStoryRequest, type StoryVisualRequestData } from './storyVisualTestFixtures';
 import type { TextApiConfig } from '../src/types';
-import { MOSE_JIANGHU_NSFW_DETAIL_RULES } from '../src/nsfwPromptRules';
+import { LIANHUA_NSFW_CREATIVE_GUIDANCE, LIANHUA_NSFW_FIXED_PREFIX, MOSE_JIANGHU_NSFW_DETAIL_RULES, MOSE_JIANGHU_NSFW_PROMPT_RULE } from '../src/nsfwPromptRules';
 
 const config: TextApiConfig = {
   enabled: true, provider: 'openai_compatible', baseUrl: 'https://api.example.test/v1/chat/completions',
@@ -172,10 +172,20 @@ try {
   fake(() => expansion);
   await requestStoryExpansion(config, '两名成年恋人在卧室脱去衣物，全裸相拥。', undefined, factoryRules);
   const privateExpansionSystem = requests[0].messages.filter((message) => message.role === 'system').map((message) => message.content).join('\n');
-  assert.equal(privateExpansionSystem.split(MOSE_JIANGHU_NSFW_DETAIL_RULES).length - 1, 1, 'existing private-detail preset is injected once when applicable');
+  const privateExpansionUser = requests[0].messages.find((message) => message.role === 'user')!.content;
+  assert.equal(privateExpansionSystem.split(MOSE_JIANGHU_NSFW_DETAIL_RULES).length - 1, 0, 'the saved detail bundle is not repeated beside the stable prefix');
+  assert.equal(privateExpansionSystem.split(MOSE_JIANGHU_NSFW_PROMPT_RULE).length - 1, 1);
+  assert.ok(privateExpansionSystem.startsWith(LIANHUA_NSFW_FIXED_PREFIX));
+  assert.ok(privateExpansionUser.includes(LIANHUA_NSFW_CREATIVE_GUIDANCE));
+  assert.ok(privateExpansionUser.indexOf('</story_expansion_data>') < privateExpansionUser.indexOf(LIANHUA_NSFW_CREATIVE_GUIDANCE));
+  assert.ok(privateExpansionUser.indexOf(LIANHUA_NSFW_CREATIVE_GUIDANCE) < privateExpansionUser.indexOf('<story_expansion_output_protocol>'));
   fake(() => expansion);
   await requestStoryExpansion(config, '林澜推开门。', undefined, factoryRules);
+  const ordinaryExpansionSystem = requests[0].messages.filter((message) => message.role === 'system').map((message) => message.content).join('\n');
+  const ordinaryExpansionUser = requests[0].messages.find((message) => message.role === 'user')!.content;
+  assert.ok(ordinaryExpansionSystem.startsWith(LIANHUA_NSFW_FIXED_PREFIX));
   assert.ok(!requests[0].messages.some((message) => message.role === 'system' && message.content.includes(MOSE_JIANGHU_NSFW_DETAIL_RULES)));
+  assert.equal(ordinaryExpansionUser.includes(LIANHUA_NSFW_CREATIVE_GUIDANCE), false);
   checks += 1;
 
   const cappedConfig = { ...config, provider: 'deepseek' as const, model: 'deepseek-test', maxTokens: 32768 };
@@ -202,7 +212,10 @@ try {
   for (const request of requests) {
     assert.equal(readStoryVisualData(request).detailMode, 'faithful');
     const system = request.messages.filter((message) => message.role === 'system').map((message) => message.content).join('\n');
-    assert.ok(system.lastIndexOf('本模式目标优先于规则预设') > system.indexOf(preset.systemPrompt));
+    const user = request.messages.find((message) => message.role === 'user')!.content;
+    assert.equal(system.includes(preset.systemPrompt), false);
+    assert.equal(`${system}\n${user}`.includes(preset.outputRules), false);
+    assert.ok(system.startsWith(LIANHUA_NSFW_FIXED_PREFIX));
     assert.match(system, /stagingAdditions/u);
   }
   checks += 1;
@@ -229,7 +242,7 @@ try {
     if (data.stage === 'understanding') return JSON.stringify({ version: 1, summary: '甲击中乙，乙随后后退。', events: [
       { id: 'e-contact', sourceParagraphIds: ['p1'], evidence: crossingEvidence, actor: '甲', target: '乙', action: '挥拳击中后乙后退', result: '乙后退一步', uncertainties: [] },
     ] });
-    assert.deepEqual(data.focusEvents?.map((event) => event.id), ['e-contact'], 'a quoted contact/reaction span overlapping this source chunk stays eligible');
+    assert.deepEqual(data.focusEvents?.map((event) => event.id), data.batchIndex === 0 ? ['e-contact'] : [], 'an event without sourceStart stays on the first source chunk and is not replayed in later slices');
     const bodyIndex = overlapRequests.filter((item) => item.stage === 'visualizing').length - 1;
     return JSON.stringify({ paragraphs: [{ id: 'v1', sourceParagraphIds: ['p1'], eventIds: ['e-contact'], text: overlapBodies[bodyIndex], stagingAdditions: [] }] });
   });

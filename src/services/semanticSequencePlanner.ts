@@ -10,7 +10,7 @@ import { STORY_PACING_RULE } from '../storyPacing';
 import { STORY_CAUSALITY_RULE } from '../storyCausalityRules';
 import { VIDEO_SCENE_CONTEXT_RULE } from '../videoSceneContext';
 import { NOVEL_ACTION_SOURCE_RULE, NOVEL_ACTION_CONTINUITY_RULE } from '../novelActionDirection';
-import { MOSE_JIANGHU_NSFW_DETAIL_RULES, MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE } from '../nsfwPromptRules';
+import { MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE } from '../nsfwPromptRules';
 import { hasNsfwDetailSignal } from '../promptConstraints';
 import type { SequenceDurationMode, TextApiConfig, VideoSequencePlan } from '../types';
 import { videoPacingWithoutCreativeRequirement } from '../videoCreativeDirection';
@@ -276,7 +276,6 @@ export const requestSemanticSequencePlan = async (
   const planningRule = [
     semanticSequencePlanningRule(snapshot),
     ...(hasNsfwDetailSignal(snapshot.story) ? [
-      MOSE_JIANGHU_NSFW_DETAIL_RULES,
       MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE,
       SEMANTIC_SEQUENCE_NSFW_SCOPE_RULE,
     ] : []),

@@ -123,6 +123,26 @@ const sentence = (text: string, language: 'zh' | 'en'): string => {
   return !body || /[.!?。！？：:;；]$/u.test(body) ? body : `${body}${language === 'en' ? '.' : '。'}`;
 };
 
+/** Identity anchors are metadata locators, not repeated scene prose. Keep the
+ * first authored occurrence and remove later exact copies emitted by a model
+ * or carried in an older definitions block. */
+const deduplicateIdentityAnchors = (prompt: string, anchors: readonly string[]): string => {
+  let result = prompt;
+  for (const anchor of anchors) {
+    if (!anchor) continue;
+    const positions: number[] = [];
+    let at = result.indexOf(anchor);
+    while (at >= 0) {
+      positions.push(at);
+      at = result.indexOf(anchor, at + anchor.length);
+    }
+    for (const start of positions.slice(1).sort((left, right) => right - left)) {
+      result = result.slice(0, start) + result.slice(start + anchor.length);
+    }
+  }
+  return result;
+};
+
 /** Construct only adopted visual performance and authored voice events. It
  * never merges the preceding free-text H3 back into this new body. */
 export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): RenderH3PerformancePlanResult => {
@@ -239,6 +259,9 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
       if (event.channel === 'on-screen') output.push(en
         ? `${names(event.speakerCharacterIds)} produces the speaking lip movements for these words.`
         : `${names(event.speakerCharacterIds)}产生本句对应的说话口型。`);
+      if (event.channel === 'on-screen' && listenerIds.length) output.push(en
+        ? `${names(event.speakerCharacterIds)} keeps the body and head oriented toward ${names(listenerIds)}, with gaze on them; camera framing is described separately and does not replace the addressed eyeline.`
+        : `${names(event.speakerCharacterIds)}的身体与头部朝向${names(listenerIds)}，视线落在对方身上；摄影机取景方向单独表达，不以正脸或看镜头代替注视对象。`);
       else if (event.channel === 'voiceover' || event.channel === 'inner-voice') output.push(en
         ? 'This voice does not assign speaking lip movements to an on-screen character.'
         : '这段声音不安排画内人物张口代说。');
@@ -295,9 +318,9 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
   const summary = (input.summary ?? plan.summary)?.trim() || (en ? 'The authored scene unfolds in the following shots.' : '按下列镜头展开已确认的场景表演。');
   const retention = (input.retentionAnalysis ?? plan.retentionAnalysis)?.trim() || (en
     ? 'Keep the referenced identities and the authored scene relationships.' : '保留参考身份与已确认的场景关系。');
-  const prompt = renderH3DeliverySections({ body, subjectDefinitions: definitions.join('\n'),
+  const prompt = deduplicateIdentityAnchors(renderH3DeliverySections({ body, subjectDefinitions: definitions.join('\n'),
     summary: /^\[reference generation[^\]]*\]/u.test(summary) ? summary : `[reference generation] ${summary}`,
     retentionAnalysis: retention, overallSoundscape: plan.overallSoundscape, nonDiegeticMusic: plan.nonDiegeticMusic,
-  }, { mode: fullReference ? 'full-reference' : 'integrated', language });
+  }, { mode: fullReference ? 'full-reference' : 'integrated', language }), renderedCharacters.map((entry) => entry.referenceAnchor));
   return { prompt, body, plan, speakerTokens, characters: renderedCharacters, events };
 };

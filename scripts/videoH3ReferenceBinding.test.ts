@@ -118,6 +118,23 @@ await test('稀疏RunningHub按模型实际消费图片编号，上传仍保持�
   assert.equal(fields.find((field) => field.nodeId === 'i1')?.fieldValue, '');
 });
 
+await test('重复身份句不再覆盖可信人物ID与本次明确选图的关联', () => {
+  const { project, draft } = fixture();
+  const duplicated = originalPrompt.replace('[Shot 2]', `[Shot 2] ${anchorA}`);
+  draft.prompt = duplicated;
+  draft.h3ReferenceBinding = { ...draft.h3ReferenceBinding!, basePrompt: duplicated, renderedPrompt: duplicated };
+  const result = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api: cloud() });
+  for (const [id, name, number] of [['a', '甲', 2], ['b', '乙', 3]] as const) {
+    assert.equal(result.characterStates.find((entry) => entry.characterId === id)?.status, 'bound');
+    assert.deepEqual(result.characterStates.find((entry) => entry.characterId === id)?.slots, [number]);
+    assertPictureBinding(result.draft.prompt, name, [number]);
+  }
+  assert.ok(result.warnings.some((warning) => warning.includes('身份句重复')));
+  assert.equal(result.warnings.some((warning) => warning.includes('本次未绑定该人物图片')), false);
+  assert.equal(result.draft.prompt.includes(duplicated), false, 'request-local picture labels are the only prompt edits');
+  assert.equal(result.draft.prompt.replace(/ Visual identity reference for [^\r\n]*?: <Picture \d+>(?:, <Picture \d+>)*\./gu, ''), duplicated);
+});
+
 await test('选图确定性编译六字段主体，镜数切点对白动作声音保留且可逆幂等', () => {
   const { project, draft } = fixture(); const before = structuredClone({ project, draft });
   const result = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api });
@@ -322,17 +339,24 @@ await test('旧稿无metadata、跨项目与人工改稿仅提示；准确唯一
   assert.doesNotMatch(result.draft.prompt.split('detailed_description:')[0], /<d>/u);
 });
 
-await test('找不到或重复的准确定位仍待关联，不推断替代位置', () => {
-  for (const source of [originalPrompt.replace(anchorA, '已替换原定位文本。'), originalPrompt + `\n${anchorA}`]) {
-    const { project, draft } = fixture();
-    draft.prompt = source;
-    draft.references = [{ assetId: 'a-image', role: 'character', slotIndex: 3 }];
-    draft.h3ReferenceBinding = { ...draft.h3ReferenceBinding!, basePrompt: source, renderedPrompt: source };
-    const result = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api: cloud() });
-    assert.equal(result.characterStates.find((entry) => entry.characterId === 'a')?.status, 'pending');
-    assert.equal(result.draft.prompt, source);
-    assert.deepEqual(result.draft.references, draft.references);
-  }
+await test('缺失定位仍待关联；重复定位沿用明确人物ID与本次选图', () => {
+  const missing = originalPrompt.replace(anchorA, '已替换原定位文本。');
+  const { project, draft } = fixture();
+  draft.prompt = missing;
+  draft.references = [{ assetId: 'a-image', role: 'character', slotIndex: 3 }];
+  draft.h3ReferenceBinding = { ...draft.h3ReferenceBinding!, basePrompt: missing, renderedPrompt: missing };
+  const unresolved = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api: cloud() });
+  assert.equal(unresolved.characterStates.find((entry) => entry.characterId === 'a')?.status, 'pending');
+  assert.equal(unresolved.draft.prompt, missing);
+  assert.deepEqual(unresolved.draft.references, draft.references);
+
+  const duplicated = `${originalPrompt}\n${anchorA}`;
+  const duplicateDraft = { ...draft, prompt: duplicated,
+    h3ReferenceBinding: { ...draft.h3ReferenceBinding!, basePrompt: duplicated, renderedPrompt: duplicated } };
+  const recovered = prepareVideoH3ReferenceDraft(project, duplicateDraft, { backend: 'api', api: cloud() });
+  assert.equal(recovered.characterStates.find((entry) => entry.characterId === 'a')?.status, 'bound');
+  assertPictureBinding(recovered.draft.prompt, '甲', [1]);
+  assert.ok(recovered.warnings.some((warning) => warning.includes('身份句重复')));
 });
 
 await test('不明自定义模板、首尾帧专用接口不虚构Picture顺序，不阻断', () => {
@@ -934,11 +958,14 @@ await test('无标题稿仅信任真实来源与准确锚点，普通稿无来�
       }
       const before = structuredClone({ project: current.project, draft: current.draft });
       const result = prepareVideoH3ReferenceDraft(current.project, current.draft, context);
-      assert.equal(result.characterStates.find((entry) => entry.characterId === 'a')?.status, 'pending');
-      assert.doesNotMatch(result.draft.prompt, /Visual identity reference for 甲:/u);
+      const expectedStatus = failure === 'duplicate' ? 'bound' : 'pending';
+      assert.equal(result.characterStates.find((entry) => entry.characterId === 'a')?.status, expectedStatus);
+      if (failure === 'duplicate') assert.match(result.draft.prompt, /Visual identity reference for 甲:/u);
+      else assert.doesNotMatch(result.draft.prompt, /Visual identity reference for 甲:/u);
       for (const id of ['b', 'c', 'd']) assert.equal(result.characterStates.find((entry) => entry.characterId === id)?.status, 'bound');
-      assert.ok(result.warnings.some((warning) => warning.includes('锚点已失效')));
-      assert.deepEqual(multiViewPictureNumbers(result.draft.prompt), [4, 5], 'a pending identity cannot acquire multi-view binding instructions');
+      if (failure === 'missing') assert.ok(result.warnings.some((warning) => warning.includes('锚点已失效')));
+      else assert.ok(result.warnings.some((warning) => warning.includes('身份句重复')));
+      assert.deepEqual(multiViewPictureNumbers(result.draft.prompt), failure === 'duplicate' ? [3, 4, 5] : [4, 5], 'identity binding keeps multi-view instructions');
       assert.equal(withoutHeaderlessPictureBindings(result.draft.prompt), current.draft.prompt);
       assert.deepEqual({ project: current.project, draft: current.draft }, before);
     }

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { h3PerformanceSpeakerTokens, normalizeH3PerformancePlan, parseH3PerformancePlan, renderH3PerformancePlan } from '../src/h3PerformancePlan';
+import { H3_EXISTING_SOUND_SUMMARY_ZH } from '../src/h3DeliverySections';
 import { readH3PromptProtocol } from '../src/h3PromptProtocol';
 import type { H3IdentityBindings, H3PerformancePlan } from '../src/types';
 
@@ -44,10 +45,11 @@ test('segment 4 converts the declared shot clock once and never voices the sourc
   assert.deepEqual(normalizeH3PerformancePlan(rendered.plan), rendered.plan);
   assert.equal(JSON.stringify(segment4), untouched);
   assert.match(rendered.prompt, /本段11\.50–13\.10秒，亚乌拉 \(S2\)在画内发话面向贝里尤洛与夏提雅/u);
+  assert.match(rendered.prompt, /亚乌拉的身体与头部朝向贝里尤洛与夏提雅，视线落在对方身上/u);
   assert.match(rendered.prompt, /沉默地环视王都方向/u);
   assert.doesNotMatch(rendered.prompt, /矮人|骷髅|与龙僵持/u);
   assert.match(rendered.prompt, /衣料的轻微摩擦声/u);
-  assert.match(rendered.prompt, /overall_soundscape:\nN\/A/u);
+  assert.ok(rendered.prompt.includes(`overall_soundscape:\n${H3_EXISTING_SOUND_SUMMARY_ZH}`));
   assert.equal(rendered.characters.find((entry) => entry.characterId === 'shalltear')?.speakerToken, undefined);
   assert.doesNotMatch(rendered.prompt, /夏提雅 \(S2\)|旧夏提雅|旧贝里尤洛/u);
   assert.deepEqual(readH3PromptProtocol(rendered.prompt)?.sections,
@@ -75,6 +77,7 @@ test('segment 5 renders the complete command with its owner, lip action and sile
   assert.match(command, /^From 10\.60 to 14\.40 seconds of this clip, 夏提雅 \(S2\) speaks on-screen to 贝里尤洛:/u);
   assert.match(command, /<d>\[Chinese\] 没错，我们的君王是为了支配你们而来的，下跪低头吧。<\/d>/u);
   assert.match(command, /夏提雅 produces the speaking lip movements/u);
+  assert.match(command, /夏提雅 keeps the body and head oriented toward 贝里尤洛, with gaze on them/u);
   assert.match(command, /贝里尤洛 listens without speaking, with no speaking lip movement/u);
   assert.match(command, /亚乌拉 remains silent: watches the exchange/u);
   assert.doesNotMatch(command, /贝里尤洛.*?speaks on-screen|夏提雅 remains silent|to 夏提雅 \(S2\) seconds/u);
@@ -101,6 +104,13 @@ test('reference image order changes pictures only; subjects, voices, exact dialo
   assert.equal(withOtherSubject.characters.find((entry) => entry.characterId === 'shalltear')?.subjectToken, '<Subject 3>');
   assert.match(withOtherSubject.prompt, /夏提雅 \(S2\), with the voice referenced from <Audio 7>/u);
   assert.equal(withOtherSubject.prompt.match(/<Picture 8> is the opening composition reference/gu)?.length, 1);
+
+  const duplicateAnchor = first.characters[0].referenceAnchor;
+  const duplicateDefinitions = renderH3PerformancePlan({ ...input, characters: first.characters,
+    characterPictures: new Map([['wolf', [5]], ['shalltear', [3]], ['aura', [4]]]),
+    subjectDefinitions: `${duplicateAnchor}\n${duplicateAnchor}` });
+  assert.equal(duplicateDefinitions.prompt.split(duplicateAnchor).length - 1, 1,
+    'identity anchors remain unique when an older definitions block repeats them');
 });
 
 test('explicit voiceover, internal voice, non-verbal voice and simultaneous speech retain their channels', () => {

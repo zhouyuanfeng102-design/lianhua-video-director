@@ -53,6 +53,8 @@ const SEARCHABLE_CHARACTER_PATTERN = /[\p{L}\p{M}\p{N}]/u;
 const PUNCTUATION_OR_SYMBOL_PATTERN = /[\p{P}\p{S}]/u;
 const OPENING_PUNCTUATION_PATTERN = /[\p{Ps}\p{Pi}]/u;
 const SEPARATOR_PATTERN = /^[\s\p{P}\p{S}]*$/u;
+const ACTION_SUMMARY_PREFIX = /^(?:动作过程|行动过程)\s*[：:]/u;
+const ACTION_DETAIL_PREFIX = /^过程细化\s*[：:]/u;
 
 const normalizedTokens = (text: string): NormalizedToken[] => {
   const tokens: NormalizedToken[] = [];
@@ -364,6 +366,7 @@ const blockIssues = (text: string, tokens: NormalizedToken[]): SourceIntegrityIs
     ))) {
       continue;
     }
+    if (isActionSummaryExpansionPair(text, original, duplicate)) continue;
 
     const originalText = text.slice(original.start, original.end);
     const duplicateText = text.slice(duplicate.start, duplicate.end);
@@ -443,6 +446,31 @@ const longLineBlocks = (text: string): LongLineBlock[] => {
   return [...blocksByRange.values()];
 };
 
+const physicalLine = (text: string, range: SourceTextRange): { start: number; end: number; value: string } => {
+  const start = text.lastIndexOf('\n', Math.max(0, range.start - 1)) + 1;
+  const newline = text.indexOf('\n', range.start);
+  const end = newline >= 0 ? newline : text.length;
+  return { start, end, value: text.slice(start, end).trim() };
+};
+
+/**
+ * The visual-description conversion intentionally emits an action summary
+ * followed by a prose expansion of the same event. They are two fields of
+ * one generated record, not two copies of source material.
+ */
+const isActionSummaryExpansionPair = (
+  text: string,
+  original: SourceTextRange,
+  duplicate: SourceTextRange,
+): boolean => {
+  const first = physicalLine(text, original);
+  const second = physicalLine(text, duplicate);
+  if (text.slice(first.end, second.start) !== '\n' && text.slice(first.end, second.start) !== '\r\n') {
+    return false;
+  }
+  return ACTION_SUMMARY_PREFIX.test(first.value) && ACTION_DETAIL_PREFIX.test(second.value);
+};
+
 const approximateLineIssues = (
   text: string,
   existingIssues: SourceIntegrityIssue[],
@@ -472,6 +500,7 @@ const approximateLineIssues = (
     for (const [firstIndex, sharedGramCount] of likelyMatches) {
       const first = blocks[firstIndex];
       if (first.range.end > block.range.start) continue;
+      if (isActionSummaryExpansionPair(text, first.range, block.range)) continue;
       const shorterLength = Math.min(first.values.length, block.values.length);
       const longerLength = Math.max(first.values.length, block.values.length);
       if (shorterLength / longerLength < MIN_NEAR_DUPLICATE_SIMILARITY) continue;

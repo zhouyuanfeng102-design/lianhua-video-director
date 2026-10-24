@@ -35,6 +35,12 @@ type ContextCarrier = { [contextKey]?: TextApiUsageContext };
 let sequence = 0;
 const newId = () => `text-${Date.now().toString(36)}-${(++sequence).toString(36)}`;
 
+/** Read the request stage stored beside the config. Missing stages stay empty. */
+export function readTextApiUsageStage(config: object): string {
+  const stage = (config as ContextCarrier)[contextKey]?.stage;
+  return typeof stage === 'string' ? stage : '';
+}
+
 /** Symbol metadata follows existing config spreads, but never enters JSON, prompts or project files. */
 export function withTextApiUsageContext<T extends object>(config: T, context: TextApiUsageContext = {}, stage?: string): T {
   const previous = (config as ContextCarrier)[contextKey];
