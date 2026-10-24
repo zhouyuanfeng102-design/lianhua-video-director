@@ -15,6 +15,7 @@ export function ImageOutputSizeControls({ lane, value, resolved, disabled, capab
   const legacy = value.mode === 'default' && !workflowSize || value.mode === '1x' || value.mode === '2x';
   const namedResolution = resolved.resolutionPlan?.encoding.kind === 'tier';
   const sizeLabel = resolved.workflowSizeMode === 'tier' ? '档位估算（以返回为准）' : namedResolution ? resolved.resolutionPlan?.verified ? '原生预期' : '档位估算（以返回为准）' : '请求';
+  const sizeSummary = workflowDefault ? '工作流默认尺寸' : `${sizeLabel} ${resolved.width} × ${resolved.height} px${resolved.layoutNote ? ` · ${resolved.layoutNote}` : ''}`;
   return <div className="image-output-size-controls" role="group" aria-label={`${label}生图分辨率设置`}>
     <div className="image-output-size-row">
       <label><span>生图分辨率</span><select aria-label={`${label}生图分辨率`} value={value.mode} disabled={disabled} onChange={(event) => onChange({ ...value, mode: event.target.value as ImageOutputSizePreference['mode'], resolutionVersion: 1 })}>
@@ -36,8 +37,8 @@ export function ImageOutputSizeControls({ lane, value, resolved, disabled, capab
     {workflowSize && !resolved.workflowAspect && <p className="field-hint" style={{ margin: '4px 0 0' }}>{resolved.workflowAspectGate
       ? 'V3 应用指定比例时同步启用“其他比例”；未选参考图时使用文生图。'
       : '涉及比例条件开关时，请在工作流中明确配置，不会自动开启。'}</p>}
-    <div className="image-output-size-summary"><span>{workflowDefault ? '工作流默认尺寸' : `${sizeLabel} ${resolved.width} × ${resolved.height} px`}{resolved.layoutNote ? ` · ${resolved.layoutNote}` : ''}</span>
-      <details><summary>尺寸说明</summary><p>{capabilityNote} 1K、2K、4K是生图分辨率档位；原生模型按其规格提交，自由像素后端按本机档位映射。实际请求宽高和必要的对齐显示于此。各视图数量与位置保持所选版式，画幅按当前请求尺寸生成；模型能力和版式提醒不阻止提交。旧规格保留原尺寸；自定义宽高按输入提交。</p></details>
+    <div className="image-output-size-summary">
+      <details><summary>尺寸说明</summary><p>{sizeSummary}。{capabilityNote} 1K、2K、4K是生图分辨率档位；原生模型按其规格提交，自由像素后端按本机档位映射。实际请求宽高和必要的对齐在本说明中。各视图数量与位置保持所选版式，画幅按当前请求尺寸生成；模型能力和版式提醒不阻止提交。旧规格保留原尺寸；自定义宽高按输入提交。</p></details>
     </div>
     {resolved.warning && <p className="field-hint image-output-size-warning" role="status" style={{ margin: '4px 0 0' }}>{resolved.warning}</p>}
     {resolved.issue && <p className="image-output-size-error" role="alert">{resolved.issue}</p>}

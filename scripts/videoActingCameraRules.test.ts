@@ -18,7 +18,8 @@ import {
   LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_1, stripLegacyVideoActingCameraRules,
 } from '../src/videoActingCameraRules';
 import { VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT,
-  VIDEO_PROMPT_ENGLISH_AI_REVIEW_SYSTEM_PROMPT } from '../src/promptTranslation';
+  VIDEO_PROMPT_ENGLISH_AI_REVIEW_SYSTEM_PROMPT,
+  VIDEO_PROMPT_ENGLISH_DOCUMENT_TRANSLATION_SYSTEM_PROMPT } from '../src/promptTranslation';
 
 // These checks cover generation authority, ordering and request compatibility.
 // They do not claim that a video model executes a pose or a spatial relation.
@@ -45,6 +46,8 @@ assert.match(SPATIAL_COORDINATE_RULE, /身体的前方不等于摄影机前景/u
 assert.match(SCENE_STAGING_GENERATION_RULE, /转身、回头或改换目标须由剧情事件/u);
 assert.match(SCENE_STAGING_GENERATION_RULE, /主观视点、正脸、反打和环绕都可以/u);
 assert.match(SCENE_STAGING_GENERATION_RULE, /头、胸髋、眼神与武器可因当前动作合理不同向/u);
+assert.match(SCENE_STAGING_GENERATION_RULE, /对话中人物停步偏头看向同伴时[\s\S]*不把它扩写成身体转身或掉头/u);
+assert.match(SCENE_STAGING_GENERATION_RULE, /原文明确已转身面对同伴[\s\S]*重新面向路线前方、沿同一方向继续/u);
 assert.match(VIDEO_WORLD_SPACE_CAMERA_RULE, /cameraTarget[\s\S]*bodyFacing、gazeTarget及actionTarget分开/u);
 assert.match(VIDEO_WORLD_SPACE_CAMERA_RULE, /worldRelations、participants[\s\S]*具名人物实例[\s\S]*同一时刻唯一的画面位置与可见范围/u);
 assert.match(VIDEO_WORLD_SPACE_CAMERA_RULE, /越肩的肩、后脑与背部属于该具名人物的同一个身体[\s\S]*不再另置一份在中景或背景/u);
@@ -68,6 +71,13 @@ for (const system of [VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT,
   assert.equal(system.includes(SCENE_STAGING_GENERATION_RULE), false);
   assert.match(system, /不在翻译阶段重新导演/u);
 }
+assert.ok(VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('让摄影机运动以camera为主语')
+  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('不得把retreating')
+  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('除非源稿明确表示人物本人倒退或折返'));
+assert.ok(VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT
+  .includes('reorients toward the path ahead and continues along the same route/uphill'));
+assert.ok(VIDEO_PROMPT_ENGLISH_DOCUMENT_TRANSLATION_SYSTEM_PROMPT.includes('对输入中的每个slot都返回且只返回一项')
+  && VIDEO_PROMPT_ENGLISH_DOCUMENT_TRANSLATION_SYSTEM_PROMPT.includes('不得省略任何slot id'));
 
 const current = [VIDEO_ACTING_CAMERA_RULES, VIDEO_ACTING_CAMERA_TRANSLATION_RULE,
   VIDEO_ACTING_CAMERA_PRESERVATION_RULES, SCENE_STAGING_GENERATION_RULE,

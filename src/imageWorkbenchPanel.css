@@ -51,6 +51,11 @@
 .image-output-card.image-output-refined .image-output-size-row :is(input,select) { height: 28px; min-height: 28px; font-size: calc(10px * var(--ui-font-scale,1)); }
 .image-output-card.image-output-refined .image-output-size-summary { font-size: calc(9px * var(--ui-font-scale,1)); }
 .image-output-card.image-output-refined .image-output-size-summary details p { z-index: 20; left: 0; right: 0; max-height: 130px; padding: 10px; }
+.image-output-card .image-story-source-field { margin: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px; }
+.image-output-card .image-story-source-field > label,
+.image-output-card.image-output-refined .image-story-source-field > label { font-size: calc(9px * var(--ui-font-scale, 1)); line-height: 1.3; }
+.image-output-card .image-story-source-field .segment { min-height: 22px; padding: 1px 7px; font-size: calc(9px * var(--ui-font-scale, 1)); }
+.image-output-card .image-story-source-note { margin: 0; color: var(--muted); font-size: calc(9px * var(--ui-font-scale, 1)); line-height: 1.35; overflow-wrap: anywhere; }
 .image-output-card.image-output-refined .image-generate-row { gap: 6px; background: white; }
 .image-output-card.image-output-refined .image-autofill-requirement { flex: none; min-width: 0; width: 100%; }
 .image-output-card.image-output-refined .image-generate-actions { display: grid; grid-template-columns: minmax(0,.85fr) minmax(0,1.35fr); gap: 6px; }
