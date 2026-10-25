@@ -2,6 +2,7 @@ import { isVideoGenerationTask } from './generationTasks';
 import { videoTaskIsClearedStoppedHistory } from './videoTaskDeletionSafety';
 import { sourceContentHash } from './sourceIntegrity';
 import { resolveConfiguredVideoApi } from './runningHubVideo';
+import { videoConfiguredApiState } from './videoGenerationSource';
 import { offsetVideoReferenceSlotRoles, videoReferenceUsage, type VideoReferenceUsageContext } from './videoReferenceUsage';
 import { assertVideoReferenceSlots, videoReferenceSlotIndex } from './videoReferenceSlots';
 import { prepareVideoH3ReferenceDraft, type VideoH3ReferenceContext } from './videoH3ReferenceBinding';
@@ -397,15 +398,33 @@ export const videoBatchReferenceFingerprint = (
     ...(draft.videoReferences?.length ? { videos: motionReferenceManifest(draft.videoReferences, assets) } : {}) }
   : referenceManifest(draft.references, assets));
 
+const selectedComfyVideoWorkflow = (
+  settings: AppSettings,
+  workflowId: string | undefined,
+) => {
+  const comfyui = settings.comfyuiVideo;
+  if (!comfyui) return undefined;
+  return comfyui.workflows.find((item) => item.id === (workflowId || comfyui.activeWorkflowId))
+    || (!workflowId ? comfyui.workflows[0] : undefined);
+};
+
+/** H3 picture order needs the saved workflow JSON. The request fingerprint keeps using the reduced connection identity. */
+export const videoBatchH3ReferenceContext = (
+  settings: AppSettings,
+  draft: Pick<VideoGenerationDraft, 'backend' | 'apiProfileId' | 'workflowId' | 'runningHubWorkflowId' | 'referenceSlotRoles'> & Partial<Pick<VideoGenerationDraft, 'parameters'>>,
+): VideoH3ReferenceContext => (
+  draft.backend === 'comfyui'
+    ? { backend: 'comfyui', workflow: selectedComfyVideoWorkflow(settings, draft.workflowId), slotRoles: draft.referenceSlotRoles }
+    : { backend: 'api', api: videoConfiguredApiState(settings, { ...draft, parameters: draft.parameters || {} }).api, slotRoles: draft.referenceSlotRoles }
+);
+
 export const videoBatchConnectionIdentity = (
   settings: AppSettings,
   draft: Pick<VideoGenerationDraft, 'backend' | 'apiProfileId' | 'workflowId' | 'runningHubWorkflowId'> & Partial<Pick<VideoGenerationDraft, 'parameters'>>,
 ): unknown => {
   if (draft.backend === 'comfyui') {
     const comfyui = settings.comfyuiVideo;
-    const workflow = comfyui?.workflows.find((item) => item.id === (
-      draft.workflowId || comfyui.activeWorkflowId
-    )) || (!draft.workflowId ? comfyui?.workflows[0] : undefined);
+    const workflow = selectedComfyVideoWorkflow(settings, draft.workflowId);
     return semanticConnection({
       backend: 'comfyui',
       comfyui: comfyui ? {
@@ -695,7 +714,7 @@ const buildChoiceCandidate = (
       }),
     };
   }
-  draft = prepareVideoH3ReferenceDraft(project, draft, videoBatchConnectionIdentity(settings, draft) as VideoH3ReferenceContext).draft;
+  draft = prepareVideoH3ReferenceDraft(project, draft, videoBatchH3ReferenceContext(settings, draft)).draft;
   const promptFingerprint = videoBatchPromptFingerprint(choice);
   const referenceFingerprint = videoBatchReferenceFingerprint(draft, project.assets);
   const requestFingerprint = videoBatchRequestFingerprint(

@@ -7,6 +7,7 @@ import {
   preflightVideoBatchManagedReferences,
   toggleVideoBatchChoice,
   ungeneratedVideoBatchChoiceKeys,
+  videoBatchH3ReferenceContext,
   videoBatchReferenceFingerprint,
   videoTaskRequestFingerprint,
   type VideoBatchChoiceCandidate,
@@ -275,6 +276,33 @@ assert.notEqual(comfyRows[0].zh?.requestFingerprint, changedParameters[0].zh?.re
 comfySettings.comfyuiVideo.workflows[0]!.workflowJson = '{"1":{"class_type":"Prompt","inputs":{"text":"changed"}}}';
 const changedWorkflow = buildVideoBatchRows(project, plan, comfySettings, { parameters: { seed: 7 } });
 assert.notEqual(comfyRows[0].zh?.requestFingerprint, changedWorkflow[0].zh?.requestFingerprint, 'workflow content is part of request identity');
+
+const customWorkflow = {
+  id: 'workflow-custom',
+  name: '自定义工作流',
+  workflowJson: '{"9":{"class_type":"LoadImage","inputs":{"image":"custom.png"}}}',
+  mapping: { prompt: [{ nodeId: '1', inputName: 'text' }], images: [{ nodeId: '9', inputName: 'image' }] },
+  createdAt: 2,
+  updatedAt: 2,
+};
+const twoWorkflows = structuredClone(comfySettings);
+twoWorkflows.comfyuiVideo.workflows.push(customWorkflow);
+twoWorkflows.comfyuiVideo.activeWorkflowId = 'workflow-a';
+const settingsBeforeBatch = structuredClone(twoWorkflows);
+const projectBeforeBatch = structuredClone(project);
+const originalPrompt = project.storyboards.find((item) => item.id === 'board-1')?.finalPrompt;
+const specifiedRows = buildVideoBatchRows(project, plan, twoWorkflows, { backend: 'comfyui', workflowId: 'workflow-custom', parameters: { seed: 7 } });
+const defaultRows = buildVideoBatchRows(project, plan, twoWorkflows, { backend: 'comfyui', parameters: { seed: 7 } });
+const removedRows = buildVideoBatchRows(project, plan, twoWorkflows, { backend: 'comfyui', workflowId: 'missing-workflow', parameters: { seed: 7 } });
+assert.equal(videoBatchH3ReferenceContext(twoWorkflows, specifiedRows[0].zh!.draft).workflow?.workflowJson, customWorkflow.workflowJson);
+assert.equal(videoBatchH3ReferenceContext(twoWorkflows, defaultRows[0].zh!.draft).workflow?.workflowJson, twoWorkflows.comfyuiVideo.workflows[0]!.workflowJson);
+assert.equal(videoBatchH3ReferenceContext(twoWorkflows, removedRows[0].zh!.draft).workflow, undefined);
+assert.equal(specifiedRows[0].zh?.draft.prompt, defaultRows[0].zh?.draft.prompt);
+assert.equal(removedRows[0].zh?.draft.prompt, originalPrompt);
+assert.equal(removedRows.length, 15);
+assert.deepEqual(twoWorkflows, settingsBeforeBatch);
+assert.deepEqual(project.storyboards.map((item) => item.finalPrompt), projectBeforeBatch.storyboards.map((item) => item.finalPrompt));
+assert.equal(videoBatchH3ReferenceContext(settings, { ...specifiedRows[0].zh!.draft, backend: 'api', workflowId: undefined }).api?.model, 'batch-test-model');
 
 const snapshotFor = (candidate: VideoBatchChoiceCandidate): VideoGenerationSnapshot => {
   const { apiKey: _apiKey, ...safeApi } = settings.videoTaskApi;

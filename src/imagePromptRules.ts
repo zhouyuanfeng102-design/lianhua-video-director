@@ -126,7 +126,7 @@ export interface SanitizedImagePromptSections {
 }
 
 export const IMAGE_PROMPT_RULES_SCHEMA_VERSION = 1;
-export const IMAGE_PROMPT_RULE_CATALOG_VERSION = 21;
+export const IMAGE_PROMPT_RULE_CATALOG_VERSION = 22;
 const GPT_IMAGE_RULE_ID = 'image-rule-openai-gpt-image';
 const KREA_RULE_ID = 'image-rule-krea-2';
 const COMFYUI_RULE_ID = 'image-rule-comfyui';
@@ -150,6 +150,7 @@ const GOOGLE_GROK_MODEL_CATALOG_VERSION = 18;
 const IMAGE_RESOLUTION_LAYOUT_CATALOG_VERSION = 19;
 const STORY_SPATIAL_STATE_CATALOG_VERSION = 20;
 const PROP_THREE_VIEW_CATALOG_VERSION = 21;
+const KREA_REFERENCE_ROLE_CATALOG_VERSION = 22;
 const NOVELAI_RULE_ID = 'image-rule-novelai';
 
 export const NOVELAI_IMAGE_PRESET_IDS = {
@@ -847,8 +848,32 @@ export const LEGACY_IMAGE_PROMPT_RULE_SETS_V20: readonly ImagePromptRuleSet[] = 
   };
 });
 
-export const BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS: readonly ImagePromptCategoryPreset[] = LEGACY_IMAGE_PROMPT_CATEGORY_PRESETS_V20.map(withPropImageSpecificationPreset);
-export const BUILT_IN_IMAGE_PROMPT_RULE_SETS: readonly ImagePromptRuleSet[] = LEGACY_IMAGE_PROMPT_RULE_SETS_V20.map(withPropImageSpecificationRule);
+const FACTORY_IMAGE_PROMPT_CATEGORY_PRESETS_V21: readonly ImagePromptCategoryPreset[] = LEGACY_IMAGE_PROMPT_CATEGORY_PRESETS_V20.map(withPropImageSpecificationPreset);
+const FACTORY_IMAGE_PROMPT_RULE_SETS_V21: readonly ImagePromptRuleSet[] = LEGACY_IMAGE_PROMPT_RULE_SETS_V20.map(withPropImageSpecificationRule);
+
+const KREA_REFERENCE_ROLE_RULE = '风格参考只保持明确要求的媒介、材质和画风。分镜或剧情静帧上传了参考图时，按每张图的实际用途分别绑定，不把所有参考图都当成要保持的构图：场景或环境图只保留空间结构、门窗位置、家具与材质，光线和时间以当前镜头为准；人物图只保留面部、发型、身体比例与服装设计，姿态、朝向和站位按当前镜头重排，不复制参考板中的站姿、朝向、背景或多格布局。五视图、设定板和单人身份资料图仍按当前图片规格保留各自版式。';
+const KREA_REFERENCE_ROLE_OUTPUT = '有参考图的分镜或剧情静帧先点明每张图只参考的内容，再写成当前镜头的一段单幅画面。';
+const KREA_STORYBOARD_REFERENCE_ROLE = '上传了参考图时，场景图只借空间结构、门窗、家具与材质，人物图只借面部、发型、身体比例与服装；姿态、朝向、站位、光线和背景以当前镜头为准，不复制参考板的站姿、朝向、背景或多格布局。';
+
+const withKreaReferenceRoleRule = (rule: ImagePromptRuleSet): ImagePromptRuleSet => rule.id === KREA_RULE_ID ? {
+  ...rule,
+  systemPrompt: rule.systemPrompt.replace(
+    '存在参考图或风格参考时，明确区分必须保持的身份、构图和材质与允许变化的画面元素。',
+    KREA_REFERENCE_ROLE_RULE,
+  ),
+  outputRules: [rule.outputRules, KREA_REFERENCE_ROLE_OUTPUT].join('\n'),
+  version: nextSpatialRuleVersion(rule.version),
+} : rule;
+
+const withKreaReferenceRolePreset = (preset: ImagePromptCategoryPreset): ImagePromptCategoryPreset => preset.id === MULTI_PERSON_BINDING_PRESET_IDS.kreaStoryboard ? {
+  ...preset,
+  systemPrompt: [preset.systemPrompt, KREA_STORYBOARD_REFERENCE_ROLE].join('\n'),
+  outputRules: [preset.outputRules, '参考图用途写在同一段自然语言里，不另起字段列表，也不把人物参考板的版式画进这一帧。'].join('\n'),
+  version: nextSpatialRuleVersion(preset.version),
+} : preset;
+
+export const BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS: readonly ImagePromptCategoryPreset[] = FACTORY_IMAGE_PROMPT_CATEGORY_PRESETS_V21.map(withKreaReferenceRolePreset);
+export const BUILT_IN_IMAGE_PROMPT_RULE_SETS: readonly ImagePromptRuleSet[] = FACTORY_IMAGE_PROMPT_RULE_SETS_V21.map(withKreaReferenceRoleRule);
 
 const BUILT_IN_DEFAULT_RULE_SET_BY_BACKEND: Readonly<Partial<Record<ImagePromptBackend, string>>> = {
   all: 'image-rule-generic',
@@ -1831,7 +1856,7 @@ const migrateCatalog20ImagePromptRulesState = (value: unknown): ImagePromptRules
   };
 };
 
-export const migrateImagePromptRulesState = (value: unknown): ImagePromptRulesState => {
+const migrateCatalog21ImagePromptRulesState = (value: unknown): ImagePromptRulesState => {
   const normalized = normalizeImagePromptRulesState(value);
   if ((normalized.catalogVersion || 0) >= PROP_THREE_VIEW_CATALOG_VERSION) return normalized;
   const state = migrateCatalog20ImagePromptRulesState(normalized);
@@ -1850,6 +1875,33 @@ export const migrateImagePromptRulesState = (value: unknown): ImagePromptRulesSt
       const legacy = legacyPresets.get(preset.id); const current = currentPresets.get(preset.id);
       return legacy && current && isUnchangedFactoryPreset({ ...preset, enabled: true }, legacy)
         ? { ...cloneCategoryPreset(current), enabled: preset.enabled } : preset;
+    }),
+  };
+};
+
+export const migrateImagePromptRulesState = (value: unknown): ImagePromptRulesState => {
+  const normalized = migrateCatalog21ImagePromptRulesState(value);
+  if ((normalized.catalogVersion || 0) >= KREA_REFERENCE_ROLE_CATALOG_VERSION) return normalized;
+  const legacyRules = new Map(FACTORY_IMAGE_PROMPT_RULE_SETS_V21.map((rule) => [rule.id, rule]));
+  const legacyPresets = new Map(FACTORY_IMAGE_PROMPT_CATEGORY_PRESETS_V21.map((preset) => [preset.id, preset]));
+  const currentRules = new Map(BUILT_IN_IMAGE_PROMPT_RULE_SETS.map((rule) => [rule.id, rule]));
+  const currentPresets = new Map(BUILT_IN_IMAGE_PROMPT_CATEGORY_PRESETS.map((preset) => [preset.id, preset]));
+  return {
+    ...normalized,
+    catalogVersion: KREA_REFERENCE_ROLE_CATALOG_VERSION,
+    ruleSets: normalized.ruleSets.map((rule) => {
+      const legacy = legacyRules.get(rule.id);
+      const current = currentRules.get(rule.id);
+      return legacy && current && isUnchangedFactoryRule({ ...rule, enabled: true }, legacy)
+        ? { ...cloneRuleSet(current), enabled: rule.enabled }
+        : rule;
+    }),
+    categoryPresets: normalized.categoryPresets.map((preset) => {
+      const legacy = legacyPresets.get(preset.id);
+      const current = currentPresets.get(preset.id);
+      return legacy && current && isUnchangedFactoryPreset({ ...preset, enabled: true }, legacy)
+        ? { ...cloneCategoryPreset(current), enabled: preset.enabled }
+        : preset;
     }),
   };
 };
