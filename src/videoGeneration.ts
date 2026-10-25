@@ -74,6 +74,14 @@ const sameRuntime = (left: VideoGenerationRuntime, right: VideoGenerationRuntime
 const samePatch = (value: object, patch: object): boolean => Object.entries(patch).every(([key, next]) => Object.is((value as Record<string, unknown>)[key], next));
 const comfyExecutionEvents = new Set(['progress', 'executing', 'executed', 'execution_start', 'execution_cached', 'execution_success', 'execution_error', 'execution_interrupted']);
 const record = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+const firstBy = <T, K>(items: readonly T[], keyOf: (item: T) => K): Map<K, T> => {
+  const indexed = new Map<K, T>();
+  for (const item of items) {
+    const key = keyOf(item);
+    if (!indexed.has(key)) indexed.set(key, item);
+  }
+  return indexed;
+};
 const id = (prefix: string) => `${prefix}_${globalThis.crypto?.randomUUID?.() || `${Date.now()}_${Math.random().toString(36).slice(2)}`}`;
 const completedFileResult = (task: VideoGenerationTask): string | undefined => {
   const config = task.videoJob?.snapshot.connection.api;
@@ -1481,6 +1489,7 @@ export class VideoGenerationEngine {
   private async preflightBatchItem(
     state: AppState,
     project: Project,
+    projectAssetsById: ReadonlyMap<string, ReferenceAsset>,
     item: VideoBatchItemInput,
     index: number,
   ): Promise<PreparedBatchItem> {
@@ -1511,16 +1520,17 @@ export class VideoGenerationEngine {
     const reuse = reused && reused.projectId === project.id && reused.connection.backend === draft.backend
       && draft.workflowId === reused.draft.workflowId && draft.apiProfileId === reused.draft.apiProfileId
       && draft.runningHubWorkflowId === reused.draft.runningHubWorkflowId ? reused : undefined;
+    const reusedImagesByAssetId = firstBy(reuse?.images || [], (image) => image.assetId);
     const assets = await Promise.all(validationDraft.references.map(async (reference, referenceIndex) => {
       if (requestedTail && referenceIndex === requestedTail.placement.index) return undefined;
-      const frozen = reuse?.images.find((image) => image.assetId === reference.assetId);
+      const frozen = reusedImagesByAssetId.get(reference.assetId);
       if (frozen) {
         if (!(frozen.relativePath && frozen.checksum) && !(frozen.freezeState === 'frozen' && frozen.dataUrl?.startsWith('data:image/'))) {
           throw new Error(`批量第 ${index + 1} 项的旧任务图片“${frozen.name}”没有可信原始字节，请重新选择图片。`);
         }
         return this.transportReferenceAsset(reference, this.imageAsset({ ...structuredClone(frozen), role: reference.role }), true);
       }
-      const asset = project.assets.find((candidate) => candidate.id === reference.assetId);
+      const asset = projectAssetsById.get(reference.assetId);
       if (!asset || asset.type === 'video' || asset.type === 'audio') throw new Error(`批量第 ${index + 1} 项所选图片已不存在或不是图片资产。`);
       if (asset.missing) throw new Error(`批量第 ${index + 1} 项的图片“${asset.name}”文件丢失，请重新关联素材。`);
       return this.transportReferenceAsset(reference, structuredClone(asset));
@@ -1810,7 +1820,8 @@ export class VideoGenerationEngine {
 
     // Promise.all is safe here: preflight performs reads and pure validation only.
     // No task shell, upload or billable generation request exists until all pass.
-    const prepared = await Promise.all(input.items.map((item, index) => this.preflightBatchItem(state, project, item, index)));
+    const projectAssetsById = firstBy(project.assets, (asset) => asset.id);
+    const prepared = await Promise.all(input.items.map((item, index) => this.preflightBatchItem(state, project, projectAssetsById, item, index)));
     checkContinuation();
     const chainEnabled = input.completionOrder === true || prepared.some((candidate) => Boolean(candidate.item.previousTail));
     const orderedPrepared = chainEnabled
@@ -2015,8 +2026,10 @@ export class VideoGenerationEngine {
     const reuse = reused && reused.projectId === project.id && reused.connection.backend === draft.backend
       && draft.workflowId === reused.draft.workflowId && draft.apiProfileId === reused.draft.apiProfileId
       && draft.runningHubWorkflowId === reused.draft.runningHubWorkflowId ? reused : undefined;
+    const reusedImagesByAssetId = firstBy(reuse?.images || [], (image) => image.assetId);
+    const projectAssetsById = firstBy(project.assets, (asset) => asset.id);
     const assets = await Promise.all(draft.references.map(async (reference) => {
-      const frozen = reuse?.images.find((image) => image.assetId === reference.assetId);
+      const frozen = reusedImagesByAssetId.get(reference.assetId);
       if (frozen) {
         // .82 managed bytes were protected by checksums; its inline/remote references were not captured.
         if (!(frozen.relativePath && frozen.checksum) && !(frozen.freezeState === 'frozen' && frozen.dataUrl?.startsWith('data:image/'))) {
@@ -2024,7 +2037,7 @@ export class VideoGenerationEngine {
         }
         return this.transportReferenceAsset(reference, this.imageAsset({ ...structuredClone(frozen), role: reference.role }), true);
       }
-      const asset = project.assets.find((item) => item.id === reference.assetId);
+      const asset = projectAssetsById.get(reference.assetId);
       if (!asset || asset.type === 'video' || asset.type === 'audio') throw new Error('所选图片已不存在或不是图片资产。');
       return this.transportReferenceAsset(reference, structuredClone(asset));
     }));

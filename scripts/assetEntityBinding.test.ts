@@ -127,6 +127,38 @@ test('关联图统计使用种类与精确ID，排除失效、归档、重复ID�
   assert.deepEqual(project, before);
 });
 
+test('关联图统计与逐图所有权解析一致，并线性统计大型旧式图片列表', () => {
+  const project = fixture();
+  project.characters[0].assetIds.push('free', 'legacy-person', 'legacy-person');
+  project.locations[1].assetIds.push('free');
+  project.props[1].assetIds.push('free');
+  project.assets.push(
+    image('subject-list', { storyReferenceSubjects: [{ chapterId: 'chapter', referenceId: 'ref', subjectId: 'subject', kind: 'character', entityId: 'person-b', label: '旅人乙' }] }),
+    image('conflicting-source', { sourceEntityId: 'location-a' }),
+    image('duplicate-source', { sourceEntityKind: 'character', sourceEntityId: 'person-a' }),
+    image('duplicate-source', { sourceEntityKind: 'character', sourceEntityId: 'person-b' }),
+  );
+  const expected = { character: new Map<string, number>(), location: new Map<string, number>(), prop: new Map<string, number>() };
+  const seen = new Set<string>();
+  for (const asset of project.assets) {
+    if (seen.has(asset.id)) continue;
+    seen.add(asset.id);
+    for (const { kind, entity } of assetReferenceEntityOwners(project, asset)) {
+      expected[kind].set(entity.id, (expected[kind].get(entity.id) || 0) + 1);
+    }
+  }
+  assert.deepEqual(assetReferenceEntityImageCounts(project), expected, 'indexed count preserves every existing owner-resolution rule');
+
+  const large = fixture();
+  const assetIds = Array.from({ length: 1500 }, (_, index) => `large-${index}`);
+  large.characters[0].assetIds = assetIds;
+  large.assets = assetIds.map((id) => image(id));
+  const largeCounts = assetReferenceEntityImageCounts(large);
+  assert.equal(largeCounts.character.get('person-a'), assetIds.length);
+  assert.equal(largeCounts.location.size, 0);
+  assert.equal(largeCounts.prop.size, 0);
+});
+
 test('场景与物品绑定决定视频参考用途，跨类型改绑不会保留旧场景归属', () => {
   let project = bindAssetEntity(fixture(), 'legacy-location', { kind: 'location', entityId: 'location-b' });
   assert.equal(videoImageRole(project.assets[2]), 'scene');

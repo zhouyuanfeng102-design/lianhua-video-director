@@ -12363,14 +12363,21 @@ function SequenceFilmstrip({
   generationPromptFormat?: "h3" | "seedance";
 }) {
   const targetFormat = generationPromptFormat || plan?.generationPromptFormat || "h3";
+  const storyboardsById = useMemo(() => {
+    const indexed = new Map<string, Project["storyboards"][number]>();
+    for (const storyboard of project.storyboards) {
+      if (!indexed.has(storyboard.id)) indexed.set(storyboard.id, storyboard);
+    }
+    return indexed;
+  }, [project.storyboards]);
   if (!plan) return null;
   return (
     <div className="sequence-filmstrip" role="tablist" aria-label="全片视频段">
       {plan.segments.map((segment) => {
-        const storyboard = project.storyboards.find((board) => board.id === segment.storyboardId);
+        const storyboard = segment.storyboardId ? storyboardsById.get(segment.storyboardId) : undefined;
         const promptAction = reads.promptAction(plan, segment, targetFormat);
         const statusLabel = sequenceSegmentPromptStatusLabel(segment, promptAction.action, targetFormat);
-        const handoffStatus = storyboard && reads.handoff(storyboard, targetFormat);
+        const handoffStatus = segment.index > 1 && storyboard ? reads.handoff(storyboard, targetFormat) : undefined;
         return (
         <button
           key={segment.id}
@@ -12511,12 +12518,12 @@ function SequencePlannerPanel(ctx: AppContext) {
   const isFirst = !activeSequenceSegment || activeSequenceSegment.index <= 1;
   const isLast = !activeSequenceSegment || activeSequenceSegment.index >= segmentCount;
   const aiBoundariesAreAuthoritative = activeSequencePlan?.segmentationSource === "ai";
-  const planIssues = activeSequencePlan && planningStage === "segmented"
+  const planIssues = useMemo(() => activeSequencePlan && planningStage === "segmented"
     ? validateSequencePlan(activeSequencePlan, {
         requireMasterStoryboard: true,
         storyboards: state.project.storyboards,
       })
-    : [];
+    : [], [activeSequencePlan, planningStage, state.project.storyboards]);
   const activeFitStatus = activeSequencePlan?.fitStatus;
   const activeSegmentPromptAction = activeSequencePlan && activeSequenceSegment
     ? ctx.promptDirectorReads.promptAction(activeSequencePlan, activeSequenceSegment, generationPromptFormat)

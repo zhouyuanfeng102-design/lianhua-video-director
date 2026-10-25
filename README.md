@@ -4,13 +4,13 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的 Windows 桌面工作台。
 
-当前版本：**3.1.1** · 2026-10-25 · Windows 64 位 · 便携运行
+当前版本：**3.1.2** · 2026-10-25 · Windows 64 位 · 便携运行
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows 便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-3.1.1.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-3.1.2.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
 1. 下载上面的 EXE，放在可写入的文件夹里，双击运行，无需安装 Node.js。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
@@ -32,17 +32,17 @@
 - **自定义生图+反推图片提示词**：输入要求生成图片，或复用上传/资产库参考图，通过视觉 API 反推可复制的提示词与人物、物品、场景、风格详情。反推同步显示在聊天和资料任务，支持后台执行、停止、重试及项目保存恢复；原有生图支持原文直发或规则转换，结果自动入库。
 - **项目与资产管理**：管理图片、视频和音频，保存项目包、备份资料并导出提示词。
 
-## 最新更新 · v3.1.1
+## 最新更新 · v3.1.2
 
-- AI 扩写、画面描述转化和自定义生图规则转换只保留 MAESTRO 前置，不再叠加旧的 NSFW Role 前缀。
-- 用户要求保持在可变区末尾，普通和成人请求共用固定系统前缀。
-- 分镜、解析、H3、Seedance 等其它阶段继续使用原有 NSFW 前缀，不新增校验、拦截或自动重试。
+- 提示词导演台复用分镜索引和计划校验结果，减少切段时的重复计算。
+- 视频单项提交和批量预检复用素材索引，保持原有任务快照、检查点和提交边界。
+- 关联图片统计改为线性索引，保留重复图片、明确绑定和历史来源语义。
 
 更新程序不改写项目存档。
 
 本版定向测试结果见发布说明，测试不调用真实模型或提交视频生成。
 
-[查看本版完整说明](docs/releases/发布说明-3.1.1.md) · [历史版本归档](docs/releases/README.md)
+[查看本版完整说明](docs/releases/发布说明-3.1.2.md) · [历史版本归档](docs/releases/README.md)
 
 ## 从源码运行
 

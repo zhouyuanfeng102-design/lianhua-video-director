@@ -11,6 +11,16 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "3.1.2",
+    releasedAt: "2026-10-25",
+    title: "降低导演台与视频提交卡顿",
+    highlights: [
+      "提示词导演台复用分镜索引和计划校验结果，减少切段时的重复计算。",
+      "视频单项提交和批量预检复用素材索引，保持原有任务快照、检查点和提交边界。",
+      "关联图片统计改为线性索引，保留重复图片、明确绑定和历史来源的原有语义。",
+    ],
+  },
+  {
     version: "3.1.1",
     releasedAt: "2026-10-25",
     title: "第一批阶段去掉原 NSFW Role，只保留 MAESTRO",

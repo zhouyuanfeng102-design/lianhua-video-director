@@ -91,11 +91,99 @@ export const assetReferenceEntityImageCounts = (
   project: Project,
 ): Record<AssetReferenceEntityBinding['kind'], Map<string, number>> => {
   const counts = { character: new Map<string, number>(), location: new Map<string, number>(), prop: new Map<string, number>() };
-  const visitedAssetIds = new Set<string>();
+  const assetCounts = new Map<string, number>();
+  const uniqueAssets = new Map<string, ReferenceAsset>();
   for (const asset of project.assets) {
-    if (visitedAssetIds.has(asset.id)) continue;
-    visitedAssetIds.add(asset.id);
-    for (const { kind, entity } of assetReferenceEntityOwners(project, asset)) {
+    assetCounts.set(asset.id, (assetCounts.get(asset.id) || 0) + 1);
+    if (!uniqueAssets.has(asset.id)) uniqueAssets.set(asset.id, asset);
+  }
+
+  const indexEntities = <T extends Character | Location | Prop>(entities: readonly T[]) => {
+    const byId = new Map<string, T[]>();
+    const assetIdsByAsset = new Map<string, Set<string>>();
+    const ids = new Set<string>();
+    for (const entity of entities) {
+      const matches = byId.get(entity.id);
+      if (matches) matches.push(entity);
+      else byId.set(entity.id, [entity]);
+      ids.add(entity.id);
+      for (const assetId of entity.assetIds) {
+        let owners = assetIdsByAsset.get(assetId);
+        if (!owners) assetIdsByAsset.set(assetId, owners = new Set());
+        owners.add(entity.id);
+      }
+    }
+    return { byId, assetIdsByAsset, ids };
+  };
+  const characters = indexEntities(project.characters);
+  const locations = indexEntities(project.locations);
+  const props = indexEntities(project.props);
+  const locationAndPropIds = new Set([...locations.ids, ...props.ids]);
+  const characterAndPropIds = new Set([...characters.ids, ...props.ids]);
+  const characterAndLocationIds = new Set([...characters.ids, ...locations.ids]);
+  const exactOwners = (kind: AssetReferenceEntityBinding['kind'], ids: readonly string[]): AssetReferenceEntityOwner[] => {
+    const index = kind === 'character' ? characters : kind === 'location' ? locations : props;
+    const owners: AssetReferenceEntityOwner[] = [];
+    for (const id of new Set(ids)) {
+      const matches = index.byId.get(id);
+      if (matches?.length !== 1 || kind === 'character' && (matches[0] as Character).dossier?.archivedIntoCharacterId) continue;
+      owners.push({ kind, entity: matches[0] } as AssetReferenceEntityOwner);
+    }
+    return owners;
+  };
+  const listedOwners = (kind: AssetReferenceEntityBinding['kind'], assetId: string): readonly string[] => {
+    const owners = (kind === 'character' ? characters : kind === 'location' ? locations : props).assetIdsByAsset.get(assetId);
+    return owners ? [...owners] : [];
+  };
+  const ownersForAsset = (asset: ReferenceAsset): AssetReferenceEntityOwner[] => {
+    if (!isAssetCharacterBindingImage(asset) || assetCounts.get(asset.id) !== 1) return [];
+    const binding = normalizeAssetReferenceEntityBinding(asset.referenceEntityBinding);
+    if (binding !== undefined) return binding ? exactOwners(binding.kind, [binding.entityId]) : [];
+
+    const characterOwners = (): Character[] => {
+      const exactCharacters = (ids: readonly string[]) => exactOwners('character', ids)
+        .flatMap((owner) => owner.kind === 'character' ? [owner.entity] : []);
+      if (asset.characterReferenceId !== undefined) {
+        return typeof asset.characterReferenceId === 'string' && asset.characterReferenceId.trim()
+          ? exactCharacters([asset.characterReferenceId]) : [];
+      }
+      if (asset.storyReferenceSubjects?.length) {
+        return exactCharacters(asset.storyReferenceSubjects.filter((subject) => subject.kind === 'character').map((subject) => subject.entityId));
+      }
+      if (asset.sourceEntityId || asset.sourceEntityKind) {
+        if (!asset.sourceEntityId || asset.sourceEntityKind && asset.sourceEntityKind !== 'character' || ['location', 'prop'].includes(asset.type)) return [];
+        if (locationAndPropIds.has(asset.sourceEntityId)) return [];
+        const resolved = exactCharacters([asset.sourceEntityId]);
+        return asset.sourceEntityKind === 'character' ? resolved : resolved.filter((owner) => owner.assetIds.includes(asset.id));
+      }
+      return exactCharacters(listedOwners('character', asset.id));
+    };
+    const otherOwners = (kind: 'location' | 'prop'): AssetReferenceEntityOwner[] => {
+      if (typeof asset.characterReferenceId === 'string' && asset.characterReferenceId.trim()) return [];
+      if (asset.storyReferenceSubjects?.length) {
+        return exactOwners(kind, asset.storyReferenceSubjects.filter((subject) => subject.kind === kind).map((subject) => subject.entityId));
+      }
+      if (asset.sourceEntityId || asset.sourceEntityKind) {
+        if (!asset.sourceEntityId || asset.sourceEntityKind && asset.sourceEntityKind !== kind
+          || ['character', kind === 'location' ? 'prop' : 'location'].includes(asset.type)) return [];
+        const otherEntityIds = kind === 'location' ? characterAndPropIds : characterAndLocationIds;
+        if (otherEntityIds.has(asset.sourceEntityId)) return [];
+        const resolved = exactOwners(kind, [asset.sourceEntityId]);
+        return asset.sourceEntityKind === kind ? resolved : resolved.filter((owner) => owner.entity.assetIds.includes(asset.id));
+      }
+      return exactOwners(kind, listedOwners(kind, asset.id));
+    };
+
+    return [
+      ...characterOwners().map((entity): AssetReferenceEntityOwner => ({ kind: 'character', entity })),
+      ...otherOwners('location'),
+      ...otherOwners('prop'),
+    ];
+  };
+
+  for (const [assetId, asset] of uniqueAssets) {
+    if (assetCounts.get(assetId) !== 1) continue;
+    for (const { kind, entity } of ownersForAsset(asset)) {
       counts[kind].set(entity.id, (counts[kind].get(entity.id) || 0) + 1);
     }
   }
