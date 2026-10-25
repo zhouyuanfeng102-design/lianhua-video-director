@@ -1295,6 +1295,7 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
 .api-card .field + .field { margin-top: 0; }
 .api-card .check-row { min-height: 22px; }
 .api-fields-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.text-max-tokens-control { display: grid; gap: 6px; }
 .api-fields-two .field + .field { margin-top: 0; }
 .comfyui-backend-row { grid-template-columns: minmax(0, 1fr); }
 .comfyui-settings { display: grid; gap: 6px; min-width: 0; }

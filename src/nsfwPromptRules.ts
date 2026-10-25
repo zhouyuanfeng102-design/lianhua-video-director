@@ -1,4 +1,4 @@
-import { hasNsfwDetailSignal } from './promptConstraints';
+import { isMaestroPhase1Stage, prependMaestroPhase1Prefix } from './maestroProtocol';
 
 /**
  * Kept verbatim from 墨色江湖's active runtime NSFW prompt.  The surrounding
@@ -136,10 +136,11 @@ export const MOSE_JIANGHU_PRIVATE_PROFILE_RULES = `私密档案采用同一人�
 
 /**
  * Stable text-request frame for every in-scope writing stage.
- * The prefix is identical for ordinary and adult scenes so the shared cache
- * prefix does not fork at the first byte. Creative guidance is appended only
- * after the user payload, and only when that payload is already adult prose.
- * Image conversion and private-image rules stay on their own constants.
+ * Fixed rules stay in the system prefix and stay identical for ordinary and
+ * adult scenes so provider prefix cache is not forked. The user requirement
+ * remains the trailing variable payload. Write-stage creative guidance is
+ * part of that fixed prefix and already says to expand only when the segment
+ * is adult prose. Image conversion and private-image rules stay separate.
  */
 export const LIANHUA_NSFW_ROLE_PREFIX = `<Role>
 你是「莲华叙事编辑」，负责把已经给出的成人虚构剧情写成当前任务要求的正文。
@@ -257,21 +258,43 @@ export interface NsfwTextFrameInput {
   finalInstruction: string;
 }
 
-/** Returns the same layers when this stage is outside the text frame. */
+/**
+ * Returns the same layers when this stage is outside the text frame.
+ * Phase-1 MAESTRO stages skip the old Lianhua NSFW Role/worldbook/creative
+ * persona prefix: API tests showed that Role framing raises Gemini refusals
+ * on expand/visual NSFW. Those stages keep MAESTRO only, then the task rules.
+ * Other stages retain the original NSFW fixed prefix for cache-stable framing.
+ */
 export function frameNsfwTextRequest(input: NsfwTextFrameInput): NsfwTextFrameInput {
+  const phase1 = isMaestroPhase1Stage(input.stage);
   const note = NSFW_TEXT_STAGE_NOTES[input.stage];
-  if (!note) return input;
-  const systemLayers = [...input.systemLayers];
-  if (!systemLayers.length) systemLayers.push('');
-  if (!systemLayers[0].startsWith(LIANHUA_NSFW_FIXED_PREFIX)) {
-    systemLayers[0] = [LIANHUA_NSFW_FIXED_PREFIX, note, systemLayers[0].trim()].filter(Boolean).join('\n\n');
+  let systemLayers = [...input.systemLayers];
+  if (note && !phase1) {
+    if (!systemLayers.length) systemLayers.push('');
+    const alreadyFramed = systemLayers[0].startsWith(LIANHUA_NSFW_FIXED_PREFIX)
+      || systemLayers[0].includes(`\n\n${LIANHUA_NSFW_FIXED_PREFIX}\n\n`)
+      || systemLayers[0].includes(`\n\n${LIANHUA_NSFW_FIXED_PREFIX}`);
+    if (!alreadyFramed) {
+      // Fixed prefix order: NSFW role/worldbook → stage note → write guidance
+      // (always on for write stages) → original task rules. Ordinary and adult
+      // share this exact system prefix; user requirements stay outside it.
+      systemLayers[0] = [
+        LIANHUA_NSFW_FIXED_PREFIX,
+        note,
+        NSFW_TEXT_WRITE_STAGES.has(input.stage) ? LIANHUA_NSFW_CREATIVE_GUIDANCE : '',
+        systemLayers[0].trim(),
+      ].filter(Boolean).join('\n\n');
+    }
   }
-  const userPrompt = NSFW_TEXT_WRITE_STAGES.has(input.stage)
-    && hasNsfwDetailSignal(input.userPrompt)
-    && !input.userPrompt.includes(LIANHUA_NSFW_CREATIVE_GUIDANCE)
-    ? `${input.userPrompt}\n\n${LIANHUA_NSFW_CREATIVE_GUIDANCE}`
-    : input.userPrompt;
-  return { stage: input.stage, systemLayers, userPrompt, finalInstruction: input.finalInstruction };
+  if (phase1) {
+    systemLayers = prependMaestroPhase1Prefix(systemLayers);
+  }
+  return {
+    stage: input.stage,
+    systemLayers,
+    userPrompt: input.userPrompt,
+    finalInstruction: input.finalInstruction,
+  };
 }
 
 /** Positive-only private image composition shared by every private target. */

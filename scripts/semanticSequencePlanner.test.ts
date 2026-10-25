@@ -128,6 +128,7 @@ test('NSFW detail rules enter semantic segmentation once while ordinary stories 
   assert.ok(ordinarySystem.startsWith(LIANHUA_NSFW_FIXED_PREFIX));
   assert.equal(ordinarySystem.includes(MOSE_JIANGHU_NSFW_DETAIL_RULES), false);
   assert.equal(ordinarySystem.includes(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE), false);
+  assert.ok(ordinarySystem.includes(LIANHUA_NSFW_CREATIVE_GUIDANCE), 'write-stage guidance stays in the fixed system prefix');
   assert.equal(prompt(ordinaryRequests[0], 'user').includes(LIANHUA_NSFW_CREATIVE_GUIDANCE), false);
 
   const request = input();
@@ -142,7 +143,12 @@ test('NSFW detail rules enter semantic segmentation once while ordinary stories 
   assert.ok(nsfwSystem.startsWith(LIANHUA_NSFW_FIXED_PREFIX));
   assert.equal(nsfwSystem.includes(MOSE_JIANGHU_NSFW_DETAIL_RULES), false);
   assert.equal(nsfwSystem.split(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE).length - 1, 1);
-  assert.equal(prompt(nsfwRequests[0], 'user').includes(LIANHUA_NSFW_CREATIVE_GUIDANCE), true);
+  assert.ok(nsfwSystem.includes(LIANHUA_NSFW_CREATIVE_GUIDANCE));
+  assert.equal(prompt(nsfwRequests[0], 'user').includes(LIANHUA_NSFW_CREATIVE_GUIDANCE), false);
+  // Adult scenes may still append task-local video-action rules after the shared
+  // NSFW frame; the shared Role/worldbook/creative-guidance prefix stays first.
+  assert.ok(nsfwSystem.startsWith(LIANHUA_NSFW_FIXED_PREFIX));
+  assert.ok(nsfwSystem.indexOf(LIANHUA_NSFW_CREATIVE_GUIDANCE) < nsfwSystem.indexOf(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE));
   assert.match(nsfwSystem, /segments\.content必须保留原剧情已有的具体动作阶段/u);
   assert.match(nsfwSystem, /本窗实际发生的阶段写入本窗content、events和sceneStaging/u);
   assert.doesNotMatch(nsfwSystem, /年龄门禁|未满18|未成年人/u);

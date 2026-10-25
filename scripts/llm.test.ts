@@ -1717,9 +1717,9 @@ test('AI storyboard planning injects the complete NSFW rules once only for an NS
       `${item.label} storyboard video action rule stays at the end only for an adult scene`,
     );
     assert.equal(
-      userPrompt.includes(LIANHUA_NSFW_CREATIVE_GUIDANCE),
-      item.expectedRuleCount === 1,
-      `${item.label} creative guidance follows the user data only for an adult scene`,
+      systemPrompt.includes(LIANHUA_NSFW_CREATIVE_GUIDANCE),
+      true,
+      `${item.label} creative guidance stays in the fixed system prefix for write stages`,
     );
     assert.equal(
       systemPrompt.includes(item.story),
@@ -3565,9 +3565,9 @@ test('story analysis injects the complete NSFW rules once only for NSFW source d
     );
     assert.ok(systemPrompt.startsWith(LIANHUA_NSFW_FIXED_PREFIX), `${item.label} story analysis starts with the shared prefix`);
     assert.equal(
-      userPrompt.includes(LIANHUA_NSFW_CREATIVE_GUIDANCE),
-      item.expectedRuleCount === 1,
-      `${item.label} creative guidance follows the analysis data only for an adult scene`,
+      systemPrompt.includes(LIANHUA_NSFW_CREATIVE_GUIDANCE),
+      true,
+      `${item.label} creative guidance stays in the fixed system prefix for write stages`,
     );
     assert.equal(
       systemPrompt.includes(item.story),

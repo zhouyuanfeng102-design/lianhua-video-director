@@ -926,7 +926,7 @@ const defaultTextApi = {
     apiKey: '',
     model: '',
     temperature: 0.45,
-    maxTokens: 6000,
+    maxTokens: 65536,
     vision: false
   } as const;
 

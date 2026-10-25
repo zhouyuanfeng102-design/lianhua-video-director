@@ -4,6 +4,7 @@ import { imageTaskRuleMetadata } from "./imageTaskRuleMetadata";
 import { imageTaskReferenceNames } from "./imageTaskReferences";
 import { AutoFitTaskMetadata } from "./components/AutoFitTaskMetadata";
 import { CustomImageWorkbenchPanel } from "./components/CustomImageWorkbenchPanel";
+import { TextMaxOutputTokensField } from "./components/TextMaxOutputTokensField";
 import { ImagePromptReverseReferencePreview, ImagePromptReverseResultView } from "./components/ImagePromptReverseResult";
 import { retryImagePromptReverse, stopImagePromptReverse, imagePromptReverseStatusLabel } from "./imagePromptReverse";
 import { retryCustomImageTask, retryCustomImageSave, type CustomImageGenerationContext } from "./customImageGeneration";
@@ -26527,15 +26528,9 @@ function SettingsView(ctx: AppContext) {
                 />
               </Field>
               <Field label="最大输出 Token">
-                <input
-                  type="number"
-                  min={500}
-                  max={100000}
-                  step={500}
+                <TextMaxOutputTokensField
                   value={settings.textApi.maxTokens}
-                  onChange={(event) =>
-                    patchText({ maxTokens: Number(event.target.value) })
-                  }
+                  onChange={(maxTokens) => patchText({ maxTokens })}
                 />
               </Field>
             </div>

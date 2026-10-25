@@ -1,6 +1,5 @@
 import { assertValidFinalImagePrompt, type ImagePromptRuleSet } from './imagePromptRules';
 import { MOSE_JIANGHU_NSFW_IMAGE_CONVERTER_RULE, MOSE_JIANGHU_NSFW_IMAGE_PROMPT_RULE } from './nsfwPromptRules';
-import { hasNsfwDetailSignal } from './promptConstraints';
 import { requestTextModel } from './services/llm';
 import { IMAGE_STORY_SPATIAL_STATE_RULE } from './spatialContinuityRules';
 import type { CustomImageRuleSnapshot, ImageApiConfig, TextApiConfig } from './types';
@@ -62,11 +61,13 @@ export const requestCustomImagePrompt = async (
     'sd-tags': 'Stable Diffusion 标签；分段时使用 BREAK，不使用 |',
     'nai-tags': 'NovelAI 标签；角色分段时使用 |，不使用 BREAK',
   }[input.rule.format];
-  const adultImageRule = hasNsfwDetailSignal(input.userPrompt)
-    ? [MOSE_JIANGHU_NSFW_IMAGE_PROMPT_RULE, MOSE_JIANGHU_NSFW_IMAGE_CONVERTER_RULE].join('\n')
-    : '';
+  // Cache-safe layout: every fixed rule stays in the system prefix (identical
+  // for ordinary/adult). The authored user requirement is the only trailing
+  // variable. Image NSFW rules already say "if SFW, ignore", so they remain
+  // in the fixed prefix instead of forking the first bytes by content class.
   const systemPrompt = [
-    adultImageRule,
+    MOSE_JIANGHU_NSFW_IMAGE_PROMPT_RULE,
+    MOSE_JIANGHU_NSFW_IMAGE_CONVERTER_RULE,
     '你是自定义生图提示词转换器。保留用户本次要求，仅按本次明确选择的规则转换为可直接生图的最终提示词。',
     `<selected_image_rule>\n${input.rule.systemPrompt}\n${input.rule.outputRules}\n</selected_image_rule>`,
     IMAGE_STORY_SPATIAL_STATE_RULE,

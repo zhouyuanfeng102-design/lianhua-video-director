@@ -11,6 +11,36 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "3.1.1",
+    releasedAt: "2026-10-25",
+    title: "第一批阶段去掉原 NSFW Role，只保留 MAESTRO",
+    highlights: [
+      "AI扩写、画面描述转化子链和自定义生图规则转换不再叠加「莲华叙事编辑」原 NSFW Role 前缀。",
+      "这些阶段只保留完整 MAESTRO 前置和任务协议，降低部分 Gemini 模型把 Role 当成 persona framing 而拒写的情况。",
+      "分镜、解析、H3 等其它阶段仍用原来的 NSFW 前缀。不新增校验、拦截或自动重试。",
+    ],
+  },
+  {
+    version: "3.1.0",
+    releasedAt: "2026-10-25",
+    title: "第一批文字链路前置 MAESTRO，并保住前缀缓存命中",
+    highlights: [
+      "AI扩写、画面描述转化、画面转化子链和自定义生图规则转换，会在原有 NSFW 规则前面挂上完整 MAESTRO 协议。",
+      "固定规则都放系统前缀，普通/成人共用；用户要求放最后，避免把文字 API 前缀缓存命中率弄废。",
+      "分镜、H3、估时等其它文字阶段本版不挂。不新增校验、拦截或自动重试。",
+    ],
+  },
+  {
+    version: "3.0.9",
+    releasedAt: "2026-10-25",
+    title: "文本最大输出 Token 改为档位加自定义",
+    highlights: [
+      "文本 API 的最大输出 Token 可选 32k、64k、128k、256k，也可以自定义。新配置默认 64k，发出去的是 65536。",
+      "已经保存的数值保持不变。不在这四档里的数字显示为自定义。",
+      "视觉 API 的额度不变。不新增校验、拦截或自动重试。",
+    ],
+  },
+  {
     version: "3.0.8",
     releasedAt: "2026-10-25",
     title: "K2 分镜按参考图用途写画面",

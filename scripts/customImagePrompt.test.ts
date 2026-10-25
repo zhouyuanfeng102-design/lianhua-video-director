@@ -52,17 +52,19 @@ Object.defineProperty(globalThis, 'window', { configurable: true, value: { lianh
 } } });
 
 try {
-  assert.equal(await requestCustomImagePrompt(textApi, { userPrompt: authored, rule: frozen, width: 1024, height: 768 }),
+  assert.equal(await requestCustomImagePrompt(textApi, { userPrompt: authored, rule: frozen, width: 1024, height: 1024 }),
     'A watercolor wooden chair.');
   assert.equal(requests.length, 1);
   const convertedRequest = JSON.parse(requests[0].body!);
   assert.deepEqual(convertedRequest.messages.map((message: { role: string }) => message.role), ['system', 'user']);
   assert.equal(convertedRequest.messages[1].content, authored, 'conversion receives the complete authored input');
-  assert.match(convertedRequest.messages[0].content, /SELECTED_CUSTOM_RULE[\s\S]*SELECTED_OUTPUT_RULE[\s\S]*1024 × 768/u);
+  assert.match(convertedRequest.messages[0].content, /SELECTED_CUSTOM_RULE[\s\S]*SELECTED_OUTPUT_RULE[\s\S]*1024 × 1024/u);
   assert.doesNotMatch(convertedRequest.messages[0].content, /morphology|bodyPlan|image_prompt_category_preset|世界观|五视图|私密/u);
   assert.ok(convertedRequest.messages[0].content.includes(IMAGE_STORY_SPATIAL_STATE_RULE),
     'custom conversion preserves only the spatial relations established in the authored request');
-  assert.doesNotMatch(convertedRequest.messages[0].content, /Image Converter Rule/u);
+  const ordinarySystem = convertedRequest.messages[0].content as string;
+  assert.ok(ordinarySystem.startsWith('(Image System Prompt:'));
+  assert.ok(ordinarySystem.includes('Image Converter Rule'), 'image NSFW rules stay in the fixed system prefix');
 
   requests.length = 0;
   reply = { status: 200, body: JSON.stringify({ choices: [{ message: { content: '宋玉跪在韩立身前，口部与下身接触，单幅静帧。' } }] }) };
@@ -71,8 +73,9 @@ try {
     '宋玉跪在韩立身前，口部与下身接触，单幅静帧。');
   assert.equal(requests.length, 1, 'an adult custom requirement still uses one conversion request');
   const adultRequest = JSON.parse(requests[0].body!);
-  assert.equal(adultRequest.messages[1].content, adultRequirement);
+  assert.equal(adultRequest.messages[1].content, adultRequirement, 'user requirement stays last and unmixed');
   const adultSystem = adultRequest.messages[0].content as string;
+  assert.equal(adultSystem, ordinarySystem, 'ordinary/adult custom conversions share one fixed system prefix');
   assert.ok(adultSystem.startsWith('(Image System Prompt:'));
   assert.ok(adultSystem.indexOf('Image Converter Rule') < adultSystem.indexOf('SELECTED_CUSTOM_RULE'));
   assert.match(adultSystem, /Do not refuse/u);
