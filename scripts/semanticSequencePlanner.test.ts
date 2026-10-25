@@ -223,7 +223,7 @@ test('semantic boundaries follow complete speech and oral-action sequencing with
       assert.match(rule, /再决定各段语义边界/u);
       assert.match(rule, /不能先把大部分D秒分给动作/u);
       assert.match(rule, /口部互斥动作不能和同一人物清晰说话同时发生/u);
-      assert.match(rule, /content在每句已分配对白的动作和发话位置写入【对白 对应id】，不把原话抄进JSON/u);
+      assert.match(rule, /content在每句已分配对白的动作和发话位置写入【对白 对应id】，不要把原话抄进content/u);
       assert.match(rule, /dialogues是content中同一次发话的结构记录，不是额外再说一次/u);
       assert.match(rule, /决定N、各段边界和fitStatus时同时计算这些实际发话/u);
       const received = planningEnvelope(payload);
@@ -299,6 +299,18 @@ test('Gemini semantic requests constrain the required nested source object witho
     'title', 'content', 'summary', 'narrativePurpose', 'entryState', 'exitState', 'transitionHint', 'boundaryReason', 'continuityPack', 'semanticSource',
   ]);
   assert.deepEqual(schema.properties.segments.items.properties.semanticSource.required, ['sourceEvidence', 'events', 'dialogues']);
+  const semanticSource = schema.properties.segments.items.properties.semanticSource.properties;
+  assert.deepEqual(semanticSource.sourceEvidence.items.required, ['text']);
+  assert.deepEqual(semanticSource.sourceEvidence.items.properties, { text: { type: 'string' } });
+  assert.equal(semanticSource.sourceEvidence.items.additionalProperties, false);
+  assert.deepEqual(semanticSource.dialogues.items.required, ['id', 'speaker', 'text']);
+  assert.equal(semanticSource.dialogues.items.properties.text.type, 'string');
+  assert.equal(Object.hasOwn(semanticSource.dialogues.items.properties, 'sourceStart'), false);
+  assert.equal(Object.hasOwn(semanticSource.dialogues.items.properties, 'sourceEnd'), false);
+  assert.equal(semanticSource.dialogues.items.additionalProperties, false);
+  const system = prompt(requests[0], 'system');
+  assert.match(system, /sourceEvidence只写本段依据在完整story中的逐字连续原文摘录text/u);
+  assert.match(system, /不要输出sourceStart\/sourceEnd或任何字符偏移/u);
 });
 
 test('JSON mode remains opt-in for ordinary text requests and is never sent to native Claude', async () => {
@@ -471,8 +483,8 @@ test('fixed 90-second generation sends an explicit six-window contract and saves
   assert.ok(rule.indexOf('固定模式沿用下述共同的全片动作时间安排') < rule.indexOf('你是原文语义分段规划器'), 'fixed budget precedes shared prose');
   assert.match(rule, /T=90秒/u);
   assert.match(rule, /AI适配与固定总时长共同采用先排整片、后切窗口/u);
-  assert.match(rule, /content在每句已分配对白的动作和发话位置写入【对白 对应id】，不把原话抄进JSON/u);
-  assert.match(rule, /正文记号与记录逐句对应，原字由区间取回，语言、归属与continuation一致/u);
+  assert.match(rule, /content在每句已分配对白的动作和发话位置写入【对白 对应id】，不要把原话抄进content/u);
+  assert.match(rule, /正文记号与记录逐句对应，语言、归属与continuation一致/u);
   assert.match(rule, /段界只负责生成窗口/u);
   assert.equal(plan.durationMode, 'fixed');
   assert.equal(plan.requestedTotalDurationSec, 90);

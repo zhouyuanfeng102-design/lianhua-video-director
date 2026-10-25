@@ -685,5 +685,26 @@ test('fresh segmentation copies chapter slices into evidence, dialogue and conte
   assert.equal(parseSemanticSequenceResponse(JSON.stringify(markerOnly), input()).segments[0].content, '没有记号的正文。');
 });
 
+test('fresh segmentation preserves exact text-only evidence and dialogues without model offsets', () => {
+  const evidence = '林舟推开门，轻声说：“等我回来。”';
+  const spoken = '“等我回来。”';
+  const wire = wireResponse(1);
+  wire.segments[0].content = '林舟推开门，接着说【对白 d-long】。';
+  wire.segments[0].semanticSource = {
+    sourceEvidence: [{ text: evidence }],
+    events: [{ id: 'e-long', description: '持续行进' }],
+    dialogues: [{ id: 'd-long', speaker: '林舟', text: spoken, language: '中文' }],
+  };
+
+  const parsed = parseSemanticSequenceResponse(JSON.stringify(wire), input());
+  assert.deepEqual(parsed.segments[0].semanticSource.sourceEvidence, [{ text: evidence }]);
+  assert.equal(parsed.segments[0].semanticSource.dialogues[0].text, spoken);
+  assert.equal(parsed.segments[0].semanticSource.dialogues[0].sourceStart, undefined);
+  assert.equal(parsed.segments[0].content, `林舟推开门，接着说${spoken}。`);
+  const plan = materialize(parsed, input());
+  assert.deepEqual(plan.segments[0].semanticSource?.sourceEvidence, [{ text: evidence }]);
+  assert.equal(plan.segments[0].semanticSource?.dialogues[0].text, spoken);
+});
+
 for (const entry of cases) { entry.run(); console.log(`PASS ${entry.name}`); }
 console.log(`semanticSequencePlan: ${cases.length}/${cases.length} passed`);
