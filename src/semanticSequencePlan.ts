@@ -314,23 +314,45 @@ const readEventCausality = (value: unknown, label: string): SemanticEventCausali
     ...(stringList(value.targetCharacterIds) ? { targetCharacterIds: [...value.targetCharacterIds] } : {}) };
 };
 
-const readSemanticSource = (value: unknown, label: string, sourceLength?: number): SemanticSegmentSource => {
+const pairedSourceOffsets = (
+  item: Record<string, unknown>, path: string, sourceLength?: number,
+): { sourceStart: number; sourceEnd: number } | undefined => {
+  const start = item.sourceStart;
+  const end = item.sourceEnd;
+  if (start === undefined && end === undefined) return undefined;
+  if (typeof start !== 'number' || typeof end !== 'number'
+    || !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end <= start
+    || (sourceLength !== undefined && end > sourceLength)) {
+    throw new SemanticSequenceTechnicalError([`${path} 原文位置必须成对提供有效范围`]);
+  }
+  return { sourceStart: start, sourceEnd: end };
+};
+
+/** A fresh segmentation response can cite the chapter by offsets. Saved plans pass no story, so their text stays. */
+const quotationFromStory = (
+  item: Record<string, unknown>, path: string, sourceLength: number | undefined, story: string | undefined, missingText: string,
+): { text: string; sourceStart?: number; sourceEnd?: number } => {
+  const offsets = pairedSourceOffsets(item, path, sourceLength);
+  if (story !== undefined && offsets) return { text: story.slice(offsets.sourceStart, offsets.sourceEnd), ...offsets };
+  if (typeof item.text !== 'string') throw new SemanticSequenceTechnicalError([missingText]);
+  return { text: item.text, ...offsets };
+};
+
+const spliceDialogueMarkers = (content: string, dialogues: ReadonlyArray<{ id: string; text: string }>): string => (
+  [...dialogues].sort((left, right) => right.id.length - left.id.length).reduce((body, dialogue) => (
+    dialogue.text ? body.split(`【对白 ${dialogue.id}】`).join(dialogue.text) : body
+  ), content)
+);
+
+const readSemanticSource = (value: unknown, label: string, sourceLength?: number, story?: string): SemanticSegmentSource => {
   const issues: string[] = [];
   if (!record(value)) throw new SemanticSequenceTechnicalError([`${label} 缺少 semanticSource 对象`]);
   for (const key of ['sourceEvidence', 'events', 'dialogues']) if (!Array.isArray(value[key])) issues.push(`${label}.${key} 必须是数组`);
   if (issues.length) throw new SemanticSequenceTechnicalError(issues);
   const sourceEvidence = (value.sourceEvidence as unknown[]).map((item, index) => {
     const path = `${label}.sourceEvidence[${index}]`;
-    if (!record(item) || typeof item.text !== 'string') throw new SemanticSequenceTechnicalError([`${path}.text 必须是字符串`]);
-    const start = item.sourceStart;
-    const end = item.sourceEnd;
-    if ((start === undefined) !== (end === undefined)
-      || (start !== undefined && (typeof start !== 'number' || typeof end !== 'number'
-        || !Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end <= start
-        || (sourceLength !== undefined && end > sourceLength)))) {
-      throw new SemanticSequenceTechnicalError([`${path} 原文位置必须成对提供有效范围`]);
-    }
-    return { text: item.text, ...(typeof start === 'number' && typeof end === 'number' ? { sourceStart: start, sourceEnd: end } : {}) };
+    if (!record(item)) throw new SemanticSequenceTechnicalError([`${path}.text 必须是字符串`]);
+    return quotationFromStory(item, path, sourceLength, story, `${path}.text 必须是字符串`);
   });
   const events = (value.events as unknown[]).map((item, index) => {
     if (!record(item) || typeof item.id !== 'string' || !item.id || typeof item.description !== 'string'
@@ -339,11 +361,13 @@ const readSemanticSource = (value: unknown, label: string, sourceLength?: number
       ...(item.causality !== undefined ? { causality: readEventCausality(item.causality, `${label}.events[${index}].causality`) } : {}) };
   });
   const dialogues = (value.dialogues as unknown[]).map((item, index) => {
-    if (!record(item) || typeof item.id !== 'string' || !item.id || typeof item.speaker !== 'string' || typeof item.text !== 'string'
+    const path = `${label}.dialogues[${index}]`;
+    if (!record(item) || typeof item.id !== 'string' || !item.id || typeof item.speaker !== 'string'
       || (item.language !== undefined && typeof item.language !== 'string') || (item.continuation !== undefined && typeof item.continuation !== 'string')) {
-      throw new SemanticSequenceTechnicalError([`${label}.dialogues[${index}] 字段格式无效`]);
+      throw new SemanticSequenceTechnicalError([`${path} 字段格式无效`]);
     }
-    return { id: item.id, speaker: item.speaker, text: item.text,
+    const quotation = quotationFromStory(item, path, sourceLength, story, `${path} 字段格式无效`);
+    return { id: item.id, speaker: item.speaker, text: quotation.text, ...(quotation.sourceStart !== undefined ? { sourceStart: quotation.sourceStart, sourceEnd: quotation.sourceEnd } : {}),
       ...(typeof item.speakerCharacterId === 'string' ? { speakerCharacterId: item.speakerCharacterId } : {}),
       ...(stringList(item.listenerCharacterIds) ? { listenerCharacterIds: [...item.listenerCharacterIds] } : {}),
       ...(stringList(item.addressedCharacterIds) ? { addressedCharacterIds: [...item.addressedCharacterIds] } : {}),
@@ -570,7 +594,8 @@ export const parseSemanticSequenceResponse = (raw: string, input: SemanticSequen
       if (has(item, field) && item[field] !== windows[index][field]) throw new SemanticSequenceTechnicalError([`第 ${index + 1} 段 ${field} 与 D 固定窗口不一致`]);
     }
     const texts = copyStrings(item, SEGMENT_TEXT_FIELDS) as Omit<SemanticSequenceResponseSegment, 'semanticSource'>;
-    return { ...texts, semanticSource: readSemanticSource(item.semanticSource, `第 ${index + 1} 段`, input.story.length) };
+    const semanticSource = readSemanticSource(item.semanticSource, `第 ${index + 1} 段`, input.story.length, input.story);
+    return { ...texts, content: spliceDialogueMarkers(texts.content, semanticSource.dialogues), semanticSource };
   });
   return { segmentCount, reason: value.reason as string, fitStatus, segments };
 };

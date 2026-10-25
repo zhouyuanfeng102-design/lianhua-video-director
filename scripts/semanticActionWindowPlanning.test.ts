@@ -96,8 +96,8 @@ const assertSharedActionWindowRule = (system: string): void => {
   assert.match(system, /持械姿势只用于已声明的身份、外观或材质连续性/u);
   assert.match(system, /不授权在空手过程加入持械、兵刃接触、金属声或武器展示/u);
   assert.match(system, /不可把同时动作逐项排队/u);
-  assert.match(system, /完整原话、说话人和发话先后直接嵌入对应动作与反应/u);
-  assert.match(system, /正文和记录逐句对应，原字、语言、归属与continuation一致/u);
+  assert.match(system, /content在每句已分配对白的动作和发话位置写入【对白 对应id】，不把原话抄进JSON/u);
+  assert.match(system, /正文记号与记录逐句对应，原字由区间取回，语言、归属与continuation一致/u);
 };
 const assertAuthoredActions = (segment: SemanticSequenceResponseSegment): void => {
   assert.equal(segment.content, paragraphs.join(''));
@@ -134,7 +134,14 @@ try {
   assert.ok(exampleText, 'the single response example is a complete JSON object');
   const example = JSON.parse(exampleText);
   assert.equal(example.segments[0].semanticSource.sceneStaging[0].version, 1);
-  assert.equal(example.segments[0].semanticSource.dialogues[0].text, '把标有"A"的钥匙放下。');
+  assert.equal(example.segments[0].semanticSource.dialogues[0].text, undefined);
+  assert.deepEqual(
+    [example.segments[0].semanticSource.dialogues[0].sourceStart, example.segments[0].semanticSource.dialogues[0].sourceEnd],
+    [12, 24],
+  );
+  assert.equal(example.segments[0].semanticSource.sourceEvidence[0].text, undefined);
+  assert.equal(example.segments[0].content.includes('【对白 dialogue-1】'), true);
+  assert.equal(exampleText.includes('把标有'), false);
   assert.doesNotMatch(prompt(aiCalls[0], 'system'), /sceneId:string|sourceEventIds\?:string\[\]/u);
   const finalInstruction = prompt(aiCalls[0], 'user').split('\n\n').slice(1).join('\n\n');
   assert.match(finalInstruction, /生成窗口D=15秒/u);

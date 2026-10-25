@@ -843,6 +843,9 @@ export interface SemanticSegmentSource {
     id: string;
     speaker: string;
     text: string;
+    /** UTF-16 offsets into the chapter used for a fresh segmentation. Older plans omit them. */
+    sourceStart?: number;
+    sourceEnd?: number;
     /** Explicit source character identity; absent for unknown and historical speakers. */
     speakerCharacterId?: string;
     /** Confirmed listeners; tracked independently from forms of address. */

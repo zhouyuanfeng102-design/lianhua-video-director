@@ -336,7 +336,7 @@
   .sequence-segment-error-text, .sequence-segment-chip .sequence-segment-failure,
   .sequence-planning-error-details > summary, .sequence-planning-error small,
   .asset-page-grid .asset-info small.asset-regeneration-issue,
-  .asset-video-dialog .asset-video-error, .image-output-size-error,
+  .asset-video-dialog .asset-video-error, .image-output-size-error, .image-story-source-warning,
   .runninghub-video-settings .rhv-main-note.error, .rhv-import-feedback[role="alert"],
   .rhv-manager .rhv-slot-warning, .rhv-manager .rhv-extras-error,
   .vgs-api-dialog > footer p

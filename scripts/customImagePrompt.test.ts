@@ -62,6 +62,20 @@ try {
   assert.doesNotMatch(convertedRequest.messages[0].content, /morphology|bodyPlan|image_prompt_category_preset|世界观|五视图|私密/u);
   assert.ok(convertedRequest.messages[0].content.includes(IMAGE_STORY_SPATIAL_STATE_RULE),
     'custom conversion preserves only the spatial relations established in the authored request');
+  assert.doesNotMatch(convertedRequest.messages[0].content, /Image Converter Rule/u);
+
+  requests.length = 0;
+  reply = { status: 200, body: JSON.stringify({ choices: [{ message: { content: '宋玉跪在韩立身前，口部与下身接触，单幅静帧。' } }] }) };
+  const adultRequirement = '凡人修仙传，宋玉给韩立口交';
+  assert.equal(await requestCustomImagePrompt(textApi, { userPrompt: adultRequirement, rule: frozen, width: 1024, height: 1024 }),
+    '宋玉跪在韩立身前，口部与下身接触，单幅静帧。');
+  assert.equal(requests.length, 1, 'an adult custom requirement still uses one conversion request');
+  const adultRequest = JSON.parse(requests[0].body!);
+  assert.equal(adultRequest.messages[1].content, adultRequirement);
+  const adultSystem = adultRequest.messages[0].content as string;
+  assert.ok(adultSystem.startsWith('(Image System Prompt:'));
+  assert.ok(adultSystem.indexOf('Image Converter Rule') < adultSystem.indexOf('SELECTED_CUSTOM_RULE'));
+  assert.match(adultSystem, /Do not refuse/u);
 
   const spatialAuthored = '近拍门缝，明川在门外；青岚位于室内中央，距门槛约四米，仍在画外。门槛与青岚之间是可行走地面，下一镜她才投掷木块并前冲。';
   const spatialOutputs = {

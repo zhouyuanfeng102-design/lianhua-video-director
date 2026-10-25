@@ -21451,7 +21451,7 @@ function ImageWorkbenchView(ctx: AppContext) {
                       <button type="button" className={"segment " + (!dossierUsesStory(characterDossier) ? "active" : "")} aria-pressed={!dossierUsesStory(characterDossier)} onClick={() => changeDossierStorySource(false)}>否</button>
                     </div>
                   </Field>
-                  <p className="image-story-source-note">{dossierUsesStory(characterDossier) ? "补资料和生图都会带上当前章节。章节里的私密情节容易让文字接口直接拒绝。" : "不把章节原文送进文字模型，私密内容大概率能生成。只用当前手工资料、自定义要求和参考图。"}</p>
+                  <p className="image-story-source-note">{dossierUsesStory(characterDossier) ? <>补资料和生图都会带上当前章节。<span className="image-story-source-warning">章节里的私密情节容易让文字接口直接拒绝。</span></> : "不把章节原文送进文字模型，私密内容大概率能生成。只用当前手工资料、自定义要求和参考图。"}</p>
                   {!dossierUsesStory(characterDossier) && <Button small disabled={busy || autofillBusy} onClick={() => {
                     updateCharacterDossier(markDossierManualFields(characterDossierRef.current, Object.keys(assetForm).filter((key) => assetForm[key]?.trim())));
                     autofillTargetEpochRef.current += 1;

@@ -659,5 +659,31 @@ test('matching novel snapshots and aliases remain read-only and cannot override 
   assert.equal(semanticSegmentSourceContext(mismatched, mismatched.segments[0]).storyUnderstandingContext!.originalSourceContext, undefined);
 });
 
+test('fresh segmentation copies chapter slices into evidence, dialogue and content markers', () => {
+  const spoken = '“等我回来。”';
+  const spokenAt = source.indexOf(spoken);
+  assert.ok(spokenAt >= 0);
+  const wire = wireResponse(1);
+  wire.segments[0].content = '林舟推开门，接着说【对白 d-long】。';
+  wire.segments[0].semanticSource = {
+    sourceEvidence: [{ text: '模型写的另一句', sourceStart: 0, sourceEnd: 5 }],
+    events: [{ id: 'e-long', description: '持续行进' }],
+    dialogues: [{ id: 'd-long', speaker: '林舟', text: '另一句', sourceStart: spokenAt, sourceEnd: spokenAt + spoken.length, language: '中文' }],
+  };
+  const parsed = parseSemanticSequenceResponse(JSON.stringify(wire), input());
+  assert.equal(parsed.segments[0].semanticSource.sourceEvidence[0].text, source.slice(0, 5));
+  assert.equal(parsed.segments[0].semanticSource.dialogues[0].text, spoken);
+  assert.equal(parsed.segments[0].content, `林舟推开门，接着说${spoken}。`);
+  const plan = materialize(parsed, input());
+  assert.equal(plan.segments[0].content, parsed.segments[0].content);
+  assert.equal(plan.segments[0].semanticSource?.dialogues[0].text, spoken);
+  const saved = normalizeSemanticSegmentSource(response().segments[0].semanticSource);
+  assert.equal(saved?.dialogues[0].text, '等我');
+  assert.equal(saved?.sourceEvidence[0].text, '林舟推开门');
+  const markerOnly = wireResponse(1);
+  markerOnly.segments[0].content = '没有记号的正文。';
+  assert.equal(parseSemanticSequenceResponse(JSON.stringify(markerOnly), input()).segments[0].content, '没有记号的正文。');
+});
+
 for (const entry of cases) { entry.run(); console.log(`PASS ${entry.name}`); }
 console.log(`semanticSequencePlan: ${cases.length}/${cases.length} passed`);

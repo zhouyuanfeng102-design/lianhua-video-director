@@ -186,6 +186,15 @@ try {
   assert.ok(ordinaryExpansionSystem.startsWith(LIANHUA_NSFW_FIXED_PREFIX));
   assert.ok(!requests[0].messages.some((message) => message.role === 'system' && message.content.includes(MOSE_JIANGHU_NSFW_DETAIL_RULES)));
   assert.equal(ordinaryExpansionUser.includes(LIANHUA_NSFW_CREATIVE_GUIDANCE), false);
+  fake(() => expansion);
+  const spokenPrivateSource = '林澜说：“先等我。”\n两人回房后脱去衣物，全裸相拥。';
+  await requestStoryExpansion(config, spokenPrivateSource);
+  const spokenExpansionUser = requests[0].messages.find((message) => message.role === 'user')!.content;
+  const spokenExpansionData = JSON.parse(spokenExpansionUser.match(/<story_expansion_data>\s*([\s\S]*?)\s*<\/story_expansion_data>/u)![1]);
+  assert.equal(spokenExpansionData.sourceTextOrRequirement, spokenPrivateSource);
+  assert.equal(spokenExpansionUser.includes('请按这个顺序写成连贯正文：'), false);
+  assert.equal(spokenExpansionData.existingDialogueLines[0].utterance, '先等我。');
+  assert.equal(requests.length, 1);
   checks += 1;
 
   const cappedConfig = { ...config, provider: 'deepseek' as const, model: 'deepseek-test', maxTokens: 32768 };
