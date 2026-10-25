@@ -985,6 +985,7 @@ export const defaultSettings: AppSettings = {
   activeTextApiProfileId: 'text_api_default',
   activeVisionApiProfileId: 'vision_api_default',
   activeImageApiProfileId: 'image_api_default',
+  customImageApiProfileId: null,
   imagePromptRuleSetIdByBackend: {},
   privateImagePromptRuleSetIdByBackend: {},
   imagePromptPresetIdByAssetKind: {},
@@ -3326,6 +3327,8 @@ export const normalizeState = (raw: unknown): AppState => {
     // Retain a deleted private choice so it cannot silently route to another API.
     privateImageApiProfileId: typeof incomingSettings.privateImageApiProfileId === 'string' && incomingSettings.privateImageApiProfileId.trim()
       ? incomingSettings.privateImageApiProfileId.trim() : null,
+    customImageApiProfileId: typeof incomingSettings.customImageApiProfileId === 'string' && incomingSettings.customImageApiProfileId.trim()
+      ? incomingSettings.customImageApiProfileId.trim() : null,
     // These are user choices, not referential-integrity constraints. Keep IDs
     // even when a referenced custom rule/preset is currently deleted so an
     // undo/import can restore the exact choice instead of silently replacing it.

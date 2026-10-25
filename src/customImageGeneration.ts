@@ -246,7 +246,7 @@ export const submitCustomImage = async (ctx: CustomImageGenerationContext, input
   try {
     if (!input.userPrompt.trim()) throw new Error('请输入本次生图要求。');
     const ids = orderedIds(input.referenceAssetIds);
-    const selection = resolveWorkbenchImageApi(initial.settings, 'ordinary');
+    const selection = resolveWorkbenchImageApi(initial.settings, 'custom');
     if (selection.issue) throw new Error(selection.issue);
     const api = cloneImageBatchConfig(selection.config);
     validateImageApi(api, ids.length);

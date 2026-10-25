@@ -26492,35 +26492,29 @@ function SettingsView(ctx: AppContext) {
                   <Button small className="model-picker-trigger" icon={<ChevronDown size={13} />}
                     title={`选择文本模型（${modelsFor("text").length} 个）`}
                     disabled={!modelsFor("text").length || loadingModels !== null} onClick={() => openModelPicker("text")} />
-                  <Button
-                    small
-                    icon={<RefreshCw size={13} />}
-                    disabled={loadingModels !== null}
-                    onClick={() => handleFetchModels("text")}
-                  >
-                    {loadingModels === "text" ? "获取中" : "获取模型"}
-                  </Button>
                 </div>
               </Field>
             </div>
-            <Field
-              label="API 地址"
-              hint="可填写基础地址或完整 /v1/chat/completions。"
-            >
-              <input
-                value={settings.textApi.baseUrl}
-                onChange={(event) => patchText({ baseUrl: event.target.value })}
-                placeholder="https://api.example.com/v1"
-              />
-            </Field>
-            <Field label="API 密钥">
-              <input
-                type="password"
-                value={settings.textApi.apiKey}
-                onChange={(event) => patchText({ apiKey: event.target.value })}
-                placeholder="桌面版使用 Windows 系统加密保存"
-              />
-            </Field>
+            <div className="api-fields-two">
+              <Field
+                label="API 地址"
+                hint="可填写基础地址或完整 /v1/chat/completions。"
+              >
+                <input
+                  value={settings.textApi.baseUrl}
+                  onChange={(event) => patchText({ baseUrl: event.target.value })}
+                  placeholder="https://api.example.com/v1"
+                />
+              </Field>
+              <Field label="API 密钥">
+                <input
+                  type="password"
+                  value={settings.textApi.apiKey}
+                  onChange={(event) => patchText({ apiKey: event.target.value })}
+                  placeholder="桌面版使用 Windows 系统加密保存"
+                />
+              </Field>
+            </div>
             <div className="api-fields-two">
               <Field label="温度">
                 <input
@@ -26542,6 +26536,14 @@ function SettingsView(ctx: AppContext) {
               </Field>
             </div>
             <div className="api-card-actions">
+              <Button
+                small
+                icon={<RefreshCw size={13} />}
+                disabled={loadingModels !== null}
+                onClick={() => handleFetchModels("text")}
+              >
+                {loadingModels === "text" ? "获取中" : "获取模型"}
+              </Button>
               <Button
                 small
                 icon={<Zap size={15} />}
@@ -26604,38 +26606,42 @@ function SettingsView(ctx: AppContext) {
                   <Button small className="model-picker-trigger" icon={<ChevronDown size={13} />}
                     title={`选择视觉模型（${modelsFor("vision").length} 个）`}
                     disabled={!modelsFor("vision").length || loadingModels !== null} onClick={() => openModelPicker("vision")} />
-                  <Button
-                    small
-                    icon={<RefreshCw size={13} />}
-                    disabled={loadingModels !== null}
-                    onClick={() => handleFetchModels("vision")}
-                  >
-                    {loadingModels === "vision" ? "获取中" : "获取模型"}
-                  </Button>
                 </div>
               </Field>
             </div>
-            <Field label="API 地址">
-              <input
-                value={settings.visionApi.baseUrl}
-                onChange={(event) =>
-                  patchVision({ baseUrl: event.target.value })
-                }
-                placeholder="OpenAI 兼容 Chat Completions 地址"
-              />
-            </Field>
-            <Field label="API 密钥">
-              <input
-                type="password"
-                value={settings.visionApi.apiKey}
-                onChange={(event) =>
-                  patchVision({ apiKey: event.target.value })
-                }
-              />
-            </Field>
+            <div className="api-fields-two">
+              <Field label="API 地址">
+                <input
+                  value={settings.visionApi.baseUrl}
+                  onChange={(event) =>
+                    patchVision({ baseUrl: event.target.value })
+                  }
+                  placeholder="OpenAI 兼容 Chat Completions 地址"
+                />
+              </Field>
+              <Field label="API 密钥">
+                <input
+                  type="password"
+                  value={settings.visionApi.apiKey}
+                  onChange={(event) =>
+                    patchVision({ apiKey: event.target.value })
+                  }
+                />
+              </Field>
+            </div>
             <div className="hint-box">
               未配置视觉 API
               时，仍可上传参考图并手动填写视觉锚点，只是不自动读取图片内容。
+            </div>
+            <div className="api-card-actions">
+              <Button
+                small
+                icon={<RefreshCw size={13} />}
+                disabled={loadingModels !== null}
+                onClick={() => handleFetchModels("vision")}
+              >
+                {loadingModels === "vision" ? "获取中" : "获取模型"}
+              </Button>
             </div>
           </Card>
         )}

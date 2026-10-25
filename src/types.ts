@@ -1721,6 +1721,8 @@ export interface AppSettings {
   activeImageApiProfileId: string | null;
   /** Private workbench override only. Null/absent follows the normal image API setting. */
   privateImageApiProfileId?: string | null;
+  /** Custom-image workbench override only. Null/absent follows the normal image API setting. */
+  customImageApiProfileId?: string | null;
   /** Last explicit image rule choice for each generation backend. */
   imagePromptRuleSetIdByBackend: Partial<Record<ImageApiConfig['backend'], string>>;
   /** Private-image rule choices are kept separate from ordinary generation. */

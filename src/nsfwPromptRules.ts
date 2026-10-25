@@ -205,6 +205,9 @@ const NSFW_TEXT_WRITE_NOTES = {
 当前这段已经是成人情节时，主体写清谁、哪一部位、方向、幅度、深度、速度和结束姿势。空间写可见范围、衣物和接触点。声音写呼吸、呻吟、衣料、床褥和湿润摩擦，并跟人设和场所一致。
 英文保留解剖词。修复只补已经缺的部位或结束状态，不新加原文没有的阶段。
 不是成人情节时，按原来的镜头任务写，不展开性描写。`,
+  custom: `[自定义生图转换任务]
+当前要求已经是成人情节时，最终生图提示词保留已经写出的身体部位、接触、姿势、衣物和湿润，不用委婉词替换。输出仍是本次规则要求的生图提示词，不改成剧情散文，不新增原文没有的进入、高潮、射精或分离。
+不是成人情节时，按原来的生图转换写，不展开性描写。`,
 } as const;
 
 const NSFW_TEXT_JUDGE_NOTES = {
@@ -242,13 +245,14 @@ const NSFW_TEXT_STAGE_NOTES: Readonly<Record<string, string>> = {
   'director-look': NSFW_TEXT_JUDGE_NOTES.look,
   'visible-characters': NSFW_TEXT_JUDGE_NOTES.visible,
   'comic-source-analysis': NSFW_TEXT_JUDGE_NOTES.comic,
+  'image-custom-convert': NSFW_TEXT_WRITE_NOTES.custom,
 };
 
 const NSFW_TEXT_WRITE_STAGES = new Set([
   'story-visual-understanding', 'story-visual-writing', 'story-visual-rewrite', 'story-preparation',
   'story-analysis', 'story-bible', 'sequence-semantic-planning', 'sequence-ai-segmentation',
   'storyboard-plan', 'convert', 'review', 'translate', 'deliver', 'repair',
-  'seedance-chinese-prompt', 'seedance-english-prompt',
+  'seedance-chinese-prompt', 'seedance-english-prompt', 'image-custom-convert',
 ]);
 
 export interface NsfwTextFrameInput {
@@ -258,18 +262,11 @@ export interface NsfwTextFrameInput {
   finalInstruction: string;
 }
 
-/**
- * Returns the same layers when this stage is outside the text frame.
- * Phase-1 MAESTRO stages skip the old Lianhua NSFW Role/worldbook/creative
- * persona prefix: API tests showed that Role framing raises Gemini refusals
- * on expand/visual NSFW. Those stages keep MAESTRO only, then the task rules.
- * Other stages retain the original NSFW fixed prefix for cache-stable framing.
- */
+/** Returns the same layers when this stage is outside the text frame. */
 export function frameNsfwTextRequest(input: NsfwTextFrameInput): NsfwTextFrameInput {
-  const phase1 = isMaestroPhase1Stage(input.stage);
   const note = NSFW_TEXT_STAGE_NOTES[input.stage];
   let systemLayers = [...input.systemLayers];
-  if (note && !phase1) {
+  if (note) {
     if (!systemLayers.length) systemLayers.push('');
     const alreadyFramed = systemLayers[0].startsWith(LIANHUA_NSFW_FIXED_PREFIX)
       || systemLayers[0].includes(`\n\n${LIANHUA_NSFW_FIXED_PREFIX}\n\n`)
@@ -286,7 +283,7 @@ export function frameNsfwTextRequest(input: NsfwTextFrameInput): NsfwTextFrameIn
       ].filter(Boolean).join('\n\n');
     }
   }
-  if (phase1) {
+  if (isMaestroPhase1Stage(input.stage)) {
     systemLayers = prependMaestroPhase1Prefix(systemLayers);
   }
   return {

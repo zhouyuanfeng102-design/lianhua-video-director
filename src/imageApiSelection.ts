@@ -1,8 +1,8 @@
 import type { AppSettings, ImageApiConfig, ImageApiExecutionSnapshot, ImageApiProfile } from './types';
 import { resolveImageProtocol, type ResolvedImageProtocol } from './imageProtocol';
 
-type ImageApiSettings = Pick<AppSettings, 'imageApi' | 'imageApiProfiles' | 'activeImageApiProfileId' | 'privateImageApiProfileId'>;
-type WorkbenchMode = 'ordinary' | 'private';
+type ImageApiSettings = Pick<AppSettings, 'imageApi' | 'imageApiProfiles' | 'activeImageApiProfileId' | 'privateImageApiProfileId' | 'customImageApiProfileId'>;
+type WorkbenchMode = 'ordinary' | 'private' | 'custom';
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 // API profiles can contain an imported ComfyUI workflow.  The workbench is
@@ -39,7 +39,9 @@ export const resolveWorkbenchImageApi = (
   settings: ImageApiSettings,
   mode: WorkbenchMode,
 ): { config: ImageApiConfig; profileId: string | null; issue: string } => {
-  const overrideId = mode === 'private' ? settings.privateImageApiProfileId?.trim() : '';
+  const overrideId = mode === 'private'
+    ? settings.privateImageApiProfileId?.trim()
+    : mode === 'custom' ? settings.customImageApiProfileId?.trim() : '';
   if (overrideId) {
     const profile = settings.imageApiProfiles.find((item) => item.id === overrideId);
     if (!profile) return { config: unavailableConfig(), profileId: overrideId, issue: '所选生图 API 配置已删除，请重新选择；不会改用其他配置。' };

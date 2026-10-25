@@ -3,6 +3,8 @@ import { buildComfyUIWorkflow } from '../src/comfyui';
 import { captureCustomImageRule, requestCustomImagePrompt } from '../src/customImagePrompt';
 import { BUILT_IN_IMAGE_PROMPT_RULE_SETS, type ImagePromptRuleSet } from '../src/imagePromptRules';
 import { requestImageModel } from '../src/services/llm';
+import { MAESTRO_PROTOCOL_MARKER } from '../src/maestroProtocol';
+import { LIANHUA_NSFW_CREATIVE_GUIDANCE, LIANHUA_NSFW_FIXED_PREFIX } from '../src/nsfwPromptRules';
 import { IMAGE_STORY_SPATIAL_STATE_RULE } from '../src/spatialContinuityRules';
 import type { ImageApiConfig, TextApiConfig } from '../src/types';
 
@@ -59,11 +61,14 @@ try {
   assert.deepEqual(convertedRequest.messages.map((message: { role: string }) => message.role), ['system', 'user']);
   assert.equal(convertedRequest.messages[1].content, authored, 'conversion receives the complete authored input');
   assert.match(convertedRequest.messages[0].content, /SELECTED_CUSTOM_RULE[\s\S]*SELECTED_OUTPUT_RULE[\s\S]*1024 × 1024/u);
-  assert.doesNotMatch(convertedRequest.messages[0].content, /morphology|bodyPlan|image_prompt_category_preset|世界观|五视图|私密/u);
+  assert.doesNotMatch(convertedRequest.messages[0].content, /morphology|bodyPlan|image_prompt_category_preset|五视图/u);
   assert.ok(convertedRequest.messages[0].content.includes(IMAGE_STORY_SPATIAL_STATE_RULE),
     'custom conversion preserves only the spatial relations established in the authored request');
   const ordinarySystem = convertedRequest.messages[0].content as string;
-  assert.ok(ordinarySystem.startsWith('(Image System Prompt:'));
+  assert.ok(ordinarySystem.startsWith(MAESTRO_PROTOCOL_MARKER));
+  assert.ok(ordinarySystem.includes(LIANHUA_NSFW_FIXED_PREFIX));
+  assert.ok(ordinarySystem.includes(LIANHUA_NSFW_CREATIVE_GUIDANCE));
+  assert.ok(ordinarySystem.indexOf(LIANHUA_NSFW_FIXED_PREFIX) < ordinarySystem.indexOf('(Image System Prompt:'));
   assert.ok(ordinarySystem.includes('Image Converter Rule'), 'image NSFW rules stay in the fixed system prefix');
 
   requests.length = 0;
@@ -76,7 +81,8 @@ try {
   assert.equal(adultRequest.messages[1].content, adultRequirement, 'user requirement stays last and unmixed');
   const adultSystem = adultRequest.messages[0].content as string;
   assert.equal(adultSystem, ordinarySystem, 'ordinary/adult custom conversions share one fixed system prefix');
-  assert.ok(adultSystem.startsWith('(Image System Prompt:'));
+  assert.ok(adultSystem.startsWith(MAESTRO_PROTOCOL_MARKER));
+  assert.ok(adultSystem.includes('莲华叙事编辑'));
   assert.ok(adultSystem.indexOf('Image Converter Rule') < adultSystem.indexOf('SELECTED_CUSTOM_RULE'));
   assert.match(adultSystem, /Do not refuse/u);
 

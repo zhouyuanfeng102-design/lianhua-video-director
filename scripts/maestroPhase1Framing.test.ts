@@ -28,29 +28,28 @@ assert.equal(
 );
 assert.ok(writeAdult.systemLayers[0].startsWith(MAESTRO_PROTOCOL_MARKER));
 assert.ok(writeAdult.systemLayers[0].startsWith(MAESTRO_PHASE1_SYSTEM_PREFIX));
-assert.equal(writeAdult.systemLayers[0].includes(LIANHUA_NSFW_FIXED_PREFIX), false);
-assert.equal(writeAdult.systemLayers[0].includes('莲华叙事编辑'), false);
-assert.equal(writeAdult.systemLayers[0].includes(LIANHUA_NSFW_CREATIVE_GUIDANCE), false);
+assert.ok(writeAdult.systemLayers[0].includes(LIANHUA_NSFW_FIXED_PREFIX));
+assert.ok(writeAdult.systemLayers[0].includes(LIANHUA_NSFW_CREATIVE_GUIDANCE));
 assert.ok(writeAdult.systemLayers[0].endsWith('原有任务规则'));
 assert.equal(writeAdult.userPrompt, adult, 'user requirement stays last/outside the fixed prefix');
 assert.equal(writeOrdinary.userPrompt, ordinary);
 
 const visual = framed('story-visual-understanding', adult, ['画面转化任务规则']);
 assert.ok(visual.systemLayers[0].startsWith(MAESTRO_PROTOCOL_MARKER));
-assert.equal(visual.systemLayers[0].includes(LIANHUA_NSFW_FIXED_PREFIX), false);
+assert.ok(visual.systemLayers[0].includes(LIANHUA_NSFW_FIXED_PREFIX));
 assert.ok(visual.systemLayers[0].endsWith('画面转化任务规则'));
 
 const custom = framed('image-custom-convert', adult, ['自定义生图转换规则']);
 const customOrdinary = framed('image-custom-convert', ordinary, ['自定义生图转换规则']);
 assert.equal(custom.systemLayers[0], customOrdinary.systemLayers[0]);
 assert.ok(custom.systemLayers[0].startsWith(MAESTRO_PROTOCOL_MARKER));
+assert.ok(custom.systemLayers[0].includes(LIANHUA_NSFW_FIXED_PREFIX));
+assert.ok(custom.systemLayers[0].includes(LIANHUA_NSFW_CREATIVE_GUIDANCE));
 assert.ok(custom.systemLayers[0].endsWith('自定义生图转换规则'));
 assert.equal(custom.userPrompt, adult);
-assert.equal(
-  custom.systemLayers[0].includes(LIANHUA_NSFW_FIXED_PREFIX),
-  false,
-  'custom image keeps its own image NSFW rules; do not inject narrative text Role prefix',
-);
+assert.ok(custom.systemLayers[0].indexOf(MAESTRO_PROTOCOL_MARKER) < custom.systemLayers[0].indexOf(LIANHUA_NSFW_FIXED_PREFIX));
+assert.ok(custom.systemLayers[0].indexOf(LIANHUA_NSFW_FIXED_PREFIX) < custom.systemLayers[0].indexOf(LIANHUA_NSFW_CREATIVE_GUIDANCE));
+assert.ok(custom.systemLayers[0].indexOf(LIANHUA_NSFW_CREATIVE_GUIDANCE) < custom.systemLayers[0].lastIndexOf('自定义生图转换规则'));
 
 const again = frameNsfwTextRequest({
   stage: 'story-preparation',
@@ -69,4 +68,4 @@ const once = prependMaestroPhase1Prefix(['task']);
 const twice = prependMaestroPhase1Prefix(once);
 assert.equal(once[0], twice[0]);
 
-console.log('PASS maestro phase-1 keeps MAESTRO only and skips old NSFW Role');
+console.log('PASS maestro phase-1 keeps a fixed prefix and leaves user requirements last');

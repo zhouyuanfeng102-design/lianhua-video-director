@@ -18,8 +18,8 @@ const write = framed('story-preparation', adult);
 const plain = framed('story-preparation', ordinary);
 assert.equal(write.systemLayers[0], plain.systemLayers[0], 'adult and ordinary requests share one system prefix');
 assert.ok(write.systemLayers[0].startsWith(MAESTRO_PROTOCOL_MARKER));
-assert.equal(write.systemLayers[0].includes(LIANHUA_NSFW_FIXED_PREFIX), false, 'phase-1 skips old NSFW Role prefix');
-assert.equal(write.systemLayers[0].includes(LIANHUA_NSFW_CREATIVE_GUIDANCE), false);
+assert.ok(write.systemLayers[0].includes(LIANHUA_NSFW_FIXED_PREFIX));
+assert.ok(write.systemLayers[0].includes(LIANHUA_NSFW_CREATIVE_GUIDANCE));
 assert.ok(write.systemLayers[0].endsWith('原有任务规则'));
 assert.equal(write.userPrompt, adult, 'user requirement is not mixed into the fixed prefix');
 assert.equal(plain.userPrompt, ordinary);
@@ -53,4 +53,4 @@ assert.equal(again.systemLayers[0], layers.systemLayers[0]);
 assert.equal(again.userPrompt, adult);
 
 assert.doesNotMatch(LIANHUA_NSFW_FIXED_PREFIX + LIANHUA_NSFW_CREATIVE_GUIDANCE, /未成年|未满|名器概率|违法路径|忘记.?AI|只能用中文/u);
-console.log('PASS nsfw text framing: phase-1 uses MAESTRO only; other stages keep old NSFW prefix');
+console.log('PASS nsfw text framing keeps fixed rules in the system prefix and user requirements last');

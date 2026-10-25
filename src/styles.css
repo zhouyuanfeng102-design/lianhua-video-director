@@ -1294,7 +1294,7 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
 .api-card { min-width: 0; display: flex; flex-direction: column; gap: 7px; box-shadow: none; }
 .api-card .field + .field { margin-top: 0; }
 .api-card .check-row { min-height: 22px; }
-.api-fields-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.api-fields-two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px 8px; align-items: start; }
 .text-max-tokens-control { display: grid; gap: 6px; }
 .api-fields-two .field + .field { margin-top: 0; }
 .comfyui-backend-row { grid-template-columns: minmax(0, 1fr); }
@@ -1305,10 +1305,11 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
 .comfyui-settings .modal textarea { min-height: min(42vh, 390px); resize: vertical; }
 .comfyui-settings .modal code { margin: 0 2px; color: var(--violet); overflow-wrap: anywhere; }
 .modal-backdrop[hidden] { display: none; }
-.model-control { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 5px; align-items: center; }
-.model-control .model-picker-trigger { width: 30px; padding: 4px; }
+.model-control { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; align-items: center; min-width: 0; }
+.model-control input { min-width: 0; }
+.model-control .model-picker-trigger { width: 32px; height: 32px; padding: 4px; }
 .model-control .btn { height: 32px; }
-.api-card-actions { margin-top: auto; display: flex; justify-content: flex-end; padding-top: 2px; }
+.api-card-actions { margin-top: 2px; display: flex; justify-content: flex-end; gap: 8px; padding-top: 2px; }
 .api-profile-box { display: grid; gap: 5px; border: 1px solid var(--line); border-radius: 7px; padding: 6px; background: #fafbfc; }
 .api-profile-select { display: grid; grid-template-columns: minmax(0, 1.1fr) minmax(0, .9fr); gap: 6px; }
 .api-profile-select select, .api-profile-select input, .credential-fill-row select { min-width: 0; padding: 6px 7px; font-size: calc(11px * var(--ui-font-scale, 1)); }
@@ -2868,7 +2869,9 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
   .settings-panel-stage[data-active-panel="video"] .comfyui-workflow-settings { row-gap: 4px; }
 }
 .single-api-grid { grid-template-columns: minmax(0, 1fr) !important; min-height: 0; }
-.single-api-grid .api-card { min-height: 0; height: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; gap: 5px 8px; }
+.single-api-grid .api-card { min-height: 0; height: auto; display: flex; flex-direction: column; align-content: start; gap: 8px; }
+.single-api-grid .text-api-card,
+.single-api-grid .vision-api-card { align-items: stretch; }
 .single-api-grid .api-card > .card-title,
 .single-api-grid .api-card > .api-profile-box,
 .single-api-grid .api-card > .check-row,
@@ -2882,7 +2885,7 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
 .single-api-grid .api-profile-actions { align-items: center; }
 .single-api-grid .hint-box { padding: 6px 8px; font-size: calc(10px * var(--ui-font-scale, 1)); line-height: 1.35; }
 .single-api-grid .image-api-card {
-  display: flex; flex-direction: column; gap: 8px;
+  display: flex; flex-direction: column; gap: 8px; height: 100%;
 }
 .image-api-card > .image-api-heading { align-items: center; margin-bottom: 0; gap: 12px; }
 .image-api-heading .image-api-enable { flex-shrink: 0; margin: 0; color: var(--text); }

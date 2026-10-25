@@ -11,6 +11,46 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "3.1.6",
+    releasedAt: "2026-10-25",
+    title: "自定义生图底部控件收成一行",
+    highlights: [
+      "规则转换、生图规则、生图 API 和发送按钮收进同一行，下拉不再拉满整栏。",
+      "分辨率和比例保持原选择，只是这一栏更矮。",
+      "不改提交、规则转换和 API 选择的行为。",
+    ],
+  },
+  {
+    version: "3.1.5",
+    releasedAt: "2026-10-25",
+    title: "自定义生图转换恢复原 NSFW Role",
+    highlights: [
+      "自定义生图规则转换重新叠上原来的 NSFW Role、世界书和创作指导。",
+      "顺序仍是 MAESTRO 全文在最前，然后是原 NSFW 前缀和任务规则，用户要求在最后。",
+      "不新增校验、拦截或自动重试。",
+    ],
+  },
+  {
+    version: "3.1.4",
+    releasedAt: "2026-10-25",
+    title: "第一批阶段恢复原 NSFW Role",
+    highlights: [
+      "AI扩写、画面描述转化和自定义生图规则转换重新叠上原来的 NSFW Role 前缀。",
+      "完整 MAESTRO 仍放在最前面。分镜等其它阶段不变。",
+      "不新增校验、拦截或自动重试。",
+    ],
+  },
+  {
+    version: "3.1.3",
+    releasedAt: "2026-10-25",
+    title: "文本 API 设置改成对齐的两列",
+    highlights: [
+      "文本 API 的服务商和模型、地址和密钥、温度和最大输出 Token 使用同一套两列。",
+      "获取模型和测试连接放在字段下方，不再挤在模型框里或掉到卡片底部。",
+      "视觉 API 使用同样的字段排列。不改接口请求和已保存的配置。",
+    ],
+  },
+  {
     version: "3.1.2",
     releasedAt: "2026-10-25",
     title: "降低导演台与视频提交卡顿",

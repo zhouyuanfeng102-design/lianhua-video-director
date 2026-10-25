@@ -2,6 +2,7 @@ import { assertValidFinalImagePrompt, type ImagePromptRuleSet } from './imagePro
 import { MOSE_JIANGHU_NSFW_IMAGE_CONVERTER_RULE, MOSE_JIANGHU_NSFW_IMAGE_PROMPT_RULE } from './nsfwPromptRules';
 import { requestTextModel } from './services/llm';
 import { IMAGE_STORY_SPATIAL_STATE_RULE } from './spatialContinuityRules';
+import { withTextApiUsageContext } from './textApiUsage';
 import type { CustomImageRuleSnapshot, ImageApiConfig, TextApiConfig } from './types';
 
 const validRuleFormat = (format: unknown): format is CustomImageRuleSnapshot['format'] => (
@@ -75,6 +76,11 @@ export const requestCustomImagePrompt = async (
     '只返回最终生图提示词文本，不要解释、代码块或 JSON。',
     `本次输出尺寸：${input.width} × ${input.height} 像素。`,
   ].filter(Boolean).join('\n');
-  const converted = await requestTextModel(apiText, systemPrompt, input.userPrompt, input.signal);
+  const converted = await requestTextModel(
+    withTextApiUsageContext(apiText, {}, 'image-custom-convert'),
+    systemPrompt,
+    input.userPrompt,
+    input.signal,
+  );
   return assertValidFinalImagePrompt(converted, input.rule.format, input.userPrompt);
 };

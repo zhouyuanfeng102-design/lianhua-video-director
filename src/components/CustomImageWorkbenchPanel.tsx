@@ -49,8 +49,9 @@ export function CustomImageWorkbenchPanel({ state, context, onOpenAssets, onMana
   const fileInput = useRef<HTMLInputElement>(null);
   const promptInput = useRef<HTMLTextAreaElement>(null);
   const history = useRef<HTMLDivElement>(null);
-  const selection = useMemo(() => resolveWorkbenchImageApi(state.settings, 'ordinary'),
-    [state.settings.imageApi, state.settings.imageApiProfiles, state.settings.activeImageApiProfileId]);
+  const customImageApiProfileId = state.settings.customImageApiProfileId || '';
+  const selection = useMemo(() => resolveWorkbenchImageApi(state.settings, 'custom'),
+    [state.settings.imageApi, state.settings.imageApiProfiles, state.settings.activeImageApiProfileId, state.settings.customImageApiProfileId]);
   const resolvedSize = useMemo(() => resolveImageOutputSize(draft.sizePreference, { width: 1024, height: 1024 }, selection.config, 'reference'),
     [draft.sizePreference, selection.config]);
   const rules = state.imagePromptRules.ruleSets.filter(rule => rule.enabled);
@@ -340,21 +341,41 @@ export function CustomImageWorkbenchPanel({ state, context, onOpenAssets, onMana
       </div>
     </div>
     <div className="custom-image-controls">
-      <div className="custom-image-settings">
-        <ImageOutputSizeControls lane="custom" variant="reference" value={draft.sizePreference} resolved={resolvedSize} disabled={submitBusy}
-          capabilityNote="按当前生图模型和协议提交所选尺寸，实际像素以返回图片为准。" onChange={sizePreference => patchDraft({ sizePreference })} />
-        <div className="custom-image-rule-controls">
-          <label className="check-row"><input type="checkbox" checked={draft.promptMode === 'rules'} onChange={event => patchDraft({ promptMode: event.target.checked ? 'rules' : 'raw', ruleSetId: draft.ruleSetId || rules[0]?.id })} />使用规则转换 <span className="field-hint">可选</span></label>
-          {draft.promptMode === 'rules' && <div className="custom-image-rule-picker"><label htmlFor={`custom-image-rule-${projectId}`}>生图规则</label>
-            <select id={`custom-image-rule-${projectId}`} aria-label="自定义生图规则" value={draft.ruleSetId || ''} onChange={event => patchDraft({ ruleSetId: event.target.value })}>
-              {!selectedRule && <option value={draft.ruleSetId || ''}>{draft.ruleSetId ? '所选规则已删除或停用，请重新选择' : '请选择生图规则'}</option>}
-              {rules.map(rule => <option key={rule.id} value={rule.id} disabled={selection.config.backend === 'novelai' && rule.format !== 'nai-tags'}>{rule.name} · v{rule.version}</option>)}
-            </select><button className="btn small ghost" onClick={onManageRules}><BookOpen size={14} />管理规则</button>
-          </div>}
-        </div>
-      </div>
-      <div className="custom-image-send-row"><div className="custom-image-send-note"><span>{draft.promptMode === 'raw' ? '原文直接提交生图模型' : '按所选规则转换后生图'}</span><span className="field-hint">{imageApiChoiceLabel(selection.config)}</span></div>
-        <button className="btn primary" disabled={submitBusy || uploadBusy || !draft.userPrompt.trim() || Boolean(issue)} onClick={() => void send()}><Send size={16} />{submitBusy ? '正在提交…' : '发送并生图'}</button>
+      <ImageOutputSizeControls lane="custom" variant="reference" value={draft.sizePreference} resolved={resolvedSize} disabled={submitBusy}
+        capabilityNote="按当前生图模型和协议提交所选尺寸，实际像素以返回图片为准。" onChange={sizePreference => patchDraft({ sizePreference })} />
+      <div className="custom-image-action-bar">
+        <label className="check-row"><input type="checkbox" aria-label="使用规则转换" checked={draft.promptMode === 'rules'} onChange={event => patchDraft({ promptMode: event.target.checked ? 'rules' : 'raw', ruleSetId: draft.ruleSetId || rules[0]?.id })} />规则转换</label>
+        {draft.promptMode === 'rules' && <>
+          <select id={`custom-image-rule-${projectId}`} className="custom-image-rule-select" aria-label="自定义生图规则" value={draft.ruleSetId || ''} onChange={event => patchDraft({ ruleSetId: event.target.value })}>
+            {!selectedRule && <option value={draft.ruleSetId || ''}>{draft.ruleSetId ? '所选规则已删除或停用，请重新选择' : '请选择生图规则'}</option>}
+            {rules.map(rule => <option key={rule.id} value={rule.id} disabled={selection.config.backend === 'novelai' && rule.format !== 'nai-tags'}>{rule.name} · v{rule.version}</option>)}
+          </select>
+          <button className="btn small ghost" aria-label="管理规则" onClick={onManageRules}><BookOpen size={13} />管理</button>
+        </>}
+        <label className="custom-image-inline-field">
+          <span>API</span>
+          <select
+            aria-label="自定义生图 API 配置"
+            title="只切换自定义生图；已排队任务保持原配置，普通生图和私密生图不受影响。"
+            value={customImageApiProfileId}
+            onChange={event => {
+              const profileId = event.target.value;
+              context.update(current => ({
+                ...current,
+                settings: { ...current.settings, customImageApiProfileId: profileId || null },
+              }));
+            }}
+          >
+            <option value="">跟随 API 设置 · {imageApiChoiceLabel(state.settings.imageApi)}</option>
+            {customImageApiProfileId && !state.settings.imageApiProfiles.some(item => item.id === customImageApiProfileId) && (
+              <option value={customImageApiProfileId}>原配置已删除，请重新选择</option>
+            )}
+            {state.settings.imageApiProfiles.map(profile => (
+              <option key={profile.id} value={profile.id}>{imageApiChoiceLabel(profile, profile.name)}</option>
+            ))}
+          </select>
+        </label>
+        <button className="btn primary small" disabled={submitBusy || uploadBusy || !draft.userPrompt.trim() || Boolean(issue)} onClick={() => void send()}><Send size={14} />{submitBusy ? '正在提交…' : '发送并生图'}</button>
       </div>
       {issue && <div className="custom-image-error" role="alert">{issue}</div>}
     </div>

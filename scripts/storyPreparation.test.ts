@@ -175,10 +175,10 @@ try {
   const privateExpansionSystem = requests[0].messages.filter((message) => message.role === 'system').map((message) => message.content).join('\n');
   const privateExpansionUser = requests[0].messages.find((message) => message.role === 'user')!.content;
   assert.equal(privateExpansionSystem.split(MOSE_JIANGHU_NSFW_DETAIL_RULES).length - 1, 0, 'the saved detail bundle is not repeated beside the stable prefix');
-  assert.equal(privateExpansionSystem.split(MOSE_JIANGHU_NSFW_PROMPT_RULE).length - 1, 0, 'phase-1 expand does not inject the old NSFW prompt Role bundle');
+  assert.equal(privateExpansionSystem.split(MOSE_JIANGHU_NSFW_PROMPT_RULE).length - 1, 1);
   assert.ok(privateExpansionSystem.startsWith(MAESTRO_PROTOCOL_MARKER));
-  assert.equal(privateExpansionSystem.includes(LIANHUA_NSFW_FIXED_PREFIX), false, 'phase-1 expand skips old NSFW Role prefix');
-  assert.equal(privateExpansionSystem.includes(LIANHUA_NSFW_CREATIVE_GUIDANCE), false);
+  assert.ok(privateExpansionSystem.includes(LIANHUA_NSFW_FIXED_PREFIX));
+  assert.ok(privateExpansionSystem.includes(LIANHUA_NSFW_CREATIVE_GUIDANCE), 'fixed creative guidance stays in the system prefix');
   assert.equal(privateExpansionUser.includes(LIANHUA_NSFW_CREATIVE_GUIDANCE), false, 'user payload stays free of fixed guidance');
   fake(() => expansion);
   await requestStoryExpansion(config, '林澜推开门。', undefined, factoryRules);
@@ -227,7 +227,7 @@ try {
     assert.equal(system.includes(preset.systemPrompt), false);
     assert.equal(`${system}\n${user}`.includes(preset.outputRules), false);
     assert.ok(system.startsWith(MAESTRO_PROTOCOL_MARKER));
-    assert.equal(system.includes(LIANHUA_NSFW_FIXED_PREFIX), false);
+    assert.ok(system.includes(LIANHUA_NSFW_FIXED_PREFIX));
     assert.match(system, /stagingAdditions/u);
   }
   checks += 1;
