@@ -377,6 +377,7 @@ export class VideoGenerationEngine {
   private tailExtractionJobs = new Map<string, string>();
   private tailSelectionControllers = new Map<string, AbortController>();
   private completionPersistence = new Set<string>();
+  private resultCheckpointWrites = new Map<string, Promise<void>>();
   private archivedDependencies = new Map<string, { signature: string; task: VideoGenerationTask }>();
   private archivedDependencyAttempts = new Map<string, string>();
   private restoringArchivedDependencies = new Set<string>();
@@ -530,7 +531,9 @@ export class VideoGenerationEngine {
         && !this.checkpointErrors.has(task.id) && !this.isInitializingBatch(task)
         && (task.status === 'draft' || task.status === 'submitting')
         && (!task.batchId || job.batchQueueState === 'ready' || job.batchQueueState === 'active')
-        && this.taskBelongsToActiveProject(task)
+        // A live batch has already written its independent ready checkpoint;
+        // switching projects must not strand its later segments in the queue.
+        && (this.taskBelongsToActiveProject(task) || Boolean(task.batchId && this.restoredCheckpoints.has(task.id)))
         && this.tailReady(task) && this.chainDependencyReady(task);
     }).sort((left, right) => left.createdAt - right.createdAt
       || (left.batchId === right.batchId ? (left.batchIndex || 0) - (right.batchIndex || 0) : 0)
@@ -770,10 +773,6 @@ export class VideoGenerationEngine {
       let project = allProjects(this.options.getState()).find((entry) => entry.id === projectId);
       if (this.disposed || !saved || !project || project.generationTasks.some((entry) => entry.id === source.id)
         || this.archivedDependencySignature(project, source) !== signature || !this.validArchivedDependency(project, source, saved)) return;
-      await this.options.persistState?.();
-      project = allProjects(this.options.getState()).find((entry) => entry.id === projectId);
-      if (this.disposed || !project || project.generationTasks.some((entry) => entry.id === source.id)
-        || this.archivedDependencySignature(project, source) !== signature || !this.validArchivedDependency(project, source, saved)) return;
       this.archivedDependencies.set(key, { signature, task: saved });
     } catch { /* No verified archive means the existing dependency gate stays closed. */ }
     finally {
@@ -802,9 +801,9 @@ export class VideoGenerationEngine {
 
   private completedLocalAsset(task: VideoGenerationTask, projectId: string): ReferenceAsset | undefined {
     const archived = !this.liveTask(task.id) && this.archivedDependencies.get(this.archivedDependencyKey(projectId, task.id))?.task === task;
-    if (this.downloading.has(task.id) || this.completionPersistence.has(task.id) || !archived && this.stopping.has(task.id)
+    if (!archived && this.stopping.has(task.id)
       || task.videoJob?.trackingStopped || task.status !== 'succeeded' || task.videoJob?.stage !== 'succeeded'
-      || task.videoJob.snapshot.projectId !== projectId || task.videoJob.downloadError || task.videoJob.resultSelectionRequired || !task.resultAssetId
+      || task.videoJob.snapshot.projectId !== projectId || task.videoJob.resultSelectionRequired || !task.resultAssetId
       || (task.videoJob.resultAssetIds?.length || 0) > 1 && !archived && !this.resultSelectionsRestored.has(task.id)) return undefined;
     const project = allProjects(this.options.getState()).find((entry) => entry.id === projectId);
     const asset = project?.assets.find((entry) => entry.id === task.resultAssetId);
@@ -914,7 +913,6 @@ export class VideoGenerationEngine {
           if (!status.available) throw new Error(status.message || '本地视频抽帧工具不可用。');
           const message = aiAssisted ? '上一段视频已保存，正在准备末段候选帧与 AI 辅助分析。' : '上一段视频已保存，正在抽取真实最后一帧。';
           live = await this.checkpoint({ ...live, videoJob: { ...live.videoJob!, message, tailPreparation: { ...live.videoJob!.tailPreparation, phase: 'extracting', revision: (live.videoJob!.tailPreparation?.revision || 0) + 1, ...source, message } } });
-          await this.options.persistState?.();
           live = checkSource();
           const extractionJobId = id(`video_tail_${task.id}`);
           const mediaSource = { assetId: source.sourceVideoAssetId, relativePath: source.sourceRelativePath, expectedChecksum: source.sourceChecksum };
@@ -962,7 +960,6 @@ export class VideoGenerationEngine {
                   ...live.videoJob!.tailPreparation, phase: 'extracting', revision: (live.videoJob!.tailPreparation?.revision || 0) + 1,
                   ...source, message, selection: nextSelection,
                 } } });
-                await this.options.persistState?.();
                 live = checkSource();
                 startedAttempt = attempt?.attempt ?? 1;
                 startedSelection = nextSelection;
@@ -1002,7 +999,6 @@ export class VideoGenerationEngine {
               ...source, selection,
             } } });
             live = await this.checkpoint(this.liveTask(task.id)!);
-            await this.options.persistState?.();
             live = checkSource();
           }
         }
@@ -1031,10 +1027,8 @@ export class VideoGenerationEngine {
         live = checkSource();
         this.patch(live, { videoJob: { ...live.videoJob!, tailPreparation: { ...live.videoJob!.tailPreparation, phase: 'ready', revision: (live.videoJob!.tailPreparation?.revision || 0) + 1, ...source, message: '已恢复已抽取衔接帧，正在保存衔接记录。' } } });
       }
-      // tailPreparations is also checked at every submission entry. Neither a
-      // React reconcile nor an explicit resume can see this as authorization
-      // until BOTH the frame asset/main state and the ready journal are durable.
-      await this.options.persistState?.();
+      // The task journal contains the frozen frame path/checksum; the full
+      // project autosave may finish independently of the next video request.
       this.ensureActive(task);
       await this.checkpoint(this.liveTask(task.id)!);
       this.ensureActive(task);
@@ -1049,7 +1043,6 @@ export class VideoGenerationEngine {
         this.patch(current, { videoJob: { ...current.videoJob, message, tailPreparation: { ...current.videoJob.tailPreparation, phase: 'blocked', revision: (current.videoJob.tailPreparation?.revision || 0) + 1, errorCode: 'extract-failed', message } } }, { message });
         const blocked = this.liveTask(task.id)!;
         await this.options.desktop?.saveVideoTaskCheckpoint?.(blocked).catch(() => {});
-        try { await this.options.persistState?.(); } catch { /* remain blocked in memory; no POST */ }
         this.options.notify?.(message, 'error');
       }
     } finally {
@@ -2010,8 +2003,6 @@ export class VideoGenerationEngine {
           });
         }
       }
-      try { await this.options.persistState?.(); }
-      catch (error) { this.options.notify?.(`批量任务状态主文件暂未更新：${messageOf(error)}；独立提交记录已保留。`, 'error'); }
       checkContinuation();
       const liveOwner = allProjects(this.options.getState()).find((candidate) => candidate.id === projectId);
       if (!liveOwner || shells.some((shell) => !liveOwner.generationTasks.some((task) => task.id === shell.id))) {
@@ -2202,12 +2193,12 @@ export class VideoGenerationEngine {
       // Establish trusted preparation first; an orphan journal cannot revive a missing project task.
       // A project JSON without its journal is never accepted as permission to resume a POST.
       task = await this.checkpoint(task);
-      await this.options.persistState?.();
+      if (!task.batchId) await this.options.persistState?.();
       if (!this.claimGenerationSlot(task)) {
         this.markLocallyQueued(this.liveTask(taskId) || task);
         const queued = this.liveTask(taskId);
         if (queued) await this.checkpoint(queued);
-        await this.options.persistState?.();
+        if (!task.batchId) await this.options.persistState?.();
         return taskId;
       }
       const admitted = this.liveTask(taskId) || task;
@@ -3172,8 +3163,8 @@ export class VideoGenerationEngine {
       // older execution journal restored for continuation or result recovery.
       this.patch(current, { ...restored, historyOnly: current.historyOnly });
       // A newer ready journal can legitimately outlive an older main project
-      // snapshot. Restore its exact frame reference into the owning library,
-      // then flush that library before allowing uploads/POSTs on recovery.
+      // snapshot. Restore its exact frame reference into the owning library;
+      // the independent task journal remains the submission boundary.
       const restoredJob = restored.videoJob;
       const tail = restoredJob?.tailPreparation;
       const dependency = restoredJob?.snapshot.previousTail;
@@ -3193,11 +3184,6 @@ export class VideoGenerationEngine {
             tags: ['视频抽帧', dependency.selectionMode === 'ai-assisted' ? 'AI 辅助选帧' : '自动衔接尾帧'], createdAt: image.frozenAt || Date.now(), updatedAt: Date.now() };
           return { ...project, assets: [asset, ...project.assets] };
         }));
-        await checkpointOperation(
-          Promise.resolve().then(() => this.options.persistState?.()),
-          '保存恢复的项目状态',
-          this.options.checkpointOperationTimeoutMs,
-        );
       }
       if (restored.videoJob?.batchQueueState !== 'cancelled') this.checkpointErrors.delete(task.id);
     } catch (error) {
@@ -3572,7 +3558,7 @@ export class VideoGenerationEngine {
       const outputSelectionWarning = source.backend === 'comfyui' && record(task.response) && typeof task.response.outputSelectionWarning === 'string' ? task.response.outputSelectionWarning : '';
       const savedMessage = (resultSelectionRequired ? `ZIP 内 ${assets.length} 段视频已全部保存，请选择本任务使用的成片；后续尾帧衔接正在等待` : '已保存到视频资产库')
         + (outputSelectionWarning ? `；${outputSelectionWarning}` : '');
-      const filingMessage = resultSelectionRequired ? savedMessage : '成片已在视频文件夹，项目记录仍在保存';
+      const filingMessage = resultSelectionRequired ? savedMessage : '已保存到视频资产库';
       this.options.setState((current) => applyOwnedProjectUpdate(current, task.videoJob!.snapshot.projectId, (project) => {
         const existing = project.generationTasks.find((item) => item.id === task.id);
         if (!existing || this.disposed || this.stopping.has(task.id) || (existing as VideoGenerationTask).videoJob?.trackingStopped
@@ -3599,21 +3585,22 @@ export class VideoGenerationEngine {
       const filedRuntime = { ...(this.runtimes.get(task.id) || runtimeOnly(task.videoJob)), stage: 'succeeded' as const, completedAt: now, progress: 100, downloadError: undefined, message: filingMessage };
       this.runtimes.set(task.id, filedRuntime); this.options.onRuntime(task.id, filedRuntime);
       if (!this.disposed) this.reconcile();
-      try {
-        await this.options.persistState?.();
-      } catch (error) {
-        // The file is already in the video folder and the task is completed.
-        // A library-save failure stays visible without putting the batch back into 运行中.
-        const latest = this.liveTask(task.id);
-        if (latest) this.patch(latest, { status: 'succeeded' }, { stage: 'succeeded', downloadError: `成片已落盘但项目保存失败：${messageOf(error)}`, message: '生成成功，项目保存失败；链式后段已暂停' });
-        return;
-      }
       ensureDownloadActive();
       const runtime = { ...(this.runtimes.get(task.id) || filedRuntime), stage: 'succeeded' as const, completedAt: now, downloadError: undefined, message: savedMessage };
       this.runtimes.set(task.id, runtime); this.options.onRuntime(task.id, runtime);
       const completed = this.liveTask(task.id);
-      if (completed?.videoJob) await this.checkpointResult(completed);
-      this.resultSelectionsRestored.add(task.id);
+      if (completed?.videoJob) {
+        void this.checkpointResult(completed).then(() => {
+          this.resultSelectionsRestored.add(task.id);
+        }).catch((error) => {
+          const latest = this.liveTask(task.id);
+          if (!this.disposed && this.controlIsCurrent(task, epoch) && !this.stopping.has(task.id)
+            && latest && latest.resultAssetId === completed.resultAssetId
+            && latest.videoJob?.resultSelectionRequired === completed.videoJob?.resultSelectionRequired) {
+            this.patch(latest, {}, { stage: 'succeeded', downloadError: `成片记录断点保存失败：${messageOf(error)}`, message: '成片已落盘，后续任务已继续；项目自动保存仍会保存任务记录' });
+          }
+        });
+      }
     } catch (error) {
       const current = this.liveTask(task.id);
       if (this.controlIsCurrent(task, epoch) && !this.stopping.has(task.id) && current?.videoJob && !current.videoJob.trackingStopped && videoWatchIdentity(current) === downloadIdentity) {
@@ -3621,23 +3608,31 @@ export class VideoGenerationEngine {
       }
     } finally {
       this.downloading.delete(task.id);
-      // Completion-order gates reject a downloading/persisting predecessor.
-      // Wake only after that in-memory durability barrier has been released.
+      // The local video file and asset entry are ready; result checkpointing
+      // continues independently while the next segment prepares its tail.
       if (!this.disposed) this.reconcile();
     }
   }
 
-  /** Unlike the POST acknowledgement, a result-selection journal failure must
-   * remain a blocking save error: another selected file must never be used. */
+  /** Result journals remain ordered per task, but never hold the video chain. */
   private async checkpointResult(task: VideoGenerationTask): Promise<void> {
-    this.ensureActive(task);
-    const checkpoint = structuredClone({ ...task, updatedAt: Date.now() });
-    if (this.options.desktop?.saveVideoTaskCheckpoint) {
-      const saved = await this.options.desktop.saveVideoTaskCheckpoint(checkpoint);
-      if (!saved.persisted) throw new Error('成片结果断点未保存，后续视频任务尚未提交。');
+    const previous = this.resultCheckpointWrites.get(task.id);
+    const operation = (previous || Promise.resolve()).catch(() => {}).then(async () => {
+      const current = this.liveTask(task.id) || task;
+      this.ensureActive(current);
+      const checkpoint = structuredClone({ ...current, updatedAt: Date.now() });
+      if (this.options.desktop?.saveVideoTaskCheckpoint) {
+        const saved = await this.options.desktop.saveVideoTaskCheckpoint(checkpoint);
+        if (!saved.persisted) throw new Error('成片结果断点未保存。');
+      }
+      this.ensureActive(current);
+    });
+    this.resultCheckpointWrites.set(task.id, operation);
+    try {
+      await operation;
+    } finally {
+      if (this.resultCheckpointWrites.get(task.id) === operation) this.resultCheckpointWrites.delete(task.id);
     }
-    this.ensureActive(task);
-    this.patch(task, checkpoint);
   }
 
   /** Main autosave and the independent journal can finish at different times.
@@ -3680,7 +3675,6 @@ export class VideoGenerationEngine {
           const asset = project?.assets.find((entry) => entry.id === assetId);
           return !asset || !isVideoAsset(asset) || asset.missing || !asset.relativePath || !asset.checksum || asset.sourceVideoTaskId !== task.id;
         })) throw new Error('成片结果清单的本地视频记录不完整，未继续尾帧链。');
-        await this.options.persistState?.();
         this.ensureActive(task);
         await this.checkpointResult(this.liveTask(task.id)!);
       } catch (error) {
@@ -3722,7 +3716,6 @@ export class VideoGenerationEngine {
           const asset = project?.assets.find((entry) => entry.id === assetId);
           return !asset || !isVideoAsset(asset) || asset.missing || !asset.relativePath || !asset.checksum || asset.sourceVideoTaskId !== current.id;
         })) throw new Error('已生成视频的本地资产记录不完整，不能继续尾帧链。');
-        await this.options.persistState?.();
         this.ensureActive(current);
         await this.checkpointResult(this.liveTask(taskId)!);
         this.patch(this.liveTask(taskId)!, {}, { message: current.videoJob!.resultSelectionRequired ? '多段视频已全部保存，请选择本任务使用的成片；后续尾帧衔接正在等待' : '已保存到视频资产库', downloadError: undefined });
@@ -3865,10 +3858,17 @@ export class VideoGenerationEngine {
       this.patch(task, { status: 'succeeded', resultAssetId: assetId, error: undefined, videoJob: { ...task.videoJob, resultSelectionRequired: false } }, {
         stage: 'succeeded', downloadError: undefined, message: `已选用成片：${asset.name}`,
       });
-      await this.options.persistState?.();
       this.ensureActive(task);
-      await this.checkpointResult(this.liveTask(taskId)!);
-      this.ensureActive(task);
+      const selected = this.liveTask(taskId)!;
+      this.resultSelectionsRestored.add(taskId);
+      this.completionPersistence.delete(taskId);
+      if (!this.disposed) this.reconcile();
+      void this.checkpointResult(selected).catch((error) => {
+        const latest = this.liveTask(taskId);
+        if (!this.disposed && !this.stopping.has(taskId) && latest?.resultAssetId === assetId) this.patch(latest, {}, {
+          stage: 'succeeded', downloadError: `成片选择记录保存失败：${messageOf(error)}`, message: '成片已落盘，后续任务已继续；项目自动保存仍会保存任务记录',
+        });
+      });
     } catch (error) {
       if (!this.disposed && !this.stopping.has(taskId) && this.liveTask(taskId)) this.patch(this.liveTask(taskId)!, {}, {
         stage: 'succeeded', downloadError: `成片选择记录保存失败：${messageOf(error)}`, message: '成片已保留，选择记录尚未保存；后续尾帧任务已暂停',

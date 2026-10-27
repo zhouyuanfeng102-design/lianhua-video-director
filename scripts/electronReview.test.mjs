@@ -23,9 +23,10 @@ const createResponse = (status, headers, chunks = []) => {
   return body;
 };
 
-const loadMainInternals = ({ dnsLookup, failPreferredDataRoot = false, fetchImpl, platform = process.platform, transportRequest, proxyResolver, proxyAgentFactory } = {}) => {
+const loadMainInternals = ({ dnsLookup, failPreferredDataRoot = false, fetchImpl, platform = process.platform, transportRequest, proxyResolver, proxyAgentFactory, useExplicitDataRoot = true, prepareTemporaryRoot } = {}) => {
   const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lianhua-electron-review-'));
   const dataRoot = path.join(temporaryRoot, 'data');
+  prepareTemporaryRoot?.({ temporaryRoot, dataRoot, appData: path.join(temporaryRoot, 'appData') });
   const controls = { failNextWrite: false, failPreferredDataRoot, forbidReadFilePath: '', forbidSyncIo: false };
   controls.rejectImageDecode = false;
   const isPreferredDataPath = (candidate) => {
@@ -103,7 +104,7 @@ const loadMainInternals = ({ dnsLookup, failPreferredDataRoot = false, fetchImpl
   const request = transportRequest || (() => { throw new Error('unexpected transport request'); });
   const processMock = {
     argv: ['node', mainPath],
-    env: { ...process.env, LIANHUA_DATA_DIR: dataRoot },
+    env: { ...process.env, LIANHUA_DATA_DIR: useExplicitDataRoot ? dataRoot : '', LIANHUA_DEFAULT_DATA_DIR: dataRoot },
     execPath: process.execPath,
     pid: process.pid,
     platform,
@@ -150,6 +151,7 @@ const loadMainInternals = ({ dnsLookup, failPreferredDataRoot = false, fetchImpl
     createModelHttpRequestOptions: typeof createModelHttpRequestOptions === 'function' ? createModelHttpRequestOptions : undefined,
     encodeModelHttpResponse: typeof encodeModelHttpResponse === 'function' ? encodeModelHttpResponse : undefined,
     dataRoot,
+    defaultDataRoot,
     downloadIntoAssetStore,
     exportMediaToPath: typeof exportMediaToPath === 'function' ? exportMediaToPath : undefined,
     fetchWithLimit,
@@ -162,6 +164,8 @@ const loadMainInternals = ({ dnsLookup, failPreferredDataRoot = false, fetchImpl
     isTrustedRendererUrl: typeof isTrustedRendererUrl === 'function' ? isTrustedRendererUrl : undefined,
     lastRecoveryNotice,
     legacyUserData,
+    storageLocationConfigFile,
+    storageLocationSnapshot,
     powershellArchive,
     powershellExpand,
     readManagedImageDataUrlForRenderer: typeof readManagedImageDataUrlForRenderer === 'function' ? readManagedImageDataUrlForRenderer : undefined,
@@ -1174,6 +1178,37 @@ test('startup falls back to Electron userData when the preferred data root canno
   assert.equal(fs.existsSync(path.join(harness.dataRoot, 'assets')), true);
 });
 
+test('startup migrates configured storage location and leaves the previous directory intact', (t) => {
+  let sourceRoot = '';
+  let targetRoot = '';
+  const harness = loadMainInternals({
+    useExplicitDataRoot: false,
+    prepareTemporaryRoot: ({ temporaryRoot, appData }) => {
+      sourceRoot = path.join(temporaryRoot, 'previous-data');
+      targetRoot = path.join(temporaryRoot, 'chosen-data');
+      fs.mkdirSync(path.join(sourceRoot, 'assets'), { recursive: true });
+      fs.writeFileSync(path.join(sourceRoot, 'project-state.json'), 'current project');
+      fs.writeFileSync(path.join(sourceRoot, 'assets', 'reference.png'), Buffer.from([1, 2, 3]));
+      const configPath = path.join(appData, 'LianhuaVideoDirector', 'storage-location.json');
+      fs.mkdirSync(path.dirname(configPath), { recursive: true });
+      fs.writeFileSync(configPath, JSON.stringify({
+        mode: 'custom', directory: targetRoot, migrationFrom: sourceRoot, migrationId: 'startup-migration',
+      }));
+    },
+  });
+  t.after(harness.dispose);
+
+  assert.equal(path.resolve(harness.dataRoot), path.resolve(targetRoot));
+  assert.equal(fs.readFileSync(path.join(targetRoot, 'project-state.json'), 'utf8'), 'current project');
+  assert.deepEqual(fs.readFileSync(path.join(targetRoot, 'assets', 'reference.png')), Buffer.from([1, 2, 3]));
+  assert.equal(fs.readFileSync(path.join(sourceRoot, 'project-state.json'), 'utf8'), 'current project');
+  const savedConfig = JSON.parse(fs.readFileSync(harness.storageLocationConfigFile, 'utf8'));
+  assert.equal(savedConfig.mode, 'custom');
+  assert.equal(savedConfig.directory, targetRoot);
+  assert.equal(savedConfig.migrationFrom, '');
+  assert.equal(savedConfig.migrationId, '');
+});
+
 test('filesystem path checks preserve case off Windows and use relative containment', (t) => {
   const harness = loadMainInternals({ platform: 'linux' });
   t.after(harness.dispose);
@@ -1215,8 +1250,14 @@ test('cross-drive backup execution and directory selection are removed', () => {
   assert.doesNotMatch(storeSource, /externalBackup|copyBackupAsset|fileSha256\(source\)|fileSha256\(destination\)/u);
 });
 test('save-state awaits local durability and schedules recovery snapshot maintenance separately', () => {
-  assert.match(mainSource, /await getStatePersistence\(\)\.run\('save-local', \{ content: text \}\)/u);
-  assert.match(mainSource, /scheduleStateMaintenance\(event\.sender\)/u);
+  const saveHandler = mainSource.slice(
+    mainSource.indexOf("handleTrustedIpc('lianhua:save-state'"),
+    mainSource.indexOf("handleTrustedIpc('lianhua:note-active-project'"),
+  );
+  assert.match(saveHandler, /await getStatePersistence\(\)\.run\('save-local', \{ content: text \}\)/u);
+  assert.match(saveHandler, /scheduleStateMaintenance\(event\.sender\)/u);
+  assert.doesNotMatch(saveHandler, /rememberAssetRosterFromContent/u);
+  assert.match(mainSource, /handleTrustedIpc\('lianhua:note-active-project',[\s\S]*?rememberAssetRoster\(payload\?\.projects, payload\?\.activeProjectId\)/u);
   const storeSource = fs.readFileSync(path.join(root, 'electron', 'statePersistenceStore.cjs'), 'utf8');
   assert.match(storeSource, /return deferMaintenance \? result : \{ \.\.\.result, \.\.\.finishMaintenance\(prepared\.payload\) \}/u);
   assert.match(storeSource, /const maintainLatest = \(\) =>/u);

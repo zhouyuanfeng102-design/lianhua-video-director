@@ -34,6 +34,7 @@ const { createStateCloseGuard } = require(path.join(__dirname, 'stateCloseGuard.
 const { createRendererCrashRecovery } = require(path.join(__dirname, 'rendererCrashRecovery.cjs'));
 const { createAssetProtocolHandler } = require(path.join(__dirname, 'assetProtocol.cjs'));
 const { allocateReadableName, kindDirectory, placeProjectAssets } = require(path.join(__dirname, 'projectAssetLayout.cjs'));
+const storageLocation = require(path.join(__dirname, 'storageLocation.cjs'));
 
 const privateIpBlockList = new nodeNet.BlockList();
 privateIpBlockList.addAddress('0.0.0.0', 'ipv4');
@@ -222,10 +223,9 @@ const copyDirectoryIfNeeded = (source, destination) => {
   }
 };
 
-const resolveDataRoot = () => {
-  const configured = String(process.env.LIANHUA_DATA_DIR || '').trim();
-  if (configured) return path.resolve(configured);
-
+const resolveDefaultDataRoot = () => {
+  const configuredDefault = String(process.env.LIANHUA_DEFAULT_DATA_DIR || '').trim();
+  if (configuredDefault) return path.resolve(configuredDefault);
   // Portable builds keep their data beside the executable. The previous
   // hard-coded E: fallback made one failing disk a single point of failure.
   if (process.env.PORTABLE_EXECUTABLE_DIR) {
@@ -241,7 +241,39 @@ const resolveDataRoot = () => {
 // Resolve and pin every Electron-managed writable path before ready so state,
 // managed media, cache, logs and crash data stay under one visible root.
 const legacyUserData = app.getPath('userData');
-const preferredDataRoot = resolveDataRoot();
+const storageLocationConfigFile = path.join(app.getPath('appData'), 'LianhuaVideoDirector', 'storage-location.json');
+let storageLocationConfig = storageLocation.readStorageLocationConfig(storageLocationConfigFile);
+const defaultDataRoot = resolveDefaultDataRoot();
+const environmentDataRoot = String(process.env.LIANHUA_DATA_DIR || '').trim();
+const configuredDataRoot = storageLocationConfig.mode === 'custom' && storageLocationConfig.directory
+  ? path.resolve(storageLocationConfig.directory)
+  : defaultDataRoot;
+let preferredDataRoot = environmentDataRoot
+  ? path.resolve(environmentDataRoot)
+  : configuredDataRoot;
+let storageMigrationError = '';
+if (!environmentDataRoot && storageLocationConfig.migrationFrom && storageLocationConfig.migrationId
+  && !isSamePath(storageLocationConfig.migrationFrom, preferredDataRoot)) {
+  try {
+    storageLocation.migrateStorageDirectory({
+      source: storageLocationConfig.migrationFrom,
+      target: preferredDataRoot,
+      migrationId: storageLocationConfig.migrationId,
+      fs,
+      path,
+    });
+    storageLocationConfig = storageLocation.writeStorageLocationConfig(storageLocationConfigFile, {
+      ...storageLocationConfig,
+      migrationFrom: '',
+      migrationId: '',
+    });
+  } catch (error) {
+    preferredDataRoot = fs.existsSync(storageLocationConfig.migrationFrom)
+      ? path.resolve(storageLocationConfig.migrationFrom)
+      : legacyUserData;
+    storageMigrationError = `文件储存位置迁移未完成，仍在使用原目录：${error instanceof Error ? error.message : String(error)}`;
+  }
+}
 const runtimeOnlyEntries = new Set(['cache', 'crash-dumps', 'logs', 'temp', '路径说明.txt']);
 
 const initializeStoragePaths = (candidateRoot, migrationSource = '') => {
@@ -270,7 +302,7 @@ const initializeStoragePaths = (candidateRoot, migrationSource = '') => {
 };
 
 let storagePaths;
-let startupRecoveryNotice = null;
+let startupRecoveryNotice = storageMigrationError || null;
 try {
   storagePaths = initializeStoragePaths(preferredDataRoot, legacyUserData);
 } catch (error) {
@@ -282,6 +314,65 @@ const {
   dataRoot, sessionRoot, cacheRoot, logsRoot, crashRoot, tempRoot,
   stateFile, snapshotRoot, assetRoot, recoveryConfigFile, secretVaultFile
 } = storagePaths;
+const storageLocationSnapshot = () => {
+  const selectedRoot = environmentDataRoot
+    ? path.resolve(environmentDataRoot)
+    : storageLocationConfig.mode === 'custom' && storageLocationConfig.directory
+      ? path.resolve(storageLocationConfig.directory)
+      : defaultDataRoot;
+  return {
+    ...storagePaths,
+    dataRoot,
+    defaultDataRoot,
+    configuredDataRoot: selectedRoot,
+    mode: environmentDataRoot ? 'environment' : storageLocationConfig.mode,
+    canChange: !environmentDataRoot,
+    pendingRestart: !isSamePath(dataRoot, selectedRoot),
+    migrationError: storageMigrationError,
+  };
+};
+const assertWritableStorageDirectory = (directory) => {
+  ensureDirectory(directory);
+  const probe = path.join(directory, `.lianhua-write-probe-${process.pid}-${randomUUID()}`);
+  try {
+    fs.writeFileSync(probe, 'ok', { encoding: 'utf8', flag: 'wx' });
+    fs.unlinkSync(probe);
+  } catch (error) {
+    try { if (fs.existsSync(probe)) fs.unlinkSync(probe); } catch { /* Preserve the write failure. */ }
+    throw new Error(`无法写入所选目录：${error instanceof Error ? error.message : String(error)}`);
+  }
+};
+const prepareStorageLocation = (directory, mode) => {
+  if (environmentDataRoot) throw new Error('当前启动方式通过 LIANHUA_DATA_DIR 固定了储存位置');
+  let selectedRoot = path.resolve(directory);
+  if (fs.existsSync(selectedRoot)) selectedRoot = fs.realpathSync(selectedRoot);
+  if (!isSamePath(dataRoot, selectedRoot) && storageLocation.pathsOverlap(dataRoot, selectedRoot)) {
+    throw new Error('新旧储存位置不能互相包含');
+  }
+  if (fs.existsSync(selectedRoot) && !fs.statSync(selectedRoot).isDirectory()) {
+    throw new Error('所选位置不是文件夹');
+  }
+  if (fs.existsSync(selectedRoot) && storageLocation.directoryHasEntries(selectedRoot, fs)
+    && !storageLocation.isManagedDataRoot(selectedRoot, fs, path)) {
+    throw new Error('请选择空文件夹，或已由莲华视频导演台使用的数据目录');
+  }
+  assertWritableStorageDirectory(selectedRoot);
+  const sameAsCurrent = isSamePath(dataRoot, selectedRoot);
+  const canResumeExistingMigration = !sameAsCurrent
+    && storageLocationConfig.migrationId
+    && storageLocationConfig.migrationFrom
+    && isSamePath(storageLocationConfig.migrationFrom, dataRoot)
+    && storageLocationConfig.mode === mode
+    && (mode !== 'custom' || (storageLocationConfig.directory && isSamePath(storageLocationConfig.directory, selectedRoot)));
+  storageLocationConfig = storageLocation.writeStorageLocationConfig(storageLocationConfigFile, {
+    mode,
+    directory: mode === 'custom' ? selectedRoot : '',
+    migrationFrom: sameAsCurrent ? '' : dataRoot,
+    migrationId: sameAsCurrent ? '' : canResumeExistingMigration ? storageLocationConfig.migrationId : randomUUID(),
+  });
+  storageMigrationError = '';
+  return storageLocationSnapshot();
+};
 let assetRoster = [];
 let activeAssetProjectId = '';
 const rememberAssetRoster = (projects, activeId) => {
@@ -1914,7 +2005,7 @@ app.whenReady().then(() => {
   });
 
   handleTrustedIpc('lianhua:storage-paths', async () => ({
-    dataRoot,
+    ...storageLocationSnapshot(),
     userData: app.getPath('userData'),
     sessionData: app.getPath('sessionData'),
     cache: app.getPath('cache'),
@@ -1926,6 +2017,49 @@ app.whenReady().then(() => {
     recovery: recoveryConfig(),
     encryptionAvailable: safeStorage.isEncryptionAvailable()
   }));
+
+  handleTrustedIpc('lianhua:select-storage-location', async () => {
+    const fixedPath = qaPath('LIANHUA_QA_STORAGE_DIR');
+    if (environmentDataRoot) throw new Error('当前启动方式通过 LIANHUA_DATA_DIR 固定了储存位置');
+    const selected = fixedPath || await dialog.showOpenDialog({
+      title: '选择文件储存位置',
+      defaultPath: dataRoot,
+      properties: ['openDirectory', 'createDirectory'],
+    }).then((result) => result.canceled ? '' : result.filePaths[0] || '');
+    if (!selected) return null;
+    if (!fixedPath) {
+      const focusedWindow = BrowserWindow.getFocusedWindow();
+      const options = {
+        type: 'info',
+        title: '更改文件储存位置',
+        message: `将当前项目和素材迁移到：\n${selected}`,
+        detail: '重启后使用新位置。原目录会保留；如果目标位置已有莲华数据，会先将那份数据另存为备份。',
+        buttons: ['取消', '继续'],
+        defaultId: 1,
+        cancelId: 0,
+        noLink: true,
+      };
+      const confirmation = focusedWindow
+        ? await dialog.showMessageBox(focusedWindow, options)
+        : await dialog.showMessageBox(options);
+      if (confirmation.response !== 1) return null;
+    }
+    return prepareStorageLocation(selected, 'custom');
+  });
+
+  handleTrustedIpc('lianhua:reset-storage-location', async () => {
+    return prepareStorageLocation(defaultDataRoot, 'default');
+  });
+
+  handleTrustedIpc('lianhua:restart-app', async () => {
+    await Promise.all([
+      statePersistence?.flush?.() || Promise.resolve(),
+      stateMaintenancePersistence?.flush?.() || Promise.resolve(),
+    ]);
+    app.relaunch();
+    app.quit();
+    return true;
+  });
 
   handleTrustedIpc('lianhua:load-state', async () => {
     const result = await getStatePersistence().run('load');
@@ -1947,9 +2081,9 @@ app.whenReady().then(() => {
 
   handleTrustedIpc('lianhua:save-state', async (event, content) => {
     // The local project manifest and referenced assets are the durability
-    // barrier. Optional recovery snapshots use their own worker.
+    // barrier. Project roster metadata arrives through note-active-project;
+    // parsing the full project JSON here would block Electron's main thread.
     const text = typeof content === 'string' ? content : '';
-    rememberAssetRosterFromContent(text);
     const result = await getStatePersistence().run('save-local', { content: text });
     scheduleStateMaintenance(event.sender);
     return result;

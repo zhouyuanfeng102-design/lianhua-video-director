@@ -3559,7 +3559,29 @@ export type DesktopSaveResult = {
 
 export type DesktopProjectResult = { project: unknown; schemaVersion: number; hash: string };
 
+export interface StorageLocationStatus {
+  dataRoot: string;
+  defaultDataRoot: string;
+  configuredDataRoot: string;
+  mode: 'default' | 'custom' | 'environment';
+  canChange: boolean;
+  pendingRestart: boolean;
+  migrationError?: string;
+  sessionData?: string;
+  cache?: string;
+  temp?: string;
+  logs?: string;
+  assets?: string;
+  snapshots?: string;
+  recovery?: RecoveryStatus['recovery'];
+  encryptionAvailable?: boolean;
+}
+
 type DesktopStateBridge = {
+  storagePaths?: () => Promise<StorageLocationStatus>;
+  selectStorageLocation?: () => Promise<StorageLocationStatus | null>;
+  resetStorageLocation?: () => Promise<StorageLocationStatus>;
+  restartApp?: () => Promise<boolean>;
   loadState?: () => Promise<string | null>;
   loadWorkspaceState?: () => Promise<string | null>;
   loadProject?: (projectId: string, hash?: string) => Promise<DesktopProjectResult>;

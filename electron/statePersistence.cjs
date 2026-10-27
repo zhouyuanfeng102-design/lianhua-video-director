@@ -1,7 +1,9 @@
 const path = require('node:path');
 const { Worker } = require('node:worker_threads');
 
-const createStatePersistence = ({ dataRoot, encryptSecrets, loadSecrets = () => null, keepAlive = true, workerFactory = (file, options) => new Worker(file, options) }) => {
+const STATE_PERSISTENCE_OPERATION_TIMEOUT_MS = 30_000;
+
+const createStatePersistence = ({ dataRoot, encryptSecrets, loadSecrets = () => null, keepAlive = true, operationTimeoutMs = STATE_PERSISTENCE_OPERATION_TIMEOUT_MS, workerFactory = (file, options) => new Worker(file, options) }) => {
   const pinnedRoot = path.resolve(dataRoot);
   let worker;
   let active;
@@ -13,6 +15,15 @@ const createStatePersistence = ({ dataRoot, encryptSecrets, loadSecrets = () => 
   let discarded = false;
   let lastSaveError;
   const unpackError = (details) => Object.assign(new Error(details?.message || '状态保存线程意外停止，项目保存未确认'), { code: details?.code });
+  const failWorker = (instance, error, terminate = true) => {
+    if (worker !== instance) return;
+    worker = undefined;
+    const operation = active;
+    active = undefined;
+    if (operation?.timer) clearTimeout(operation.timer);
+    const stopped = terminate ? Promise.resolve().then(() => instance.terminate()).catch(() => {}) : Promise.resolve();
+    void stopped.then(() => operation?.reject(unpackError(error)));
+  };
   const ensureWorker = () => {
     if (worker) return worker;
     const instance = workerFactory(path.join(__dirname, 'statePersistenceWorker.cjs'), {
@@ -28,28 +39,21 @@ const createStatePersistence = ({ dataRoot, encryptSecrets, loadSecrets = () => 
           if (worker === instance && active?.id === message.id) instance.postMessage({ type: 'credential-result', id: message.id, value });
         }, (error) => {
           if (worker === instance && active?.id === message.id) instance.postMessage({ type: 'credential-result', id: message.id, error: { message: error instanceof Error ? error.message : String(error), code: error?.code } });
-        }).catch((error) => fail(error));
+        }).catch((error) => failWorker(instance, error));
         return;
       }
       if (message.type !== 'result') return;
       const operation = active;
       active = undefined;
+      if (operation.timer) clearTimeout(operation.timer);
       instance.unref();
       if (message.error) operation.reject(unpackError(message.error));
       else operation.resolve(message.value);
     });
-    const fail = (error) => {
-      if (worker !== instance) return;
-      worker = undefined;
-      const operation = active;
-      active = undefined;
-      operation?.reject(unpackError(error));
-      void instance.terminate().catch(() => {});
-    };
-    instance.on('error', fail);
+    instance.on('error', (error) => failWorker(instance, error));
     instance.on('exit', (code) => {
       if (worker !== instance) return;
-      fail(new Error(`状态保存线程已退出（${code}），本次保存未确认；请重试保存`));
+      failWorker(instance, new Error(`状态保存线程已退出（${code}），本次保存未确认；请重试保存`), false);
     });
     instance.unref();
     return instance;
@@ -64,12 +68,20 @@ const createStatePersistence = ({ dataRoot, encryptSecrets, loadSecrets = () => 
         if (discarded) throw new Error('状态保存已中断');
         const instance = ensureWorker();
         const id = ++sequence;
-        active = { id, resolve, reject };
+        const timer = setTimeout(() => {
+          if (worker !== instance || active?.id !== id) return;
+          failWorker(instance, Object.assign(new Error('本地保存线程响应超时，本次保存结果未确认；请检查项目状态后重试。'), { code: 'STATE_PERSISTENCE_TIMEOUT' }));
+        }, operationTimeoutMs);
+        timer.unref?.();
+        active = { id, resolve, reject, timer };
         if (keepAlive) instance.ref();
         else instance.unref();
         instance.postMessage({ type: 'operation', id, operation, payload });
       } catch (error) {
-        active = undefined;
+        if (active?.resolve === resolve) {
+          if (active.timer) clearTimeout(active.timer);
+          active = undefined;
+        }
         worker?.unref();
         reject(error);
       }
@@ -107,6 +119,7 @@ const createStatePersistence = ({ dataRoot, encryptSecrets, loadSecrets = () => 
     discarded = true;
     const instance = worker;
     worker = undefined;
+    if (active?.timer) clearTimeout(active.timer);
     active?.reject(new Error('状态保存已中断'));
     active = undefined;
     if (instance) await instance.terminate();

@@ -152,7 +152,7 @@ const reloadAndWaitForUiShell = async ({ expectedFontScale, label }) => {
           ) === ${JSON.stringify(markerValue)},
           appShellFound: Boolean(shell),
           settingsTriggerFound: Boolean(
-            document.querySelector('button[aria-label="界面与字体设置"]')
+            document.querySelector('button[aria-label="设置"]')
           ),
           fontScale: shell?.getAttribute('data-ui-font-scale') || '',
         };
@@ -183,7 +183,7 @@ while (Date.now() < appReadyDeadline) {
     document.readyState === 'complete'
     && location.href === ${JSON.stringify(navigationUrl.href)}
     && document.querySelector('.app-shell')
-    && document.querySelector('button[aria-label="界面与字体设置"]')
+    && document.querySelector('button[aria-label="设置"]')
   )`)) {
     appReady = true;
     break;
@@ -332,12 +332,12 @@ if (!bootstrapOnly) {
     }
   };
   const openFontSettings = () => evaluate(`(async () => {
-    const trigger = document.querySelector('button[aria-label="界面与字体设置"]');
+    const trigger = document.querySelector('button[aria-label="设置"]');
     if (!trigger) return { triggerFound: false };
     trigger.focus();
     trigger.click();
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    const activeTrigger = document.querySelector('button[aria-label="界面与字体设置"]');
+    const activeTrigger = document.querySelector('button[aria-label="设置"]');
     const dialog = document.querySelector('#ui-settings-dialog[role="dialog"][aria-modal="true"]');
     const focusableSelector = [
       'button:not([disabled])',
@@ -347,10 +347,15 @@ if (!bootstrapOnly) {
       'textarea:not([disabled])',
       '[tabindex]:not([tabindex="-1"])',
     ].join(',');
-    const firstFocusable = dialog?.querySelector(focusableSelector);
+    const firstFocusable = [...(dialog?.querySelectorAll(focusableSelector) || [])]
+      .find((element) => !element.closest('[hidden]') && element.getClientRects().length > 0);
     const range = dialog?.querySelector('#ui-font-scale-range');
     const number = dialog?.querySelector('#ui-font-scale-number');
     const group = dialog?.querySelector('[role="group"][aria-label="界面字体大小"]');
+    const appearanceTab = dialog?.querySelector('#ui-settings-tab-appearance[role="tab"]');
+    const storageTab = dialog?.querySelector('#ui-settings-tab-storage[role="tab"]');
+    const appearancePanel = dialog?.querySelector('#ui-settings-panel-appearance[role="tabpanel"]');
+    const storagePanel = dialog?.querySelector('#ui-settings-panel-storage[role="tabpanel"]');
     const buttonTexts = [...(dialog?.querySelectorAll('button') || [])]
       .map((button) => button.textContent?.replace(/\s+/g, ' ').trim() || '')
       .filter(Boolean);
@@ -363,6 +368,14 @@ if (!bootstrapOnly) {
       dialogFound: Boolean(dialog),
       heading: dialog?.querySelector('#ui-settings-title')?.textContent?.trim() || '',
       describedBy: dialog?.getAttribute('aria-describedby') || '',
+      tabs: {
+        appearanceControls: appearanceTab?.getAttribute('aria-controls') || '',
+        storageControls: storageTab?.getAttribute('aria-controls') || '',
+        appearanceSelected: appearanceTab?.getAttribute('aria-selected') || '',
+        storageSelected: storageTab?.getAttribute('aria-selected') || '',
+        appearanceHidden: appearancePanel?.hasAttribute('hidden') || false,
+        storageHidden: storagePanel?.hasAttribute('hidden') || false,
+      },
       groupFound: Boolean(group),
       range: range ? { min: range.min, max: range.max, step: range.step, value: range.value } : null,
       number: number ? { min: number.min, max: number.max, step: number.step, value: number.value } : null,
@@ -375,13 +388,19 @@ if (!bootstrapOnly) {
   const initialOpen = await openFontSettings();
   if (
     !initialOpen.triggerFound
-    || initialOpen.triggerTitle !== '界面与字体设置'
+    || initialOpen.triggerTitle !== '设置'
     || initialOpen.triggerControls !== 'ui-settings-dialog'
     || initialOpen.triggerHasPopup !== 'dialog'
     || initialOpen.triggerExpanded !== 'true'
     || !initialOpen.dialogFound
-    || initialOpen.heading !== '界面设置'
+    || initialOpen.heading !== '设置'
     || initialOpen.describedBy !== 'ui-settings-description'
+    || initialOpen.tabs?.appearanceControls !== 'ui-settings-panel-appearance'
+    || initialOpen.tabs?.storageControls !== 'ui-settings-panel-storage'
+    || initialOpen.tabs?.appearanceSelected !== 'true'
+    || initialOpen.tabs?.storageSelected !== 'false'
+    || initialOpen.tabs?.appearanceHidden
+    || !initialOpen.tabs?.storageHidden
     || !initialOpen.groupFound
     || initialOpen.range?.min !== '80'
     || initialOpen.range?.max !== '130'
@@ -395,6 +414,42 @@ if (!bootstrapOnly) {
   ) {
     throw new Error(`Font settings accessibility check failed\n${JSON.stringify(initialOpen, null, 2)}`);
   }
+
+  const storageTabCheck = await evaluate(`(async () => {
+    const dialog = document.querySelector('#ui-settings-dialog');
+    const appearanceTab = dialog?.querySelector('#ui-settings-tab-appearance');
+    const storageTab = dialog?.querySelector('#ui-settings-tab-storage');
+    appearanceTab?.focus();
+    appearanceTab?.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const keyboardMoved = storageTab?.getAttribute('aria-selected') === 'true'
+      && storageTab === document.activeElement;
+    storageTab?.click();
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const storagePanel = dialog?.querySelector('#ui-settings-panel-storage');
+    const appearancePanel = dialog?.querySelector('#ui-settings-panel-appearance');
+    return {
+      selected: storageTab?.getAttribute('aria-selected') || '',
+      keyboardMoved,
+      storageHidden: storagePanel?.hasAttribute('hidden') || false,
+      appearanceHidden: appearancePanel?.hasAttribute('hidden') || false,
+      hasStorageHeading: storagePanel?.textContent?.includes('文件储存位置') || false,
+      hasBrowserNotice: storagePanel?.textContent?.includes('浏览器版不可管理文件储存位置') || false,
+      labelledBy: storagePanel?.getAttribute('aria-labelledby') || '',
+    };
+  })()`);
+  if (
+    storageTabCheck.selected !== 'true'
+    || !storageTabCheck.keyboardMoved
+    || storageTabCheck.storageHidden
+    || !storageTabCheck.appearanceHidden
+    || !storageTabCheck.hasStorageHeading
+    || !storageTabCheck.hasBrowserNotice
+    || storageTabCheck.labelledBy !== 'ui-settings-tab-storage'
+  ) {
+    throw new Error(`Storage settings tab check failed\n${JSON.stringify(storageTabCheck, null, 2)}`);
+  }
+  await evaluate(`(() => { document.querySelector('#ui-settings-tab-appearance')?.click(); })()`);
 
   const buttonAdjustment = await evaluate(`(async () => {
     const findButton = (text) => [...document.querySelectorAll('#ui-settings-dialog button')]
@@ -453,7 +508,7 @@ if (!bootstrapOnly) {
       .find((button) => button.textContent?.trim() === '完成');
     completeButton?.click();
     await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    const trigger = document.querySelector('button[aria-label="界面与字体设置"]');
+    const trigger = document.querySelector('button[aria-label="设置"]');
     return {
       completeFound: Boolean(completeButton),
       dialogClosed: !document.querySelector('#ui-settings-dialog'),
@@ -520,7 +575,8 @@ if (!bootstrapOnly) {
 
   const preparedTabTrap = await evaluate(`(() => {
     const dialog = document.querySelector('#ui-settings-dialog');
-    const focusable = [...(dialog?.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') || [])];
+    const focusable = [...(dialog?.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') || [])]
+      .filter((element) => !element.closest('[hidden]') && element.getClientRects().length > 0);
     const last = focusable.at(-1);
     last?.focus();
     return { count: focusable.length, lastFocused: last === document.activeElement };
@@ -537,7 +593,8 @@ if (!bootstrapOnly) {
   await delay(50);
   const tabWrapped = await evaluate(`(() => {
     const dialog = document.querySelector('#ui-settings-dialog');
-    const first = dialog?.querySelector('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])');
+    const first = [...(dialog?.querySelectorAll('button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])') || [])]
+      .find((element) => !element.closest('[hidden]') && element.getClientRects().length > 0);
     return Boolean(first && first === document.activeElement);
   })()`);
   if (!tabWrapped) throw new Error('Font settings Tab focus did not wrap from the last control to the first');
@@ -550,7 +607,7 @@ if (!bootstrapOnly) {
   });
   await delay(50);
   const escaped = await evaluate(`(() => {
-    const trigger = document.querySelector('button[aria-label="界面与字体设置"]');
+    const trigger = document.querySelector('button[aria-label="设置"]');
     return {
       dialogClosed: !document.querySelector('#ui-settings-dialog'),
       triggerFocused: trigger === document.activeElement,

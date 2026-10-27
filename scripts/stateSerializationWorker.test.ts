@@ -132,6 +132,25 @@ const postClient = createStateSerializationClient(() => postPort);
 await assert.rejects(postClient.encode(fixture('uncloneable'), policy), /mock clone failure/u);
 postPort.throwOnPost = false; const recoverPost = postClient.encode(fixture('valid again'), policy); postPort.complete(0); assert.ok((await recoverPost).serialized);
 
+// A silent encoder must release the ordered writer and allow a fresh worker.
+const timeoutPorts: FakeWorker[] = [];
+const timeoutClient = createStateSerializationClient(() => {
+  const next = new FakeWorker(); timeoutPorts.push(next); return next;
+}, 10);
+const timeoutQueue = createOrderedStateSaveQueue();
+let timedOutWriteCalled = false;
+const timedOutEncode = timeoutQueue(timeoutClient.encode(fixture('stalled encoder'), policy), async () => {
+  timedOutWriteCalled = true; return true;
+});
+await assert.rejects(timedOutEncode, /编码超时/u);
+assert.equal(timeoutPorts[0].terminated, true);
+assert.equal(timedOutWriteCalled, false, 'a timed out snapshot never reaches persistence');
+const recoveredEncode = timeoutQueue(timeoutClient.encode(fixture('recovered encoder'), policy), async (encoded) => encoded.serialized);
+timeoutPorts[0].onerror?.({ message: 'late error from terminated worker', preventDefault: () => {} });
+assert.equal(timeoutPorts[1].terminated, false, 'a late event from the old worker cannot terminate its replacement');
+timeoutPorts[1].complete(0);
+assert.ok((await recoveredEncode).includes('recovered encoder'));
+
 // Exercise the real saveStateAsync integration under a worker mock. A trap on
 // the main realm's JSON.stringify proves both encoding and cache redaction
 // stay out of this path; the returned cache is already fully encoded.

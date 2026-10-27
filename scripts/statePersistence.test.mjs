@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -186,6 +187,62 @@ test('worker death rejects the uncertain persistence barrier without retrying; n
   block = false;
   await h.persistence.run('save', { content: content('explicit-retry') });
   assert.equal(readSaved(h).project.id, 'explicit-retry');
+});
+
+test('persistence timeout terminates the stalled worker and lets the next save use a fresh worker', async (t) => {
+  const workers = [];
+  let encryptionCalls = 0;
+  const h = fixture(t, {
+    operationTimeoutMs: 2_000,
+    workerFactory: (file, options) => {
+      const worker = new Worker(file, options);
+      workers.push(worker);
+      return worker;
+    },
+    encryptSecrets: () => ++encryptionCalls === 1
+      ? new Promise(() => {})
+      : { mode: 'keep' },
+  });
+  await assert.rejects(h.persistence.run('save', { content: content('unconfirmed') }), /响应超时/u);
+  await tick();
+  assert.equal(h.persistence.pendingCount, 0, 'timeout settles the active FIFO item');
+  assert.equal(fs.existsSync(h.stateFile), false, 'unconfirmed writes are never treated as durable');
+  assert.equal(workers.length, 1);
+
+  await h.persistence.run('save', { content: content('recovered') });
+  assert.equal(workers.length, 2, 'the next save starts a replacement worker');
+  assert.equal(readSaved(h).project.id, 'recovered');
+});
+
+test('persistence timeout waits for the old worker to stop before dispatching the next save', async (t) => {
+  const stopping = deferred();
+  const workers = [];
+  const h = fixture(t, {
+    operationTimeoutMs: 20,
+    workerFactory: () => {
+      const worker = new EventEmitter();
+      worker.ref = () => {};
+      worker.unref = () => {};
+      worker.postMessage = (message) => { worker.operation = message; };
+      worker.terminate = () => worker === workers[0] ? stopping.promise : Promise.resolve(0);
+      workers.push(worker);
+      return worker;
+    },
+  });
+  const first = h.persistence.run('save', { content: content('timed-out') });
+  const second = h.persistence.run('save', { content: content('after-timeout') });
+  let firstSettled = false;
+  void first.catch(() => { firstSettled = true; });
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.equal(workers.length, 1, 'the next queued operation waits for old-worker termination');
+  assert.equal(firstSettled, false, 'the timeout is not released while the old worker may still write');
+
+  stopping.resolve(0);
+  await assert.rejects(first, /响应超时/u);
+  await tick();
+  assert.equal(workers.length, 2);
+  workers[1].emit('message', { type: 'result', id: workers[1].operation.id, value: { ok: true } });
+  assert.deepEqual(await second, { ok: true });
 });
 
 test('snapshot restoration is ordered after older pending saves and keeps the displaced state as a restore point', async (t) => {

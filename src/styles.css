@@ -896,7 +896,7 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
   width: min(460px, 100%);
   max-height: min(640px, calc(100vh - 28px));
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 14px;
   overflow: hidden;
   padding: 16px;
@@ -982,6 +982,18 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
   border-top: 1px solid var(--line);
 }
 .ui-settings-footer > .row { flex: 0 0 auto; gap: 6px; }
+.ui-settings-tabs { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.ui-settings-tabs .segment { min-width: 0; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.ui-settings-panel { min-height: 0; display: grid; align-content: start; gap: 10px; overflow-x: hidden; overflow-y: auto; }
+.ui-settings-panel[hidden] { display: none; }
+.ui-storage-section { min-width: 0; display: grid; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+.ui-storage-heading { min-width: 0; display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.ui-storage-heading > div { min-width: 0; display: grid; gap: 4px; }
+.ui-storage-path { min-width: 0; padding: 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--panel); color: var(--text); font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: calc(11px * var(--ui-font-scale, 1)); line-height: 1.45; overflow-wrap: anywhere; }
+.ui-storage-default { color: var(--faint); font-size: calc(10px * var(--ui-font-scale, 1)); line-height: 1.4; overflow-wrap: anywhere; }
+.ui-storage-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 7px; }
+.ui-storage-pending, .ui-storage-error { padding: 8px 10px; border: 1px solid var(--accent-line); border-radius: 6px; color: var(--accent); background: var(--accent-soft); font-size: calc(11px * var(--ui-font-scale, 1)); line-height: 1.45; }
+.ui-storage-error { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 35%, var(--line)); background: var(--danger-soft); }
 .update-log-backdrop { padding: 14px; }
 .update-log-modal {
   width: min(780px, 100%);

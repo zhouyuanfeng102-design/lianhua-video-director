@@ -548,8 +548,6 @@ for (const staleStage of ['preparing', 'queued', 'reconnecting', 'downloading'] 
 {
   const initialPersistEntered = deferred();
   const releaseInitialPersist = deferred();
-  const finalPersistEntered = deferred();
-  const releaseFinalPersist = deferred();
   const firstCheckpointEntered = deferred();
   const releaseFirstCheckpoint = deferred();
   const releasePosts = deferred();
@@ -565,9 +563,6 @@ for (const staleStage of ['preparing', 'queued', 'reconnecting', 'downloading'] 
       if (persistCalls === 1) {
         initialPersistEntered.resolve();
         await releaseInitialPersist.promise;
-      } else if (persistCalls === 2) {
-        finalPersistEntered.resolve();
-        await releaseFinalPersist.promise;
       }
     },
     saveCheckpoint: async (task) => {
@@ -619,15 +614,11 @@ for (const staleStage of ['preparing', 'queued', 'reconnecting', 'downloading'] 
 
   releaseFirstCheckpoint.resolve();
   await waitFor(() => readyCheckpointIds.size === 2, 'all batch rows did not receive a ready checkpoint');
-  await finalPersistEntered.promise;
   shells = videoTasks(harness.holder.state);
-  assert.ok(shells.every((task) => task.videoJob?.batchQueueState === 'ready'));
   assert.ok(shells.every((task) => task.videoJob?.trackingStopped !== true && task.videoJob?.stage !== 'stopped' && task.status !== 'failed'));
-  assert.equal(posts, 0, 'ready checkpoints must be established before the submission pump starts');
-
-  releaseFinalPersist.resolve();
+  await waitFor(() => posts === 1, 'ready checkpoints must release submissions without waiting for another project save');
+  assert.equal(persistCalls, 1, 'the durable initial shell save is sufficient for the batch');
   await started;
-  await waitFor(() => posts === 1, 'the initialized batch did not start its first POST');
   assert.ok(videoTasks(harness.holder.state).every((task) => task.videoJob?.trackingStopped !== true && task.videoJob?.stage !== 'stopped' && task.status !== 'failed'));
   releasePosts.resolve();
   await waitFor(() => videoTasks(harness.holder.state).every((task) => Boolean(task.remoteTaskId)), 'the initialized batch did not submit every row');

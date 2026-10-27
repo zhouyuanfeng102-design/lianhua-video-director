@@ -141,6 +141,7 @@ import { StoryPreparationReviewDialog } from "./components/StoryPreparationRevie
 import { ImageOutputSizeControls } from "./components/ImageOutputSizeControls";
 import { TaskErrorDetails } from "./components/TaskErrorDetails";
 import { VideoExecutionControls } from "./components/VideoExecutionControls";
+import { countOpenGenerationTasks } from "./closeTaskCount";
 import { isUnsubmittedVideoTask, videoTaskHasUnresolvedSubmission } from "./videoGenerationQueue";
 import { defaultImageOutputSize, resolveImageOutputSize, imageReturnedSizeWarning, type ImageOutputSizePreference } from "./imageOutputSize";
 import { assertImageResolutionPlanForConfig, imageResolutionAspectRatio, resolveImageResolutionCapabilities } from "./imageResolution";
@@ -302,6 +303,7 @@ import {
   UI_FONT_SCALE_MIN_PERCENT,
   UNIFIED_VIDEO_CONVERTER_ID,
   type RecoveryStatus,
+  type StorageLocationStatus,
 } from "./storage";
 import { isProjectLibraryReference, projectLibraryReferenceOf } from "./projectLibraryRuntime";
 import { applyAssetPathMoves, setAssetPathMoveListener } from "./assetPathMoves";
@@ -1855,6 +1857,7 @@ const CompactPager = ({
 };
 
 type Notice = { text: string; tone?: "normal" | "error" };
+type UiSettingsTab = "appearance" | "storage";
 
 /**
  * Mirror the active project into the durable project library on every state
@@ -2055,6 +2058,10 @@ export default function App() {
   const updateLogTriggerRef = useRef<HTMLButtonElement>(null);
   const updateLogDialogRef = useRef<HTMLDivElement>(null);
   const [uiSettingsOpen, setUiSettingsOpen] = useState(false);
+  const [uiSettingsTab, setUiSettingsTab] = useState<UiSettingsTab>("appearance");
+  const [storageLocation, setStorageLocation] = useState<StorageLocationStatus | null>(null);
+  const [storageLocationReadError, setStorageLocationReadError] = useState("");
+  const [storageLocationBusy, setStorageLocationBusy] = useState(false);
   const colorMode = normalizeAppColorMode(state.settings.theme);
   const colorTheme = normalizeAppColorTheme(state.settings.themeColor);
   const [systemDarkMode, setSystemDarkMode] = useState(() => window.matchMedia('(prefers-color-scheme: dark)').matches);
@@ -2577,6 +2584,70 @@ export default function App() {
 
   useEffect(() => {
     if (!uiSettingsOpen) return;
+    let active = true;
+    const bridge = desktopBridge();
+    setStorageLocation(null);
+    setStorageLocationReadError("");
+    if (!bridge?.storagePaths) {
+      setStorageLocationReadError("浏览器版不可管理文件储存位置，请在桌面版设置。");
+      return () => { active = false; };
+    }
+    void bridge.storagePaths().then((status) => {
+      if (active) setStorageLocation(status);
+    }).catch((error) => {
+      if (active) setStorageLocationReadError(error instanceof Error ? error.message : "无法读取当前文件储存位置。");
+    });
+    return () => { active = false; };
+  }, [uiSettingsOpen]);
+
+  const selectStorageLocation = async () => {
+    if (storageLocationBusy) return;
+    setStorageLocationBusy(true);
+    try {
+      const next = await desktopBridge()?.selectStorageLocation?.();
+      if (next) {
+        setStorageLocation(next);
+        setStorageLocationReadError("");
+        if (next.pendingRestart) notify("文件储存位置已变更，重启后迁移并生效。");
+      }
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "选择文件储存位置失败。", "error");
+    } finally {
+      setStorageLocationBusy(false);
+    }
+  };
+
+  const resetStorageLocation = async () => {
+    if (storageLocationBusy) return;
+    if (!window.confirm("将当前项目和素材迁移到默认位置。重启后生效，原目录会保留；默认位置已有莲华数据时会先另存为备份。继续吗？")) return;
+    setStorageLocationBusy(true);
+    try {
+      const next = await desktopBridge()?.resetStorageLocation?.();
+      if (next) {
+        setStorageLocation(next);
+        setStorageLocationReadError("");
+        if (next.pendingRestart) notify("已恢复默认储存位置，重启后迁移并生效。");
+      }
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "恢复默认储存位置失败。", "error");
+    } finally {
+      setStorageLocationBusy(false);
+    }
+  };
+
+  const restartForStorageLocation = async () => {
+    if (storageLocationBusy) return;
+    setStorageLocationBusy(true);
+    try {
+      await desktopBridge()?.restartApp?.();
+    } catch (error) {
+      setStorageLocationBusy(false);
+      notify(error instanceof Error ? error.message : "重启软件失败。", "error");
+    }
+  };
+
+  useEffect(() => {
+    if (!uiSettingsOpen) return;
     setUiFontScaleDraft(String(stateRef.current.settings.uiFontScalePercent));
     const previouslyFocused = document.activeElement instanceof HTMLElement
       ? document.activeElement
@@ -2589,11 +2660,10 @@ export default function App() {
       "textarea:not([disabled])",
       '[tabindex]:not([tabindex="-1"])',
     ].join(",");
-    const animationFrame = window.requestAnimationFrame(() => {
-      uiSettingsDialogRef.current
-        ?.querySelector<HTMLElement>(focusableSelector)
-        ?.focus();
-    });
+    const getFocusable = () => Array.from(
+      uiSettingsDialogRef.current?.querySelectorAll<HTMLElement>(focusableSelector) || [],
+    ).filter(element => !element.closest("[hidden]") && element.getClientRects().length > 0);
+    const animationFrame = window.requestAnimationFrame(() => getFocusable()[0]?.focus());
     const handleUiSettingsKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
@@ -2601,9 +2671,7 @@ export default function App() {
         return;
       }
       if (event.key !== "Tab") return;
-      const focusable = Array.from(
-        uiSettingsDialogRef.current?.querySelectorAll<HTMLElement>(focusableSelector) || [],
-      );
+      const focusable = getFocusable();
       if (!focusable.length) {
         event.preventDefault();
         return;
@@ -3148,21 +3216,6 @@ export default function App() {
   useEffect(() => window.lianhuaDesktop?.onStateMaintenanceWarning?.(({ warnings }) => {
     if (warnings.length) setNotice({ text: warnings.join("；"), tone: "error" });
   }), []);
-
-  const countOpenGenerationTasks = (source: AppState) => {
-    const seen = new Set<string>();
-    let count = 0;
-    for (const project of [source.project, ...(source.projects || [])]) {
-      if (!project?.id || seen.has(project.id)) continue;
-      seen.add(project.id);
-      for (const task of project.generationTasks || []) {
-        if (isVideoGenerationTask(task)) {
-          if (videoTaskHasUnresolvedSubmission(task)) count += 1;
-        } else if (task.status === "queued" || task.status === "running") count += 1;
-      }
-    }
-    return count;
-  };
 
   useEffect(() => {
     const bridge = window.lianhuaDesktop;
@@ -10448,11 +10501,11 @@ export default function App() {
               type="button"
               className="ui-settings-trigger"
               ref={uiSettingsTriggerRef}
-              aria-label="界面与字体设置"
+              aria-label="设置"
               aria-haspopup="dialog"
               aria-controls="ui-settings-dialog"
               aria-expanded={uiSettingsOpen}
-              title="界面与字体设置"
+              title="设置"
               onClick={() => setUiSettingsOpen(true)}
             >
               <Settings size={16} aria-hidden="true" />
@@ -10624,9 +10677,9 @@ export default function App() {
           >
             <div className="modal-head ui-settings-head">
               <div>
-                <h3 id="ui-settings-title">界面设置</h3>
+                <h3 id="ui-settings-title">设置</h3>
                 <div id="ui-settings-description" className="field-hint">
-                  调整显示模式、配色和字体大小；修改后立即生效并自动保存。
+                  界面显示和文件储存位置分开管理。
                 </div>
               </div>
               <Button
@@ -10634,139 +10687,122 @@ export default function App() {
                 variant="ghost"
                 icon={<X size={14} />}
                 onClick={() => setUiSettingsOpen(false)}
-                title="关闭界面设置"
+                title="关闭设置"
               />
             </div>
-            <section className="ui-appearance-section" role="group" aria-label="显示模式">
-              <strong>显示模式</strong>
-              <div className="ui-color-mode-options">
-                {appColorModes.map((mode) => <button
-                  key={mode.id}
-                  type="button"
-                  className="btn small"
-                  aria-pressed={colorMode === mode.id}
-                  onClick={() => setState((current) => ({ ...current, settings: { ...current.settings, theme: mode.id } }))}
-                >{mode.name}</button>)}
-              </div>
-            </section>
-            <section className="ui-appearance-section" role="group" aria-label="颜色主题">
-              <strong>颜色主题</strong>
-              <div className="field-hint">经典原色保留原来的多彩配色。</div>
-              <div className="ui-theme-grid">
-                {appColorThemes.map((theme) => <button
-                  key={theme.id}
-                  type="button"
-                  className="ui-theme-choice"
-                  aria-label={`${theme.name}主题`}
-                  aria-pressed={colorTheme === theme.id}
-                  style={{
-                    '--theme-preview-bg': effectiveColorMode === 'dark' ? '#171b23' : theme.background,
-                    '--theme-preview-panel': effectiveColorMode === 'dark' ? '#252b35' : '#ffffff',
-                    '--theme-preview-accent': theme.id === 'classic'
-                      ? 'linear-gradient(90deg, #c84f86 0% 25%, #3f72b5 25% 50%, #287e57 50% 75%, #6f63cf 75% 100%)'
-                      : theme.accent,
-                  } as CSSProperties}
-                  onClick={() => setState((current) => ({ ...current, settings: { ...current.settings, themeColor: theme.id } }))}
-                >
-                  <span className="ui-theme-swatch" aria-hidden="true"><i /><i /><i /></span>
-                  <span>{theme.name}</span>
-                  {colorTheme === theme.id && <Check size={13} aria-hidden="true" />}
-                </button>)}
-              </div>
-            </section>
-            <section
-              className="ui-settings-font-group"
-              role="group"
-              aria-label="界面字体大小"
-            >
-              <div className="ui-settings-scale-row">
-                <div>
-                  <label htmlFor="ui-font-scale-range">字体大小</label>
-                  <div className="field-hint">
-                    可在 {UI_FONT_SCALE_MIN_PERCENT}%–{UI_FONT_SCALE_MAX_PERCENT}% 之间自定义。
+            <div className="ui-settings-tabs" role="tablist" aria-label="设置分类" onKeyDown={(event) => {
+              const currentIndex = uiSettingsTab === "appearance" ? 0 : 1;
+              const nextIndex = event.key === "ArrowRight" ? (currentIndex + 1) % 2
+                : event.key === "ArrowLeft" ? (currentIndex + 1) % 2
+                  : event.key === "Home" ? 0
+                    : event.key === "End" ? 1
+                      : -1;
+              if (nextIndex < 0) return;
+              event.preventDefault();
+              const nextTab = event.currentTarget.querySelectorAll<HTMLButtonElement>("[role='tab']")[nextIndex];
+              nextTab?.focus();
+              setUiSettingsTab(nextIndex === 0 ? "appearance" : "storage");
+            }}>
+              <button id="ui-settings-tab-appearance" type="button" role="tab" aria-selected={uiSettingsTab === "appearance"} aria-controls="ui-settings-panel-appearance" tabIndex={uiSettingsTab === "appearance" ? 0 : -1} className={`segment ${uiSettingsTab === "appearance" ? "active cyan" : ""}`} onClick={() => setUiSettingsTab("appearance")}>
+                <Settings size={14} />界面
+              </button>
+              <button id="ui-settings-tab-storage" type="button" role="tab" aria-selected={uiSettingsTab === "storage"} aria-controls="ui-settings-panel-storage" tabIndex={uiSettingsTab === "storage" ? 0 : -1} className={`segment ${uiSettingsTab === "storage" ? "active violet" : ""}`} onClick={() => setUiSettingsTab("storage")}>
+                <FolderOpen size={14} />文件储存位置
+              </button>
+            </div>
+            <div id="ui-settings-panel-appearance" hidden={uiSettingsTab !== "appearance"} className="ui-settings-panel" role="tabpanel" aria-labelledby="ui-settings-tab-appearance" aria-label="界面设置" tabIndex={0}>
+                <section className="ui-appearance-section" role="group" aria-label="显示模式">
+                  <strong>显示模式</strong>
+                  <div className="ui-color-mode-options">
+                    {appColorModes.map((mode) => <button
+                      key={mode.id}
+                      type="button"
+                      className="btn small"
+                      aria-pressed={colorMode === mode.id}
+                      onClick={() => setState((current) => ({ ...current, settings: { ...current.settings, theme: mode.id } }))}
+                    >{mode.name}</button>)}
                   </div>
-                </div>
-                <output
-                  className="ui-settings-value"
-                  htmlFor="ui-font-scale-range ui-font-scale-number"
-                  aria-live="polite"
-                >
-                  {uiFontScalePercent}% · {uiFontScalePercent === UI_FONT_SCALE_DEFAULT_PERCENT ? "默认" : "自定义"}
-                </output>
-              </div>
-              <input
-                id="ui-font-scale-range"
-                className="ui-settings-range"
-                type="range"
-                min={UI_FONT_SCALE_MIN_PERCENT}
-                max={UI_FONT_SCALE_MAX_PERCENT}
-                step={5}
-                value={uiFontScalePercent}
-                aria-valuetext={`${uiFontScalePercent}%`}
-                onChange={(event) => setUiFontScalePercent(Number(event.target.value))}
-              />
-              <div className="ui-settings-scale-controls">
-                <Button
-                  small
-                  variant="ghost"
-                  className="ui-settings-stepper"
-                  disabled={uiFontScalePercent <= UI_FONT_SCALE_MIN_PERCENT}
-                  onClick={() => setUiFontScalePercent(uiFontScalePercent - 5)}
-                >
-                  减小字体
-                </Button>
-                <label className="ui-settings-number">
-                  <span>自定义比例</span>
-                  <span className="ui-settings-number-input">
-                    <input
-                      id="ui-font-scale-number"
-                      type="number"
-                      min={UI_FONT_SCALE_MIN_PERCENT}
-                      max={UI_FONT_SCALE_MAX_PERCENT}
-                      step={1}
-                      inputMode="numeric"
-                      value={uiFontScaleDraft}
-                      aria-label="自定义字体大小百分比"
-                      onChange={(event) => {
-                        const draft = event.target.value;
-                        setUiFontScaleDraft(draft);
-                        const parsed = Number(draft);
-                        if (
-                          Number.isFinite(parsed)
-                          && parsed >= UI_FONT_SCALE_MIN_PERCENT
-                          && parsed <= UI_FONT_SCALE_MAX_PERCENT
-                        ) {
-                          setUiFontScalePercent(parsed);
-                        }
-                      }}
-                      onBlur={commitUiFontScaleDraft}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter") event.currentTarget.blur();
-                      }}
-                    />
-                    <span aria-hidden="true">%</span>
-                  </span>
-                </label>
-                <Button
-                  small
-                  variant="ghost"
-                  className="ui-settings-stepper"
-                  disabled={uiFontScalePercent >= UI_FONT_SCALE_MAX_PERCENT}
-                  onClick={() => setUiFontScalePercent(uiFontScalePercent + 5)}
-                >
-                  增大字体
-                </Button>
-              </div>
-            </section>
+                </section>
+                <section className="ui-appearance-section" role="group" aria-label="颜色主题">
+                  <strong>颜色主题</strong>
+                  <div className="field-hint">经典原色保留原来的多彩配色。</div>
+                  <div className="ui-theme-grid">
+                    {appColorThemes.map((theme) => <button
+                      key={theme.id}
+                      type="button"
+                      className="ui-theme-choice"
+                      aria-label={`${theme.name}主题`}
+                      aria-pressed={colorTheme === theme.id}
+                      style={{
+                        '--theme-preview-bg': effectiveColorMode === 'dark' ? '#171b23' : theme.background,
+                        '--theme-preview-panel': effectiveColorMode === 'dark' ? '#252b35' : '#ffffff',
+                        '--theme-preview-accent': theme.id === 'classic'
+                          ? 'linear-gradient(90deg, #c84f86 0% 25%, #3f72b5 25% 50%, #287e57 50% 75%, #6f63cf 75% 100%)'
+                          : theme.accent,
+                      } as CSSProperties}
+                      onClick={() => setState((current) => ({ ...current, settings: { ...current.settings, themeColor: theme.id } }))}
+                    >
+                      <span className="ui-theme-swatch" aria-hidden="true"><i /><i /><i /></span>
+                      <span>{theme.name}</span>
+                      {colorTheme === theme.id && <Check size={13} aria-hidden="true" />}
+                    </button>)}
+                  </div>
+                </section>
+                <section className="ui-settings-font-group" role="group" aria-label="界面字体大小">
+                  <div className="ui-settings-scale-row">
+                    <div>
+                      <label htmlFor="ui-font-scale-range">字体大小</label>
+                      <div className="field-hint">可在 {UI_FONT_SCALE_MIN_PERCENT}%–{UI_FONT_SCALE_MAX_PERCENT}% 之间自定义。</div>
+                    </div>
+                    <output className="ui-settings-value" htmlFor="ui-font-scale-range ui-font-scale-number" aria-live="polite">
+                      {uiFontScalePercent}% · {uiFontScalePercent === UI_FONT_SCALE_DEFAULT_PERCENT ? "默认" : "自定义"}
+                    </output>
+                  </div>
+                  <input id="ui-font-scale-range" className="ui-settings-range" type="range" min={UI_FONT_SCALE_MIN_PERCENT} max={UI_FONT_SCALE_MAX_PERCENT} step={5} value={uiFontScalePercent} aria-valuetext={`${uiFontScalePercent}%`} onChange={(event) => setUiFontScalePercent(Number(event.target.value))} />
+                  <div className="ui-settings-scale-controls">
+                    <Button small variant="ghost" className="ui-settings-stepper" disabled={uiFontScalePercent <= UI_FONT_SCALE_MIN_PERCENT} onClick={() => setUiFontScalePercent(uiFontScalePercent - 5)}>减小字体</Button>
+                    <label className="ui-settings-number">
+                      <span>自定义比例</span>
+                      <span className="ui-settings-number-input">
+                        <input id="ui-font-scale-number" type="number" min={UI_FONT_SCALE_MIN_PERCENT} max={UI_FONT_SCALE_MAX_PERCENT} step={1} inputMode="numeric" value={uiFontScaleDraft} aria-label="自定义字体大小百分比" onChange={(event) => {
+                          const draft = event.target.value;
+                          setUiFontScaleDraft(draft);
+                          const parsed = Number(draft);
+                          if (Number.isFinite(parsed) && parsed >= UI_FONT_SCALE_MIN_PERCENT && parsed <= UI_FONT_SCALE_MAX_PERCENT) setUiFontScalePercent(parsed);
+                        }} onBlur={commitUiFontScaleDraft} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }} />
+                        <span aria-hidden="true">%</span>
+                      </span>
+                    </label>
+                    <Button small variant="ghost" className="ui-settings-stepper" disabled={uiFontScalePercent >= UI_FONT_SCALE_MAX_PERCENT} onClick={() => setUiFontScalePercent(uiFontScalePercent + 5)}>增大字体</Button>
+                  </div>
+                </section>
+            </div>
+            <div id="ui-settings-panel-storage" hidden={uiSettingsTab !== "storage"} className="ui-settings-panel" role="tabpanel" aria-labelledby="ui-settings-tab-storage" aria-label="文件储存位置" tabIndex={0}>
+                <section className="ui-storage-section" role="group" aria-label="文件储存位置">
+                  <div className="ui-storage-heading">
+                    <div>
+                      <strong>文件储存位置</strong>
+                      <div className="field-hint">项目、素材、恢复点和任务记录都会保存到这里。</div>
+                    </div>
+                    {storageLocation && <span className="badge violet">{storageLocation.mode === "custom" ? "自定义" : storageLocation.mode === "environment" ? "启动参数固定" : "默认"}</span>}
+                  </div>
+                  {storageLocation ? (
+                    <>
+                      <div className="ui-storage-path" title={storageLocation.dataRoot}>{storageLocation.dataRoot}</div>
+                      {storageLocation.pendingRestart && <div className="ui-storage-pending" role="status">已选择新位置，重启后迁移并生效。当前软件仍使用旧目录。</div>}
+                      {storageLocation.migrationError && <div className="ui-storage-error" role="alert">{storageLocation.migrationError}</div>}
+                      {storageLocation.mode === "environment" && <div className="field-hint">当前由启动参数固定位置，普通设置不会覆盖它。</div>}
+                      {storageLocation.mode !== "environment" && <div className="ui-storage-default">默认位置：{storageLocation.defaultDataRoot}</div>}
+                      <div className="ui-storage-actions">
+                        <Button small icon={<FolderOpen size={14} />} disabled={!storageLocation.canChange || storageLocationBusy} onClick={() => void selectStorageLocation()}>选择文件夹</Button>
+                        <Button small variant="ghost" disabled={!storageLocation.canChange || storageLocationBusy || storageLocation.mode === "default"} onClick={() => void resetStorageLocation()}>恢复默认</Button>
+                      </div>
+                    </>
+                  ) : storageLocationReadError ? <div className="field-hint" role="status">{storageLocationReadError}</div> : <div className="field-hint" role="status">正在读取当前文件储存位置…</div>}
+                </section>
+            </div>
             <div className="ui-settings-footer">
-              <Button
-                variant="ghost"
-                icon={<RotateCcw size={15} />}
-                disabled={uiFontScalePercent === UI_FONT_SCALE_DEFAULT_PERCENT}
-                onClick={() => setUiFontScalePercent(UI_FONT_SCALE_DEFAULT_PERCENT)}
-              >
-                恢复默认字体
-              </Button>
+              {uiSettingsTab === "appearance" ? <Button variant="ghost" icon={<RotateCcw size={15} />} disabled={uiFontScalePercent === UI_FONT_SCALE_DEFAULT_PERCENT} onClick={() => setUiFontScalePercent(UI_FONT_SCALE_DEFAULT_PERCENT)}>恢复默认字体</Button> : storageLocation?.pendingRestart ? <Button variant="primary" disabled={storageLocationBusy} onClick={() => void restartForStorageLocation()}>立即重启</Button> : <span />}
               <Button
                 variant="primary"
                 onClick={() => setUiSettingsOpen(false)}

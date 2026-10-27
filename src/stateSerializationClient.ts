@@ -15,6 +15,8 @@ export interface StateSerializationWorkerPort {
   onmessageerror: (() => void) | null;
 }
 
+const STATE_SERIALIZATION_TIMEOUT_MS = 30_000;
+
 const createBrowserStateWorker = (): StateSerializationWorkerPort | undefined => (
   typeof Worker === 'function'
     ? new Worker(new URL('./stateSerialization.worker.ts', import.meta.url), { type: 'module', name: 'lianhua-state-encoder' }) as unknown as StateSerializationWorkerPort
@@ -25,17 +27,21 @@ const createBrowserStateWorker = (): StateSerializationWorkerPort | undefined =>
  * live state later without changing the queued snapshot. */
 export const createStateSerializationClient = (
   createWorker: () => StateSerializationWorkerPort | undefined = createBrowserStateWorker,
+  timeoutMs = STATE_SERIALIZATION_TIMEOUT_MS,
 ) => {
   let worker: StateSerializationWorkerPort | undefined;
   let disabled = false;
   let nextId = 0;
-  const pending = new Map<number, { resolve: (value: EncodedStateSnapshot) => void; reject: (error: Error) => void }>();
-  const failWorker = (message: string) => {
+  const pending = new Map<number, { resolve: (value: EncodedStateSnapshot) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>();
+  const failWorker = (message: string, allowRestart = false, expectedWorker = worker) => {
+    if (expectedWorker && worker !== expectedWorker) return;
+    const instance = worker;
     disabled = true;
-    worker?.terminate();
     worker = undefined;
+    instance?.terminate();
+    if (allowRestart) disabled = false;
     const error = new Error(message);
-    for (const job of pending.values()) job.reject(error);
+    for (const job of pending.values()) { clearTimeout(job.timer); job.reject(error); }
     pending.clear();
   };
   const obtainWorker = () => {
@@ -43,19 +49,21 @@ export const createStateSerializationClient = (
     try {
       worker = createWorker();
       if (!worker) return undefined;
-      worker.onmessage = ({ data }) => {
+      const instance = worker;
+      instance.onmessage = ({ data }) => {
         const job = pending.get(data.id);
         if (!job) return;
         pending.delete(data.id);
+        clearTimeout(job.timer);
         if (data.ok) job.resolve(data.result);
         else job.reject(new Error(data.error));
       };
-      worker.onerror = (event) => {
+      instance.onerror = (event) => {
         event.preventDefault?.();
-        failWorker(`本地存档后台编码失败：${event.message || '编码线程无法启动或已停止'}；本次未写入，请重试保存。`);
+        failWorker(`本地存档后台编码失败：${event.message || '编码线程无法启动或已停止'}；本次未写入，请重试保存。`, false, instance);
       };
-      worker.onmessageerror = () => failWorker('本地存档后台编码通信失败；本次未写入，请重试保存。');
-      return worker;
+      instance.onmessageerror = () => failWorker('本地存档后台编码通信失败；本次未写入，请重试保存。', false, instance);
+      return instance;
     } catch {
       // Construction/security failures are still synchronous, so a fallback
       // can capture the original call's state without any mutable-data race.
@@ -73,11 +81,17 @@ export const createStateSerializationClient = (
     }
     const id = ++nextId;
     return new Promise((resolve, reject) => {
-      pending.set(id, { resolve, reject });
+      const timer = setTimeout(() => {
+        const job = pending.get(id);
+        if (!job) return;
+        failWorker('本地存档后台编码超时；本次未写入，后续保存可以重试。', true, target);
+      }, timeoutMs);
+      pending.set(id, { resolve, reject, timer });
       try {
         target.postMessage({ id, state, policy });
       } catch (error) {
         pending.delete(id);
+        clearTimeout(timer);
         // A failed post has sent no snapshot and written nothing. Do not
         // retry a possibly different state after an asynchronous error.
         reject(error instanceof Error ? error : new Error('本地存档快照无法发送到编码线程'));

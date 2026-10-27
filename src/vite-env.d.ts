@@ -10,6 +10,12 @@ interface Window {
     saveFile: (payload: unknown) => Promise<string | null>;
     storagePaths: () => Promise<{
       dataRoot: string;
+      defaultDataRoot: string;
+      configuredDataRoot: string;
+      mode: 'default' | 'custom' | 'environment';
+      canChange: boolean;
+      pendingRestart: boolean;
+      migrationError?: string;
       sessionData: string;
       cache: string;
       temp: string;
@@ -19,6 +25,25 @@ interface Window {
       recovery?: import('./storage').RecoveryStatus['recovery'];
       encryptionAvailable: boolean;
     }>;
+    selectStorageLocation?: () => Promise<{
+      dataRoot: string;
+      defaultDataRoot: string;
+      configuredDataRoot: string;
+      mode: 'default' | 'custom' | 'environment';
+      canChange: boolean;
+      pendingRestart: boolean;
+      migrationError?: string;
+    } | null>;
+    resetStorageLocation?: () => Promise<{
+      dataRoot: string;
+      defaultDataRoot: string;
+      configuredDataRoot: string;
+      mode: 'default' | 'custom' | 'environment';
+      canChange: boolean;
+      pendingRestart: boolean;
+      migrationError?: string;
+    }>;
+    restartApp?: () => Promise<boolean>;
     loadState: () => Promise<string | null>;
     loadWorkspaceState?: () => Promise<string | null>;
     loadProject?: (projectId: string, hash?: string) => Promise<import('./storage').DesktopProjectResult>;

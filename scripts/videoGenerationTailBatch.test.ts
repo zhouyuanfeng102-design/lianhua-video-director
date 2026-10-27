@@ -127,48 +127,50 @@ const aiSelection = (source: 'ai' | 'last-frame' = 'ai'): VideoTailFrameSelectio
 }
 
 {
-  const h = makeHarness(); const wait = deferred(); let persisted = false;
+  const h = makeHarness(); const wait = deferred(); let saveStarted = false; let saveFinished = false;
   h.options.persistState = async () => {
-    if (!persisted && tasks(h)[0]?.resultAssetId) { persisted = true; await wait.promise; }
+    if (!saveStarted && tasks(h)[0]?.resultAssetId) { saveStarted = true; await wait.promise; saveFinished = true; }
   };
-  const result = await h.engine.startBatch(chainInput(h.holder().project.id));
-  await waitFor(() => persisted, '第一段没有进入项目落盘');
+  const setState = h.options.setState;
+  h.options.setState = (updater) => {
+    setState(updater);
+    if (!saveStarted && tasks(h)[0]?.resultAssetId) void h.options.persistState?.();
+  };
+  await h.engine.startBatch(chainInput(h.holder().project.id));
+  await waitFor(() => saveStarted, '上一段落盘后没有进入自动保存');
   for (let index = 0; index < 5; index += 1) h.engine.reconcile();
-  await h.engine.resume(result.taskIds[1]); await settle();
-  assert.equal(posts(h).length, 1, '成片记录落盘之前不能提交后段'); assert.equal(h.extractions.length, 0);
-  wait.resolve(); await waitFor(() => posts(h).length === 3, '成片项目记录落盘后未唤醒'); h.engine.dispose();
-}
-
-for (const barrier of ['main', 'journal'] as const) {
-  const h = makeHarness(); const wait = deferred(); let hit = false;
-  if (barrier === 'main') h.options.persistState = async () => {
-    if (!hit && tasks(h)[1]?.videoJob?.tailPreparation?.phase === 'ready') { hit = true; await wait.promise; }
-  };
-  else {
-    const save = h.desktop.saveVideoTaskCheckpoint!;
-    h.desktop.saveVideoTaskCheckpoint = async (task) => {
-      if (!hit && task.videoJob?.tailPreparation?.phase === 'ready') { hit = true; await wait.promise; }
-      return save(task);
-    };
-  }
-  const result = await h.engine.startBatch(chainInput(h.holder().project.id));
-  await waitFor(() => hit, `尾帧未触及${barrier}持久化门禁`);
-  h.engine.reconcile(); await h.engine.resume(result.taskIds[1]); await settle();
-  assert.equal(posts(h).length, 1, `尾帧${barrier}落盘之前不允许上传/POST`);
-  wait.resolve(); await waitFor(() => posts(h).length === 3, `${barrier}落盘后没有继续`); h.engine.dispose();
+  await waitFor(() => posts(h).length === 3, '视频链仍在等待整库自动保存');
+  assert.equal(saveFinished, false, '后段提交时整库自动保存仍处于等待中');
+  wait.resolve(); await waitFor(() => saveFinished, '模拟项目保存没有完成'); h.engine.dispose();
 }
 
 {
-  const h = makeHarness(); const wait = deferred(); let entered = false; let downloads = 0; const download = h.desktop.downloadGeneratedMedia;
-  h.desktop.downloadGeneratedMedia = async (input) => { downloads += 1; return download(input); };
-  h.options.persistState = async () => { if (!entered && tasks(h)[0]?.resultAssetId) { entered = true; await wait.promise; } };
-  const batch = await h.engine.startBatch(chainInput(h.holder().project.id));
-  await waitFor(() => entered, '取消存盘回归没有到达第一段持久化门禁');
-  await h.engine.cancel(batch.taskIds[0]); wait.resolve(); await settle();
-  assert.equal(posts(h).length, 1); assert.equal(tasks(h)[0].videoJob?.trackingStopped, true);
-  await h.engine.resume(batch.taskIds[0]);
-  await waitFor(() => posts(h).length === 3, '已落盘父成片停追踪后无法恢复链');
-  assert.equal(downloads, 3, '恢复已保存成片不应重新下载父视频'); h.engine.dispose();
+  const h = makeHarness(); const wait = deferred(); let hit = false;
+  const save = h.desktop.saveVideoTaskCheckpoint!;
+  h.desktop.saveVideoTaskCheckpoint = async (task) => {
+    if (!hit && task.videoJob?.tailPreparation?.phase === 'ready') { hit = true; await wait.promise; }
+    return save(task);
+  };
+  const result = await h.engine.startBatch(chainInput(h.holder().project.id));
+  await waitFor(() => hit, '尾帧未触及独立断点持久化门禁');
+  h.engine.reconcile(); await h.engine.resume(result.taskIds[1]); await settle();
+  assert.equal(posts(h).length, 1, '尾帧独立断点落盘之前不允许上传/POST');
+  wait.resolve(); await waitFor(() => posts(h).length === 3, '尾帧独立断点落盘后没有继续'); h.engine.dispose();
+}
+
+{
+  const h = makeHarness(); const wait = deferred(); let entered = false; const download = h.desktop.downloadGeneratedMedia;
+  h.desktop.downloadGeneratedMedia = async (input) => download(input);
+  const saveCheckpoint = h.desktop.saveVideoTaskCheckpoint!;
+  h.desktop.saveVideoTaskCheckpoint = async (task) => {
+    if (!entered && task.videoJob?.resultAssetIds?.length) { entered = true; await wait.promise; }
+    return saveCheckpoint(task);
+  };
+  await h.engine.startBatch(chainInput(h.holder().project.id));
+  await waitFor(() => entered, '未到达独立成片断点');
+  await waitFor(() => posts(h).length === 3, '后段仍在等前段结果断点保存');
+  assert.equal(h.extractions.length, 2, '文件落盘后应立即抽取后续尾帧');
+  wait.resolve(); await settle(); h.engine.dispose();
 }
 
 {
@@ -198,16 +200,29 @@ for (const barrier of ['main', 'journal'] as const) {
   assert.equal(h.extractions.length, 2, '第二段已有正确帧时不应再抽一张；仅第三段再抽一张'); h.engine.dispose();
 }
 
-for (const failure of ['download', 'persist'] as const) {
+for (const failure of ['download', 'checkpoint'] as const) {
   const h = makeHarness(); const original = h.desktop.downloadGeneratedMedia; let fail = true; let downloads = 0;
   h.desktop.downloadGeneratedMedia = async (input) => { downloads += 1; if (failure === 'download' && fail) throw new Error('模拟成片下载失败'); return original(input); };
-  if (failure === 'persist') h.options.persistState = async () => { if (fail && tasks(h)[0]?.resultAssetId) throw new Error('模拟成片主文件落盘失败'); };
+  if (failure === 'checkpoint') {
+    const saveCheckpoint = h.desktop.saveVideoTaskCheckpoint!;
+    h.desktop.saveVideoTaskCheckpoint = async (task) => {
+      if (fail && task.videoJob?.resultAssetIds?.length) throw new Error('模拟成片断点写入失败');
+      return saveCheckpoint(task);
+    };
+  }
   const result = await h.engine.startBatch(chainInput(h.holder().project.id));
   await waitFor(() => Boolean(tasks(h)[0]?.videoJob?.downloadError), `${failure}失败没有展示保存错误`);
-  h.engine.reconcile(); await settle(); assert.equal(posts(h).length, 1); assert.equal(h.extractions.length, 0);
-  fail = false; await h.engine.retryDownload(result.taskIds[0]);
-  await waitFor(() => posts(h).length === 3, `${failure}重试未继续后段`);
-  assert.equal(downloads, failure === 'download' ? 4 : 3, '保存重试不能重生成或反复下载已落盘视频');
+  h.engine.reconcile(); await settle();
+  if (failure === 'download') {
+    assert.equal(posts(h).length, 1); assert.equal(h.extractions.length, 0);
+    fail = false; await h.engine.retryDownload(result.taskIds[0]);
+    await waitFor(() => posts(h).length === 3, '下载重试未继续后段');
+    assert.equal(downloads, 4, '保存重试不能重生成');
+  } else {
+    await waitFor(() => posts(h).length === 3, '成片文件已落盘但断点失败仍阻塞了后段');
+    assert.equal(h.extractions.length, 2);
+    assert.equal(downloads, 3, '断点写入失败不能重复下载视频');
+  }
   h.engine.dispose();
 }
 
@@ -606,15 +621,18 @@ for (const { cancelUpload, role, replaceAll } of [
   assert.equal(tasks(h)[0].resultAssetId, undefined); assert.equal(tasks(h)[0].videoJob!.resultAssetIds!.length, 2);
   assert.match(tasks(h)[1].videoJob!.tailPreparation!.message!, /选择/u);
   const chosen = tasks(h)[0].videoJob!.resultAssetIds![1]; const hold = deferred(); let hit = false;
-  h.options.persistState = async () => { if (!hit && tasks(h)[0].resultAssetId === chosen) { hit = true; await hold.promise; } };
+  const saveCheckpoint = h.desktop.saveVideoTaskCheckpoint!;
+  h.desktop.saveVideoTaskCheckpoint = async (task) => {
+    if (!hit && task.resultAssetId === chosen && task.videoJob?.resultSelectionRequired === false) { hit = true; await hold.promise; }
+    return saveCheckpoint(task);
+  };
   const selecting = h.engine.selectResultVideo(batch.taskIds[0], chosen);
-  await waitFor(() => hit, '成片选择未进入持久化门槛');
-  h.engine.reconcile(); await h.engine.resume(batch.taskIds[1]); await settle();
-  assert.equal(posts(h).length, 1, '选择记录落盘前不能提交后段'); assert.equal(h.extractions.length, 0);
-  hold.resolve(); await selecting;
-  await waitFor(() => posts(h).length === 3, '选择成片后没有继续尾帧链');
+  await waitFor(() => hit, '成片选择未进入独立断点门槛');
+  await selecting;
+  await waitFor(() => posts(h).length === 3, '成片已选择但后段仍在等待断点保存');
   assert.equal((h.extractions[0].source as { assetId: string }).assetId, chosen, '尾帧必须来自明确选中的ZIP视频，不是第一条');
-  assert.equal(downloadCount, 3, '选择成片不重新下载整个ZIP'); h.engine.dispose();
+  assert.equal(downloadCount, 3, '选择成片不重新下载整个ZIP');
+  hold.resolve(); await settle(); h.engine.dispose();
 }
 
 {
@@ -628,25 +646,10 @@ for (const { cancelUpload, role, replaceAll } of [
     if (fail && task.id === batch.taskIds[0] && task.resultAssetId) throw new Error('选择断点写入失败');
     return save(task);
   };
-  await assert.rejects(h.engine.selectResultVideo(batch.taskIds[0], tasks(h)[0].videoJob!.resultAssetIds![1]), /断点/u);
-  h.engine.reconcile(); await settle();
-  assert.equal(posts(h).length, 1); assert.equal(h.extractions.length, 0); assert.ok(tasks(h)[0].videoJob!.downloadError);
-  fail = false; await h.engine.retryDownload(batch.taskIds[0]);
-  await waitFor(() => posts(h).length === 3, '重试选择断点后未继续尾帧链'); assert.equal(count, 3); h.engine.dispose();
-}
-
-{
-  const h = makeHarness(); let count = 0; const download = h.desktop.downloadGeneratedMedia;
-  h.desktop.downloadGeneratedMedia = async (input) => ++count === 1
-    ? { ...movie('cancel-choice-A'), additionalVideos: [movie('cancel-choice-B')], archiveFileName: 'cancel.zip' } : download(input);
-  const batch = await h.engine.startBatch(chainInput(h.holder().project.id));
-  await waitFor(() => tasks(h)[0]?.videoJob?.resultSelectionRequired === true, '选择取消测试未收到多视频'); await settle();
-  const wait = deferred(); let hit = false;
-  h.options.persistState = async () => { if (!hit && tasks(h)[0].resultAssetId) { hit = true; await wait.promise; } };
-  const selecting = h.engine.selectResultVideo(batch.taskIds[0], tasks(h)[0].videoJob!.resultAssetIds![1]);
-  await waitFor(() => hit, '选择取消测试没有到达主文件持久化');
-  await h.engine.cancel(batch.taskIds[0]); wait.resolve(); await assert.rejects(selecting, /停止/u); await settle();
-  assert.equal(posts(h).length, 1); assert.equal(h.extractions.length, 0); assert.equal(tasks(h)[0].videoJob!.trackingStopped, true); h.engine.dispose();
+  await h.engine.selectResultVideo(batch.taskIds[0], tasks(h)[0].videoJob!.resultAssetIds![1]);
+  await waitFor(() => Boolean(tasks(h)[0]?.videoJob?.downloadError), '选择断点写入失败没有显示');
+  await waitFor(() => posts(h).length === 3, '选择断点写入失败仍阻塞了后段');
+  assert.equal(h.extractions.length, 2); assert.equal(count, 3); h.engine.dispose();
 }
 
 {
@@ -844,20 +847,15 @@ for (const failure of ['unavailable', 'fallback', 'request-error'] as const) {
 // AI owns semantic repair. The engine only persists every actual request's
 // bounded paid boundary, and never recreates a completed predecessor video.
 for (const successAt of [2, 3, 4]) {
-  const h = makeHarness(); const seen: number[] = []; const persisted: number[] = [];
-  h.options.persistState = async () => {
-    const selection = tasks(h)[1]?.videoJob?.tailPreparation?.selection;
-    if (selection?.status === 'started') persisted.push(selection.attempt!);
-  };
+  const h = makeHarness(); const seen: number[] = [];
   h.options.selectTailFrame = async (request) => {
     assert.equal(request.maxAiAttempts, 4);
     for (let attempt = 1; attempt <= successAt; attempt += 1) {
       const boundary = { attempt, maxAttempts: 4, maxTokens: 4096 * 2 ** (attempt - 1) };
       await request.onBeforeAI!(boundary);
       seen.push(attempt);
-      assert.equal(persisted.at(-1), attempt, '每次请求都必须先保存项目记录');
       assert.deepEqual(h.checkpoints.get(tasks(h)[1].id)?.videoJob?.tailPreparation?.selection, { status: 'started', run: 1, ...boundary });
-      assert.equal(posts(h).length, 1, 'AI重试不重生成上一段，也不提前提交下一段');
+      assert.equal(posts(h).length, 1, 'AI尝试独立断点落盘后才继续，且不重生成上一段');
     }
     return aiSelection();
   };
@@ -932,7 +930,7 @@ for (const failure of ['exhausted', 'unknown-response'] as const) {
   assert.equal(analyses, 3); assert.equal(tasks(h)[1].videoJob!.tailPreparation!.selection!.run, 2); h.engine.dispose();
 }
 
-for (const barrier of ['journal', 'main'] as const) {
+for (const barrier of ['journal'] as const) {
   const h = makeHarness(); const blockedWrite = deferred(); let blockedEntered = false; let analyses = 0;
   const originalSave = h.desktop.saveVideoTaskCheckpoint!;
   h.options.selectTailFrame = async (request) => {
@@ -943,8 +941,7 @@ for (const barrier of ['journal', 'main'] as const) {
   const waitOnBlocked = async (task: VideoGenerationTask | undefined) => {
     if (!blockedEntered && task?.videoJob?.tailPreparation?.phase === 'blocked') { blockedEntered = true; await blockedWrite.promise; }
   };
-  if (barrier === 'journal') h.desktop.saveVideoTaskCheckpoint = async (task) => { await waitOnBlocked(task); return originalSave(task); };
-  else h.options.persistState = async () => { await waitOnBlocked(tasks(h)[1]); };
+  h.desktop.saveVideoTaskCheckpoint = async (task) => { await waitOnBlocked(task); return originalSave(task); };
   const batch = await h.engine.startBatch(strictAiInput(h.holder().project.id));
   await waitFor(() => blockedEntered, '未进入可点击重试但旧写盘未结束的窗口');
   let resumed = false; const retry = h.engine.resume(batch.taskIds[1]).then(() => { resumed = true; });
@@ -1023,13 +1020,12 @@ for (const stop of ['cancel', 'delete'] as const) {
   h.engine.dispose();
 }
 
-for (const barrier of ['journal', 'main'] as const) {
+for (const barrier of ['journal'] as const) {
   const h = makeHarness(); let analyses = 0; const originalSave = h.desktop.saveVideoTaskCheckpoint!;
   const rejectSecondBoundary = (task: VideoGenerationTask | undefined) => {
     if (task?.videoJob?.tailPreparation?.phase === 'extracting' && task.videoJob.tailPreparation.selection?.attempt === 2) throw new Error('第二次收费边界落盘失败');
   };
-  if (barrier === 'journal') h.desktop.saveVideoTaskCheckpoint = async (task) => { rejectSecondBoundary(task); return originalSave(task); };
-  else h.options.persistState = async () => { rejectSecondBoundary(tasks(h)[1]); };
+  h.desktop.saveVideoTaskCheckpoint = async (task) => { rejectSecondBoundary(task); return originalSave(task); };
   h.options.selectTailFrame = async (request) => {
     for (let attempt = 1; attempt <= 4; attempt += 1) { await request.onBeforeAI!({ attempt, maxAttempts: 4, maxTokens: 4096 }); analyses += 1; }
     return aiSelection();
@@ -1134,4 +1130,4 @@ for (const barrier of ['journal', 'main'] as const) {
   h.engine.dispose();
 }
 
-console.log('Video tail dependency checks passed: zero-video sequence, exact parent pixels, download/main/journal barriers, no bypass on resume, failure recovery, cancellation/late frames, project ownership, future-slot preflight, ZIP explicit primary selection, AI selection/fallback, durable one-request AI boundaries, strict one-click AI, confirmed suffix continuation and chain idempotency.');
+console.log('Video tail dependency checks passed: zero-video sequence, exact parent pixels, download and independent-journal barriers, no bypass on resume, failure recovery, cancellation/late frames, project ownership, future-slot preflight, ZIP explicit primary selection, AI selection/fallback, durable one-request AI boundaries, strict one-click AI, confirmed suffix continuation and chain idempotency.');

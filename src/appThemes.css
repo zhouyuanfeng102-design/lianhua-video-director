@@ -463,8 +463,9 @@
 }
 
 /* Appearance preferences: small readable choices with a sample palette. */
-.ui-settings-modal { width: min(560px, 100%); max-height: calc(100dvh - 28px); display: flex; flex-direction: column; gap: 10px; overflow-x: hidden; overflow-y: auto; }
-.ui-settings-modal > :is(.ui-settings-head, .ui-appearance-section, .ui-settings-font-group, .ui-settings-footer) { flex: 0 0 auto; }
+.ui-settings-modal { width: min(560px, 100%); max-height: calc(100dvh - 28px); display: flex; flex-direction: column; gap: 10px; overflow-x: hidden; overflow-y: hidden; }
+.ui-settings-modal > :is(.ui-settings-head, .ui-settings-tabs, .ui-settings-panel, .ui-settings-footer) { flex: 0 0 auto; }
+.ui-settings-modal > .ui-settings-panel { min-height: 0; flex: 1 1 auto; }
 .ui-settings-modal .ui-settings-font-group { overflow: visible; gap: 8px; padding: 10px; }
 .ui-settings-modal .ui-settings-footer { padding-top: 9px; }
 .ui-appearance-section { min-width: 0; display: grid; gap: 8px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
