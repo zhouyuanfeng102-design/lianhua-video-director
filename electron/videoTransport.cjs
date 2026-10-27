@@ -132,7 +132,7 @@ const createVideoTransport = ({
     },
     download(payload, owner) {
       return run(payload?.requestId || `download-${randomBytes(12).toString('hex')}`, owner, (signal) => downloadIntoAssetStore(payload.url, payload.headers || {}, {
-        noTimeout: true, signal, fileName: payload.fileName,
+        noTimeout: true, signal, fileName: payload.fileName, projectId: payload.projectId,
         allowVideoArchive: payload.allowVideoArchive === true, archiveHint: payload.archiveHint === true,
         onProgress: (data) => send(owner, { watchId: payload.requestId, type: 'message', data: { type: 'download_progress', data } }),
       }));

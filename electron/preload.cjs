@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld('lianhuaDesktop', {
   loadWorkspaceState: () => ipcRenderer.invoke('lianhua:load-workspace-state'),
   loadProject: (projectId, hash) => ipcRenderer.invoke('lianhua:load-project', { projectId, hash }),
   saveState: (content) => ipcRenderer.invoke('lianhua:save-state', content),
+  noteActiveProject: (payload) => ipcRenderer.invoke('lianhua:note-active-project', payload),
   onBeforeClose: (callback) => {
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on('lianhua:before-close', listener);

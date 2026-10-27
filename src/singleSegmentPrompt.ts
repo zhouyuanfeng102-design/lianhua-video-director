@@ -17,7 +17,7 @@ import { h3MediaModeForReferences, type PromptReferenceInput } from './promptAda
 import { translateVideoPromptToEnglish } from './promptTranslation';
 import { createRuntimeErrorLogEntry } from './runtimeErrorLog';
 import { resolveConfirmedMasterSliceSource, type ConfirmedMasterSliceSourceContext } from './confirmedMasterSliceSource';
-import { VIDEO_DIALOGUE_STAGING_RULE, VIDEO_SPATIAL_CONTINUITY_RULE, VIDEO_WARDROBE_SCOPE_RULE, VIDEO_STAGING_TRANSCRIPTION_RULE, VIDEO_PROMPT_FOCUS_RULE, VIDEO_SEQUENCE_TEXT_HANDOFF_RULE, VIDEO_SEQUENCE_TEXT_HANDOFF_TRANSLATION_RULE, VIDEO_SEQUENCE_TEXT_HANDOFF_UNLABELLED_ACTOR_RULE } from './videoConversionRules';
+import { VIDEO_DIALOGUE_STAGING_RULE, VIDEO_SPATIAL_CONTINUITY_RULE, VIDEO_WARDROBE_SCOPE_RULE, VIDEO_STAGING_TRANSCRIPTION_RULE, VIDEO_PROMPT_FOCUS_RULE, VIDEO_SEQUENCE_TEXT_HANDOFF_RULE, VIDEO_SEQUENCE_TEXT_HANDOFF_TRANSLATION_RULE, VIDEO_SEQUENCE_TEXT_HANDOFF_UNLABELLED_ACTOR_RULE, VIDEO_SELECTED_STYLE_DELIVERY_RULE, selectedVideoStyleFields } from './videoConversionRules';
 import { AUDIO_EXISTING_SCOPE_RULE, AUDIO_H3_DELIVERY_RULE, AUDIO_PROMPT_RULE, AUDIO_TRANSLATION_SCOPE_RULE, DIALOGUE_DELIVERY_RULE, DIALOGUE_LANGUAGE_RULE } from './audioPromptPolicy';
 import {
   H3_DIALOGUE_FORMAT_RULE,
@@ -512,6 +512,7 @@ export async function generateSingleSegmentPrompt(
       shotMode: official.shotMode, shotCount: official.shotCount || official.shots.length,
       voiceFactScope,
       currentCharacterVoiceFacts: input.context.currentCharacterVoiceFacts,
+      ...selectedVideoStyleFields(input.board),
       characterIdentityFacts: identityCharacters.map((character) => ({
         ...characterVoiceIdentityFacts(character),
         id: character.id, name: character.name, gender: character.gender, apparentAge: character.apparentAge,
@@ -561,6 +562,7 @@ export async function generateSingleSegmentPrompt(
       VIDEO_STAGING_TRANSCRIPTION_RULE,
       ...(canReplanStaging ? [VIDEO_ACTION_EVENT_REVIEW_RULE] : []),
       VIDEO_PROMPT_FOCUS_RULE,
+      VIDEO_SELECTED_STYLE_DELIVERY_RULE,
       H3_CLIP_TIME_RULE,
       DIALOGUE_LANGUAGE_RULE,
       H3_DIALOGUE_FORMAT_RULE,

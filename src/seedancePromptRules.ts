@@ -26,6 +26,7 @@ export const seedanceChineseWriterRule = (actionRetiming = false): string => [
   DIALOGUE_VOICE_IDENTITY_RULE,
   'sourceEvidence.characterIdentityFacts完整保留已知性别、外观年龄apparentAge、实际年龄actualAge和已确认voiceProfile；sourceEvidence.audioLedgerFacts提供已保存声源、台词、时段及声音备注。按voiceFactScope区分新稿选角与已有声音保真，不把canonical候选中自行补写的成熟声线当成用户设定。主体连续性可简述本段实际说话人物的稳定声音；每句在连续时间轴中以完整姓名和简短有依据声线绑定，声龄、音色、语气写在台词引号之外。保持六个自然语言章节，不输出voiceProfile/voiceFactScope等技术字段，不加入H3声源编码、<d>或新声音章节。自然发话时长、交接与必要停顿先满足；固定已确认时长与镜界保持，不能以赶话、加速、拖腔或删改原对白掩盖时窗冲突。',
   '全局约束只表达已经采用的画面、连续性与声音安排，不复制内部生成规则、返回形状或模型指令。按同一事件已有的行动者、对象、路径、末态和摄影写成完整正文，切镜只更换观察范围，身份细节随后按实际可见部分展开。',
+  'sourceEvidence.selectedPictureStyle 与 selectedDirectorStyle 是用户已选的画面风格和导演调度。有原文时各写一次，放在视频规格里；没有则不另编画风。不逐镜重复，不改镜数、机位和运镜，不把〔〕标签写进正文。',
 ].map((rule) => actionRetiming ? rule
   .replace('已确认排程仍锁定原起止时间、镜数、顺序和切点，不因补清动作而重排。', '本次明确重排当前段动作节奏，原动作、次数、顺序因果、镜数和源shot.id保持；旧镜内时窗与切点是可调整草稿。')
   .replace('当前 canonicalPrompt 与已确认 shots 中的用户改动、镜头范围和时间仍优先，动作依据不能重新扩展已确认演出范围。', '当前 canonicalPrompt 与已确认 shots 中的用户剧情改动和动作归属优先；仅本段动作时窗和镜界可重排，不能扩展演出范围。')

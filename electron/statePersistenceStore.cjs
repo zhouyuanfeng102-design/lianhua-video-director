@@ -9,6 +9,7 @@ const { collectImageReferenceSnapshotsForExport } = require('./imageReferenceSna
 const { readProjectLibrary, readWorkspaceLibrary, readLibraryProject, createProjectLibraryContext,
   writeProjectLibrary, projectLibrarySize, isProjectLibraryManifest } = require('./projectLibraryStore.cjs');
 const { createStateMediaExternalizer, collectStateMediaFiles } = require('./stateMediaFiles.cjs');
+const { placeProjectAssets } = require('./projectAssetLayout.cjs');
 
 const localFileError = (error, operation = '保存本地文件') => {
   const reasons = {
@@ -270,6 +271,13 @@ const createStateStore = ({ dataRoot, fs = nodeFs, now = Date.now }) => {
   const save = async (content, encryptSecrets) => {
     recoverVaultTransaction();
     const prepared = prepare(content);
+    let placementDeletes = [];
+    prepared.assetMoves = [];
+    try {
+      const placed = placeProjectAssets(prepared.state, { assetRoot, dataRoot: root, fs, deferDeletes: true });
+      prepared.assetMoves = placed.moves;
+      placementDeletes = placed.deletes;
+    } catch { /* A placement failure keeps the original paths and still saves the project. */ }
     // Encryption is the sole main-thread callback and only carries credentials.
     // Structural validation precedes vault/state commit. Projects and media
     // are stored separately; there is no total-library business byte limit.
@@ -315,7 +323,10 @@ const createStateStore = ({ dataRoot, fs = nodeFs, now = Date.now }) => {
       backupError = backup?.warning || '';
     }
     catch (error) { backupError = error instanceof Error ? error.message : String(error); }
-    return { ok: true, checksum: prepared.checksum, projectHashes: prepared.projectHashes, externalBackup: external, backupError, snapshotError };
+    for (const file of placementDeletes) {
+      try { if (fs.existsSync(file)) fs.unlinkSync(file); } catch { /* The project folder copy is already recorded. */ }
+    }
+    return { ok: true, checksum: prepared.checksum, projectHashes: prepared.projectHashes, externalBackup: external, backupError, snapshotError, assetMoves: prepared.assetMoves };
   };
   const load = (secrets, { workspace = false } = {}) => {
     lastRecoveryNotice = '';

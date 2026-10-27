@@ -3277,12 +3277,12 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
 .vd-compression-card { display: grid; gap: 6px; padding: 4px 8px 8px; }
 .vd-compression-card small { overflow-wrap: anywhere; color: var(--muted, #777184); }
 .vd-compression-card > div { display: flex; gap: 5px; flex-wrap: wrap; }
-.vd-compression-summary { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; padding: 8px 12px; margin: 4px 0 10px; border: 1px solid #ddd6ef; border-radius: 10px; background: #faf8fd; }
+.vd-compression-summary { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; padding: 8px 12px; margin: 4px 0 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel-2); color: var(--text); }
 .vd-compression-summary > .vd-error { flex-basis: 100%; }
 .vd-compression-dialog { width: min(1120px, calc(100vw - 32px)); max-height: calc(100dvh - 32px); overflow-y: auto; }
 .vd-compression-review { display: grid; gap: 12px; min-width: 0; }
 .vd-compression-review > .field { max-width: 300px; }
-.vd-compression-result { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; padding: 10px; border: 1px solid #ded8ea; border-radius: 8px; }
+.vd-compression-result { display: flex; align-items: center; gap: 8px 14px; flex-wrap: wrap; padding: 10px; border: 1px solid var(--line); border-radius: 8px; color: var(--text); }
 .vd-compression-result > span { overflow-wrap: anywhere; }
 .vd-compression-previews { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; min-width: 0; }
 .vd-compression-previews > div { min-width: 0; }

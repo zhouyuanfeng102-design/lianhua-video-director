@@ -33,6 +33,7 @@ const { createStatePersistence } = require(path.join(__dirname, 'statePersistenc
 const { createStateCloseGuard } = require(path.join(__dirname, 'stateCloseGuard.cjs'));
 const { createRendererCrashRecovery } = require(path.join(__dirname, 'rendererCrashRecovery.cjs'));
 const { createAssetProtocolHandler } = require(path.join(__dirname, 'assetProtocol.cjs'));
+const { allocateReadableName, kindDirectory, placeProjectAssets } = require(path.join(__dirname, 'projectAssetLayout.cjs'));
 
 const privateIpBlockList = new nodeNet.BlockList();
 privateIpBlockList.addAddress('0.0.0.0', 'ipv4');
@@ -281,6 +282,33 @@ const {
   dataRoot, sessionRoot, cacheRoot, logsRoot, crashRoot, tempRoot,
   stateFile, snapshotRoot, assetRoot, recoveryConfigFile, secretVaultFile
 } = storagePaths;
+let assetRoster = [];
+let activeAssetProjectId = '';
+const rememberAssetRoster = (projects, activeId) => {
+  if (!Array.isArray(projects)) return;
+  const seen = new Set();
+  assetRoster = [];
+  for (const project of projects) {
+    if (!project || typeof project.id !== 'string' || !project.id || seen.has(project.id)) continue;
+    seen.add(project.id);
+    const entry = { id: project.id };
+    if (typeof project.name === 'string') entry.name = project.name;
+    assetRoster.push(entry);
+  }
+  if (typeof activeId === 'string' && activeId) activeAssetProjectId = activeId;
+};
+const rememberAssetRosterFromContent = (content) => {
+  try {
+    const parsed = JSON.parse(String(content || ''));
+    const projects = [parsed?.project, ...(Array.isArray(parsed?.projects) ? parsed.projects : [])];
+    rememberAssetRoster(projects, parsed?.activeProjectId || parsed?.project?.id);
+  } catch { /* The persistence worker reports an unreadable state. */ }
+};
+const mediaKindDirectory = (kind, projectId) => {
+  const id = typeof projectId === 'string' && projectId ? projectId : activeAssetProjectId;
+  const project = assetRoster.find((item) => item.id === id);
+  return project ? kindDirectory(kind, project, assetRoster) : kind;
+};
 let lastRecoveryNotice = startupRecoveryNotice;
 const approvedReadPaths = new Set();
 const approveReadPath = (filePath) => approvedReadPaths.add(pathComparisonKey(filePath));
@@ -618,7 +646,7 @@ const copyIntoAssetStore = (sourcePath) => {
   if (!ALLOWED_MEDIA_EXTENSIONS.has(extension)) throw new Error('不支持的媒体文件格式');
   const checksum = fileSha256(sourcePath);
   const kind = mediaKindFromExtension(extension);
-  const relativePath = path.join(kind, `${checksum}${extension}`);
+  const relativePath = relativeMediaPath(mediaKindDirectory(kind), `${checksum}${extension}`);
   const destination = assetPathFromRelative(relativePath);
   ensureDirectory(path.dirname(destination));
   if (!fs.existsSync(destination)) fs.copyFileSync(sourcePath, destination);
@@ -953,51 +981,17 @@ const readableMediaFileName = (rawName, extension) => {
   if (WINDOWS_RESERVED_FILE_STEM.test(firstStemPart)) stem = `_${stem}`;
   return `${stem}${extension}`;
 };
-const readableMediaNameKey = (value) => String(value || '')
-  .normalize('NFKC')
-  .replace(/[<>:"/\\|?*\u0000-\u001F]/gu, '_')
-  .replace(/[. ]+$/gu, '')
-  .toUpperCase();
-const allocateReadableMediaRelativePath = (kind, fileName, checksum) => {
-  const directory = ensureDirectory(path.join(assetRoot, kind));
-  const entries = new Map();
-  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-    if (entry.isFile()) entries.set(readableMediaNameKey(entry.name), entry.name);
-  }
-  const extension = path.extname(fileName);
-  const originalStem = extension ? fileName.slice(0, -extension.length) : fileName;
-  for (let version = 1; version < 100_000; version += 1) {
-    const suffix = version === 1 ? '' : ` · 第 ${version} 版`;
-    const stem = clipFileStem(originalStem, MAX_READABLE_MEDIA_STEM_LENGTH - suffix.length).trimEnd();
-    const candidate = `${stem}${suffix}${extension}`;
-    const existing = entries.get(readableMediaNameKey(candidate));
-    if (!existing) return path.join(kind, candidate);
-    try {
-      if (fileSha256(path.join(directory, existing)) === checksum) return path.join(kind, existing);
-    } catch { /* An unreadable collision is occupied; allocate the next version. */ }
-  }
-  throw new Error('同名视频版本过多，无法分配安全文件名');
+const relativeMediaPath = (directory, fileName) => `${String(directory || '').replace(/\\/gu, '/').replace(/^\/+|\/+$/gu, '')}/${fileName}`;
+const allocateReadableMediaRelativePath = (directory, fileName, checksum) => {
+  const folder = ensureDirectory(path.join(assetRoot, ...String(directory).split(/[\\/]/u)));
+  const names = fs.readdirSync(folder, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => entry.name);
+  return relativeMediaPath(directory, allocateReadableName(names, fileName, checksum, (name) => fileSha256(path.join(folder, name))));
 };
-const allocateReadableMediaRelativePathAsync = async (kind, fileName, checksum) => {
-  const directory = path.join(assetRoot, kind);
-  await fs.promises.mkdir(directory, { recursive: true });
-  const entries = new Map();
-  for (const entry of await fs.promises.readdir(directory, { withFileTypes: true })) {
-    if (entry.isFile()) entries.set(readableMediaNameKey(entry.name), entry.name);
-  }
-  const extension = path.extname(fileName);
-  const originalStem = extension ? fileName.slice(0, -extension.length) : fileName;
-  for (let version = 1; version < 100_000; version += 1) {
-    const suffix = version === 1 ? '' : ` · 第 ${version} 版`;
-    const stem = clipFileStem(originalStem, MAX_READABLE_MEDIA_STEM_LENGTH - suffix.length).trimEnd();
-    const candidate = `${stem}${suffix}${extension}`;
-    const existing = entries.get(readableMediaNameKey(candidate));
-    if (!existing) return path.join(kind, candidate);
-    try {
-      if (await fileSha256Async(path.join(directory, existing)) === checksum) return path.join(kind, existing);
-    } catch { /* Unreadable collisions remain occupied. */ }
-  }
-  throw new Error('同名视频版本过多，无法分配安全文件名');
+const allocateReadableMediaRelativePathAsync = async (directory, fileName, checksum) => {
+  const folder = path.join(assetRoot, ...String(directory).split(/[\\/]/u));
+  await fs.promises.mkdir(folder, { recursive: true });
+  const names = (await fs.promises.readdir(folder, { withFileTypes: true })).filter((entry) => entry.isFile()).map((entry) => entry.name);
+  return relativeMediaPath(directory, allocateReadableName(names, fileName, checksum, (name) => fileSha256Async(path.join(folder, name))));
 };
 const DOWNLOAD_MEDIA_EXTENSIONS = new Set(['.mp4', '.webm', '.mov', '.mp3', '.wav', '.m4a', '.aac', '.ogg', '.flac']);
 const DOWNLOAD_MIME_EXTENSIONS = new Map([
@@ -1139,11 +1133,12 @@ const resolveDownloadedMediaExtension = ({ bytes, contentType, dispositionName, 
   if (hintedExtension) return hintedExtension;
   throw new Error('无法确认结果媒体格式；请让接口返回正确的 Content-Type、文件扩展名或标准媒体容器');
 };
-const commitDownloadedMedia = async (temporary, { kind, requestedFileName, checksum, extension, useReadablePath }) => {
+const commitDownloadedMedia = async (temporary, { kind, requestedFileName, checksum, extension, useReadablePath, projectId }) => {
+  const directory = mediaKindDirectory(kind, projectId);
   for (let attempt = 0; attempt < 100_000; attempt += 1) {
     const relativePath = useReadablePath
-      ? await allocateReadableMediaRelativePathAsync(kind, requestedFileName, checksum)
-      : path.join(kind, `${checksum}${extension}`);
+      ? await allocateReadableMediaRelativePathAsync(directory, requestedFileName, checksum)
+      : relativeMediaPath(directory, `${checksum}${extension}`);
     const destination = assetPathFromRelative(relativePath);
     await fs.promises.mkdir(path.dirname(destination), { recursive: true });
     if (await pathExistsAsync(destination)) {
@@ -1336,6 +1331,7 @@ const downloadIntoAssetStore = async (rawUrl, headers = {}, timeoutOptions = MAX
         if (options.allowVideoArchive !== true) throw new Error('结果是 ZIP 压缩包；当前下载入口未启用视频解压');
         const result = await importVideoArchive({
           archivePath: temporary, tempRoot, assetRoot, checksum,
+          relativeDirectory: mediaKindDirectory('video', options.projectId),
           fileName: options.fileName,
           archiveFileName: dispositionName || decodedFileName(path.basename(new URL(target.url).pathname)) || '云端视频.zip',
           signal: controller.signal, onProgress: options.onProgress,
@@ -1365,6 +1361,7 @@ const downloadIntoAssetStore = async (rawUrl, headers = {}, timeoutOptions = MAX
         checksum,
         extension,
         useReadablePath,
+        projectId: options.projectId,
       });
       temporary = '';
       activeResponse = undefined;
@@ -1538,7 +1535,7 @@ const storeGeneratedImageInAssetStore = async (payload) => {
   const input = typeof payload === 'string' ? { dataUrl: payload } : payload || {};
   const { bytes, mimeType, extension } = decodeGeneratedImageDataUrl(input.dataUrl);
   const checksum = createHash('sha256').update(bytes).digest('hex');
-  const relativePath = path.join('image', `${checksum}${extension}`);
+  const relativePath = relativeMediaPath(mediaKindDirectory('image', input.projectId), `${checksum}${extension}`);
   const destination = assetPathFromRelative(relativePath);
   ensureDirectory(path.dirname(destination));
   if (!fs.existsSync(destination)) {
@@ -1564,7 +1561,7 @@ const storeGeneratedImageInAssetStore = async (payload) => {
 const storeGeneratedAudioInAssetStore = async (payload) => {
   const { bytes, mimeType, extension } = decodeReferenceAudioDataUrl(payload?.dataUrl);
   const checksum = createHash('sha256').update(bytes).digest('hex');
-  const relativePath = `audio/${checksum}${extension}`;
+  const relativePath = relativeMediaPath(mediaKindDirectory('audio', payload?.projectId), `${checksum}${extension}`);
   const destination = assetPathFromRelative(relativePath);
   ensureDirectory(path.dirname(destination));
   if (!fs.existsSync(destination)) atomicWriteFile(destination, bytes);
@@ -1807,7 +1804,10 @@ const getVideoThumbnails = (event) => {
 };
 const workbenchOwners = new WeakSet();
 const getVideoWorkbench = () => {
-  if (!videoWorkbench) videoWorkbench = createVideoWorkbench({ assetRoot, tempRoot, projectRoot, resourcesPath: process.resourcesPath });
+  if (!videoWorkbench) videoWorkbench = createVideoWorkbench({
+    assetRoot, tempRoot, projectRoot, resourcesPath: process.resourcesPath,
+    mediaDirectory: (kind, projectId) => mediaKindDirectory(kind, projectId),
+  });
   return videoWorkbench;
 };
 const workbenchProgressTarget = (event) => {
@@ -1890,12 +1890,14 @@ app.whenReady().then(() => {
   handleTrustedIpc('lianhua:load-state', async () => {
     const result = await getStatePersistence().run('load');
     lastRecoveryNotice = result.notice || startupRecoveryNotice;
+    rememberAssetRosterFromContent(result.content);
     return result.content;
   });
 
   handleTrustedIpc('lianhua:load-workspace-state', async () => {
     const result = await getStatePersistence().run('load-workspace');
     lastRecoveryNotice = result.notice || startupRecoveryNotice;
+    rememberAssetRosterFromContent(result.content);
     return result.content;
   });
 
@@ -1907,7 +1909,14 @@ app.whenReady().then(() => {
     // Shared structural/integrity checks and per-project storage run in
     // the ordered worker before any vault/state writes. Await is still durable,
     // including the external-backup result, not a fire-and-forget enqueue.
-    return getStatePersistence().run('save', { content: typeof content === 'string' ? content : '' });
+    const text = typeof content === 'string' ? content : '';
+    rememberAssetRosterFromContent(text);
+    return getStatePersistence().run('save', { content: text });
+  });
+
+  handleTrustedIpc('lianhua:note-active-project', async (_event, payload) => {
+    rememberAssetRoster(payload?.projects, payload?.activeProjectId);
+    return true;
   });
 
   handleTrustedIpc('lianhua:complete-before-close', async (event, payload) => (
@@ -1991,7 +2000,10 @@ app.whenReady().then(() => {
     readVideoReferenceImage({ assetRoot, relativePath: payload?.relativePath, expectedChecksum: payload?.expectedChecksum })
   ));
   handleTrustedIpc('lianhua:store-video-reference-image', async (_event, payload) => (
-    storeVideoReferenceImage({ assetRoot, dataUrl: payload?.dataUrl, fileName: payload?.fileName })
+    storeVideoReferenceImage({
+      assetRoot, dataUrl: payload?.dataUrl, fileName: payload?.fileName,
+      relativeDirectory: mediaKindDirectory('image', payload?.projectId),
+    })
   ));
   handleTrustedIpc('lianhua:read-managed-audio-data-url', async (_event, payload) => (
     readManagedAudioDataUrlForRenderer(payload)
@@ -2000,7 +2012,10 @@ app.whenReady().then(() => {
     readManagedVideoDataUrl({ assetRoot, relativePath: payload?.relativePath, expectedChecksum: payload?.expectedChecksum })
   ));
   handleTrustedIpc('lianhua:store-video-reference-video', async (_event, payload) => (
-    storeVideoReferenceVideo({ assetRoot, dataUrl: payload?.dataUrl, fileName: payload?.fileName })
+    storeVideoReferenceVideo({
+      assetRoot, dataUrl: payload?.dataUrl, fileName: payload?.fileName,
+      relativeDirectory: mediaKindDirectory('video', payload?.projectId),
+    })
   ));
 
   handleTrustedIpc('lianhua:relink-media', async (_event, asset) => {
@@ -2099,6 +2114,7 @@ app.whenReady().then(() => {
         remapImportedManagedPaths(state, replacements);
         syncImportedGeneratedVideoNames(state);
       }
+      placeProjectAssets(state, { assetRoot, dataRoot, fs, deferDeletes: false });
       // Import also hydrates the current vault. Do not read it halfway through
       // a background state/vault commit for another pending autosave.
       await getStatePersistence().flush();
@@ -2154,7 +2170,7 @@ app.whenReady().then(() => {
       await fs.promises.copyFile(real, temporary, fs.constants.COPYFILE_EXCL);
       const checksum = await fileSha256Async(temporary);
       const sizeBytes = (await fs.promises.stat(temporary)).size;
-      const relativePath = (await commitDownloadedMedia(temporary, { kind: 'video', requestedFileName: fileName, checksum, extension, useReadablePath: true })).replace(/\\/gu, '/');
+      const relativePath = (await commitDownloadedMedia(temporary, { kind: 'video', requestedFileName: fileName, checksum, extension, useReadablePath: true, projectId: payload?.projectId })).replace(/\\/gu, '/');
       managed = { fileName, relativePath, checksum, sizeBytes, mediaType: 'video', managed: true, missing: false,
         url: `lianhua-asset://local/${relativePath.split('/').map(encodeURIComponent).join('/')}` };
     } finally { await fs.promises.rm(temporary, { force: true }); }

@@ -324,7 +324,10 @@ const createVideoWorkbench = (options) => {
     assertActive(job);
     const checksum = await fileHash(filePath, job);
     const kind = extension === '.png' ? 'image' : 'video';
-    const directory = path.join(assetRoot, kind);
+    const requestedDirectory = typeof options.mediaDirectory === 'function' ? options.mediaDirectory(kind, job.projectId) : kind;
+    const relativeDirectory = String(requestedDirectory || kind).replace(/\\/gu, '/').replace(/^\/+/u, '');
+    const safeDirectory = relativeDirectory.split('/').every((part) => part && part !== '.' && part !== '..') ? relativeDirectory : kind;
+    const directory = path.join(assetRoot, ...safeDirectory.split('/'));
     await fs.promises.mkdir(directory, { recursive: true });
     const actualRoot = await fs.promises.realpath(assetRoot);
     const actualDirectory = await fs.promises.realpath(directory);
@@ -332,7 +335,7 @@ const createVideoWorkbench = (options) => {
     const destination = path.join(actualDirectory, `${checksum}${extension}`);
     job.outputs.push({ filePath, destination, checksum });
     const stat = await fs.promises.stat(filePath);
-    const relativePath = `${kind}/${checksum}${extension}`;
+    const relativePath = `${safeDirectory}/${checksum}${extension}`;
     return { fileName, relativePath, checksum, sizeBytes: stat.size, mediaType: kind, mimeType: extension === '.png' ? 'image/png' : 'video/mp4', managed: true, missing: false, url: `lianhua-asset://local/${relativePath}`, ...metadata };
   };
 

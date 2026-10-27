@@ -174,10 +174,10 @@ assert.equal(legacyConverterV130.outputRules, LEGACY_DEFAULT_VIDEO_CONVERSION_OU
   'v1.3.0 output remains the old format/example, not the newly expanded live output');
 const storyPreparation = defaultStoryExpansionPresets[0];
 assert.ok(storyPreparation, 'the app must expose a default story-preparation preset');
-assert.equal(storyPreparation.version, '1.5.0');
+assert.equal(storyPreparation.version, '1.5.1');
 assert.ok(
   storyPreparation.systemPrompt.includes(MOSE_JIANGHU_NSFW_DETAIL_RULES),
-  'the active v1.5.0 story-preparation preset must preserve the existing complete rule block',
+  'the active v1.5.1 story-preparation preset must preserve the existing complete rule block',
 );
 assert.ok(storyPreparation.systemPrompt.includes(STORY_CAUSALITY_RULE));
 const legacyStoryPreparationV140WithoutAge = {
@@ -197,7 +197,7 @@ const migratedV130 = normalizeState({
 });
 assert.equal(migratedV130.converterPresets[0].version, converter.version);
 assert.equal(migratedV130.converterPresets[0].systemPrompt, converter.systemPrompt);
-assert.equal(migratedV130.storyExpansionPresets[0].version, '1.5.0');
+assert.equal(migratedV130.storyExpansionPresets[0].version, '1.5.1');
 assert.equal(migratedV130.storyExpansionPresets[0].systemPrompt, storyPreparation.systemPrompt);
 assert.deepEqual(migratedV130.project, projectBefore, 'v1.3.0 prompt migration must not rewrite project content');
 assert.deepEqual(migratedV130.settings, settingsBefore, 'v1.3.0 prompt migration must not change user settings');
@@ -205,7 +205,7 @@ assert.deepEqual(normalizeState(migratedV130), migratedV130, 'v1.3.0 prompt migr
 
 for (const historicStory of [legacyStoryPreparationV140WithoutAge, legacyStoryPreparationV140]) {
   const migrated = normalizeState({ ...clone(initial), storyExpansionPresets: [clone(historicStory)] });
-  assert.equal(migrated.storyExpansionPresets[0].version, '1.5.0', 'both shipped 1.4.0 layouts upgrade');
+  assert.equal(migrated.storyExpansionPresets[0].version, '1.5.1', 'both shipped 1.4.0 layouts upgrade');
   assert.equal(migrated.storyExpansionPresets[0].name, storyPreparation.name);
   assert.equal(migrated.storyExpansionPresets[0].systemPrompt, storyPreparation.systemPrompt);
   assert.equal(migrated.storyExpansionPresets[0].outputRules, storyPreparation.outputRules);

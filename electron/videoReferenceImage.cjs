@@ -42,14 +42,21 @@ const fileNameForFormat = (rawName, extension) => {
   return `${stem}${extension}`;
 };
 
+const safeRelativeDirectory = (value) => {
+  const relative = String(value || '').replace(/\\/gu, '/').replace(/^\/+/u, '');
+  if (!relative || relative.split('/').some((part) => !part || part === '.' || part === '..')) return '';
+  return relative;
+};
+
 /** Publish an immutable, content-addressed copy. Existing files are verified,
  * never rewritten, including races with another save of the same pixels. */
-const storeVideoReferenceImage = ({ assetRoot, dataUrl, fileName } = {}) => {
+const storeVideoReferenceImage = ({ assetRoot, dataUrl, fileName, relativeDirectory } = {}) => {
   const decoded = decodeReferenceImageDataUrl(dataUrl, Number.POSITIVE_INFINITY);
   const { bytes, mimeType, extension } = decoded;
   const checksum = sha256(bytes);
+  const folder = safeRelativeDirectory(relativeDirectory) || 'image';
   const root = fs.realpathSync(path.resolve(String(assetRoot || '')));
-  const requestedDirectory = path.join(root, 'image');
+  const requestedDirectory = path.join(root, ...folder.split('/'));
   fs.mkdirSync(requestedDirectory, { recursive: true });
   const directory = fs.realpathSync(requestedDirectory);
   if (!isInside(root, directory)) throw new Error('视频参考副本真实路径越界。');
@@ -75,7 +82,7 @@ const storeVideoReferenceImage = ({ assetRoot, dataUrl, fileName } = {}) => {
     }
   }
   const sizeBytes = storedFile(destination, checksum, bytes.length);
-  const relativePath = `image/${checksum}${extension}`;
+  const relativePath = `${folder}/${checksum}${extension}`;
   return { fileName: fileNameForFormat(fileName, extension), relativePath, checksum, sizeBytes,
     mediaType: 'image', mimeType, managed: true, missing: false,
     url: `lianhua-asset://local/${relativePath.split('/').map(encodeURIComponent).join('/')}` };

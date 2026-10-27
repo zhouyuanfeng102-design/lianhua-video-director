@@ -2686,18 +2686,25 @@ const soundForTimeline = (
     'unknown-nonhuman': '非人躯体运动、结构摩擦与地面受力声',
   };
   const humanLike = motion.kind === 'human' || motion.kind === 'humanoid';
+  // Body-to-body intimate contact is skin and wetness. Door, wall, weapon and
+  // strike events keep the hard-contact label this fallback already used.
+  const intimateBodyContact = /穴|阴蒂|阴道|阴茎|肉棒|乳房|乳尖|臀瓣|臀|抽送|抽插|交合|跨坐|湿滑|蜜液|射精|抚穴|跪趴|深灌|顶入/u.test(text)
+    && !/格挡|出鞘|碰刃|刀|剑|枪|拳|踢|踹|撞门|撞墙|砸|爆|兵器|木门|石壁|墙体/u.test(text);
+  const contactLabel = intimateBodyContact ? '贴近的皮肤贴合与湿滑摩擦声' : '接触碰撞声';
+  const locomotion = /走|跑|追|踏/u.test(text) || (!intimateBodyContact && /冲|跨/u.test(text));
+  const forcefulContact = /击|撞|砸|爆|格挡|拍打|重拍/u.test(text);
   const action = timedSound || propEffect || (/破土|地层|路面(?:开裂|爆裂)/u.test(text)
     ? '地表破裂与碎片摩擦声'
     : /枪|开火/u.test(text)
       ? '枪械连射与金属震动'
       : !humanLike
         ? speciesSound[motion.kind as Exclude<SubjectMotionClass, 'human' | 'humanoid'>]
-        : /走|跑|冲|追|跨|踏/u.test(text)
-          ? /击|撞|砸|爆|格挡|拍打|重拍/u.test(text)
-            ? '脚步声与接触碰撞声'
+        : locomotion
+          ? forcefulContact
+            ? `脚步声与${contactLabel}`
             : '脚步声'
-          : /击|撞|砸|爆|格挡|拍打|重拍/u.test(text)
-            ? '接触碰撞声'
+          : forcefulContact
+            ? contactLabel
             : /菌丝|孢子/u.test(text)
               ? '菌丝运动与孢子破裂声'
               : '无');

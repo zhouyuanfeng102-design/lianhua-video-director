@@ -50,7 +50,7 @@ import { STORY_CAUSALITY_RULE } from './storyCausalityRules';
 import {
   DEFAULT_VIDEO_CONVERSION_SYSTEM, DEFAULT_VIDEO_CONVERSION_OUTPUT,
   VIDEO_CONVERSION_STORY_RULE, VIDEO_DIALOGUE_RULE, VIDEO_LOCAL_TIME_RULE,
-  VIDEO_SCENE_STYLE_RULE, VIDEO_CONTINUOUS_SCENE_STYLE_RULE, VIDEO_CONVERSION_FORMAT_RULE, VIDEO_CONVERSION_EXAMPLE,
+  VIDEO_SCENE_STYLE_RULE, VIDEO_CONTINUOUS_SCENE_STYLE_RULE, VIDEO_SELECTED_STYLE_DELIVERY_RULE, selectedVideoStyleFields, VIDEO_CONVERSION_FORMAT_RULE, VIDEO_CONVERSION_EXAMPLE,
   VIDEO_CONTINUOUS_CONVERSION_EXAMPLE,
   VIDEO_DIALOGUE_STAGING_RULE, VIDEO_SPATIAL_CONTINUITY_RULE,
   VIDEO_STAGING_REVIEW_RULE, VIDEO_STAGING_TRANSCRIPTION_RULE, VIDEO_PROMPT_FOCUS_RULE, VIDEO_WARDROBE_SCOPE_RULE,
@@ -597,7 +597,8 @@ export const convertStoryboardDraftToFinal = async (
     'referenceBindings 和每镜 referenceAssetIds 只说明已有引用关系，实际用途以提供的 currentReferences 名称、角色和责任说明为准；没有真实像素时不能声称看到了人物站位、口型或朝向，参考图缺少某人物不能证明该人物不存在。不得为适配参考图改变原故事说话人或凭空添加转身。',
     '在本次回答内完成内容自检和必要修正：检查是否误认人物、遗漏情节或对白、改变说话者、违背物种外貌或声音情绪；以完整剧情为准修正后只返回最终逐镜正文，不另行输出审核说明。不会由本地词面匹配决定内容正误。',
     'sourceLocationStatus=unlocated 只表示出处未精确定位，不代表没有剧情；sourceExcerpt/sourceStart/sourceEnd 仅供查找，plannedAction 和 localStructureDraft 是镜头计划而不是原文，不得以它们代替 sourceStoryContent 全文。',
-    requiredVisualStyleAtoms.length ? 'requiredVisualStyleAtoms 是已选风格原子，保留各项一次，不把它们当剧情。' : '',
+    VIDEO_SELECTED_STYLE_DELIVERY_RULE,
+    requiredVisualStyleAtoms.length ? 'requiredVisualStyleAtoms 是本地草稿里的风格标签。按上面的规则把其中的风格原文写入首镜光影，不把〔〕标签本身贴进正文，也不把它们当新剧情。' : '',
     VIDEO_CONTINUOUS_CONVERSION_EXAMPLE,
     limitedRepairRule,
   ].filter(Boolean).join('\n\n');
@@ -627,6 +628,7 @@ export const convertStoryboardDraftToFinal = async (
     referenceBindings,
     globalContinuityFacts: publicVideoContinuityLock(input.draft.globalLock || ''),
     requiredVisualStyleAtoms,
+    ...selectedVideoStyleFields(input.draft),
   }, ['characterIdentityFacts', 'currentCharacterVoiceFacts', 'globalContinuityFacts', 'sourceStoryContent']));
   const userPrompt = [
     '<video_conversion_data>', conversionData, '</video_conversion_data>',
@@ -706,6 +708,7 @@ export const convertStoryboardDraftToFinal = async (
       referenceBindings,
       globalContinuityFacts: publicVideoContinuityLock(input.draft.globalLock || ''),
       requiredVisualStyleAtoms,
+      ...selectedVideoStyleFields(input.draft),
     });
     const structuralRepairUserPrompt = [
       '<video_conversion_structural_repair_data>',

@@ -1,5 +1,8 @@
 import { AUDIO_PROMPT_RULE, DIALOGUE_DELIVERY_RULE, DIALOGUE_LANGUAGE_RULE, DIALOGUE_VOICE_IDENTITY_RULE } from './audioPromptPolicy';
-import { MOSE_JIANGHU_NSFW_DETAIL_RULES } from './nsfwPromptRules';
+import {
+  LEGACY_MOSE_JIANGHU_NSFW_DETAIL_RULES_V0_6_7,
+  MOSE_JIANGHU_NSFW_DETAIL_RULES,
+} from './nsfwPromptRules';
 import { STORY_CAUSALITY_RULE } from './storyCausalityRules';
 import { VIDEO_ACTION_CHOREOGRAPHY_RULE } from './videoActionChoreographyRules';
 
@@ -44,6 +47,21 @@ export const VIDEO_SCENE_STYLE_RULE = '每镜描述一个清楚的主事件，�
 /** Current request instructions; retired exports above remain fingerprint-stable. */
 export const VIDEO_CONTINUOUS_SCENE_STYLE_RULE = '每镜依据既定观看任务组织完整连续场面，一个镜头可以承载相互因果的多个动作、对白与回应；事件条目不等于镜头条目，主事件不意味着每镜只许一次动作。保持真实行动顺序、强度、接触与反馈，不规定机械的1/2/3阶段、每秒字数或动作配额。空间只表达必要的人物、物体与通路关系，光影和摄影忠实转写既定画面；不要求每镜凑齐前中后景、色温K数字或完整身体力学清单。转换、H3转写与翻译保留给定镜数、顺序、时间标题、机位、运镜与观察对象，不在这些阶段拆镜、合镜或重选摄影；摄影选择只属于明确的源头导演任务。';
 
+/** User-selected picture style and directing manner, written once into the delivered body. */
+export const VIDEO_SELECTED_STYLE_DELIVERY_RULE = 'selectedPictureStyle 是用户已选的画面风格，selectedDirectorStyle 是用户已选的导演调度。两项都有原文时各用原文写一次；只有一项时只写那一项。没有这两项时不另编画风。不改写成另一套媒介或年代，不逐镜重复，不把「视觉风格锚点」「风格预设视觉」和〔〕标签写进正文。六字段把这两句接在首镜光影的场景光之后，写成「画面风格：…。导演调度：…。」场景光仍写该镜的时间、天气和光源。full-reference 的 H3 在 detailed_description 的 [Shot 1] 之前写这一到两句。三字段 H3 把同一句写在 [Shot 1] 正文开头。Seedance 写在视频规格一次。参考图职责保持身份、场景或通用参考，不改标为视觉风格参考。若正文还没有这两句，补在上述位置一次，不改写其余镜头。';
+
+export const selectedVideoStyleFields = (input: {
+  visualStyle?: string;
+  directorStyleSummary?: string;
+}): { selectedPictureStyle?: string; selectedDirectorStyle?: string } => {
+  const picture = input.visualStyle?.trim() || '';
+  const director = input.directorStyleSummary?.trim() || '';
+  return {
+    ...(picture ? { selectedPictureStyle: picture } : {}),
+    ...(director ? { selectedDirectorStyle: director } : {}),
+  };
+};
+
 export const VIDEO_STAGING_TRANSCRIPTION_RULE = '在源头导演阶段，将真实说话人、听者、世界行动关系与观看任务一起落实到逐镜动作和摄影；在同一次输出内保持完整对白、原语言、具名声源、口型、朝向、空间及镜首镜尾状态。普通转换、H3转写、参考更新、翻译和已有confirmed中文只忠实传递既定排程与摄影，表达遗漏或歧义用原稿已经成立的关系澄清，不另选机位、运镜、景别或切点，不用新增转身、瞬移或新动作圆场。显式dialogue-repair只在当前任务明确授权的发话与必要排程修改内配置摄影，不借此从头重套导演风格或重新分配剧情。参考图只承担给定身份、场景或构图职责，缺少人物、背面或静态表情不更改已有演出；最终仅返回当前格式的完整正文，不追加检查器、审核调用或重试。';
 
 export const VIDEO_CONVERSION_FORMAT_RULE = '输出逐镜正文。每镜保留输入时间标题，按主体、空间、光影、镜头、台词、音效六字段组织，字段间使用中文分号。主体使用可复用名称及“正在 [可见动作]”结构；多个动作可用“→”连接，但不为凑数量补动作。其余字段用简明自然描述；有对白时把原话放在台词字段，推荐第Xs @说话人：“原话”，原文是裸对白也照常保留，不把标牌或说话语气注释当成台词。音效可用环境层-[...] 动作层-[...] 情绪层-[...]表达，无事件和无配乐如实写无。不要输出规则解释、分析、JSON或代码围栏。';
@@ -73,7 +91,7 @@ export const LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_3_0 = [
 /** Exact v1.4.0 defaults retained only for lossless built-in migration. */
 export const LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_4_0 = [
   LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_3_0.split(LEGACY_VIDEO_DIALOGUE_RULE).join(VIDEO_DIALOGUE_RULE),
-  MOSE_JIANGHU_NSFW_DETAIL_RULES,
+  LEGACY_MOSE_JIANGHU_NSFW_DETAIL_RULES_V0_6_7,
 ].join('\n\n');
 export const LEGACY_DEFAULT_VIDEO_CONVERSION_OUTPUT_V1_4_0 = [VIDEO_CONVERSION_FORMAT_RULE, VIDEO_CONVERSION_EXAMPLE].join('\n\n');
 
@@ -90,6 +108,7 @@ export const LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_7_0 = [
 ].join('\n\n');
 export const DEFAULT_VIDEO_CONVERSION_SYSTEM = [
   LEGACY_DEFAULT_VIDEO_CONVERSION_SYSTEM_V1_7_0
+    .replace(LEGACY_MOSE_JIANGHU_NSFW_DETAIL_RULES_V0_6_7, MOSE_JIANGHU_NSFW_DETAIL_RULES)
     .replace(LEGACY_VIDEO_DIALOGUE_STAGING_RULE_V1_7_0, VIDEO_DIALOGUE_STAGING_RULE)
     .replace(VIDEO_SCENE_STYLE_RULE, VIDEO_CONTINUOUS_SCENE_STYLE_RULE)
     .replace(VIDEO_STAGING_REVIEW_RULE, VIDEO_STAGING_TRANSCRIPTION_RULE),

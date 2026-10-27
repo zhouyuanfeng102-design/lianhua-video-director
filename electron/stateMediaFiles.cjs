@@ -2,6 +2,7 @@ const nodeFs = require('node:fs');
 const path = require('node:path');
 const { createHash, randomUUID } = require('node:crypto');
 const { decodeReferenceImageDataUrl } = require('./imageReferenceTransport.cjs');
+const { kindDirectory, assetUrl } = require('./projectAssetLayout.cjs');
 
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const isRecord = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -232,38 +233,48 @@ const createStateMediaExternalizer = ({ assetRoot, fs = nodeFs, atomicWriteFile 
   const root = path.resolve(assetRoot);
   return {
     externalize(state) {
+      if (!isRecord(state)) return state;
       const verified = new Map();
-      return mapStateMedia(state, (asset) => {
-        if (!isRecord(asset)) return asset;
-        const dataUrl = typeof asset.dataUrl === 'string' && /^data:/iu.test(asset.dataUrl.trim()) ? asset.dataUrl
-          : typeof asset.url === 'string' && /^data:image\//iu.test(asset.url.trim()) ? asset.url : undefined;
-        if (!dataUrl) return asset;
-        // Video/audio asset payloads are outside this image-only migration.
-        if (asset.mediaType === 'video' || asset.mediaType === 'audio' || asset.type === 'video' || asset.type === 'audio') return asset;
-        const label = String(asset.name || asset.id || asset.assetId || '未命名图片').slice(0, 160);
-        try {
-          let metadata = verified.get(dataUrl);
-          if (!metadata) {
-            const { bytes, mimeType, extension } = decodeInlineImage(dataUrl);
-            const checksum = hash(bytes);
-            const relativePath = `image/${checksum}${extension}`;
-            const destination = path.join(root, 'image', `${checksum}${extension}`);
-            assertSafeFile(fs, root, destination);
-            if (!safeStat(fs, destination)) atomicWriteFile(destination, bytes, fs);
-            assertSafeFile(fs, root, destination);
-            const stored = fs.readFileSync(destination);
-            if (stored.length !== bytes.length || hash(stored) !== checksum) throw new Error('图片写入后 SHA-256 校验不一致，未切换存档引用');
-            metadata = { relativePath, checksum, sizeBytes: bytes.length, mimeType, mediaType: 'image', managed: true,
-              missing: false, url: `lianhua-asset://local/${relativePath}` };
-            verified.set(dataUrl, metadata);
-          }
-          if (typeof asset.checksum === 'string' && asset.checksum && asset.checksum.toLowerCase() !== metadata.checksum) {
-            throw new Error('图片内容与已保存的 SHA-256 不一致，未替换冻结的原图');
-          }
-          const { dataUrl: _inline, ...rest } = asset;
-          return { ...rest, ...metadata };
-        } catch (error) { throw mediaError(error, label); }
-      });
+      const roster = [state.project, ...(Array.isArray(state.projects) ? state.projects : [])].filter(isRecord);
+      const convert = (project) => {
+        if (!isRecord(project)) return project;
+        const directory = kindDirectory('image', project, roster);
+        return mapProjectMedia(project, (asset) => {
+          if (!isRecord(asset)) return asset;
+          const dataUrl = typeof asset.dataUrl === 'string' && /^data:/iu.test(asset.dataUrl.trim()) ? asset.dataUrl
+            : typeof asset.url === 'string' && /^data:image\//iu.test(asset.url.trim()) ? asset.url : undefined;
+          if (!dataUrl) return asset;
+          // Video/audio asset payloads are outside this image-only migration.
+          if (asset.mediaType === 'video' || asset.mediaType === 'audio' || asset.type === 'video' || asset.type === 'audio') return asset;
+          const label = String(asset.name || asset.id || asset.assetId || '未命名图片').slice(0, 160);
+          try {
+            const cacheKey = `${directory}\0${dataUrl}`;
+            let metadata = verified.get(cacheKey);
+            if (!metadata) {
+              const { bytes, mimeType, extension } = decodeInlineImage(dataUrl);
+              const checksum = hash(bytes);
+              const relativePath = `${directory}/${checksum}${extension}`;
+              const destination = path.join(root, ...directory.split('/'), `${checksum}${extension}`);
+              assertSafeFile(fs, root, destination);
+              if (!safeStat(fs, destination)) atomicWriteFile(destination, bytes, fs);
+              assertSafeFile(fs, root, destination);
+              const stored = fs.readFileSync(destination);
+              if (stored.length !== bytes.length || hash(stored) !== checksum) throw new Error('图片写入后 SHA-256 校验不一致，未切换存档引用');
+              metadata = { relativePath, checksum, sizeBytes: bytes.length, mimeType, mediaType: 'image', managed: true,
+                missing: false, url: assetUrl(relativePath) };
+              verified.set(cacheKey, metadata);
+            }
+            if (typeof asset.checksum === 'string' && asset.checksum && asset.checksum.toLowerCase() !== metadata.checksum) {
+              throw new Error('图片内容与已保存的 SHA-256 不一致，未替换冻结的原图');
+            }
+            const { dataUrl: _inline, ...rest } = asset;
+            return { ...rest, ...metadata };
+          } catch (error) { throw mediaError(error, label); }
+        });
+      };
+      const project = convert(state.project);
+      const projects = mapChanged(state.projects, convert);
+      return project === state.project && projects === state.projects ? state : { ...state, project, ...(projects !== undefined ? { projects } : {}) };
     },
   };
 };

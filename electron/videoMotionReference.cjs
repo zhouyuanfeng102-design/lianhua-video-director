@@ -27,11 +27,13 @@ const decodeReferenceVideoDataUrl = (dataUrl) => {
   const extension = Object.entries(formats).find(([, mime]) => mime === match[1])?.[0] || '.mp4';
   return { bytes, extension, mimeType: match[1] };
 };
-const storeVideoReferenceVideo = ({ assetRoot, dataUrl, fileName }) => {
+const storeVideoReferenceVideo = ({ assetRoot, dataUrl, fileName, relativeDirectory }) => {
   const { bytes, extension, mimeType } = decodeReferenceVideoDataUrl(dataUrl);
   const digest = checksum(bytes);
-  const relativePath = `video/${digest}${extension}`;
-  const destination = path.join(assetRoot, relativePath);
+  const folder = String(relativeDirectory || 'video').replace(/\\/gu, '/').replace(/^\/+/u, '');
+  const relativeDirectorySafe = folder && folder.split('/').every((part) => part && part !== '.' && part !== '..') ? folder : 'video';
+  const relativePath = `${relativeDirectorySafe}/${digest}${extension}`;
+  const destination = path.join(assetRoot, ...relativePath.split('/'));
   fs.mkdirSync(path.dirname(destination), { recursive: true });
   if (!fs.existsSync(destination)) fs.writeFileSync(destination, bytes, { flag: 'wx' });
   return { fileName: path.basename(fileName || `reference-video${extension}`), relativePath, checksum: digest,

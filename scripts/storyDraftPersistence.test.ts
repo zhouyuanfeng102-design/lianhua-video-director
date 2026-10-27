@@ -277,31 +277,23 @@ test('background task bookkeeping does not cancel a valid import', async () => {
   assert.equal(qa.stateRef.current.project.sourceDocuments[0].content, '正常导入');
 });
 
-test('actual source-cleanup await also discards stale notices and never opens a second cleanup prompt', async () => {
+test('source actions keep the original text and do not open the similarity prompt', async () => {
   assert.ok(integrityDeclaration);
-  for (const mode of ['success', 'failure'] as const) {
-    let current = true; let confirmations = 0; let resolutions = 0;
-    const notices: unknown[] = []; const backup = deferred<boolean>();
-    const dependencies = {
-      detectSourceIntegrityIssues: () => [{ kind: 'fixture' }], sourceContentHash: (text: string) => text,
-      sourceIntegrityAcknowledgedHashRef: { current: '' }, window: { confirm: () => true },
-      confirmSourceIntegrityAction: () => { confirmations += 1; return 'keep-first'; },
-      desktopBridge: () => ({ createRestorePoint: () => {} }), sourceDraftSnapshot: () => 'synthetic-snapshot',
-      createRestorePointWithNotice: async (_create: unknown, _snapshot: unknown, notify: (value: unknown) => void) => {
-        const result = await backup.promise; notify('late backup notice'); return result;
-      },
-      setNotice: (notice: unknown) => notices.push(notice), notify: (notice: unknown) => notices.push(notice),
-      applySourceIntegrityResolution: () => { resolutions += 1; return 'cleaned'; },
-    };
-    const resolve: (content: string, label: string, isCurrent: () => boolean) => Promise<string | undefined> = new Function('dependencies', `with(dependencies) {
-      ${compile(`const ${integrityDeclaration.getText(ast)};`)} return resolveSourceIntegrityForAction;
-    }`)(dependencies);
-    const pending = resolve('synthetic duplicate', '导入剧情', () => current);
-    current = false;
-    if (mode === 'success') backup.resolve(true); else backup.reject(new Error('late backup failure'));
-    assert.equal(await pending, undefined);
-    assert.equal(confirmations, 1); assert.equal(resolutions, 0); assert.deepEqual(notices, []);
-  }
+  let current = true; let confirmations = 0; let resolutions = 0;
+  const dependencies = {
+    detectSourceIntegrityIssues: () => [{ kind: 'fixture' }], sourceContentHash: (text: string) => text,
+    confirmSourceIntegrityAction: () => { confirmations += 1; return 'keep-first'; },
+    applySourceIntegrityResolution: () => { resolutions += 1; return 'cleaned'; },
+  };
+  const resolve: (content: string, label: string, isCurrent: () => boolean) => Promise<string | undefined> = new Function('dependencies', `with(dependencies) {
+    ${compile(`const ${integrityDeclaration.getText(ast)};`)} return resolveSourceIntegrityForAction;
+  }`)(dependencies);
+  const pending = resolve('synthetic duplicate', '导入剧情', () => current);
+  current = false;
+  assert.equal(await pending, 'synthetic duplicate');
+  assert.equal(confirmations, 0);
+  assert.equal(resolutions, 0);
+  assert.equal(await resolve('synthetic duplicate', '导入剧情', () => false), undefined);
 });
 
 test('draft roundtrip does not inherit active project drafts into legacy archived projects', () => {

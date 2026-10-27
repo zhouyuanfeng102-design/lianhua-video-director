@@ -3458,6 +3458,7 @@ export class VideoGenerationEngine {
           const downloaded = await receive({
             url: candidate.resultUrl, headers, noTimeout: true, requestId,
             fileName: task.videoJob.snapshot.draft.name, allowVideoArchive: true,
+            projectId: task.videoJob.snapshot.projectId,
             archiveHint: Boolean(candidate.archiveHint || mapped?.archiveHint && mapped.resultUrl === candidate.resultUrl),
           });
           ensureDownloadActive();

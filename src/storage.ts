@@ -122,6 +122,7 @@ import {
   stateHasProjectLibraryReferences,
 } from './projectLibraryRuntime';
 export { hasUnsavedDesktopProjects, isProjectLibraryReference, projectLibraryReferenceOf } from './projectLibraryRuntime';
+import { projectNeedsAssetFolderPlacement, publishAssetPathMoves, type AssetPathMove } from './assetPathMoves';
 export { stateUtf8ByteLength } from './stateSerialization';
 export type { PersistedActiveProjectReference, PersistedAppState } from './stateSerialization';
 
@@ -830,7 +831,7 @@ const LEGACY_STORY_EXPANSION_GENERAL_V1_4_4: StoryExpansionPreset = {
   updatedAt: 0,
 };
 
-export const defaultStoryExpansionPresets: StoryExpansionPreset[] = [{
+export const LEGACY_STORY_EXPANSION_GENERAL_V1_5_0: StoryExpansionPreset = {
   ...LEGACY_STORY_EXPANSION_GENERAL_V1_4_4,
   systemPrompt: LEGACY_STORY_EXPANSION_GENERAL_V1_4_4.systemPrompt
     .replace('已经清晰的普通剧情可以保留有效表达。', '普通静态描述可以保留有效表达；打斗、多人互动和复杂操作应展开已有行动的连续过程，不能只换词或复述原文。')
@@ -838,6 +839,21 @@ export const defaultStoryExpansionPresets: StoryExpansionPreset[] = [{
     .replace('只交付完整正文，不输出分析或推理过程。', '遵循本次服务指定的事件理解或画面转化协议，结构字段只是内部资料，用户最终看到完整自然段正文；不输出推理过程。'),
   outputRules: 'optimize 先按本次协议提取原文事件依据，再据此生成自然连贯的中文画面段落，段落元数据记录来源事件和编排补充。内部 JSON 由服务读取，正文 text 中不得出现 JSON、H3、逐镜字段、秒数、时间轴、镜头参数、制作指令或分析说明。expand 只输出围绕原主线扩写的完整中文剧情正文。两种模式保留人物代号、原对白原话原语种原说话人顺序、对白与动作时序、事件因果与结局。',
   version: '1.5.0',
+  updatedAt: 0,
+};
+
+export const defaultStoryExpansionPresets: StoryExpansionPreset[] = [{
+  ...LEGACY_STORY_EXPANSION_GENERAL_V1_5_0,
+  systemPrompt: LEGACY_STORY_EXPANSION_GENERAL_V1_5_0.systemPrompt
+    .replace(
+      '允许细化原文已经发生的动作，包括准备、发力或操作、路径、接触或避让、反应和结束状态，不机械走满固定步骤。',
+      '允许细化原文已经发生的动作，包括准备、发力或操作、路径、接触或避让、反应和结束状态，不机械走满固定步骤。已经进入且双方还连着的成人身体接触，不按打斗的发力、路径和每一击展开，连续过程只用髋和腰贴着对方的缓慢、小幅度、温柔的连续起伏，相接处一直贴着，这串起伏从头到尾保持缓慢，两套句子不并列。拳脚、摔倒、撞门、拍桌和兵器仍按那一下真实打击写。',
+    )
+    .replace(
+      '不机械走满固定步骤或为了加长反复同一动作。',
+      '不机械走满固定步骤或为了加长反复同一动作。已经进入且双方还连着时，补上的连续过程只用那句缓慢起伏，不补成一下一下的抽送。',
+    ),
+  version: '1.5.1',
   updatedAt: now(),
 }];
 
@@ -1129,6 +1145,9 @@ const isUntouchedLegacyStoryExpansionPreset = (candidate: unknown, includeV100: 
   if (LEGACY_STORY_EXPANSION_SEMANTIC_FIELDS.every(
     (field) => candidate[field] === LEGACY_STORY_EXPANSION_GENERAL_V1_4_4[field],
   )) return true;
+  if (LEGACY_STORY_EXPANSION_SEMANTIC_FIELDS.every(
+    (field) => candidate[field] === LEGACY_STORY_EXPANSION_GENERAL_V1_5_0[field],
+  )) return true;
   if (
     candidate.id === DEFAULT_STORY_EXPANSION_PRESET_ID
     && candidate.name === LEGACY_STORY_EXPANSION_GENERAL_V1_3_0.name
@@ -1143,7 +1162,7 @@ const isUntouchedLegacyStoryExpansionPreset = (candidate: unknown, includeV100: 
 };
 
 /**
- * Untouched v1.1.0/v1.2.0/v1.3.0/v1.4.0 defaults gain the current video-story template
+ * Untouched v1.1.0/v1.2.0/v1.3.0/v1.4.0/v1.5.0 defaults gain the current video-story template
  * even in schema-21 saves. Keep the existing pre-schema-13 v1.0.0 upgrade path;
  * a later user-restored v1.0.0 remains authoritative. No collection reset or
  * schema bump is needed, and all user edits/custom metadata remain untouched.
@@ -3186,7 +3205,8 @@ const normalizeTrackedProject = (
   projectConverterMigrations.set(project, migratedConverterIds);
   // Interrupted-task recovery and real migrations are dirty changes. Merely
   // loading a checked block must not acknowledge changes absent from that file.
-  if (schemaVersion >= CURRENT_SCHEMA_VERSION && samePersistedData(canonical, project)) {
+  // A legacy image/video/audio path stays unsaved so the next write can move that project's files.
+  if (schemaVersion >= CURRENT_SCHEMA_VERSION && samePersistedData(canonical, project) && !projectNeedsAssetFolderPlacement(project)) {
     rememberPersistedProject(project, hash, normalizedSchemaVersion);
   }
   return project;
@@ -3536,6 +3556,7 @@ export type DesktopSaveResult = {
   backupError?: string;
   snapshotError?: string;
   projectHashes?: Record<string, string>;
+  assetMoves?: AssetPathMove[];
 };
 
 export type DesktopProjectResult = { project: unknown; schemaVersion: number; hash: string };
@@ -3685,6 +3706,7 @@ const saveStateDirect = async (state: AppState): Promise<DesktopSaveResult> => {
   if (desktop?.saveState) result = await desktop.saveState(serialized);
   if (!result.ok) throw new Error('本地保存未完成，请检查数据目录后重试');
   captured?.acknowledge(result.projectHashes);
+  publishAssetPathMoves(result.assetMoves);
   // Desktop state is authoritative. Large project libraries cannot fit into
   // browser storage; do not repeatedly clone/encode them merely to exceed its
   // much smaller quota. Keep existing browser data untouched.

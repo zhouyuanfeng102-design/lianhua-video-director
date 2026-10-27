@@ -3,6 +3,7 @@ const path = require('node:path');
 const { createHash } = require('node:crypto');
 const { readProjectLibrary, isProjectLibraryManifest } = require('./projectLibraryStore.cjs');
 const { collectStateMediaFiles } = require('./stateMediaFiles.cjs');
+const { placeProjectAssets } = require('./projectAssetLayout.cjs');
 
 const statOrMissing = (fs, file) => { try { return fs.lstatSync(file); } catch (error) { if (error?.code === 'ENOENT') return undefined; throw error; } };
 const pathKey = (value) => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
@@ -156,6 +157,8 @@ const readProjectLibraryImport = (content, { filePath, dataRoot, assetRoot, fs =
     }
   }
   remapMediaRecords(state, replacements);
+  // Old packages still import. Named projects then land in their own folders.
+  placeProjectAssets(state, { assetRoot, dataRoot, fs, deferDeletes: false });
   return JSON.stringify(state);
 };
 

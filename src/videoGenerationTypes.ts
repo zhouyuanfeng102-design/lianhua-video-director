@@ -29,6 +29,8 @@ export interface GeneratedMediaDownloadRequest {
   /** Only the video-task workflow can opt in to ZIP video extraction. */
   allowVideoArchive?: boolean;
   archiveHint?: boolean;
+  /** Project that owns the finished clip. The file is stored in that project's folder. */
+  projectId?: string;
 }
 export interface GeneratedMediaDownloadResult extends ManagedMediaResult {
   /** All videos are imported; multiple results need an explicit primary choice. */

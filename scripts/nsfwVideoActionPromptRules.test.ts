@@ -10,6 +10,7 @@ import { translateVideoPromptToEnglish } from '../src/promptTranslation';
 import { generateOfficialSeedancePrompt } from '../src/seedancePrompt';
 import type { SemanticSegmentSourceContext } from '../src/semanticSequencePlan';
 import { requestShotRecommendation } from '../src/services/llm';
+import { renderShotPrompt } from '../src/promptEngine';
 import { generateSingleSegmentPrompt } from '../src/singleSegmentPrompt';
 import type { ConverterPreset, Storyboard, TextApiConfig, VideoShot } from '../src/types';
 
@@ -92,6 +93,24 @@ assert.match(convertSystem, /动作阶段、人物反应、身体\/衣料\/环�
 assert.match(convertSystem, /接近与姿势建立写贴近呼吸/u);
 assert.match(convertSystem, /克制、冷静、羞怯的人物/u);
 assert.match(convertSystem, /不写成重击、格挡、拳脚冲撞、墙体震动、破裂声或战斗类拟声/u);
+assert.match(convertSystem, /很轻的、贴在耳边的、没有房间敲击回响的湿滑黏连，停在压低喘息和台词下面/u);
+assert.match(convertSystem, /音效句和 overall_soundscape 不用拍击、脆响、闷响、相撞、冲撞、撞击、重击/u);
+assert.match(convertSystem, /同一个来回，由髋、腰或手持续带动/u);
+assert.match(convertSystem, /髋和腰贴着对方做缓慢、小幅度、温柔的连续起伏，相接处一直贴着/u);
+assert.match(convertSystem, /这串起伏从头到尾保持缓慢/u);
+assert.match(convertSystem, /抽出大半、整根送回、退回大半、每一下、顶到底、顶入/u);
+assert.match(convertSystem, /一上一下、加快、深而急、更急、加重、顶进去、顶得往前、一耸一耸/u);
+assert.match(convertSystem, /短促进入声/u);
+assert.match(convertSystem, /每个器官在每一句里都写明主人的姓名/u);
+assert.match(convertSystem, /甲的手握住乙的肉棒/u);
+assert.match(convertSystem, /人还留在里面/u);
+assert.match(convertSystem, /不把连续来回写成一下猛插入再整个抽出/u);
+assert.match(convertSystem, /闷闷声响/u);
+assert.match(convertSystem, /喉咙里的闷哼是人声，可以保留/u);
+assert.match(convertSystem, /拳脚、摔倒、撞门、手或物件拍桌、兵器相撞仍按那一下真实打击写/u);
+assert.match(convertSystem, /抽送带动的桌面、床铺或地面晃动只留在画面里/u);
+assert.match(convertSystem, /手、杯或其他物件单独打到桌面、门板、墙面或地板时，仍按那一下真实接触写成短促闷响或拍击/u);
+assert.match(convertSystem, /私密身体对身体的接触不归入碰撞/u);
 assert.equal(convertSystem.split(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE).length - 1, 1);
 assert.equal(convertSystem.split(MOSE_JIANGHU_NSFW_VIDEO_SOUND_RULE).length - 1, 1);
 
@@ -134,7 +153,21 @@ await translateVideoPromptToEnglish({
 });
 assert.equal(translationSystem.includes(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE), true);
 assert.match(translationSystem, /具体声音来源、人物反应、动作阶段、材质声/u);
-assert.match(translationSystem, /不译成 generic impact \/ collision \/ thud \/ striking \/ wall vibration \/ combat sound/u);
+assert.match(translationSystem, /不译成 slap, knock, thud, generic impact \/ collision \/ thud \/ striking \/ wall vibration \/ combat sound/u);
+assert.match(translationSystem, /a very quiet close-to-the-ear wet adhesion with no room slap, sitting under the breath and dialogue/u);
+assert.match(translationSystem, /hips and waist stay together in a small, slow, continuous rock and the contact stays joined/u);
+assert.match(translationSystem, /抽出大半又整根送回、每一下顶到底或被撞得发颤时，翻译保持该动作/u);
+assert.match(translationSystem, /翻译保持该动作，不在翻译阶段改成连续来回/u);
+assert.match(translationSystem, /打斗、撞门、手拍桌面和兵器仍译成 impact、thud 或 metal clash/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_PRESERVATION_RULE, /纯格式修复、参考更新和衔接修复保持已写动作原句和已写音效原句/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_PRESERVATION_RULE, /抽出大半又整根送回、每一下顶到底/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_PRESERVATION_RULE, /一上一下、加快、深而急、更急、加重、顶进去、顶得往前、一耸一耸/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_PRESERVATION_RULE, /短促进入声/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_PRESERVATION_RULE, /每个器官在每一句里都写明主人的姓名/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_PRESERVATION_RULE, /回程仍留在里面/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_PRESERVATION_RULE, /闷闷声响、深撞、撞击段/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_PRESERVATION_RULE, /拍击、闷响、相撞、冲撞、撞击或脆响的句子改成很轻的、贴在耳边的、没有房间敲击回响的湿滑黏连/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_PRESERVATION_RULE, /打斗、撞门、手拍桌面和兵器相撞保持撞击声/u);
 
 const h3Prompt = [
   'integrated_multimodal_description:',
@@ -307,5 +340,17 @@ await generateOfficialSeedancePrompt({
 assert.equal(seedanceSystem.includes(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE), true);
 assert.doesNotMatch(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /年龄门禁|未满|未成年/u);
 assert.doesNotMatch(MOSE_JIANGHU_NSFW_VIDEO_SOUND_RULE, /年龄门禁|未满|未成年/u);
+
+const intimateDraft = renderShotPrompt({
+  ...shot('两人跨坐抽送，下腹反复撞在臀瓣上'),
+  sound: '',
+}, 5, []);
+assert.match(intimateDraft, /动作层-\[贴近的皮肤贴合与湿滑摩擦声\]/u);
+assert.doesNotMatch(intimateDraft, /接触碰撞声/u);
+const doorDraft = renderShotPrompt({
+  ...shot('旅人快跑后肩膀撞上木门'),
+  sound: '',
+}, 5, []);
+assert.match(doorDraft, /动作层-\[脚步声与接触碰撞声\]/u);
 
 console.log('NSFW video action prompt rule injection checks passed');

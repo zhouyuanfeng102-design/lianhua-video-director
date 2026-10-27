@@ -304,6 +304,7 @@ import {
   type RecoveryStatus,
 } from "./storage";
 import { isProjectLibraryReference, projectLibraryReferenceOf } from "./projectLibraryRuntime";
+import { applyAssetPathMoves, setAssetPathMoveListener } from "./assetPathMoves";
 import { CacheAnalysisPanel } from "./components/CacheAnalysisPanel";
 import { withTextApiUsageContext, type TextApiUsageContext } from "./textApiUsage";
 import {
@@ -515,7 +516,6 @@ import {
   collectAuthoritativeStoryEntityNames,
   commitStateTransition,
   composeDerivedLocalPrompt,
-  confirmSourceIntegrityAction,
   credentialDraftFromEntry,
   createRestorePointWithNotice,
   deriveSceneSelection,
@@ -587,8 +587,6 @@ import {
   updateSequenceSegment,
 } from "./sequencePlan";
 import {
-  applySourceIntegrityResolution,
-  detectSourceIntegrityIssues,
   sourceContentHash,
 } from "./sourceIntegrity";
 import {
@@ -1983,7 +1981,6 @@ export default function App() {
     apiIdentity: string;
   } | null>(null);
   const promptMigrationAttempted = useRef<Set<string>>(new Set());
-  const sourceIntegrityAcknowledgedHashRef = useRef("");
   const stateRef = useRef(state);
   const lastAutosavedStateRef = useRef<AppState | null>(null);
   stateRef.current = state;
@@ -3099,6 +3096,27 @@ export default function App() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [undo, redo, desktopStateReady]);
+
+  useEffect(() => {
+    setAssetPathMoveListener((moves) => {
+      setBackgroundState((current) => applyAssetPathMoves(current, moves));
+    });
+    return () => setAssetPathMoveListener(undefined);
+  }, [setBackgroundState]);
+
+  const assetRosterNote = `${state.project?.id || ""}\0${state.project?.name || ""}\0${state.projects.map((project) => `${project.id}\0${project.name || ""}`).join("\n")}`;
+  useEffect(() => {
+    const note = window.lianhuaDesktop?.noteActiveProject;
+    if (!note) return;
+    const current = stateRef.current;
+    void note({
+      activeProjectId: current.project?.id || current.activeProjectId,
+      projects: current.projects.filter((project) => project?.id).map((project) => ({
+        id: project.id,
+        name: typeof project.name === "string" ? project.name : "",
+      })),
+    });
+  }, [assetRosterNote]);
 
   useEffect(() => {
     if (!desktopStateReady || closingSaveRef.current || restoringSnapshot || state === lastAutosavedStateRef.current) return;
@@ -5991,91 +6009,13 @@ export default function App() {
     return sourceChanged;
   };
 
-  const sourceDraftSnapshot = (content: string): string => {
-    const current = stateRef.current;
-    const t = Date.now();
-    const source = activeChapter(current.project);
-    const nextSource = source
-      ? {
-          ...source,
-          name: storyName.trim() || source.name || "剧情原文",
-          content,
-          contentHash: sourceContentHash(content),
-          updatedAt: t,
-        }
-      : {
-          id: createId("source"),
-          name: storyName.trim() || "剧情原文",
-          content,
-          contentHash: sourceContentHash(content),
-          createdAt: t,
-          updatedAt: t,
-        };
-    return serializeStateForStorage(withProjectLibrary({
-      ...current,
-      project: {
-        ...current.project,
-        sourceDocuments: source
-          ? current.project.sourceDocuments.map((chapter) => chapter.id === source.id ? nextSource : chapter)
-          : [nextSource, ...current.project.sourceDocuments],
-      },
-    }, current)).serialized;
-  };
-
   const resolveSourceIntegrityForAction = async (
     content: string,
-    actionLabel: string,
+    _actionLabel: string,
     isCurrent: () => boolean = () => true,
   ): Promise<string | undefined> => {
     if (!isCurrent()) return undefined;
-    let resolvedText = content;
-    let issues = detectSourceIntegrityIssues(resolvedText);
-    if (!issues.length) return resolvedText;
-    const inputHash = sourceContentHash(resolvedText);
-    if (sourceIntegrityAcknowledgedHashRef.current === inputHash) return resolvedText;
-    let restorePointCreated = false;
-
-    while (issues.length) {
-      if (!isCurrent()) return undefined;
-      const issue = issues[0];
-      const action = confirmSourceIntegrityAction(issue, actionLabel, (message) => window.confirm(message));
-      if (action === "cancel") return undefined;
-      if (action === "continue") {
-        sourceIntegrityAcknowledgedHashRef.current = inputHash;
-        return resolvedText;
-      }
-      if (!restorePointCreated) {
-        const createRestorePoint = desktopBridge()?.createRestorePoint;
-        if (createRestorePoint) {
-          let created = false;
-          try {
-            created = await createRestorePointWithNotice(createRestorePoint, sourceDraftSnapshot(content), (notice) => {
-              if (isCurrent()) setNotice(notice);
-            });
-          } catch (error) {
-            if (!isCurrent()) return undefined;
-            notify(`创建原文恢复点失败，已取消本次操作：${error instanceof Error ? error.message : String(error)}`, "error");
-            return undefined;
-          }
-          if (!isCurrent()) return undefined;
-          if (!created) {
-            notify("未能创建去重前恢复点，已取消本次操作。", "error");
-            return undefined;
-          }
-        }
-        restorePointCreated = true;
-      }
-      const nextText = applySourceIntegrityResolution(resolvedText, issue, "keep-first");
-      if (nextText === resolvedText) {
-        notify("无法安全移除检测到的重复段，未修改原文。", "error");
-        return undefined;
-      }
-      resolvedText = nextText;
-      issues = detectSourceIntegrityIssues(resolvedText);
-    }
-
-    sourceIntegrityAcknowledgedHashRef.current = "";
-    return resolvedText;
+    return content;
   };
 
   const materializeProject = async (projectId: string): Promise<{ project: Project; hash?: string } | undefined> => {

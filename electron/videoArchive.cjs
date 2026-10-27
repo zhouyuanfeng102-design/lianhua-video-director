@@ -200,7 +200,9 @@ const importVideoArchive = async (options) => {
     const usedNames = new Set();
     for (const file of files) { const original = file.fileName; let suffix = 1; while (usedNames.has(file.fileName.normalize('NFC').toLowerCase())) { suffix += 1; file.fileName = `${path.basename(original, file.extension)} (${suffix})${file.extension}`; } usedNames.add(file.fileName.normalize('NFC').toLowerCase()); }
     const assetRoot = await fs.promises.realpath(options.assetRoot);
-    const videoRoot = path.join(assetRoot, 'video');
+    const requestedDirectory = String(options.relativeDirectory || 'video').replace(/\\/gu, '/').replace(/^\/+/u, '');
+    const relativeDirectory = requestedDirectory.split('/').every((part) => part && part !== '.' && part !== '..') ? requestedDirectory : 'video';
+    const videoRoot = path.join(assetRoot, ...relativeDirectory.split('/'));
     await fs.promises.mkdir(videoRoot, { recursive: true });
     if ((await fs.promises.lstat(videoRoot)).isSymbolicLink() || !inside(assetRoot, await fs.promises.realpath(videoRoot))) throw new Error('托管视频目录不允许指向资产库外部');
     publicationStage = await fs.promises.mkdtemp(path.join(videoRoot, '.archive-pending-'));

@@ -395,9 +395,15 @@ export const generateOfficialSeedancePrompt = async ({ input, request, isCurrent
   const metadata = compileOfficialSeedancePrompt(input);
   // Keep the saved fingerprint inputs intact, while the writer receives the
   // adopted shots rather than the original menu of directing preferences.
-  const { creativeDirection: _creativeDirection, directorStyleSummary: _directorStyleSummary,
+  const { creativeDirection: _creativeDirection, directorStyleSummary, visualStyle,
     extraRequirement: _extraRequirement, ...adoptedSourceEvidence } = input.sourceEvidence || {};
-  const expressionSourceEvidence: Record<string, unknown> = { ...adoptedSourceEvidence };
+  const selectedPictureStyle = typeof visualStyle === 'string' ? visualStyle.trim() : '';
+  const selectedDirectorStyle = typeof directorStyleSummary === 'string' ? directorStyleSummary.trim() : '';
+  const expressionSourceEvidence: Record<string, unknown> = {
+    ...adoptedSourceEvidence,
+    ...(selectedPictureStyle ? { selectedPictureStyle } : {}),
+    ...(selectedDirectorStyle ? { selectedDirectorStyle } : {}),
+  };
   const sequenceContext = adoptedSourceEvidence.sequenceSegmentContext;
   if (sequenceContext && typeof sequenceContext === 'object' && !Array.isArray(sequenceContext)) {
     const { creativeDirection: _planningPreferences, ...adoptedContext } = sequenceContext as Record<string, unknown>;

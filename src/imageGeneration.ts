@@ -910,7 +910,7 @@ const IMAGE_VARIANT_SPECS: Readonly<Record<ImageVariant, ImageVariantGenerationS
   'first-frame': {
     id: 'first-frame',
     label: '分镜首帧',
-    direction: '视频分镜首帧采用当前采纳稿的起始时刻和初始机位，先保留人物世界位置、朝向、真实距离与行动空间，再写该取景实际可见的身份和主光源；随后走近或运镜才出现的状态不提前入画。',
+    direction: '视频分镜首帧采用当前采纳稿的起始时刻和初始机位，先写人物往哪走、摄影机在哪、画面背后是什么，再写该取景实际可见的身份和主光源。后移跟拍是摄影机在人物前方后退，目的地留在人物身体前方，不画到他们身后；随后走近或运镜才出现的状态不提前入画。',
     canvas: SQUARE_CANVAS,
   },
   'last-frame': {
@@ -922,7 +922,7 @@ const IMAGE_VARIANT_SPECS: Readonly<Record<ImageVariant, ImageVariantGenerationS
   'storyboard-frame': {
     id: 'storyboard-frame',
     label: '分镜图片',
-    direction: '单镜头剧情分镜图片，先固定当前采纳稿中的一个时刻与该时刻的机位，保留该阶段的人物世界位置、朝向、距离及行动通路，再写取景实际可见的动作、光线和必要身份；不将整镜过程与结果同时入画，也不为展示人物正面另选视点。',
+    direction: '单镜头剧情分镜图片，先固定当前采纳稿中的一个时刻与该时刻的机位，先写人物往哪走、摄影机在哪、画面背后是什么，再写取景实际可见的动作、光线和必要身份。后移跟拍不把目的地画到人物身后；不将整镜过程与结果同时入画，也不为展示人物正面另选视点。',
     canvas: LANDSCAPE_CANVAS,
   },
   icon: {
