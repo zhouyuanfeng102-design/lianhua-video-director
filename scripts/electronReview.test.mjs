@@ -938,7 +938,7 @@ test('generated image data URLs are content-addressed in the managed image store
   });
 
   assert.equal(first.checksum, expectedChecksum);
-  assert.equal(first.relativePath, `image/${expectedChecksum}.png`);
+  assert.equal(first.relativePath, 'image/第 1 镜 · 第 1 版.png');
   assert.equal(first.relativePath, second.relativePath, 'identical image bytes must deduplicate');
   assert.equal(first.sizeBytes, pngBytes.length);
   assert.equal(first.mediaType, 'image');
@@ -952,7 +952,7 @@ test('generated image data URLs are content-addressed in the managed image store
   );
   assert.deepEqual(
     fs.readdirSync(path.join(harness.dataRoot, 'assets', 'image')),
-    [`${expectedChecksum}.png`],
+    ['第 1 镜 · 第 1 版.png'],
     'deduplication must leave only one managed file',
   );
   assert.doesNotMatch(JSON.stringify(first), /base64|data:image/u, 'metadata must not retain embedded image data');
@@ -972,8 +972,8 @@ test('generated image storage accepts JPEG and WebP but rejects unsafe or oversi
   const webp = await harness.storeGeneratedImageInAssetStore({
     dataUrl: `data:image/webp;base64,${webpBytes.toString('base64')}`,
   });
-  assert.match(jpeg.relativePath, /^image\/[a-f0-9]{64}\.jpg$/u);
-  assert.match(webp.relativePath, /^image\/[a-f0-9]{64}\.webp$/u);
+  assert.equal(jpeg.relativePath, 'image/未命名图片 · 第 1 版.jpg');
+  assert.equal(webp.relativePath, 'image/未命名图片 · 第 1 版.webp');
   const mislabeled = await harness.storeGeneratedImageInAssetStore({ dataUrl: `data:image/png;base64,${samples.jpeg}`, fileName: 'upstream-wrong-name.png' });
   assert.equal(mislabeled.mimeType, 'image/jpeg');
   assert.equal(mislabeled.fileName, 'upstream-wrong-name.jpg');

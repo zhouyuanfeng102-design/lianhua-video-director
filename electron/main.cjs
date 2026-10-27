@@ -982,16 +982,16 @@ const readableMediaFileName = (rawName, extension) => {
   return `${stem}${extension}`;
 };
 const relativeMediaPath = (directory, fileName) => `${String(directory || '').replace(/\\/gu, '/').replace(/^\/+|\/+$/gu, '')}/${fileName}`;
-const allocateReadableMediaRelativePath = (directory, fileName, checksum) => {
+const allocateReadableMediaRelativePath = (directory, fileName, checksum, options) => {
   const folder = ensureDirectory(path.join(assetRoot, ...String(directory).split(/[\\/]/u)));
   const names = fs.readdirSync(folder, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => entry.name);
-  return relativeMediaPath(directory, allocateReadableName(names, fileName, checksum, (name) => fileSha256(path.join(folder, name))));
+  return relativeMediaPath(directory, allocateReadableName(names, fileName, checksum, (name) => fileSha256(path.join(folder, name)), options));
 };
-const allocateReadableMediaRelativePathAsync = async (directory, fileName, checksum) => {
+const allocateReadableMediaRelativePathAsync = async (directory, fileName, checksum, options) => {
   const folder = path.join(assetRoot, ...String(directory).split(/[\\/]/u));
   await fs.promises.mkdir(folder, { recursive: true });
   const names = (await fs.promises.readdir(folder, { withFileTypes: true })).filter((entry) => entry.isFile()).map((entry) => entry.name);
-  return relativeMediaPath(directory, allocateReadableName(names, fileName, checksum, (name) => fileSha256Async(path.join(folder, name))));
+  return relativeMediaPath(directory, allocateReadableName(names, fileName, checksum, (name) => fileSha256Async(path.join(folder, name)), options));
 };
 const DOWNLOAD_MEDIA_EXTENSIONS = new Set(['.mp4', '.webm', '.mov', '.mp3', '.wav', '.m4a', '.aac', '.ogg', '.flac']);
 const DOWNLOAD_MIME_EXTENSIONS = new Map([
@@ -1528,14 +1528,19 @@ const generatedImageFileName = (rawName, extension) => {
     .replace(/[<>:"/\\|?*\u0000-\u001F]/g, '_')
     .trim();
   const stem = path.basename(requested, path.extname(requested)).trim().slice(0, 160);
-  return `${stem || 'generated-image'}${extension}`;
+  return `${stem || '未命名图片'}${extension}`;
 };
 
 const storeGeneratedImageInAssetStore = async (payload) => {
   const input = typeof payload === 'string' ? { dataUrl: payload } : payload || {};
   const { bytes, mimeType, extension } = decodeGeneratedImageDataUrl(input.dataUrl);
   const checksum = createHash('sha256').update(bytes).digest('hex');
-  const relativePath = relativeMediaPath(mediaKindDirectory('image', input.projectId), `${checksum}${extension}`);
+  const relativePath = allocateReadableMediaRelativePath(
+    mediaKindDirectory('image', input.projectId),
+    generatedImageFileName(input.fileName, extension),
+    checksum,
+    { numbered: true },
+  );
   const destination = assetPathFromRelative(relativePath);
   ensureDirectory(path.dirname(destination));
   if (!fs.existsSync(destination)) {

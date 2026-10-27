@@ -222,12 +222,32 @@ const placeProjectAssets = (state, { assetRoot, dataRoot = '', fs = nodeFs, defe
   for (const project of fullProjects) {
     const folder = names.get(project.id);
     const groups = new Map();
+    const reservedNames = new Map();
     visitMedia(project, (object, key) => {
       const current = normalizeRelative(object[key]);
-      const destination = relocatedRelative(current, folder);
-      if (!destination || destination === current) return;
+      let destination = relocatedRelative(current, folder);
+      const checksumImage = isChecksumImageRelative(current);
+      if (!destination || (destination === current && !checksumImage)) return;
       let group = groups.get(current);
-      if (!group) groups.set(current, group = { current, destination, checksum: '', conflict: false });
+      if (!group) {
+        if (checksumImage) {
+          const directory = destination.split('/').slice(0, -1).join('/');
+          const extension = path.extname(current.split('/').pop() || '') || '.png';
+          const folderAbs = path.join(root, ...directory.split('/'));
+          let names = [];
+          try {
+            names = fs.readdirSync(folderAbs).filter((name) => regularFile(fs, path.join(folderAbs, name)));
+          } catch { names = []; }
+          const reserved = reservedNames.get(directory) || [];
+          const digest = typeof object.checksum === 'string' ? object.checksum.toLowerCase() : '';
+          const readable = allocateReadableName([...names, ...reserved], `${imageDisplayStem(object)}${extension}`, digest, (name) => fileChecksum(fs, path.join(folderAbs, name)), { numbered: true });
+          reserved.push(readable);
+          reservedNames.set(directory, reserved);
+          destination = `${directory}/${readable}`;
+        }
+        if (destination === current) return;
+        groups.set(current, group = { current, destination, checksum: '', conflict: false });
+      }
       const checksum = typeof object.checksum === 'string' ? object.checksum.toLowerCase() : '';
       if (checksum) {
         if (group.checksum && group.checksum !== checksum) group.conflict = true;
@@ -309,8 +329,9 @@ const placeProjectAssets = (state, { assetRoot, dataRoot = '', fs = nodeFs, defe
       const destination = placed.get(`${project.id}\0${current}`);
       if (!destination || destination === current) return;
       object[key] = destination;
-      if (key === 'relativePath' && typeof object.url === 'string' && decodeAssetUrl(object.url) === current) {
-        object.url = assetUrl(destination);
+      if (key === 'relativePath') {
+        if (isChecksumImageRelative(current)) object.fileName = destination.split('/').pop();
+        if (typeof object.url === 'string' && decodeAssetUrl(object.url) === current) object.url = assetUrl(destination);
       }
       moves.push({ projectId: project.id, from: current, to: destination });
     });
@@ -330,16 +351,27 @@ const placeProjectAssets = (state, { assetRoot, dataRoot = '', fs = nodeFs, defe
   return { state, moves, deletes: uniqueDeletes };
 };
 
-/** Version numbers are chosen from one directory listing, so each project folder counts on its own. */
-const allocateReadableName = (existingNames, fileName, checksum, checksumOf) => {
+const VERSION_SUFFIX = /(?:\s*·\s*)?第\s*\d+\s*版$/u;
+const stemWithoutVersion = (stem) => String(stem || '').replace(VERSION_SUFFIX, '').trim() || String(stem || '');
+
+/** Version numbers are chosen from one directory listing, so each project folder counts on its own.
+ * Images pass numbered:true so the first file is already 「名称 · 第 1 版」. Videos keep the first file unsuffixed. */
+const allocateReadableName = (existingNames, fileName, checksum, checksumOf, options = {}) => {
+  const numbered = options.numbered === true;
   const entries = new Map();
   for (const name of existingNames || []) {
     if (name) entries.set(readableMediaNameKey(name), name);
   }
+  if (numbered && checksum) {
+    for (const name of entries.values()) {
+      if (CHECKSUM_IMAGE_NAME.test(name)) continue;
+      try { if (checksumOf(name) === checksum) return name; } catch { /* An unreadable file stays occupied. */ }
+    }
+  }
   const extension = path.extname(String(fileName || ''));
-  const originalStem = extension ? String(fileName).slice(0, -extension.length) : String(fileName || '');
+  const originalStem = stemWithoutVersion(extension ? String(fileName).slice(0, -extension.length) : String(fileName || ''));
   for (let version = 1; version < 100_000; version += 1) {
-    const suffix = version === 1 ? '' : ` · 第 ${version} 版`;
+    const suffix = numbered || version > 1 ? ` · 第 ${version} 版` : '';
     const stem = clipFileStem(originalStem, MAX_READABLE_MEDIA_STEM_LENGTH - suffix.length).trimEnd();
     const candidate = `${stem}${suffix}${extension}`;
     const existing = entries.get(readableMediaNameKey(candidate));
@@ -348,7 +380,16 @@ const allocateReadableName = (existingNames, fileName, checksum, checksumOf) => 
       if (checksumOf(existing) === checksum) return existing;
     } catch { /* An unreadable collision stays occupied. */ }
   }
-  throw new Error('同名视频版本过多，无法分配安全文件名');
+  throw new Error('同名文件版本过多，无法分配安全文件名');
+};
+
+const CHECKSUM_IMAGE_NAME = /^[a-f0-9]{64}\.(?:png|jpe?g|webp)$/iu;
+const isChecksumImageRelative = (relative) => CHECKSUM_IMAGE_NAME.test(String(relative || '').split('/').pop() || '');
+const imageDisplayStem = (object) => {
+  const raw = String(object?.name || object?.fileName || '').trim();
+  const stem = raw.replace(/\.[a-z0-9]{2,5}$/iu, '').trim();
+  if (!stem || /^[a-f0-9]{64}$/iu.test(stem)) return '未命名图片';
+  return stem;
 };
 
 module.exports = {

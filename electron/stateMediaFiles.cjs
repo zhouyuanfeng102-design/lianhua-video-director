@@ -2,7 +2,7 @@ const nodeFs = require('node:fs');
 const path = require('node:path');
 const { createHash, randomUUID } = require('node:crypto');
 const { decodeReferenceImageDataUrl } = require('./imageReferenceTransport.cjs');
-const { kindDirectory, assetUrl } = require('./projectAssetLayout.cjs');
+const { allocateReadableName, kindDirectory, assetUrl } = require('./projectAssetLayout.cjs');
 
 const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
 const isRecord = (value) => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -253,8 +253,14 @@ const createStateMediaExternalizer = ({ assetRoot, fs = nodeFs, atomicWriteFile 
             if (!metadata) {
               const { bytes, mimeType, extension } = decodeInlineImage(dataUrl);
               const checksum = hash(bytes);
-              const relativePath = `${directory}/${checksum}${extension}`;
-              const destination = path.join(root, ...directory.split('/'), `${checksum}${extension}`);
+              const folder = path.join(root, ...directory.split('/'));
+              const rawName = String(asset.name || asset.fileName || '').trim().replace(/\.[a-z0-9]{2,5}$/iu, '').trim();
+              const stem = rawName && !/^[a-f0-9]{64}$/iu.test(rawName) ? rawName : '未命名图片';
+              let names = [];
+              try { names = fs.readdirSync(folder).filter((name) => { try { return fs.statSync(path.join(folder, name)).isFile(); } catch { return false; } }); } catch { names = []; }
+              const fileName = allocateReadableName(names, `${stem}${extension}`, checksum, (name) => hash(fs.readFileSync(path.join(folder, name))), { numbered: true });
+              const relativePath = `${directory}/${fileName}`;
+              const destination = path.join(folder, fileName);
               assertSafeFile(fs, root, destination);
               if (!safeStat(fs, destination)) atomicWriteFile(destination, bytes, fs);
               assertSafeFile(fs, root, destination);

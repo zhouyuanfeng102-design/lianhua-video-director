@@ -54,7 +54,7 @@ test('typed reverse snapshots externalize exact original pixels without rewritin
   const converted = createStateMediaExternalizer({ assetRoot }).externalize({ project: { assets: [], generationTasks: [original] } });
   const stored = converted.project.generationTasks[0].referenceAssetSnapshots[0];
   assert.equal(stored.dataUrl, undefined);
-  assert.equal(stored.relativePath, `image/${checksum}.png`);
+  assert.equal(stored.relativePath, 'image/原图 · 第 1 版.png');
   assert.equal(stored.checksum, checksum);
   assert.deepEqual(fs.readFileSync(path.join(assetRoot, stored.relativePath)), bytes);
   assert.equal(converted.project.generationTasks[0].customRequirement, dataUrl);

@@ -11,6 +11,15 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "3.3.0",
+    releasedAt: "2026-10-27",
+    title: "图片文件改为名称加第几版",
+    highlights: [
+      "项目图片文件夹用图片名称加「第 N 版」，不再用一长串校验值。",
+      "同一张图再次保存仍用原来的文件。下次保存时，已有的校验值文件名会改成这个写法。",
+    ],
+  },
+  {
     version: "3.2.9",
     releasedAt: "2026-10-27",
     title: "没有原话不再配听不清的人声",

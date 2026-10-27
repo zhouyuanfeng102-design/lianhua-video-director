@@ -46,6 +46,12 @@ test('the second project that sanitizes to the same title keeps a stable id suff
   assert.equal(projectFolderName(collided[2], collided), '同名-c111111');
 });
 
+test('image names keep the title and a version, and the same bytes stay on the first file', () => {
+  assert.equal(allocateReadableName([], '首帧.png', 'aaa', () => 'bbb', { numbered: true }), '首帧 · 第 1 版.png');
+  assert.equal(allocateReadableName(['首帧 · 第 1 版.png'], '首帧.png', 'ccc', () => 'bbb', { numbered: true }), '首帧 · 第 2 版.png');
+  assert.equal(allocateReadableName(['首帧 · 第 1 版.png'], '首帧.png', 'aaa', () => 'aaa', { numbered: true }), '首帧 · 第 1 版.png');
+});
+
 test('readable video versions are counted inside the directory that is asked', () => {
   const occupied = allocateReadableName(['镜头.mov'], '镜头.mov', 'aaa', () => 'bbb');
   assert.equal(occupied, '镜头 · 第 2 版.mov');
@@ -107,6 +113,28 @@ test('a missing file and a file already in the project folder keep their places'
   assert.equal(placed.moves.length, 0);
   assert.equal(fs.readFileSync(kept, 'utf8'), 'video');
   assert.equal(fs.existsSync(path.join(assetRoot, 'image', 'missing.png')), false);
+});
+
+test('a checksum image already in the project folder takes the asset name and version', (t) => {
+  const root = temporary(t);
+  const assetRoot = path.join(root, 'assets');
+  const digest = 'ab'.repeat(32);
+  const source = path.join(assetRoot, 'projects', '韩立6464', 'image', `${digest}.png`);
+  fs.mkdirSync(path.dirname(source), { recursive: true });
+  fs.writeFileSync(source, 'pixels');
+  const project = {
+    id: 'p1', name: '韩立6464',
+    assets: [{
+      id: 'frame', name: '后山上行与石亭前落 · 第 1 段 · 首帧',
+      relativePath: `projects/韩立6464/image/${digest}.png`, checksum: checksum('pixels'),
+      url: `lianhua-asset://local/projects/韩立6464/image/${digest}.png`,
+    }],
+  };
+  const placed = placeProjectAssets({ project, projects: [project] }, { assetRoot, dataRoot: root, fs, deferDeletes: false });
+  const relative = 'projects/韩立6464/image/后山上行与石亭前落 · 第 1 段 · 首帧 · 第 1 版.png';
+  assert.equal(placed.state.project.assets[0].relativePath, relative);
+  assert.equal(fs.readFileSync(path.join(assetRoot, ...relative.split('/')), 'utf8'), 'pixels');
+  assert.equal(fs.existsSync(source), false);
 });
 
 test('renaming a project renames only that project folder', (t) => {
