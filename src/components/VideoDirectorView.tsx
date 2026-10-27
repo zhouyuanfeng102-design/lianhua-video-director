@@ -287,8 +287,11 @@ export function VideoTaskCard({ task, assets, runtime: fallbackRuntime, runtimeS
   const [now, setNow] = useState(Date.now());
   const [busy, setBusy] = useState('');
   const [actionError, setActionError] = useState<unknown>(undefined);
-  const state = runtime ? { ...task.videoJob, ...runtime } : task.videoJob;
-  const stage = state?.stage || (task.status === 'succeeded' ? 'succeeded' : task.status === 'failed' ? 'failed' : 'queued');
+  const explicitlyStopped = task.videoJob?.batchQueueState === 'cancelled'
+    || task.videoJob?.tailPreparation?.phase === 'cancelled'
+    || (task.videoJob?.trackingStopped === true && task.videoJob.stage === 'stopped');
+  const state = explicitlyStopped ? task.videoJob : runtime ? { ...task.videoJob, ...runtime } : task.videoJob;
+  const stage = explicitlyStopped ? 'stopped' : state?.stage || (task.status === 'succeeded' ? 'succeeded' : task.status === 'failed' ? 'failed' : 'queued');
   const batchQueueLabel = ['waiting', 'ready'].includes(task.videoJob?.batchQueueState || '')
     ? '等待批量提交'
     : task.videoJob?.batchQueueState === 'active' ? '正在批量提交'

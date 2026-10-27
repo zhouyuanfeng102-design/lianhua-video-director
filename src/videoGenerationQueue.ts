@@ -125,6 +125,13 @@ export const videoTaskStoppedLocally = (task: VideoGenerationTask): boolean => (
   task.videoJob?.trackingStopped === true && task.videoJob.stage === 'stopped'
 );
 
+/** A cancelled batch item is stopped even when an older runtime record still says queued. */
+export const videoTaskExplicitlyStopped = (task: VideoGenerationTask): boolean => (
+  task.videoJob?.batchQueueState === 'cancelled'
+  || task.videoJob?.tailPreparation?.phase === 'cancelled'
+  || videoTaskStoppedLocally(task)
+);
+
 /** Stopped tasks, including persisted history in another project, release the
  * software's slot without changing remote evidence. Unstopped unknown POSTs
  * still reserve capacity; explicit resume queries the original task only. */

@@ -21,6 +21,7 @@ const fixture = (options = {}) => {
     window.emit('close', { preventDefault: () => { prevented = true; } });
     if (!prevented) { closed = true; window.emit('closed'); }
   };
+  window.destroy = () => { closed = true; window.emit('closed'); };
   const guard = createStateCloseGuard({ window, flush: async () => {},
     showMessage: async (message) => { notices.push(message); return { response: 0 }; }, ...options });
   return { window, guard, sent, notices, get closed() { return closed; },
@@ -82,7 +83,7 @@ test('worker flush failure never closes the already-acknowledged renderer', asyn
 
 test('unresponsive renderer produces a bounded wait prompt and cancel keeps unsaved content open', async () => {
   const prompted = deferred();
-  const h = fixture({ timeoutMs: 5, showMessage: async (message) => { prompted.resolve(message); return { response: 0 }; } });
+  const h = fixture({ timeoutMs: 5, showMessage: async (message) => { prompted.resolve(message); return { response: 1 }; } });
   h.window.close();
   const firstId = h.sent[0].payload.requestId;
   const notice = await prompted.promise;
@@ -101,7 +102,7 @@ test('unresponsive renderer produces a bounded wait prompt and cancel keeps unsa
 test('continue waiting does not send another save or duplicate the final close', async () => {
   const prompted = deferred();
   const choice = deferred();
-  const h = fixture({ timeoutMs: 5, showMessage: async () => { prompted.resolve(); await choice.promise; return { response: 1 }; } });
+  const h = fixture({ timeoutMs: 5, showMessage: async () => { prompted.resolve(); await choice.promise; return { response: 2 }; } });
   h.window.close();
   await prompted.promise;
   h.guard.acknowledge({ requestId: h.sent[0].payload.requestId, ok: true });
@@ -110,6 +111,30 @@ test('continue waiting does not send another save or duplicate the final close',
   assert.equal(h.sent.length, 1);
   assert.equal(h.closed, true);
   assert.equal(h.cancelled.length, 0);
+});
+
+test('unfinished tasks can force close without waiting for a save', async () => {
+  const prompted = deferred();
+  let flushCalls = 0;
+  const h = fixture({ flush: () => { flushCalls += 1; return Promise.resolve(); }, showMessage: async (message) => { prompted.resolve(message); return { response: 0 }; } });
+  h.window.close();
+  h.guard.acknowledge({ requestId: h.sent[0].payload.requestId, ok: false, chooseForceClose: true, pendingTasks: 3 });
+  const notice = await prompted.promise;
+  assert.match(notice.message, /3 项/);
+  await tick();
+  assert.equal(h.closed, true);
+  assert.equal(flushCalls, 0);
+  assert.equal(h.cancelled.length, 0);
+});
+
+test('returning from the unfinished-task prompt keeps the window open', async () => {
+  const h = fixture({ showMessage: async () => ({ response: 1 }) });
+  h.window.close();
+  const requestId = h.sent[0].payload.requestId;
+  h.guard.acknowledge({ requestId, ok: false, chooseForceClose: true, pendingTasks: 2 });
+  await tick();
+  assert.equal(h.closed, false);
+  assert.deepEqual(h.cancelled.map((message) => message.payload), [{ requestId }]);
 });
 
 test('destroyed/crashed window cleanup releases its pending acknowledgement', async () => {

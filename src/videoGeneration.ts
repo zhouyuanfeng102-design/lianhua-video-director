@@ -531,7 +531,10 @@ export class VideoGenerationEngine {
 
   private markLocallyQueued(task: VideoGenerationTask) {
     const job = task.videoJob;
-    if (!job || job.trackingStopped || this.stopping.has(task.id)) return;
+    const live = this.liveTask(task.id) || task;
+    const liveJob = live.videoJob;
+    if (!liveJob || liveJob.trackingStopped || liveJob.batchQueueState === 'cancelled' || liveJob.tailPreparation?.phase === 'cancelled'
+      || liveJob.stage === 'stopped' || this.stopping.has(live.id)) return;
     const scope = videoTaskExecutionScope(task);
     const tasks = this.generationScopeTasks(task);
     const occupied = tasks.filter((candidate) => videoTaskOccupiesGenerationSlot(candidate) || this.generationClaims.has(candidate.id));
@@ -559,9 +562,9 @@ export class VideoGenerationEngine {
       : unknownOrigins.length || uncertain.length
         ? `${summary}：同连接有 ${confirmedOrigins} 个占位任务；${unresolvedOrigins}远端状态尚未确认的任务请恢复查询；本任务尚未提交，不会重复扣费。`
         : `${summary}：等待同连接前序视频生成结束后自动提交（已占用 ${confirmedOrigins} 个名额）；本任务尚未发送到服务端。`;
-    this.patch(task, {
+    this.patch(live, {
       status: 'draft', error: undefined,
-      videoJob: { ...job, ...(task.batchId ? { batchQueueState: 'ready' as const } : {}) },
+      videoJob: { ...liveJob, ...(live.batchId ? { batchQueueState: 'ready' as const } : {}) },
     }, {
       stage: 'queued',
       message: blockers ? `${reason}\n${blockers}` : reason,
@@ -2582,7 +2585,7 @@ export class VideoGenerationEngine {
       return result;
     }
     for (const task of state.tasks) {
-      if (this.disposed || this.options.getState().project.id !== initial.project.id) throw Object.assign(new Error('项目已切换，批次继续已取消。'), { name: 'AbortError' });
+      if (this.disposed || this.options.getState().project.id !== initial.project.id) break;
       if (this.completedLocalAsset(task, initial.project.id)) continue;
       if (this.checkpointErrors.has(task.id)) { issue(task.id, this.checkpointErrors.get(task.id)!); continue; }
       if (task.videoJob?.resultSelectionRequired) { issue(task.id, '原任务有多个成片，请先在任务卡选择用于衔接的视频。'); continue; }
@@ -2590,13 +2593,17 @@ export class VideoGenerationEngine {
       // Opening this summary can recover existing remote work, but must not
       // authorize a fresh POST or a paid AI preparation before confirmation.
       if (reason === 'cancelled' || reason === 'failed' || reason === 'preparing') continue;
-      try {
-        if (runningHubRemoteSucceeded(task) || canRecoverComfyPreviewResult(task)) await this.recoverResult(task.id);
-        else if (task.resultUrl || completedFileResult(task)) await this.retryDownload(task.id);
-        else if (task.remoteTaskId || task.status === 'unknown' || task.videoJob?.preparation?.phase === 'post-started') await this.resume(task.id);
-        else { issue(task.id, '缺少可核验的提交快照，请先恢复原任务，不能直接重新生成。'); continue; }
-        result.resumedTaskIds.push(task.id);
-      } catch (error) { issue(task.id, messageOf(error)); }
+      const taskId = task.id;
+      const track = runningHubRemoteSucceeded(task) || canRecoverComfyPreviewResult(task) ? this.recoverResult(taskId)
+        : task.resultUrl || completedFileResult(task) ? this.retryDownload(taskId)
+        : task.remoteTaskId || task.status === 'unknown' || task.videoJob?.preparation?.phase === 'post-started' ? this.resume(taskId)
+        : undefined;
+      if (!track) { issue(taskId, '缺少可核验的提交快照，请先恢复原任务，不能直接重新生成。'); continue; }
+      void track.catch((error) => {
+        const live = this.liveTask(taskId);
+        if (live?.videoJob) this.patch(live, { error: messageOf(error) }, { message: messageOf(error) });
+      });
+      result.resumedTaskIds.push(taskId);
     }
     state = this.continuationBatchState(batchId);
     result.completedTaskIds = state.tasks.filter((task) => Boolean(this.completedLocalAsset(task, state.project.id))).map((task) => task.id);
@@ -2862,10 +2869,11 @@ export class VideoGenerationEngine {
       }
       cancelledTaskIds.push(task.id);
       const message = '已停止此批次中尚未提交的视频；未影响已经提交到服务器的任务。';
+      const completedAt = Date.now();
       this.patch(stopped, {
         status: 'failed', error: message,
-        videoJob: { ...stopped.videoJob, batchQueueState: 'cancelled', stage: 'stopped', trackingStopped: true, completedAt: Date.now(), message },
-      });
+        videoJob: { ...stopped.videoJob, batchQueueState: 'cancelled', stage: 'stopped', trackingStopped: true, completedAt, message },
+      }, { stage: 'stopped', trackingStopped: true, cancellationPending: false, message, completedAt });
       const persisted = this.liveTask(task.id);
       if (persisted) {
         const requestFingerprint = videoTaskRequestFingerprint(persisted);

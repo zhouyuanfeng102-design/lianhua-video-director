@@ -1,4 +1,4 @@
-import { videoTaskHasUnresolvedSubmission, videoTaskStoppedLocally } from './videoGenerationQueue';
+import { videoTaskExplicitlyStopped, videoTaskHasUnresolvedSubmission, videoTaskStoppedLocally } from './videoGenerationQueue';
 import { videoTaskBatchStatus } from './videoTaskBatchStatus';
 import type { VideoGenerationTask } from './types';
 import type { VideoGenerationRuntime } from './videoGenerationTypes';
@@ -16,8 +16,9 @@ export const videoTaskDeletionBlocked = (
   activeLocalTaskId?: string,
 ): boolean => {
   const live = runtime || task.videoJob;
+  const explicitlyStopped = videoTaskExplicitlyStopped(task);
   if (task.id === activeLocalTaskId || task.videoJob?.cancellationPending || runtime?.cancellationPending) return true;
-  if (task.videoJob && activeStages.has(task.videoJob.stage) || runtime && activeStages.has(runtime.stage)) return true;
+  if (!explicitlyStopped && (task.videoJob && activeStages.has(task.videoJob.stage) || runtime && activeStages.has(runtime.stage))) return true;
   if (task.videoJob?.resultSelectionRequired || !task.resultAssetId && (
     task.resultUrl || task.status === 'succeeded' || task.videoJob?.generatedAt
     || task.videoJob?.resultAssetIds?.length || task.videoJob?.downloadError || runtime?.downloadError

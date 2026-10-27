@@ -26,7 +26,7 @@ interface Window {
     noteActiveProject?: (payload: { activeProjectId?: string; projects?: Array<{ id: string; name: string }> }) => Promise<boolean>;
     onBeforeClose: (callback: (event: { requestId: string }) => void) => () => void;
     onCloseCancelled: (callback: (event: { requestId: string }) => void) => () => void;
-    completeBeforeClose: (payload: { requestId: string; ok: boolean; error?: string }) => Promise<boolean>;
+    completeBeforeClose: (payload: { requestId: string; ok: boolean; error?: string; pendingTasks?: number; chooseForceClose?: boolean }) => Promise<boolean>;
     saveMedia: (payload: {
       sourceUrl?: string;
       relativePath?: string;

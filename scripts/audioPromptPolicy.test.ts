@@ -141,7 +141,8 @@ assert.match(VISUAL_IDENTITY_SPEECH_SCOPE_RULE, /保留资料与画面描述中�
 assert.match(VISUAL_IDENTITY_SPEECH_SCOPE_RULE, /真实台词本来就在呼喊姓名.*逐字保留该句、原说话人和时刻/u);
 assert.match(NO_DIALOGUE_PERFORMANCE_RULE, /从0秒到该段结束（包括最后几秒）都不说话/u);
 assert.match(NO_DIALOGUE_PERFORMANCE_RULE, /不新增喊名、含混交谈、耳语、旁白或说话口型/u);
-assert.match(NO_DIALOGUE_PERFORMANCE_RULE, /仅当原稿明确要求不可辨词汇的人声.*该区间没有明确要求无对白/u);
+assert.match(NO_DIALOGUE_PERFORMANCE_RULE, /剧情已经写明谁说了什么，包括说、道、问、答、笑说、一路说着、接着说、低声说后面已有的内容/u);
+assert.match(DIALOGUE_DELIVERY_RULE, /剧情已经写明谁说了什么时，按无对白规则把那句话补成台词/u);
 assert.match(NO_DIALOGUE_PERFORMANCE_RULE, /不写不可辨低声、不构成可辨台词/u);
 assert.match(NATURAL_ACTION_AUDIO_RULE, /铜铃、风铃、门环、耳环、杯盏和金属饰只有原文写明它自己响的那一下才出声/u);
 assert.match(NO_DIALOGUE_PERFORMANCE_RULE, /无对白不等于整轨静音.*笑声、咳嗽、哭泣等非语言声及必要动作声/u);

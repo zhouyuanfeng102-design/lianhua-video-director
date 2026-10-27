@@ -3149,6 +3149,21 @@ export default function App() {
     return () => { superseded = true; window.clearTimeout(timer); };
   }, [state, desktopStateReady, restoringSnapshot]);
 
+  const countOpenGenerationTasks = (source: AppState) => {
+    const seen = new Set<string>();
+    let count = 0;
+    for (const project of [source.project, ...(source.projects || [])]) {
+      if (!project?.id || seen.has(project.id)) continue;
+      seen.add(project.id);
+      for (const task of project.generationTasks || []) {
+        if (isVideoGenerationTask(task)) {
+          if (videoTaskHasUnresolvedSubmission(task)) count += 1;
+        } else if (task.status === "queued" || task.status === "running") count += 1;
+      }
+    }
+    return count;
+  };
+
   useEffect(() => {
     const bridge = window.lianhuaDesktop;
     if (!bridge?.onBeforeClose || !bridge.completeBeforeClose) return;
@@ -3163,6 +3178,13 @@ export default function App() {
       if (closingSaveRef.current) return;
       closingRequestIdRef.current = requestId;
       closingSaveRef.current = true;
+      const pendingTasks = countOpenGenerationTasks(stateRef.current);
+      if (pendingTasks > 0) {
+        void bridge.completeBeforeClose({ requestId, ok: false, pendingTasks, chooseForceClose: true })
+          .catch(() => false)
+          .finally(() => unlock(requestId));
+        return;
+      }
       setSavingBeforeClose(true);
       void (async () => {
         let accepted = false;
@@ -25064,7 +25086,7 @@ function GenerationTasksView(ctx: AppContext) {
     } catch (cause) {
       if (isCurrent()) setVideoBatchContinueNotice({ batchId, text: formatUserFacingError(cause), error: true });
     } finally {
-      if (isCurrent()) setResumingVideoBatchId("");
+      setResumingVideoBatchId("");
     }
   };
   const cancelVideoBatchContinuation = () => {

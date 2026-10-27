@@ -23,17 +23,42 @@ const createStateCloseGuard = ({ window, flush, showMessage, timeoutMs = 30_000 
       if (result.done) return result.value;
       const choice = await showMessage({
         type: 'warning', title: '正在等待本地保存',
-        message: '关闭前的保存尚未完成，软件暂未退出。',
-        detail: '大型项目或备份磁盘响应慢时可能需要更久。可以继续等待，或返回软件查看保存状态；不会自动丢弃未保存内容。',
-        buttons: ['返回软件', '继续等待'], defaultId: 0, cancelId: 0,
+        message: '关闭前的保存尚未完成。',
+        detail: '可以强制关闭。本机留下的是上次已经写完的保存，正在写的这一次不保证写完。服务器上的生成任务不会取消。',
+        buttons: ['强制关闭', '返回软件', '继续等待'], defaultId: 1, cancelId: 1,
       });
-      if (choice.response !== 1) return { ok: false, cancelled: true };
+      if (choice.response === 0) return { ok: false, forceClose: true };
+      if (choice.response !== 2) return { ok: false, cancelled: true };
     }
     return { ok: false, cancelled: true };
+  };
+  const forceClose = () => {
+    allowed = true;
+    destroyed = true;
+    resolveDestroyed();
+    try {
+      if (typeof window.destroy === 'function') window.destroy();
+      else window.close();
+    } catch (error) {
+      allowed = false;
+      throw error;
+    }
   };
   const finish = async (requestId) => {
     const reply = await awaitWithNotice(waitForRenderer(requestId));
     waiting = undefined;
+    if (reply?.forceClose) { forceClose(); return; }
+    if (reply?.chooseForceClose) {
+      const count = Number(reply.pendingTasks) || 0;
+      const choice = await showMessage({
+        type: 'warning', title: '还有任务未完成',
+        message: `还有 ${count} 项图片、视频或资料任务未完成。`,
+        detail: '关掉软件只停止本机跟踪，服务器任务可能继续并计费。本机留下的是上次已经写完的保存。',
+        buttons: ['强制关闭', '返回软件'], defaultId: 1, cancelId: 1,
+      });
+      if (choice?.response === 0 && !destroyed) forceClose();
+      return;
+    }
     if (!reply?.ok || destroyed) {
       if (!reply?.cancelled && !destroyed) await showMessage({
         type: 'error', title: '项目尚未保存，已取消关闭',
@@ -88,7 +113,12 @@ const createStateCloseGuard = ({ window, flush, showMessage, timeoutMs = 30_000 
       if (!waiting || payload?.requestId !== waiting.requestId || typeof payload?.ok !== 'boolean') return false;
       const pending = waiting;
       waiting = undefined;
-      pending.resolve({ ok: payload.ok, error: typeof payload.error === 'string' ? payload.error.slice(0, 2000) : '' });
+      pending.resolve({
+        ok: payload.ok,
+        error: typeof payload.error === 'string' ? payload.error.slice(0, 2000) : '',
+        chooseForceClose: payload.chooseForceClose === true,
+        pendingTasks: Number(payload.pendingTasks) || 0,
+      });
       return true;
     },
     get allowed() { return allowed; },
