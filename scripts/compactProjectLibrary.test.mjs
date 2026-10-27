@@ -142,21 +142,18 @@ test('per-project migration versions survive a mixed-version save, full load and
   assert.equal(h.manifest().projects[1].schemaVersion, 6);
 });
 
-test('compact saves still produce complete external backups with untouched inactive content', async (t) => {
+test('compact saves retain inactive project content without writing cross-drive backups', async (t) => {
   const h = fixture(t);
   await h.store.save(JSON.stringify(h.state), keepVault);
   const compact = JSON.parse(h.store.loadWorkspace(null).content);
   const backupDirectory = path.join(h.root, 'backup');
-  fs.writeFileSync(path.join(h.root, 'recovery-config.json'), JSON.stringify({ backupDirectory }));
+  fs.writeFileSync(path.join(h.root, 'recovery-config.json'), JSON.stringify({ backupDirectory, backupOnSave: true }));
   const saved = await h.store.save(JSON.stringify(compact), keepVault);
-  assert.equal(saved.backupError, '');
-  assert.ok(saved.externalBackup);
-  const backup = createStateStore({ dataRoot: path.dirname(saved.externalBackup) });
-  fs.copyFileSync(saved.externalBackup, path.join(path.dirname(saved.externalBackup), 'project-state.json'));
-  const full = JSON.parse(backup.load(null).content);
+  assert.equal(saved.ok, true);
+  const full = JSON.parse(h.store.load(null).content);
   assert.deepEqual(full.projects[1], h.state.projects[1]);
+  assert.equal(fs.existsSync(backupDirectory), false);
 });
-
 test('ordered worker dispatch exposes compact startup, project hydration and light status operations', async (t) => {
   const h = fixture(t);
   const persistence = createStatePersistence({ dataRoot: h.root, encryptSecrets: keepVault });

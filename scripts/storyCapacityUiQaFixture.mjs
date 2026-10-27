@@ -28,7 +28,6 @@ export async function installCapacityIpcAudit(electronApp, expectedDataRoot) {
           row.ok = result?.ok ?? Boolean(result);
           row.path = result?.path;
           row.checksum = result?.checksum;
-          row.backupError = result?.backupError;
           return result;
         } catch (error) {
           row.completed = true;

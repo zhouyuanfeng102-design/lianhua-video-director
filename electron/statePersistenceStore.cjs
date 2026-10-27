@@ -2,13 +2,12 @@ const nodeFs = require('node:fs');
 const path = require('node:path');
 const { createHash, randomUUID } = require('node:crypto');
 const {
-  validateStateText, stateChecksum, stateAssets, stripSecrets, collectSecrets,
+  validateStateText, stateChecksum, stripSecrets, collectSecrets,
   hydrateStateSecrets, normalizeRecoveryConfig,
 } = require('./stateSerialization.cjs');
-const { collectImageReferenceSnapshotsForExport } = require('./imageReferenceSnapshots.cjs');
 const { readProjectLibrary, readWorkspaceLibrary, readLibraryProject, createProjectLibraryContext,
   writeProjectLibrary, projectLibrarySize, isProjectLibraryManifest } = require('./projectLibraryStore.cjs');
-const { createStateMediaExternalizer, collectStateMediaFiles } = require('./stateMediaFiles.cjs');
+const { createStateMediaExternalizer } = require('./stateMediaFiles.cjs');
 const { placeProjectAssets } = require('./projectAssetLayout.cjs');
 
 const localFileError = (error, operation = '保存本地文件') => {
@@ -66,12 +65,6 @@ const atomicWriteFile = (filePath, content, fs = nodeFs) => {
     fs.fsyncSync(directoryHandle);
   } catch { /* Windows may not allow directory fsync. */ }
   finally { try { if (directoryHandle !== undefined) fs.closeSync(directoryHandle); } catch { /* best effort */ } }
-};
-
-const pathKey = (value) => process.platform === 'win32' ? path.resolve(value).toLowerCase() : path.resolve(value);
-const isPathInside = (root, candidate) => {
-  const relative = path.relative(pathKey(root), pathKey(candidate));
-  return relative !== '' && relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
 };
 
 const createStateStore = ({ dataRoot, fs = nodeFs, now = Date.now }) => {
@@ -147,32 +140,6 @@ const createStateStore = ({ dataRoot, fs = nodeFs, now = Date.now }) => {
     } finally { fs.closeSync(descriptor); }
     return hash.digest('hex');
   };
-  const copyBackupAsset = (source, destination, checksum) => {
-    const temporary = path.join(path.dirname(destination), `.${path.basename(destination)}.${randomUUID()}.tmp`);
-    const previous = `${destination}.previous`;
-    let handle;
-    try {
-      fs.copyFileSync(source, temporary, nodeFs.constants.COPYFILE_EXCL);
-      if (fileSha256(temporary) !== checksum) throw new Error('备份素材写入校验失败');
-      handle = fs.openSync(temporary, 'r+');
-      fs.fsyncSync(handle);
-      fs.closeSync(handle);
-      handle = undefined;
-      if (fs.existsSync(destination)) {
-        if (fs.existsSync(previous)) fs.unlinkSync(previous);
-        fs.renameSync(destination, previous);
-      }
-      fs.renameSync(temporary, destination);
-    } catch (error) {
-      try { if (handle !== undefined) fs.closeSync(handle); } catch { /* preserve failure */ }
-      let recovered = true;
-      try { if (!fs.existsSync(destination) && fs.existsSync(previous)) fs.renameSync(previous, destination); }
-      catch { recovered = false; }
-      if (recovered) { try { if (fs.existsSync(temporary)) fs.unlinkSync(temporary); } catch { /* preserve failure */ } }
-      throw localFileError(error, '备份素材');
-    }
-    try { if (fs.existsSync(previous)) fs.unlinkSync(previous); } catch { /* completed destination is durable */ }
-  };
   const replaceVault = (encrypted) => {
     if (encrypted !== null) {
       const bytes = Buffer.from(encrypted, 'base64');
@@ -205,70 +172,13 @@ const createStateStore = ({ dataRoot, fs = nodeFs, now = Date.now }) => {
     replaceVault(encrypted);
     fs.unlinkSync(vaultTransactionFile);
   };
-  const externalBackup = (payload, state, checksum) => {
-    const config = readConfig();
-    if (!config.backupOnSave || !config.backupDirectory) return null;
-    // A compact renderer snapshot is not a complete backup. Resolve all
-    // immutable pointers and retain each project's own migration version.
-    state = readState(payload, { annotateProjects: true });
-    const resolved = path.resolve(config.backupDirectory);
-    if (pathKey(resolved) === pathKey(root)) return null;
-    const targetRoot = path.join(resolved, '莲华视频导演台备份');
-    const target = path.join(targetRoot, `project-latest-${checksum.slice(0, 12)}.json`);
-    fs.mkdirSync(targetRoot, { recursive: true });
-    // Every project block and media file is durable before publishing the
-    // external manifest. A failed backup cannot replace its last good index.
-    const library = writeProjectLibrary(state, { root: targetRoot, fs, writeFile: atomicWriteFile, savedAt: JSON.parse(payload).integrity.savedAt });
-    if (library.checksum !== checksum) throw new Error('备份项目库索引与本地保存内容不一致');
-    const manifest = [];
-    const frozenImages = collectImageReferenceSnapshotsForExport(state);
-    const frozenImageChecksums = new Map(frozenImages.map((asset) => [asset.relativePath, asset.checksum]));
-    const seenPaths = new Set();
-    for (const asset of [...stateAssets(state), ...frozenImages, ...collectStateMediaFiles(state)]) {
-      if (seenPaths.has(asset.relativePath)) continue;
-      seenPaths.add(asset.relativePath);
-      let source;
-      let destination;
-      let stat;
-      let assetChecksum;
-      try {
-        const normalized = String(asset.relativePath || '').replace(/\\/g, '/').replace(/^\/+/, '');
-        source = path.resolve(assetRoot, normalized);
-        const targetAssetRoot = path.resolve(targetRoot, 'assets');
-        destination = path.resolve(targetAssetRoot, normalized);
-        if (!isPathInside(assetRoot, source) || !isPathInside(targetAssetRoot, destination)) throw new Error('备份资产路径越界');
-        stat = fs.statSync(source);
-        if (!stat.isFile()) throw new Error('备份资产不是文件');
-        // Realpath also rejects managed-directory symlinks escaping the store.
-        if (!isPathInside(fs.realpathSync(assetRoot), fs.realpathSync(source))) throw new Error('备份资产真实路径越界');
-        assetChecksum = fileSha256(source);
-        const frozenChecksum = frozenImageChecksums.get(asset.relativePath);
-        if (frozenChecksum && frozenChecksum !== assetChecksum) throw new Error('图生图参考图快照校验不一致');
-        if (asset.checksum && String(asset.checksum).toLowerCase() !== assetChecksum) throw new Error('备份源资产校验不一致');
-      } catch (error) {
-        manifest.push({ id: asset.id, relativePath: asset.relativePath, missing: true, error: localFileError(error, '读取备份源素材').message });
-        continue;
-      }
-      // Destination write errors are not missing-source warnings. Abort before
-      // publishing a new manifest and keep the previous complete backup usable.
-      fs.mkdirSync(path.dirname(destination), { recursive: true });
-      if (!isPathInside(fs.realpathSync(targetRoot), fs.realpathSync(path.dirname(destination)))) throw new Error('备份目标真实路径越界');
-      if (fs.existsSync(destination) && !isPathInside(fs.realpathSync(targetRoot), fs.realpathSync(destination))) throw new Error('备份目标真实路径越界');
-      const matches = fs.existsSync(destination) && fs.statSync(destination).size === stat.size && fileSha256(destination) === assetChecksum;
-      if (!matches) copyBackupAsset(source, destination, assetChecksum);
-      manifest.push({ id: asset.id, relativePath: asset.relativePath, checksum: assetChecksum, sizeBytes: stat.size, missing: false });
-    }
-    if (!fs.existsSync(target)) atomicWriteFile(target, payload, fs);
-    else if (fileSha256(target) !== checksum) throw new Error('既有外部备份索引校验失败');
-    atomicWriteFile(path.join(targetRoot, 'backup-integrity.json'), JSON.stringify({ updatedAt: new Date(now()).toISOString(), stateFile: path.basename(target), stateChecksum: checksum, projectFiles: library.projectFiles, assets: manifest }, null, 2), fs);
-    const backups = fs.readdirSync(targetRoot).filter((entry) => /^project-latest-.*\.json$/i.test(entry)).flatMap((entry) => {
-      try { return [{ entry, time: fs.statSync(path.join(targetRoot, entry)).mtimeMs }]; } catch { return []; }
-    }).sort((left, right) => right.time - left.time);
-    for (const { entry } of backups.slice(config.keepCount)) fs.unlinkSync(path.join(targetRoot, entry));
-    const missing = manifest.filter((asset) => asset.missing).length;
-    return { path: target, warning: missing ? `备份索引已保存，但有 ${missing} 份源素材缺失或校验失败，备份不完整；详情见 backup-integrity.json` : '' };
+  const finishMaintenance = (payload) => {
+    let snapshotError = '';
+    try { writeSnapshot(payload); }
+    catch (error) { snapshotError = localFileError(error, '创建恢复点').message; }
+    return { snapshotError };
   };
-  const save = async (content, encryptSecrets) => {
+  const save = async (content, encryptSecrets, { deferMaintenance = false } = {}) => {
     recoverVaultTransaction();
     const prepared = prepare(content);
     let placementDeletes = [];
@@ -312,21 +222,16 @@ const createStateStore = ({ dataRoot, fs = nodeFs, now = Date.now }) => {
       }
       throw localFileError(error);
     }
-    let snapshotError = '';
-    try { writeSnapshot(prepared.payload); }
-    catch (error) { snapshotError = localFileError(error, '创建恢复点').message; }
-    let external = null;
-    let backupError = '';
-    try {
-      const backup = externalBackup(prepared.payload, prepared.state, prepared.checksum);
-      external = backup?.path || null;
-      backupError = backup?.warning || '';
-    }
-    catch (error) { backupError = error instanceof Error ? error.message : String(error); }
     for (const file of placementDeletes) {
       try { if (fs.existsSync(file)) fs.unlinkSync(file); } catch { /* The project folder copy is already recorded. */ }
     }
-    return { ok: true, checksum: prepared.checksum, projectHashes: prepared.projectHashes, externalBackup: external, backupError, snapshotError, assetMoves: prepared.assetMoves };
+    const result = { ok: true, checksum: prepared.checksum, projectHashes: prepared.projectHashes, assetMoves: prepared.assetMoves };
+    return deferMaintenance ? result : { ...result, ...finishMaintenance(prepared.payload) };
+  };
+  const maintainLatest = () => {
+    if (!fs.existsSync(stateFile)) return { snapshotError: '' };
+    const payload = fs.readFileSync(stateFile, 'utf8');
+    return finishMaintenance(payload);
   };
   const load = (secrets, { workspace = false } = {}) => {
     lastRecoveryNotice = '';
@@ -404,14 +309,7 @@ const createStateStore = ({ dataRoot, fs = nodeFs, now = Date.now }) => {
     loadedWorkspaceRaw = library.payload;
     return JSON.stringify(hydrateStateSecrets(readState(library.payload), secrets));
   };
-  const backup = (content) => {
-    const prepared = prepare(content);
-    Object.assign(prepared, prepareLibrary(prepared.state));
-    const result = externalBackup(prepared.payload, prepared.state, prepared.checksum);
-    if (result?.warning) throw new Error(result.warning);
-    return result?.path || null;
-  };
-  return { save, load, loadWorkspace, loadProject, recoveryStatus, createRestorePoint, restoreSnapshot, backup, recoverVaultTransaction };
+  return { save, maintainLatest, load, loadWorkspace, loadProject, recoveryStatus, createRestorePoint, restoreSnapshot, recoverVaultTransaction };
 };
 
 module.exports = { createStateStore, atomicWriteFile, localFileError };

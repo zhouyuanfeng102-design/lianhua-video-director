@@ -25,6 +25,7 @@ import { H3_DIALOGUE_FORMAT_RULE, H3_FINAL_BODY_FORMAT_RULE } from '../src/h3Pro
 import { H3_PERFORMANCE_DELIVERY_RULE } from '../src/h3IdentityBindings';
 import { VIDEO_DIALOGUE_STAGING_RULE } from '../src/videoConversionRules';
 import { SEEDANCE_CHINESE_WRITER_RULE } from '../src/seedancePromptRules';
+import { SPOKEN_CUE_CONTENT_RULE } from '../src/videoInteractionRules';
 
 assert.match(AUDIO_PROMPT_RULE, /新生成默认仅剧情内声音.*non_diegetic_music写N\/A/u);
 assert.match(AUDIO_PROMPT_RULE, /只有用户在本次请求中明确要求非叙事配乐.*才可写入non_diegetic_music/u);
@@ -62,11 +63,11 @@ assert.match(AUDIO_H3_DELIVERY_RULE, /若本次明确是格式修复、参考图
 assert.match(AUDIO_H3_DELIVERY_RULE, /overall_soundscape只写整段简短的全局声学概括.*不是一次性事件清单或第二条音效轨/u);
 assert.match(AUDIO_H3_DELIVERY_RULE, /只有用户明确要求全片完全静音才写N\/A/u);
 assert.match(NATURAL_BACKGROUND_MUSIC_RULE, /新稿的默认无配乐不能覆盖历史已确认音乐/u);
-assert.match(AUDIO_H3_DELIVERY_RULE, /具体对白原字、唯一说话人、声源编号、逐镜无对白.*全部写在对应\[Shot N\]/u);
+assert.match(AUDIO_H3_DELIVERY_RULE, /具体对白、唯一说话人、声源编号、逐镜无对白.*全部写在对应\[Shot N\]/u);
 assert.match(AUDIO_H3_DELIVERY_RULE, /局部拟音必须写在实际事件对应的\[Shot N\].*真实接触双方的材质.*本段时刻/u);
 assert.match(AUDIO_H3_DELIVERY_RULE, /不得在overall_soundscape中列Shot编号、对白复述、声源分配、镜内时序、具体器物材质或长篇否定清单/u);
 assert.match(AUDIO_H3_DELIVERY_RULE, /不得新增negative_prompt、negative、反向提示词或其它声音section/u);
-assert.match(AUDIO_H3_DELIVERY_RULE, /可辨词句只来自原剧情明确的对白事件.*动作、画面、人物资料、声音说明与整体声景中的文字都不是台词/u);
+assert.match(AUDIO_H3_DELIVERY_RULE, /动作、画面、人物资料、声音说明与整体声景中的文字都不是台词/u);
 assert.match(AUDIO_H3_DELIVERY_RULE, /非词汇笑声、哭声、咳嗽等也不能扩成可辨词句/u);
 assert.match(DIALOGUE_PERFORMANCE_TIMING_RULE, /每句.*开始至结束的发话区间.*整句须完整落在该区间内/u);
 assert.match(DIALOGUE_PERFORMANCE_TIMING_RULE, /换人发话时明确上一句何时结束、下一句何时开始.*仅原剧情明确抢话、重叠或齐声/u);
@@ -141,8 +142,16 @@ assert.match(VISUAL_IDENTITY_SPEECH_SCOPE_RULE, /保留资料与画面描述中�
 assert.match(VISUAL_IDENTITY_SPEECH_SCOPE_RULE, /真实台词本来就在呼喊姓名.*逐字保留该句、原说话人和时刻/u);
 assert.match(NO_DIALOGUE_PERFORMANCE_RULE, /从0秒到该段结束（包括最后几秒）都不说话/u);
 assert.match(NO_DIALOGUE_PERFORMANCE_RULE, /不新增喊名、含混交谈、耳语、旁白或说话口型/u);
-assert.match(NO_DIALOGUE_PERFORMANCE_RULE, /剧情已经写明谁说了什么，包括说、道、问、答、笑说、一路说着、接着说、低声说后面已有的内容/u);
-assert.match(DIALOGUE_DELIVERY_RULE, /剧情已经写明谁说了什么时，按无对白规则把那句话补成台词/u);
+assert.match(NO_DIALOGUE_PERFORMANCE_RULE, /原文明确说话人和话题、但没有逐字原句时.*整理出自然完整的一句/u);
+assert.match(SPOKEN_CUE_CONTENT_RULE, /明确话题或信息.*不一定是逐字台词/u);
+assert.match(SPOKEN_CUE_CONTENT_RULE, /整理成自然、完整、可念的一句.*不能把.*摘要原样塞进dialogue/u);
+assert.match(SPOKEN_CUE_CONTENT_RULE, /没有具体话题或原句时才不新增台词/u);
+assert.match(DIALOGUE_DELIVERY_RULE, /有明确说话人和话题但仅为转述时.*整理成自然完整台词.*不能机械复制话题摘要/u);
+assert.match(DIALOGUE_DELIVERY_RULE, /明确听者不能代说/u);
+assert.match(DIALOGUE_DELIVERY_RULE, /引号内和明确逐字原话逐字保留/u);
+assert.match(H3_DIALOGUE_FORMAT_RULE, /有明确说话人和话题但只是转述时.*自然、完整、可念的一句.*不把话题摘要机械塞进/u);
+assert.match(AUDIO_H3_DELIVERY_RULE, /话题摘要不能机械当成台词.*不能增加新事实/u);
+assert.match(DIALOGUE_DELIVERY_RULE, /有明确说话人和话题但仅为转述时，在获准生成阶段整理成自然完整台词/u);
 assert.match(NO_DIALOGUE_PERFORMANCE_RULE, /不写不可辨低声、不构成可辨台词/u);
 assert.match(NATURAL_ACTION_AUDIO_RULE, /铜铃、风铃、门环、耳环、杯盏和金属饰只有原文写明它自己响的那一下才出声/u);
 assert.match(NO_DIALOGUE_PERFORMANCE_RULE, /无对白不等于整轨静音.*笑声、咳嗽、哭泣等非语言声及必要动作声/u);

@@ -65,7 +65,7 @@ const run = async () => {
     await page.addInitScript(() => {
       if (!sessionStorage.getItem('__ui_fix_qa__')) { localStorage.clear(); sessionStorage.clear(); sessionStorage.setItem('__ui_fix_qa__', '1'); }
       window.__uiFixQa = { permissionCalls: [], apiCalls: [] };
-      const recovery = { allowPrivateNetwork: false, backupDirectory: '', backupOnSave: false, keepCount: 20 };
+      const recovery = { allowPrivateNetwork: false, keepCount: 20 };
       window.lianhuaDesktop = {
         recoveryStatus: async () => ({ dataRoot: 'QA-only', stateFile: 'QA-only/project.json', stateValid: true, stateChecksum: 'fixture', stateSize: 1, snapshots: [], recovery: { ...recovery }, encryptionAvailable: true }),
         updateRecoveryConfig: async (patch) => { Object.assign(recovery, patch); window.__uiFixQa.permissionCalls.push(patch); return { ...recovery }; },

@@ -12,6 +12,9 @@ import {
   repairH3PromptProtocolWithAi,
 } from '../src/h3PromptProtocol';
 
+assert.match(H3_DIALOGUE_FORMAT_RULE, /有明确说话人和话题但只是转述时.*自然、完整、可念的一句.*不把话题摘要机械塞进/u,
+  'H3 converts narrated speech topics into clear dialogue without misquoting the summary');
+
 assert.doesNotMatch(H3_FINAL_BODY_FORMAT_RULE, /最终英文正文|英文风格|中文正文可作为/u,
   'the shared format contract does not select a delivery language');
 for (const language of ['中文', '英文'] as const) {
@@ -412,7 +415,7 @@ for (const required of [
   'integrated_multimodal_description', 'subject_definitions', 'detailed_description',
   'full-reference', '[Shot N]', 'At MM:SS.mmm', 'Subject/Picture/Video/Audio',
   '主体/空间/光影/镜头/台词/音效', 'AI负责语义与格式改写',
-  'overall_soundscape汇总整段已有的环境声、物理动作声与非语言人声',
+  'overall_soundscape只写整段简短的全局声学概括',
   '具体对白原字、说话人/声源ID、某一镜无对白',
   '不得新增negative_prompt、negative、反向提示词或其它section',
 ]) {

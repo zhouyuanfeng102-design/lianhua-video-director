@@ -71,7 +71,6 @@ const unsafeCases: Array<{ label: string; value?: VideoGenerationTask; runtime?:
   { label: 'remote running', value: { ...failed, status: 'running', remoteTaskId: 'remote', videoJob: { ...failed.videoJob!, stage: 'running' } } },
   { label: 'stopped storage with non-stopped runtime', value: { ...stopped, remoteTaskId: 'unresolved', videoJob: { ...stopped.videoJob!, cancellationConfirmed: false } }, runtime: { stage: 'failed' } },
   { label: 'unknown paid POST not fully stopped', value: { ...stopped, status: 'unknown', videoJob: { ...stopped.videoJob!, stage: 'submission-unknown', cancellationConfirmed: false, preparation: { version: 1, phase: 'post-started', uploadedImages: [] } } } },
-  { label: 'pending cancellation journal', value: { ...stopped, videoJob: { ...stopped.videoJob!, cancellationPending: true } } },
   { label: 'live downloading over stored success', value: success, runtime: { stage: 'downloading' } },
   { label: 'live running over stored failure', runtime: { stage: 'running' } },
   { label: 'live cancellation', runtime: { stage: 'failed', cancellationPending: true } },
@@ -99,6 +98,18 @@ for (const item of unsafeCases) {
   assert.equal(result.project, mixed, `${item.label}: preserve the entire batch, not just the unsafe row`);
   assert.deepEqual(result.removedTaskIds, []);
   assert.equal(mixed.assets[0].videoSourceTask, undefined, 'blocked deletion does not backfill or partially edit assets');
+}
+
+{
+  const pendingCancellation = { ...stopped, status: 'unknown' as const, response: undefined,
+    videoJob: { ...stopped.videoJob!, cancellationConfirmed: false, cancellationPending: true,
+      preparation: { version: 1 as const, phase: 'post-started' as const, uploadedImages: [] } } };
+  const isolated = { ...project, generationTasks: [pendingCancellation, other] };
+  const input = { ...options, getRuntime: () => ({ stage: 'stopped' as const, trackingStopped: true }) };
+  const result = removeVideoBatchKeepingProvenance(isolated, input);
+  assert.equal(result.canDelete, true, 'a locally stopped task may be cleared while remote cancellation is pending');
+  const retained = result.project.generationTasks.find((entry) => entry.id === pendingCancellation.id);
+  assert.deepEqual(retained, { ...pendingCancellation, historyOnly: true }, 'pending cancellation evidence remains in hidden history');
 }
 
 {

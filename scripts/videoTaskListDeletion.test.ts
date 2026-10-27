@@ -148,7 +148,6 @@ test('a single-row removal never removes its batch sibling or another project', 
 test('a stale deletion click rechecks download and cancellation state inside the actual App commit', async () => {
   for (const runtime of [
     { stage: 'downloading' as const },
-    { stage: 'stopped' as const, trackingStopped: true, cancellationPending: true },
   ]) {
     const original = stoppedTask(`race-${runtime.stage}-${Boolean(runtime.cancellationPending)}`);
     const h = fixture([original]);
@@ -165,6 +164,20 @@ test('a stale deletion click rechecks download and cancellation state inside the
     assert.equal(h.deleteButton(original.id), undefined);
     assert.deepEqual(h.calls, [], 'the stale delete callback must not initiate cancellation or generation');
   }
+});
+
+test('a locally stopped unresolved task can leave the list while remote cancellation is pending', async () => {
+  const original = stoppedTask('pending-remote-cancel');
+  original.videoJob!.cancellationPending = true;
+  const h = fixture([original]);
+  const button = h.deleteButton(original.id);
+  assert.ok(button, 'a stopped task remains locally deletable during remote cancellation');
+  assert.doesNotMatch(String(button.props.title), /确认停止后再删除/u);
+  await h.click(button);
+  assert.deepEqual(h.target(original.id), { ...original, historyOnly: true }, 'the original submission evidence stays retained as hidden history');
+  assert.equal(h.target(original.id)?.videoJob?.cancellationPending, true);
+  assert.match(h.notices.at(-1) || '', /仍可能运行或计费/u);
+  assert.deepEqual(h.calls, [], 'local deletion does not wait for or reissue remote cancellation');
 });
 
 test('single deletion retains an exact continuation parent and leaves its running child untouched', async () => {

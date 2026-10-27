@@ -488,8 +488,6 @@ const pathExistsAsync = async (filePath) => {
 const stateChecksum = (content) => createHash('sha256').update(content, 'utf8').digest('hex');
 
 const normalizeRecoveryConfig = (raw) => ({
-    backupDirectory: typeof raw?.backupDirectory === 'string' ? raw.backupDirectory : '',
-    backupOnSave: raw?.backupOnSave !== false,
     allowPrivateNetwork: raw?.allowPrivateNetwork === true,
     keepCount: Number.isFinite(raw?.keepCount) ? Math.max(3, Math.min(100, raw.keepCount)) : 20
 });
@@ -497,14 +495,6 @@ const normalizeRecoveryConfig = (raw) => ({
 const recoveryConfig = () => normalizeRecoveryConfig(readJsonFile(recoveryConfigFile, {}));
 
 const writeRecoveryConfig = (config) => atomicWriteFile(recoveryConfigFile, JSON.stringify(config, null, 2));
-
-const fileSha256Async = async (filePath) => {
-  const hash = createHash('sha256');
-  for await (const chunk of fs.createReadStream(filePath)) hash.update(chunk);
-  return hash.digest('hex');
-};
-
-const writeExternalBackup = (serialized) => getStatePersistence().run('backup', { content: serialized });
 
 const stripSecrets = (state) => {
   return stateSerialization.stripSecrets(state);
@@ -549,6 +539,7 @@ const loadSecrets = () => {
 };
 
 let statePersistence;
+let stateMaintenancePersistence;
 const getStatePersistence = () => {
   if (!statePersistence) {
     let cachedSecretText = '';
@@ -581,6 +572,50 @@ const getStatePersistence = () => {
     });
   }
   return statePersistence;
+};
+const getStateMaintenancePersistence = () => {
+  if (!stateMaintenancePersistence) stateMaintenancePersistence = createStatePersistence({
+    dataRoot,
+    encryptSecrets: () => ({ mode: 'keep' }),
+    keepAlive: false,
+  });
+  return stateMaintenancePersistence;
+};
+let stateMaintenanceTimer;
+let stateMaintenanceRunning = false;
+let stateMaintenanceRequested = false;
+const stateMaintenanceSenders = new Set();
+const scheduleStateMaintenance = (sender) => {
+  if (sender && !sender.isDestroyed()) stateMaintenanceSenders.add(sender);
+  stateMaintenanceRequested = true;
+  if (stateMaintenanceRunning || stateMaintenanceTimer) return;
+  stateMaintenanceTimer = setTimeout(() => {
+    stateMaintenanceTimer = undefined;
+    stateMaintenanceRunning = true;
+    stateMaintenanceRequested = false;
+    const targets = [...stateMaintenanceSenders];
+    stateMaintenanceSenders.clear();
+    void getStateMaintenancePersistence().run('maintenance').then((result) => {
+      const warnings = [
+        result.snapshotError ? `恢复点创建失败：${result.snapshotError}` : '',
+      ].filter(Boolean);
+      if (!warnings.length) return;
+      for (const target of targets) {
+        try { if (!target.isDestroyed()) target.send('lianhua:state-maintenance-warning', { warnings }); } catch { /* the renderer may close after the liveness check */ }
+      }
+    }, (error) => {
+      for (const target of targets) {
+        try {
+          if (!target.isDestroyed()) target.send('lianhua:state-maintenance-warning', {
+            warnings: [`本地恢复维护失败：${error instanceof Error ? error.message : String(error)}`],
+          });
+        } catch { /* the renderer may close after the liveness check */ }
+      }
+    }).finally(() => {
+      stateMaintenanceRunning = false;
+      if (stateMaintenanceRequested) scheduleStateMaintenance();
+    });
+  }, 500);
 };
 
 const hydrateSecrets = (state) => {
@@ -1910,13 +1945,14 @@ app.whenReady().then(() => {
     getStatePersistence().run('load-project', { projectId: payload?.projectId, hash: payload?.hash })
   ));
 
-  handleTrustedIpc('lianhua:save-state', async (_event, content) => {
-    // Shared structural/integrity checks and per-project storage run in
-    // the ordered worker before any vault/state writes. Await is still durable,
-    // including the external-backup result, not a fire-and-forget enqueue.
+  handleTrustedIpc('lianhua:save-state', async (event, content) => {
+    // The local project manifest and referenced assets are the durability
+    // barrier. Optional recovery snapshots use their own worker.
     const text = typeof content === 'string' ? content : '';
     rememberAssetRosterFromContent(text);
-    return getStatePersistence().run('save', { content: text });
+    const result = await getStatePersistence().run('save-local', { content: text });
+    scheduleStateMaintenance(event.sender);
+    return result;
   });
 
   handleTrustedIpc('lianhua:note-active-project', async (_event, payload) => {
@@ -1945,22 +1981,10 @@ app.whenReady().then(() => {
     return getStatePersistence().run('restore', { snapshotId: String(snapshotId || '') });
   });
 
-  handleTrustedIpc('lianhua:choose-backup-directory', async () => {
-    const fixedPath = qaPath('LIANHUA_QA_BACKUP_DIR');
-    const selectedPath = fixedPath || await dialog.showOpenDialog({ title: '选择跨盘备份目录', properties: ['openDirectory', 'createDirectory'] })
-      .then((result) => result.canceled ? '' : result.filePaths[0] || '');
-    if (!selectedPath) return null;
-    ensureDirectory(selectedPath);
-    const config = { ...recoveryConfig(), backupDirectory: selectedPath };
-    writeRecoveryConfig(config);
-    return config;
-  });
-
   handleTrustedIpc('lianhua:update-recovery-config', async (_event, patch) => {
     const current = recoveryConfig();
     const next = {
       ...current,
-      backupOnSave: patch?.backupOnSave === undefined ? current.backupOnSave : Boolean(patch.backupOnSave),
       allowPrivateNetwork: patch?.allowPrivateNetwork === undefined ? current.allowPrivateNetwork : Boolean(patch.allowPrivateNetwork),
       keepCount: Number.isFinite(patch?.keepCount) ? Math.max(3, Math.min(100, patch.keepCount)) : current.keepCount
     };

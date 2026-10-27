@@ -23,6 +23,7 @@ interface Window {
     loadWorkspaceState?: () => Promise<string | null>;
     loadProject?: (projectId: string, hash?: string) => Promise<import('./storage').DesktopProjectResult>;
     saveState: (content: string) => Promise<import('./storage').DesktopSaveResult>;
+    onStateMaintenanceWarning?: (callback: (event: { warnings: string[] }) => void) => () => void;
     noteActiveProject?: (payload: { activeProjectId?: string; projects?: Array<{ id: string; name: string }> }) => Promise<boolean>;
     onBeforeClose: (callback: (event: { requestId: string }) => void) => () => void;
     onCloseCancelled: (callback: (event: { requestId: string }) => void) => () => void;
@@ -37,7 +38,6 @@ interface Window {
     recoveryStatus: (options?: { light?: boolean }) => Promise<import('./storage').RecoveryStatus>;
     createRestorePoint: (content: string) => Promise<{ ok: boolean; path: string }>;
     restoreSnapshot: (id: string) => Promise<string>;
-    chooseBackupDirectory: () => Promise<import('./storage').RecoveryStatus['recovery'] | null>;
     updateRecoveryConfig: (patch: Partial<import('./storage').RecoveryStatus['recovery']>) => Promise<import('./storage').RecoveryStatus['recovery']>;
     importMedia: (file: File) => Promise<import('./storage').ManagedMediaResult | null>;
     storeGeneratedImage: (payload: {

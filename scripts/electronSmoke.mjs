@@ -8,10 +8,9 @@ const port = Number(process.env.CDP_PORT || 9231);
 const dataDirectory = process.env.LIANHUA_DATA_DIR;
 const outputDirectory = process.env.QA_OUTPUT || path.resolve('.qa-electron');
 const exportPath = process.env.LIANHUA_QA_EXPORT_PATH;
-const backupDirectory = process.env.LIANHUA_QA_BACKUP_DIR;
 const savedImagePath = process.env.LIANHUA_QA_SAVE_MEDIA_PATH;
 if (!dataDirectory) throw new Error('LIANHUA_DATA_DIR is required');
-if (!exportPath || !backupDirectory || !savedImagePath) throw new Error('LIANHUA_QA_EXPORT_PATH, LIANHUA_QA_BACKUP_DIR, and LIANHUA_QA_SAVE_MEDIA_PATH are required');
+if (!exportPath || !savedImagePath) throw new Error('LIANHUA_QA_EXPORT_PATH and LIANHUA_QA_SAVE_MEDIA_PATH are required');
 const normalizeFsPath = (value) => {
   const normalized = path.resolve(String(value || '')).replace(/[\\/]+/gu, path.sep);
   return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
@@ -173,8 +172,6 @@ const result = await evaluate(`(async () => {
   await window.lianhuaDesktop.saveState(JSON.stringify(changed));
   const restored = JSON.parse(await window.lianhuaDesktop.restoreSnapshot(snapshotId));
   const loadedAfterRestore = JSON.parse(await window.lianhuaDesktop.loadState());
-  const backupConfig = await window.lianhuaDesktop.chooseBackupDirectory();
-  const backupSaved = await window.lianhuaDesktop.saveState(JSON.stringify(restored));
   const exported = await window.lianhuaDesktop.exportProjectPackage({ content: JSON.stringify(restored), fileName: 'qa-roundtrip' });
   const imported = JSON.parse(await window.lianhuaDesktop.importProjectPackage());
   const savedImage = await window.lianhuaDesktop.saveMedia({
@@ -198,8 +195,6 @@ const result = await evaluate(`(async () => {
     secretHydrated: loaded.settings.textApi.apiKey === secret,
     restoreCreated: Boolean(restore?.ok),
     restoredStateReplaced: restored.project.name === '恢复点版本' && loadedAfterRestore.project.name === '恢复点版本',
-    backupDirectorySelected: backupConfig?.backupDirectory || '',
-    backupWritten: Boolean(backupSaved?.externalBackup),
     packageExported: Boolean(exported?.path && exported.assetCount === 1 && exported.missingCount === 0),
     packageImported: imported.project.name === restored.project.name && imported.project.assets.some((asset) => asset.checksum === ${JSON.stringify(fixtureChecksum)}),
     imageSaved: Boolean(savedImage),
@@ -227,8 +222,6 @@ const disk = {
   encryptedVaultExists: fs.existsSync(path.join(dataDirectory, 'credentials.safe')),
   stateBytes: Buffer.byteLength(stateText),
   exportExists: fs.existsSync(exportPath),
-  backupManifestExists: fs.existsSync(path.join(backupDirectory, '莲华视频导演台备份', 'backup-integrity.json')),
-  backupAssetExists: fs.existsSync(path.join(backupDirectory, '莲华视频导演台备份', 'assets', fixtureRelativePath)),
   savedImageExists: fs.existsSync(savedImagePath),
   savedImageMatches: fs.existsSync(savedImagePath) && fs.readFileSync(savedImagePath).equals(fixtureImage),
 };
@@ -239,8 +232,6 @@ const failed = Object.entries({
   secretHydrated: result.secretHydrated,
   restoreCreated: result.restoreCreated,
   restoredStateReplaced: result.restoredStateReplaced,
-  backupDirectorySelected: path.resolve(result.backupDirectorySelected || '') === path.resolve(backupDirectory),
-  backupWritten: result.backupWritten,
   packageExported: result.packageExported,
   packageImported: result.packageImported,
   imageSaved: result.imageSaved,
@@ -254,8 +245,6 @@ const failed = Object.entries({
   secretAbsentFromState: disk.secretAbsentFromState,
   encryptedVaultExists: disk.encryptedVaultExists,
   exportExists: disk.exportExists,
-  backupManifestExists: disk.backupManifestExists,
-  backupAssetExists: disk.backupAssetExists,
   savedImageExists: disk.savedImageExists,
   savedImageMatches: disk.savedImageMatches,
   noConsoleErrors: consoleErrors.length === 0,

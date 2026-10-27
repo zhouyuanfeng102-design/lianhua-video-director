@@ -1,7 +1,7 @@
 const path = require('node:path');
 const { Worker } = require('node:worker_threads');
 
-const createStatePersistence = ({ dataRoot, encryptSecrets, loadSecrets = () => null, workerFactory = (file, options) => new Worker(file, options) }) => {
+const createStatePersistence = ({ dataRoot, encryptSecrets, loadSecrets = () => null, keepAlive = true, workerFactory = (file, options) => new Worker(file, options) }) => {
   const pinnedRoot = path.resolve(dataRoot);
   let worker;
   let active;
@@ -65,7 +65,8 @@ const createStatePersistence = ({ dataRoot, encryptSecrets, loadSecrets = () => 
         const instance = ensureWorker();
         const id = ++sequence;
         active = { id, resolve, reject };
-        instance.ref();
+        if (keepAlive) instance.ref();
+        else instance.unref();
         instance.postMessage({ type: 'operation', id, operation, payload });
       } catch (error) {
         active = undefined;

@@ -9,6 +9,11 @@ contextBridge.exposeInMainWorld('lianhuaDesktop', {
   loadWorkspaceState: () => ipcRenderer.invoke('lianhua:load-workspace-state'),
   loadProject: (projectId, hash) => ipcRenderer.invoke('lianhua:load-project', { projectId, hash }),
   saveState: (content) => ipcRenderer.invoke('lianhua:save-state', content),
+  onStateMaintenanceWarning: (callback) => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('lianhua:state-maintenance-warning', listener);
+    return () => ipcRenderer.removeListener('lianhua:state-maintenance-warning', listener);
+  },
   noteActiveProject: (payload) => ipcRenderer.invoke('lianhua:note-active-project', payload),
   onBeforeClose: (callback) => {
     const listener = (_event, payload) => callback(payload);
@@ -25,7 +30,6 @@ contextBridge.exposeInMainWorld('lianhuaDesktop', {
   recoveryStatus: (options) => ipcRenderer.invoke('lianhua:recovery-status', options),
   createRestorePoint: (content) => ipcRenderer.invoke('lianhua:create-restore-point', content),
   restoreSnapshot: (id) => ipcRenderer.invoke('lianhua:restore-snapshot', id),
-  chooseBackupDirectory: () => ipcRenderer.invoke('lianhua:choose-backup-directory'),
   updateRecoveryConfig: (patch) => ipcRenderer.invoke('lianhua:update-recovery-config', patch),
   importMedia: (file) => ipcRenderer.invoke('lianhua:import-media', { path: file ? webUtils.getPathForFile(file) : '' }),
   storeGeneratedImage: (payload) => ipcRenderer.invoke('lianhua:store-generated-image', payload),

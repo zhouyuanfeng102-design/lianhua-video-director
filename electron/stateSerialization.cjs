@@ -111,8 +111,6 @@ const stateAssets = (state) => {
 };
 
 const normalizeRecoveryConfig = (raw) => ({
-  backupDirectory: typeof raw?.backupDirectory === 'string' ? raw.backupDirectory : '',
-  backupOnSave: raw?.backupOnSave !== false,
   allowPrivateNetwork: raw?.allowPrivateNetwork === true,
   keepCount: Number.isFinite(raw?.keepCount) ? Math.max(3, Math.min(100, raw.keepCount)) : 20,
 });

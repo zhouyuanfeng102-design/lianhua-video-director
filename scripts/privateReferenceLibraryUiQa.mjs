@@ -100,7 +100,7 @@ async function run() {
   await context.routeWebSocket(/.*/u, socket => socket.close());
   await context.addInitScript(() => {
     const qa = window.__privateReferenceQa = { reads: [], requests: [], media: null, pixels: {}, baseline: [] };
-    const recovery = { allowPrivateNetwork: false, backupDirectory: '', backupOnSave: false, keepCount: 20 };
+    const recovery = { allowPrivateNetwork: false, keepCount: 20 };
     window.lianhuaDesktop = {
       storagePaths: async () => ({ dataRoot: 'QA-only', sessionData: 'QA-only/session', cache: 'QA-only/cache', temp: 'QA-only/temp', logs: 'QA-only/logs', recovery }),
       recoveryStatus: async () => new Promise(() => {}),

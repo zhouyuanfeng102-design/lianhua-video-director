@@ -127,6 +127,26 @@ test('unfinished tasks can force close without waiting for a save', async () => 
   assert.equal(h.cancelled.length, 0);
 });
 
+test('force close is idempotent when Electron has already destroyed the window', async () => {
+  const prompted = deferred();
+  const choice = deferred();
+  const notices = [];
+  const h = fixture({ timeoutMs: 5, showMessage: async (message) => { notices.push(message); prompted.resolve(); return choice.promise; } });
+  let nativeDestroyed = false;
+  let destroyCalls = 0;
+  h.window.isDestroyed = () => nativeDestroyed;
+  h.window.destroy = () => { destroyCalls += 1; throw new Error('Object has been destroyed'); };
+  h.window.close();
+  await prompted.promise;
+  nativeDestroyed = true;
+  h.window.emit('closed');
+  choice.resolve({ response: 0 });
+  await tick();
+  assert.equal(h.guard.allowed, true);
+  assert.equal(destroyCalls, 0);
+  assert.equal(notices.length, 1);
+});
+
 test('returning from the unfinished-task prompt keeps the window open', async () => {
   const h = fixture({ showMessage: async () => ({ response: 1 }) });
   h.window.close();

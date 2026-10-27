@@ -191,53 +191,24 @@ test('manifest pointer traversal and symlinks outside the project directory are 
   assert.throws(() => writeProjectLibrary(state(), { root: linkedRoot, writeFile: atomicWriteFile }), /越界/u);
 });
 
-test('external backup is self-contained with project blocks, media and secret-free manifests', async (t) => {
+test('saving preserves local media and never writes a cross-drive backup', async (t) => {
   const h = setup(t);
   const backupDirectory = path.join(h.root, 'backup');
-  fs.writeFileSync(path.join(h.dataRoot, 'recovery-config.json'), JSON.stringify({ backupDirectory }));
+  fs.writeFileSync(path.join(h.dataRoot, 'recovery-config.json'), JSON.stringify({ backupDirectory, backupOnSave: true }));
   fs.mkdirSync(path.join(h.dataRoot, 'assets'));
   fs.writeFileSync(path.join(h.dataRoot, 'assets', 'fixture.png'), 'synthetic-bytes');
   const source = state();
   source.project.assets = [{ id: 'fixture', relativePath: 'fixture.png' }];
-  source.settings.imageApi = { apiKey: 'secret-must-stay-outside-json' };
+  source.settings.imageApi = { apiKey: 'secret-remains-out-of-project-state' };
   const result = await h.store.save(JSON.stringify(source), keepVault);
-  assert.equal(result.backupError, '');
-  const backupRoot = path.dirname(result.externalBackup);
-  const saved = readProjectLibrary(fs.readFileSync(result.externalBackup, 'utf8'), { root: backupRoot });
+  assert.equal(result.ok, true);
+  const saved = JSON.parse(h.store.load(null).content);
   assert.equal(saved.settings.imageApi.apiKey, '');
   assert.equal(saved.project.shots[0].finalPrompt, source.project.shots[0].finalPrompt);
-  assert.equal(fs.readFileSync(path.join(backupRoot, 'assets', 'fixture.png'), 'utf8'), 'synthetic-bytes');
-  const integrity = JSON.parse(fs.readFileSync(path.join(backupRoot, 'backup-integrity.json'), 'utf8'));
-  assert.equal(integrity.stateChecksum, result.checksum);
-  assert.equal(integrity.projectFiles.length, 2);
-  assert.ok(integrity.assets.every((item) => !item.missing));
+  assert.equal(fs.readFileSync(path.join(h.dataRoot, 'assets', 'fixture.png'), 'utf8'), 'synthetic-bytes');
+  assert.equal(fs.existsSync(backupDirectory), false);
 });
-
-test('external backup block failure preserves its prior manifest and still confirms local save', async (t) => {
-  const h = setup(t);
-  const backupDirectory = path.join(h.root, 'backup');
-  fs.writeFileSync(path.join(h.dataRoot, 'recovery-config.json'), JSON.stringify({ backupDirectory }));
-  const first = await h.store.save(content('old'), keepVault);
-  const oldBackup = fs.readFileSync(first.externalBackup, 'utf8');
-  const backupRoot = path.dirname(first.externalBackup);
-  const oldIntegrity = fs.readFileSync(path.join(backupRoot, 'backup-integrity.json'), 'utf8');
-  const proxy = new Proxy(fs, { get(target, name) {
-    if (name === 'renameSync') return (from, to) => {
-      if (to.startsWith(path.join(backupRoot, 'project-library'))) throw Object.assign(new Error('fixture backup full'), { code: 'ENOSPC' });
-      return fs.renameSync(from, to);
-    };
-    return Reflect.get(target, name);
-  } });
-  const store = createStateStore({ dataRoot: h.dataRoot, fs: proxy });
-  const result = await store.save(content('new'), keepVault);
-  assert.equal(result.ok, true);
-  assert.match(result.backupError, /ENOSPC/u);
-  assert.equal(JSON.parse(store.load(null).content).project.description, 'new');
-  assert.equal(fs.readFileSync(first.externalBackup, 'utf8'), oldBackup);
-  assert.equal(fs.readFileSync(path.join(backupRoot, 'backup-integrity.json'), 'utf8'), oldIntegrity);
-});
-
-test('automatic snapshot failure reports a backup warning without claiming the durable local save failed', async (t) => {
+test('automatic snapshot failure is reported without claiming the durable local save failed', async (t) => {
   const h = setup(t);
   const proxy = new Proxy(fs, { get(target, name) {
     if (name === 'renameSync') return (from, to) => {
@@ -251,44 +222,6 @@ test('automatic snapshot failure reports a backup warning without claiming the d
   assert.equal(saved.ok, true);
   assert.match(saved.snapshotError, /EPERM/u);
   assert.equal(JSON.parse(store.load(null).content).project.description, 'saved');
-});
-
-test('backup media copy failure preserves its previous complete manifest and reports the failed backup', async (t) => {
-  const h = setup(t);
-  const backupDirectory = path.join(h.root, 'backup');
-  fs.writeFileSync(path.join(h.dataRoot, 'recovery-config.json'), JSON.stringify({ backupDirectory }));
-  fs.mkdirSync(path.join(h.dataRoot, 'assets'));
-  fs.writeFileSync(path.join(h.dataRoot, 'assets', 'first.png'), 'first-fixture');
-  fs.writeFileSync(path.join(h.dataRoot, 'assets', 'second.png'), 'second-fixture');
-  const before = state('first');
-  before.project.assets = [{ id: 'first', relativePath: 'first.png' }];
-  const first = await h.store.save(JSON.stringify(before), keepVault);
-  assert.equal(first.backupError, '');
-  const backupRoot = path.dirname(first.externalBackup);
-  const originalIntegrity = fs.readFileSync(path.join(backupRoot, 'backup-integrity.json'), 'utf8');
-  const originalIndexes = fs.readdirSync(backupRoot).filter((name) => name.startsWith('project-latest-'));
-  const proxy = new Proxy(fs, { get(target, name) {
-    if (name === 'copyFileSync') return (source, destination, flags) => {
-      if (destination.startsWith(path.join(backupRoot, 'assets'))) {
-        fs.writeFileSync(destination, 'partial');
-        throw Object.assign(new Error('fixture full while copying'), { code: 'ENOSPC' });
-      }
-      return fs.copyFileSync(source, destination, flags);
-    };
-    return Reflect.get(target, name);
-  } });
-  const store = createStateStore({ dataRoot: h.dataRoot, fs: proxy });
-  const next = state('second');
-  next.project.assets = [{ id: 'second', relativePath: 'second.png' }];
-  const result = await store.save(JSON.stringify(next), keepVault);
-  assert.equal(result.ok, true);
-  assert.match(result.backupError, /ENOSPC/u);
-  assert.equal(fs.readFileSync(path.join(backupRoot, 'backup-integrity.json'), 'utf8'), originalIntegrity);
-  assert.deepEqual(fs.readdirSync(backupRoot).filter((name) => name.startsWith('project-latest-')), originalIndexes);
-  assert.equal(fs.readFileSync(path.join(backupRoot, 'assets', 'first.png'), 'utf8'), 'first-fixture');
-  assert.equal(fs.existsSync(path.join(backupRoot, 'assets', 'second.png')), false);
-  assert.equal(fs.readdirSync(path.join(backupRoot, 'assets')).some((name) => name.endsWith('.tmp')), false);
-  assert.equal(JSON.parse(store.load(null).content).project.description, 'second');
 });
 
 test('migration original is the final read-only fallback when all shared project blocks are damaged', async (t) => {

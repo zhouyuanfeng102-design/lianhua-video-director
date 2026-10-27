@@ -3133,11 +3133,7 @@ export default function App() {
           if (superseded || stateRef.current !== state || closingSaveRef.current || restoringSnapshotRef.current) return;
           lastAutosavedStateRef.current = state;
           setSaveStatus("saved");
-          const backupWarnings = [
-            result.snapshotError ? `恢复点创建失败：${result.snapshotError}` : "",
-            result.backupError ? `跨盘备份失败：${result.backupError}` : "",
-          ].filter(Boolean);
-          if (backupWarnings.length) setNotice({ text: `项目已保存；${backupWarnings.join("；")}`, tone: "error" });
+          if (result.snapshotError) setNotice({ text: `项目已保存；恢复点创建失败：${result.snapshotError}`, tone: "error" });
         })
         .catch((error) => {
           if (superseded || isCoalescedAutoSaveCancellation(error)
@@ -3148,6 +3144,10 @@ export default function App() {
     }, 180);
     return () => { superseded = true; window.clearTimeout(timer); };
   }, [state, desktopStateReady, restoringSnapshot]);
+
+  useEffect(() => window.lianhuaDesktop?.onStateMaintenanceWarning?.(({ warnings }) => {
+    if (warnings.length) setNotice({ text: warnings.join("；"), tone: "error" });
+  }), []);
 
   const countOpenGenerationTasks = (source: AppState) => {
     const seen = new Set<string>();
@@ -10162,13 +10162,6 @@ export default function App() {
     }
   };
 
-  const chooseBackupDirectory = async () => {
-    const config = await desktopBridge()?.chooseBackupDirectory?.();
-    if (!config) return;
-    await refreshRecoveryStatus();
-    notify(`跨盘备份目录已设置：${config.backupDirectory}`);
-  };
-
   const restoreSnapshot = async (id: string) => {
     if (restoringSnapshotRef.current || closingSaveRef.current) return;
     if (!window.confirm("恢复会替换当前项目状态，并先为当前状态创建恢复点。继续吗？")) return;
@@ -10475,7 +10468,7 @@ export default function App() {
                   setRecoveryOpen(true);
                 }}
               >
-                {saveStatus === "saving" ? "保存中" : saveStatus === "error" ? "保存失败" : "恢复与备份"}
+                {saveStatus === "saving" ? "保存中" : saveStatus === "error" ? "保存失败" : "本地恢复"}
               </Button>
             )}
             <Button
@@ -11135,8 +11128,8 @@ export default function App() {
           <div className="modal recovery-modal" onMouseDown={(event) => event.stopPropagation()}>
             <div className="modal-head">
               <div>
-                <h3>恢复与备份</h3>
-                <div className="field-hint">主状态校验、手动恢复点和跨盘备份。</div>
+                <h3>本地恢复</h3>
+                <div className="field-hint">本地项目存档和恢复点。</div>
               </div>
               <Button small variant="ghost" icon={<X size={14} />} onClick={() => setRecoveryOpen(false)}>关闭</Button>
             </div>
@@ -11154,10 +11147,6 @@ export default function App() {
             </div>
             <div className="row wrap" style={{ marginTop: 10 }}>
               <Button small icon={<Save size={14} />} onClick={createRestorePoint}>创建恢复点</Button>
-              <Button small variant="ghost" icon={<FolderOpen size={14} />} onClick={chooseBackupDirectory}>选择跨盘备份目录</Button>
-            </div>
-            <div className="hint-box" style={{ marginTop: 8 }}>
-              跨盘备份：{recoveryStatus.recovery.backupDirectory || "尚未设置"}
             </div>
             <div className="recovery-list">
               {recoveryStatus.snapshots.map((snapshot) => (
@@ -24905,7 +24894,9 @@ function GenerationTasksView(ctx: AppContext) {
       }));
       if (removed) notify(queuedVideoDeletion
         ? "已取消并删除尚未提交的视频任务，其他任务继续。"
-        : "已从列表删除任务记录，已生成的视频和素材保留。");
+        : videoTaskHasUnresolvedSubmission(latestTask)
+          ? "已从本地列表移除任务；远端仍可能运行或计费，请在服务端处理。原提交记录已保留，可通过撤销恢复。"
+          : "已从列表删除任务记录，已生成的视频和素材保留。");
       else if (reason) notify(reason);
       return;
     }
@@ -24941,14 +24932,20 @@ function GenerationTasksView(ctx: AppContext) {
       },
     ));
   };
-  const videoBatchDeletionBusyReason = (batchId: string) => (
-    resumingVideoBatchId || continuingVideoBatchId || stoppingVideoBatchId
+  const videoBatchDeletionBusyReason = (batchId: string, canDelete = false) => (
+    resumingVideoBatchId === batchId || continuingVideoBatchId === batchId
       ? "正在处理批次，请完成后再删除。"
+      : stoppingVideoBatchId === batchId && !canDelete
+        ? "正在停止尚未提交的任务；本地停止完成后即可清理，已提交的任务不会被取消。"
       : videoBatchContinuation && [videoBatchContinuation.displayBatchId, videoBatchContinuation.batchId].includes(batchId)
         ? "请先在继续批次的确认区点击“暂不继续”，再删除批次。" : ""
   );
   const removeVideoBatch = (batchId: string) => {
-    const busyReason = videoBatchDeletionBusyReason(batchId);
+    const busyReason = videoBatchDeletionBusyReason(batchId, inspectVideoBatchDeletion(state.project, {
+      projectId: state.project.id, batchId,
+      getRuntime: (taskId) => ctx.videoController.runtimeStore?.getTaskSnapshot(taskId)
+        || ctx.videoController.runtimeById[taskId],
+    }).canDelete);
     if (busyReason) { notify(busyReason); return; }
     const projectId = state.project.id;
     if (ctx.getCurrentState().project.id !== projectId) {
@@ -24956,6 +24953,7 @@ function GenerationTasksView(ctx: AppContext) {
       return;
     }
     let removedCount = 0;
+    let unresolvedRemoteCount = 0;
     let reason = "";
     setState((current) => {
       if (current.project.id !== projectId) return current;
@@ -24966,6 +24964,8 @@ function GenerationTasksView(ctx: AppContext) {
             || ctx.videoController.runtimeById[taskId],
         });
         removedCount = result.removedTaskIds.length;
+        unresolvedRemoteCount = project.generationTasks.filter((task) => isVideoGenerationTask(task)
+          && task.batchId === batchId && videoTaskHasUnresolvedSubmission(task)).length;
         reason = result.reason || "";
         return result.project;
       });
@@ -24977,7 +24977,9 @@ function GenerationTasksView(ctx: AppContext) {
       return next;
     });
     setVideoBatchContinueNotice((current) => current?.batchId === batchId ? undefined : current);
-    notify(`已从列表移除本批次的 ${removedCount} 条任务，已生成的视频和素材保留。`);
+    notify(unresolvedRemoteCount
+      ? `已从本地列表移除本批次的 ${removedCount} 条任务；其中 ${unresolvedRemoteCount} 条远端结果未确认，可能仍在运行或计费，请在服务端处理。原提交记录保留，可通过撤销恢复。`
+      : `已从列表移除本批次的 ${removedCount} 条任务，已生成的视频和素材保留。`);
   };
   const videoTaskGroups = (() => {
     const result: Array<{ key: string; batchId?: string; tasks: VideoGenerationTask[] }> = [];
@@ -25030,14 +25032,13 @@ function GenerationTasksView(ctx: AppContext) {
         onReuse={(item) => ctx.openVideoDirector({ taskId: item.id })}
         onOpenPrompt={ctx.openPromptSource}
       />
-      {cancellationPending && <div className="field-hint">正在确认远端取消状态，确认完成后可删除任务记录。</div>}
+      {cancellationPending && <div className="field-hint">本地跟踪已停止；远端任务仍可能运行或计费。远端处理后可直接清理本地记录。</div>}
       {(removable || active) && <div className="row">
         <Button
           small
           variant={active ? "danger" : "ghost"}
           icon={active && !localQueued ? <X size={13} /> : <Trash2 size={13} />}
-          disabled={cancellationPending}
-          title={localQueued ? "取消尚未提交的排队任务并直接删除，不影响其他任务" : active ? "先停止本地跟踪并请求取消远端排队；任务记录会保留，确认停止后再删除" : "删除任务记录，已生成的成片会保留在资产库"}
+          title={localQueued ? "取消尚未提交的排队任务并直接删除，不影响其他任务" : active ? "先停止本地跟踪并请求取消远端排队；已提交任务可能仍运行或计费" : cancellationPending ? "仅从本地列表移除；远端仍可能运行或计费，原提交记录保留" : "删除任务记录，已生成的成片会保留在资产库"}
           onClick={() => { void removeTask(task.id); }}
         >
           {localQueued ? "删除任务" : active ? "取消任务" : "删除任务记录（保留成片）"}
@@ -25151,7 +25152,7 @@ function GenerationTasksView(ctx: AppContext) {
       projectId: state.project.id, batchId: group.batchId,
       getRuntime: (taskId) => runtimeById[taskId],
     });
-    const deleteDisabledReason = partialBatchReason || videoBatchDeletionBusyReason(group.batchId) || deletion.reason;
+    const deleteDisabledReason = partialBatchReason || videoBatchDeletionBusyReason(group.batchId, deletion.canDelete) || deletion.reason;
     const stoppedUnconfirmedCount = deletion.canDelete ? group.tasks.filter(videoTaskHasUnresolvedSubmission).length : 0;
     const stoppable = group.tasks.filter(videoTaskCanStopBeforeSubmit).length;
     const chainBatch = group.tasks.some((task) => task.videoJob?.snapshot.batchCompletionOrder);
@@ -25279,11 +25280,13 @@ function GenerationTasksView(ctx: AppContext) {
           {deleteDisabledReason}
         </span>}
         {!deleteDisabledReason && stoppedUnconfirmedCount > 0 && <span className="field-hint" role="note">
-          仅清理本地列表，不会取消远端任务；原提交记录保留，可通过顶部撤销找回。
+          仅清理本地列表；远端仍可能运行或计费，请在服务端处理。原提交记录保留，可通过顶部撤销找回。
         </span>}
         <Button small variant="danger" icon={<Trash2 size={13} />} ariaLabel="删除批次"
           disabled={!deletion.canDelete || Boolean(deleteDisabledReason)}
-          title={deleteDisabledReason || "清理本批次任务列表，保留已生成的视频和素材；不会取消远端任务，可通过顶部撤销恢复记录"}
+          title={deleteDisabledReason || stoppedUnconfirmedCount > 0
+            ? (deleteDisabledReason || "仅清理本地列表；远端仍可能运行或计费，原提交记录保留，可撤销恢复")
+            : "清理本批次任务列表，保留已生成的视频和素材；可通过顶部撤销恢复记录"}
           onClick={() => removeVideoBatch(group.batchId!)}>
           删除批次
         </Button>

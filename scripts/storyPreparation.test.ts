@@ -4,6 +4,7 @@ import { STORY_VISUAL_ENGINE_VERSION } from '../src/storyVisualAction';
 import { fixturePlan, fixtureParagraphs, readStoryVisualData, type CapturedStoryRequest, type StoryVisualRequestData } from './storyVisualTestFixtures';
 import type { TextApiConfig } from '../src/types';
 import { MAESTRO_PROTOCOL_MARKER } from '../src/maestroProtocol';
+import { SPOKEN_CUE_CONTENT_RULE } from '../src/videoInteractionRules';
 import { LIANHUA_NSFW_CREATIVE_GUIDANCE, LIANHUA_NSFW_FIXED_PREFIX, MOSE_JIANGHU_NSFW_DETAIL_RULES, MOSE_JIANGHU_NSFW_PROMPT_RULE } from '../src/nsfwPromptRules';
 
 const config: TextApiConfig = {
@@ -46,6 +47,8 @@ try {
     assert.equal(request.response_format, undefined, 'third-party providers are not forced to accept response_format');
     assert.equal(request.thinking, undefined, 'facts are understood using the provider reasoning default');
   }
+  assert.ok(requests[0].messages.some((message) => message.content.includes(SPOKEN_CUE_CONTENT_RULE)),
+    'the first event-classification stage treats concrete narrated speech content as dialogue');
   assert.equal(reviewed.actionPlan?.events.length, 2);
   assert.equal(reviewed.paragraphs?.[0].text, body);
   checks += 1;
@@ -159,6 +162,22 @@ try {
     assert.equal(data.dialogueMode, expectedMode);
     if (expectedMode === 'preserve-existing-no-new') assert.equal(data.existingDialogueLines[0].utterance, '等我。');
   }
+  fake(() => expansion);
+  await requestStoryExpansion(config, '宋玉一路说着后山几处灵田今年的收成。');
+  const spokenCueRequest = requests[0];
+  const spokenCuePrompt = spokenCueRequest.messages.map((message) => message.content).join('\n');
+  const spokenCueUser = spokenCueRequest.messages.find((message) => message.role === 'user')!.content;
+  const spokenCueData = JSON.parse(spokenCueUser.match(/<story_expansion_data>\s*([\s\S]*?)\s*<\/story_expansion_data>/u)![1]);
+  assert.equal(spokenCueData.dialogueMode, 'not-required', 'the source needs no invented dialogue');
+  assert.ok(spokenCuePrompt.includes(SPOKEN_CUE_CONTENT_RULE), 'no-invention mode preserves concrete speech already written in narrative');
+  assert.match(spokenCuePrompt, /明确话题或信息.*不一定是逐字台词.*自然、完整、可念的一句/u,
+    'expansion naturalizes a narrated topic instead of passing its summary off as a quote');
+  assert.match(spokenCuePrompt, /只有“接着说下去”等没有具体话题或原句时才不新增台词/u,
+    'a speech action without a topic remains non-verbal rather than invented dialogue');
+  assert.match(spokenCuePrompt, /听者只倾听、反应或行动，不能代说/u,
+    'the listener is not given an invented reply');
+  assert.ok(spokenCuePrompt.includes('dialogueMode=not-required只表示不强制增加原文没有的对白'),
+    'not-required cannot suppress a source utterance expressed without quotation marks');
   const expansionLongSource = '林澜沿着长廊往前走，李云跟在林澜身后。'.repeat(400);
   fake(() => expansion);
   await requestStoryExpansion(config, expansionLongSource);

@@ -114,7 +114,7 @@ try {
   const saveStarted = performance.now();
   const result = await store.save(isolatedLegacy, async () => ({ mode: 'keep' }));
   const firstSaveMs = Math.round(performance.now() - saveStarted);
-  ensure(result.ok && !result.backupError && !result.snapshotError, 'ISOLATED_SAVE_WARNING');
+  ensure(result.ok && !result.snapshotError, 'ISOLATED_SAVE_WARNING');
   ensure(fileHash(path.join(dataRoot, 'project-state.legacy-original.json')) === isolatedLegacyHash, 'LEGACY_COPY_CHANGED');
   isolatedLegacy = '';
   stage = 'reload-and-compare';
@@ -143,7 +143,7 @@ try {
   stage = 'second-save';
   const secondStarted = performance.now();
   const second = await store.save(JSON.stringify(loaded), async () => ({ mode: 'keep' }));
-  ensure(second.ok && !second.backupError && !second.snapshotError, 'SECOND_SAVE_WARNING');
+  ensure(second.ok && !second.snapshotError, 'SECOND_SAVE_WARNING');
   const afterFiles = fs.readdirSync(blockDirectory).sort();
   ensure(JSON.stringify(beforeFiles) === JSON.stringify(afterFiles), 'UNCHANGED_PROJECT_BLOCK_COUNT_CHANGED');
   for (const name of beforeFiles) {

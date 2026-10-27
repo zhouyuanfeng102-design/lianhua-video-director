@@ -36,13 +36,16 @@ parentPort.on('message', async (message) => {
       case 'save':
         value = await store.save(payload.content, (secrets) => credentials('encrypt-secrets', secrets));
         break;
+      case 'save-local':
+        value = await store.save(payload.content, (secrets) => credentials('encrypt-secrets', secrets), { deferMaintenance: true });
+        break;
+      case 'maintenance': value = store.maintainLatest(); break;
       case 'load': value = store.load(await credentials('load-secrets')); break;
       case 'load-workspace': value = store.loadWorkspace(await credentials('load-secrets')); break;
       case 'load-project': value = store.loadProject(payload.projectId, payload.hash); break;
       case 'status': value = store.recoveryStatus({ light: payload.light === true }); break;
       case 'restore-point': value = store.createRestorePoint(payload.content); break;
       case 'restore': value = store.restoreSnapshot(payload.snapshotId, await credentials('load-secrets')); break;
-      case 'backup': value = store.backup(payload.content); break;
       default: throw new Error('未知状态保存操作');
     }
     parentPort.postMessage({ type: 'result', id, value });

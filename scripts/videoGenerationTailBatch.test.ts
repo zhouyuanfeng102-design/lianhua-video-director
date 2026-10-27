@@ -26,6 +26,7 @@ const makeHarness = (holdExtract = false) => {
   let state = createInitialState(); state.settings.videoTaskApi = config;
   const requests: Array<{ url: string; method?: string; body?: string }> = [];
   const extractions: Array<{ jobId: string; source: unknown }> = [];
+  let workbenchProgress: ((event: { jobId: string; projectId: string; kind: 'extract' | 'render'; stage: 'preparing' | 'processing' | 'saving' | 'completed' | 'cancelled' | 'failed'; percent: number; message: string }) => void) | undefined;
   const checkpoints = new Map<string, VideoGenerationTask>();
   const extractionWaiters: Array<{ resolve: () => void; reject: (error: Error) => void }> = [];
   let movieCount = 0; let frameCount = 0;
@@ -36,6 +37,7 @@ const makeHarness = (holdExtract = false) => {
       return response({ status: 'succeeded', url: 'https://cdn.example.test/no-poll.mp4' });
     },
     cancelVideoRequest: async () => true, watchVideoProgress: async () => {}, unwatchVideoProgress: async () => true, onVideoProgress: () => () => {},
+    onWorkbenchProgress: (callback) => { workbenchProgress = callback; return () => { workbenchProgress = undefined; }; },
     setVideoTaskCredential: async () => ({ persisted: true }), getVideoTaskCredential: async () => null,
     saveVideoTaskCheckpoint: async (task) => { checkpoints.set(task.id, structuredClone(task)); return { persisted: true }; },
     getVideoTaskCheckpoint: async (taskId) => structuredClone(checkpoints.get(taskId) || null), deleteVideoTaskCheckpoint: async () => true,
@@ -50,7 +52,7 @@ const makeHarness = (holdExtract = false) => {
     cancelWorkbenchJob: async () => { extractionWaiters.splice(0).forEach(({ reject }) => reject(new Error('已取消抽帧'))); return true; },
   };
   const options: VideoGenerationEngineOptions = { getState: () => state, setState: (updater: (current: AppState) => AppState) => { state = updater(state); }, desktop, onRuntime: () => {}, persistState: async () => {} };
-  return { holder: () => state, requests, extractions, checkpoints, desktop, options, mutate: options.setState, engine: new VideoGenerationEngine(options) };
+  return { holder: () => state, requests, extractions, checkpoints, desktop, options, mutate: options.setState, emitWorkbenchProgress: (event: NonNullable<typeof workbenchProgress> extends (event: infer T) => void ? T : never) => workbenchProgress?.(event), engine: new VideoGenerationEngine(options) };
 };
 const chainInput = (projectId: string): VideoBatchStartInput => ({ projectId, label: '三段自动衔接', concurrency: 1, items: [1, 2, 3].map((index) => ({ itemKey: `board-${index}:zh`, draft: draft(index), previousTail: index > 1 ? { predecessorItemKey: `board-${index - 1}:zh`, placement: { mode: 'append' as const, index: 0, role: 'first-frame' as const } } : undefined })) });
 const posts = (h: ReturnType<typeof makeHarness>) => h.requests.filter((request) => request.method === 'POST');
@@ -96,6 +98,12 @@ const aiSelection = (source: 'ai' | 'last-frame' = 'ai'): VideoTailFrameSelectio
   const h = makeHarness(true); const projectId = h.holder().project.id;
   const result = await h.engine.startBatch(chainInput(projectId));
   await waitFor(() => h.extractions.length === 1, '第二段尾帧没有进入本地抽取');
+  const runtimeUpdates = new Map<string, { progress?: number; message?: string }>();
+  h.options.onRuntime = (taskId, runtime) => runtimeUpdates.set(taskId, runtime);
+  h.emitWorkbenchProgress({ jobId: h.extractions[0].jobId, projectId, kind: 'extract', stage: 'processing', percent: 37, message: '正在提取 1 张原尺寸画面…' });
+  await waitFor(() => runtimeUpdates.get(result.taskIds[1])?.progress === 37, '本地尾帧进度没有传到后段任务运行时');
+  assert.match(runtimeUpdates.get(result.taskIds[1])?.message || '', /正在提取/u);
+  assert.equal(posts(h).length, 1, '进度事件不能触发新的生成请求');
   await h.engine.cancelBatch(result.batchId);
   await tick();
   assert.equal(h.requests.filter((item) => item.method === 'POST').length, 1, '取消抽帧后不应提交后续段');

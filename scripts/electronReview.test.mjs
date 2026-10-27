@@ -130,6 +130,7 @@ const loadMainInternals = ({ dnsLookup, failPreferredDataRoot = false, fetchImpl
         const helpers = require(path.join(root, 'electron', 'systemProxyTransport.cjs'));
         return proxyAgentFactory ? { ...helpers, createProxyTunnelAgent: proxyAgentFactory } : helpers;
       }
+      if (specifier.startsWith('./')) return require(path.join(root, 'electron', specifier));
       return require(specifier);
     },
     setTimeout,
@@ -172,8 +173,7 @@ const loadMainInternals = ({ dnsLookup, failPreferredDataRoot = false, fetchImpl
     finishModelRequest: typeof finishModelRequest === 'function' ? finishModelRequest : undefined,
     cancelModelRequest: typeof cancelModelRequest === 'function' ? cancelModelRequest : undefined,
     syncImportedGeneratedVideoNames: typeof syncImportedGeneratedVideoNames === 'function' ? syncImportedGeneratedVideoNames : undefined,
-    withTrustedIpcSender: typeof withTrustedIpcSender === 'function' ? withTrustedIpcSender : undefined,
-    writeExternalBackup
+    withTrustedIpcSender: typeof withTrustedIpcSender === 'function' ? withTrustedIpcSender : undefined
   };`, context, { filename: mainPath });
   return {
     ...context.__review,
@@ -1209,51 +1209,18 @@ test('project archives work without the Microsoft.PowerShell.Archive module', as
   assert.equal(fs.readFileSync(path.join(expanded, 'assets', 'probe.txt'), 'utf8'), 'archive payload');
 });
 
-test('external backup uses asynchronous filesystem I/O and preserves manifest, boundary and retention behavior', async (t) => {
-  const harness = loadMainInternals();
-  t.after(harness.dispose);
-  const backupDirectory = path.join(harness.temporaryRoot, 'external');
-  fs.writeFileSync(path.join(harness.dataRoot, 'recovery-config.json'), JSON.stringify({ backupDirectory, backupOnSave: true, keepCount: 3 }));
-  const relativePath = 'video/probe.mp4';
-  const assetPath = path.join(harness.dataRoot, 'assets', relativePath);
-  fs.mkdirSync(path.dirname(assetPath), { recursive: true });
-  fs.writeFileSync(assetPath, 'managed-media');
-  const targetRoot = path.join(backupDirectory, '莲华视频导演台备份');
-  fs.mkdirSync(targetRoot, { recursive: true });
-  for (let index = 0; index < 4; index += 1) {
-    const oldBackup = path.join(targetRoot, `project-latest-old-${index}.json`);
-    fs.writeFileSync(oldBackup, '{}');
-    fs.utimesSync(oldBackup, new Date(1000 + index * 1000), new Date(1000 + index * 1000));
-  }
-  const serialized = JSON.stringify({
-    project: { assets: [
-      { id: 'valid', relativePath },
-      { id: 'escape', relativePath: '../outside.mp4' },
-    ] },
-    settings: {},
-  });
-  harness.controls.forbidSyncIo = true;
-
-  let backupPromise;
-  assert.doesNotThrow(() => { backupPromise = harness.writeExternalBackup(serialized); });
-  assert.equal(typeof backupPromise?.then, 'function');
-  const target = await backupPromise;
-  harness.controls.forbidSyncIo = false;
-
-  assert.ok(target && fs.existsSync(target));
-  assert.equal(fs.readFileSync(path.join(targetRoot, 'assets', relativePath), 'utf8'), 'managed-media');
-  const manifest = JSON.parse(fs.readFileSync(path.join(targetRoot, 'backup-integrity.json'), 'utf8'));
-  assert.equal(manifest.assets.find((asset) => asset.id === 'valid').missing, false);
-  assert.match(manifest.assets.find((asset) => asset.id === 'valid').checksum, /^[a-f0-9]{64}$/);
-  assert.equal(manifest.assets.find((asset) => asset.id === 'escape').missing, true);
-  assert.equal(fs.readdirSync(targetRoot).filter((entry) => /^project-latest-.*\.json$/i.test(entry)).length, 3);
-});
-
-test('save-state awaits external backup so its result or error is returned to the renderer', () => {
-  assert.match(mainSource, /return getStatePersistence\(\)\.run\('save', \{ content:/u);
+test('cross-drive backup execution and directory selection are removed', () => {
   const storeSource = fs.readFileSync(path.join(root, 'electron', 'statePersistenceStore.cjs'), 'utf8');
-  assert.match(storeSource, /try\s*\{\s*external\s*=\s*externalBackup\(prepared\.payload, prepared\.state, prepared\.checksum\);\s*\}\s*catch/u);
-  assert.ok(storeSource.indexOf('external = externalBackup(') < storeSource.indexOf('return { ok: true, checksum: prepared.checksum'));
+  assert.doesNotMatch(mainSource, /writeExternalBackup|choose-backup-directory/u);
+  assert.doesNotMatch(storeSource, /externalBackup|copyBackupAsset|fileSha256\(source\)|fileSha256\(destination\)/u);
+});
+test('save-state awaits local durability and schedules recovery snapshot maintenance separately', () => {
+  assert.match(mainSource, /await getStatePersistence\(\)\.run\('save-local', \{ content: text \}\)/u);
+  assert.match(mainSource, /scheduleStateMaintenance\(event\.sender\)/u);
+  const storeSource = fs.readFileSync(path.join(root, 'electron', 'statePersistenceStore.cjs'), 'utf8');
+  assert.match(storeSource, /return deferMaintenance \? result : \{ \.\.\.result, \.\.\.finishMaintenance\(prepared\.payload\) \}/u);
+  assert.match(storeSource, /const maintainLatest = \(\) =>/u);
+  assert.match(mainSource, /target\.send\('lianhua:state-maintenance-warning'/u);
 });
 
 test('renderer console logging uses Electron 41 details and keeps legacy test-stub compatibility', (t) => {
@@ -1407,7 +1374,6 @@ const runDesktopQaWithFakeChildren = () => {
     fs.writeFileSync(path.join(outputDirectory, 'observed.json'), JSON.stringify({ qaOutput: outputDirectory }));
   `);
   const configured = {
-    backup: path.join(temporaryRoot, 'isolated-backup'),
     data: path.join(temporaryRoot, 'isolated-data'),
     output: path.join(temporaryRoot, 'isolated-output'),
   };
@@ -1418,7 +1384,6 @@ const runDesktopQaWithFakeChildren = () => {
       ...process.env,
       CDP_PORT: '1',
       LIANHUA_DATA_DIR: configured.data,
-      LIANHUA_QA_BACKUP_DIR: configured.backup,
       QA_OUTPUT: configured.output,
       QA_RUN_TIMEOUT_MS: '5000',
     },
@@ -1427,27 +1392,22 @@ const runDesktopQaWithFakeChildren = () => {
   return { configured, result, temporaryRoot, workingDirectory };
 };
 
-test('desktop QA honors externally configured managed directories without resetting repository defaults', (t) => {
+test('desktop QA honors externally configured data and output directories without resetting repository defaults', (t) => {
   let configured;
   const { result, temporaryRoot, workingDirectory } = runQaWithExternalDirectories('desktopQa.mjs', (sandbox) => {
-    configured = {
-      backup: path.join(sandbox, 'isolated-backup'),
-      data: path.join(sandbox, 'isolated-data'),
-      output: path.join(sandbox, 'isolated-output'),
-    };
+    configured = { data: path.join(sandbox, 'isolated-data'), output: path.join(sandbox, 'isolated-output') };
     for (const directory of Object.values(configured)) {
       fs.mkdirSync(directory);
       fs.writeFileSync(path.join(directory, 'stale.txt'), 'stale');
     }
     return {
       LIANHUA_DATA_DIR: configured.data,
-      LIANHUA_QA_BACKUP_DIR: configured.backup,
       QA_OUTPUT: configured.output,
     };
   });
   t.after(() => fs.rmSync(temporaryRoot, { recursive: true, force: true }));
 
-  for (const name of ['.qa-electron-data', '.qa-electron', '.qa-external-backup']) {
+  for (const name of ['.qa-electron-data', '.qa-electron']) {
     const defaultDirectory = path.join(workingDirectory, name);
     assert.equal(fs.existsSync(defaultDirectory), false, `${name} must not be created when an external path is configured`);
   }

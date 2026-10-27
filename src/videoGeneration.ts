@@ -32,7 +32,7 @@ import { officialH3ContextForStoryboard } from './officialH3Context';
 import { isVideoDirectorAudio, prepareVideoAudioDraft, renderVideoAudioDraft, validateVideoAudioReferences, videoAudioTargetLabel } from './videoAudioReferences';
 import { isVideoDirectorMotionVideo, prepareVideoMotionDraft, stripVideoMotionPromptBinding } from './videoMotionReferences';
 import type { FrozenVideoMotionReference } from './videoMotionTypes';
-import type { WorkbenchExtractedFrame } from './videoWorkbenchTypes';
+import type { WorkbenchExtractedFrame, WorkbenchProgress } from './videoWorkbenchTypes';
 import type { extractVideoTailFrameSelection } from './videoFrameSelection';
 import type { AppState, Project, ReferenceAsset, VideoGenerationTask, VideoTaskApiConfig } from './types';
 import type {
@@ -184,6 +184,20 @@ const videoWatchIdentity = (task: VideoGenerationTask): string => JSON.stringify
 ]);
 const join = (base: string, path: string) => `${base.replace(/\/+$/u, '')}/${path.replace(/^\/+/u, '')}`;
 const messageOf = (error: unknown) => error instanceof Error ? error.message : String(error);
+const CHECKPOINT_OPERATION_TIMEOUT_MS = 30_000;
+const checkpointOperation = async <T>(operation: Promise<T>, label: string, timeoutMs = CHECKPOINT_OPERATION_TIMEOUT_MS): Promise<T> => {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise<T>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label}超时，已暂停恢复`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+};
 const downloadWasAborted = (error: unknown): boolean => Boolean(error && typeof error === 'object'
   && ('name' in error && error.name === 'AbortError' || 'code' in error && error.code === 'ABORT_ERR'))
   || /(?:AbortError|\bABORT_ERR\b|(?:视频下载|ZIP 视频接收|请求)已取消)/u.test(messageOf(error));
@@ -241,6 +255,8 @@ export interface VideoGenerationEngineOptions {
   onRemoveRuntime?: (taskId: string) => void;
   notify?: (message: string, kind?: 'normal' | 'error') => void;
   pollIntervalMs?: number;
+  /** Injectable only for bounded recovery-operation tests; production uses 30s. */
+  checkpointOperationTimeoutMs?: number;
   /** Flushes the newly inserted task before any generated-video POST can be issued. */
   persistState?: () => Promise<void>;
   /** Injected by the app with its explicitly selected vision connection. The
@@ -367,6 +383,7 @@ export class VideoGenerationEngine {
   /** Also reserves fingerprints while a batch is freezing local inline inputs. */
   private requestFingerprintOwners = new Map<string, string>();
   private unsubscribe?: () => void;
+  private unsubscribeWorkbenchProgress?: () => void;
 
   /**
    * A batch is deliberately invisible to reconciliation while its task shells
@@ -437,6 +454,20 @@ export class VideoGenerationEngine {
       } else if (progress) this.progress(task, progress);
       if (['execution_success', 'executed'].includes(String(payload.type))) this.schedule(task.id, 0);
     });
+    this.unsubscribeWorkbenchProgress = options.desktop?.onWorkbenchProgress?.((event: WorkbenchProgress) => {
+      if (this.disposed || event.kind !== 'extract') return;
+      const taskId = [...this.tailExtractionJobs.entries()].find(([, jobId]) => jobId === event.jobId)?.[0];
+      if (!taskId || this.stopping.has(taskId)) return;
+      const task = this.find(taskId);
+      if (!task?.videoJob || task.videoJob.tailPreparation?.phase !== 'extracting') return;
+      // Native workbench progress is presentation-only. The durable tail state
+      // remains the single source of truth for retry/cancel and billing gates.
+      this.progress(task, {
+        stage: 'preparing',
+        progress: Math.max(0, Math.min(100, Number(event.percent) || 0)),
+        message: event.message || '正在处理上一段视频尾帧…',
+      });
+    });
   }
 
   private find(taskId: string): VideoGenerationTask | undefined {
@@ -475,6 +506,15 @@ export class VideoGenerationEngine {
       .filter((task): task is VideoGenerationTask => task.kind === 'video' || task.kind == null));
   }
 
+  /** Preparation records without a durable POST boundary are project-local.
+   * Do not wake or admit them while another project is active; opening that
+   * project makes its records eligible for the normal strict recovery path. */
+  private taskBelongsToActiveProject(task: VideoGenerationTask): boolean {
+    const state = this.options.getState();
+    if (task.videoJob?.snapshot.projectId) return task.videoJob.snapshot.projectId === state.project.id;
+    return state.project.generationTasks.some((candidate) => candidate.id === task.id);
+  }
+
   private nextTaskCreatedAt(): number {
     // Several starts can occur within one millisecond. A durable increasing
     // timestamp keeps their queue order stable instead of sorting random IDs.
@@ -490,6 +530,7 @@ export class VideoGenerationEngine {
         && !this.checkpointErrors.has(task.id) && !this.isInitializingBatch(task)
         && (task.status === 'draft' || task.status === 'submitting')
         && (!task.batchId || job.batchQueueState === 'ready' || job.batchQueueState === 'active')
+        && this.taskBelongsToActiveProject(task)
         && this.tailReady(task) && this.chainDependencyReady(task);
     }).sort((left, right) => left.createdAt - right.createdAt
       || (left.batchId === right.batchId ? (left.batchIndex || 0) - (right.batchIndex || 0) : 0)
@@ -510,6 +551,9 @@ export class VideoGenerationEngine {
       && !candidate.remoteTaskId && !candidate.resultAssetId
       && !['cancelled', 'done'].includes(candidate.videoJob.batchQueueState || '')
       && !this.isInitializingBatch(candidate)
+      && (this.taskBelongsToActiveProject(candidate)
+        || this.generationClaims.has(candidate.id)
+        || ['unknown', 'submitted', 'running'].includes(candidate.status))
       && (!this.restoredCheckpoints.has(candidate.id) || this.restoringCheckpoints.has(candidate.id)));
   }
 
@@ -1009,6 +1053,13 @@ export class VideoGenerationEngine {
         this.options.notify?.(message, 'error');
       }
     } finally {
+      const current = this.liveTask(task.id);
+      const runtime = this.runtimes.get(task.id);
+      if (current?.videoJob && runtime?.progress !== undefined) this.progress(current, {
+        stage: runtime.stage,
+        progress: undefined,
+        message: current.videoJob.message || current.videoJob.tailPreparation?.message || runtime.message,
+      });
       this.tailExtractionJobs.delete(task.id);
       this.tailSelectionControllers.delete(task.id);
       this.tailPreparations.delete(task.id);
@@ -2973,6 +3024,13 @@ export class VideoGenerationEngine {
       if (task.resultAssetId || task.status === 'succeeded' || task.remoteTaskId || completedFileResult(task)
         || task.videoJob?.batchQueueState === 'cancelled' || task.videoJob?.batchQueueState === 'done' && task.status === 'failed') this.restoredCheckpoints.add(task.id);
       if (task.videoJob?.preparation?.version === 1 && !this.restoredCheckpoints.has(task.id)) {
+        // A pre-POST journal belongs to the project that owns it. Keeping an
+        // inactive project's recovery read lazy prevents one stale project
+        // from holding the active project's queue during startup. Once that
+        // project becomes active, this branch performs the same strict read.
+        if (task.videoJob.preparation.phase === 'preparing' && !this.taskBelongsToActiveProject(task)
+          && !task.remoteTaskId && !['unknown', 'submitted', 'running'].includes(task.status)
+          && !this.generationClaims.has(task.id)) continue;
         if (!this.restoringCheckpoints.has(task.id)) void this.restoreCheckpoint(task);
         continue;
       }
@@ -3018,7 +3076,11 @@ export class VideoGenerationEngine {
         skippedInitializingBatch = true;
         return;
       }
-      const saved = await this.options.desktop?.getVideoTaskCheckpoint?.(task.id);
+      const saved = await checkpointOperation(
+        Promise.resolve().then(() => this.options.desktop?.getVideoTaskCheckpoint?.(task.id) || null),
+        '读取本地准备记录',
+        this.options.checkpointOperationTimeoutMs,
+      );
       const current = this.liveTask(task.id);
       if (this.disposed || !current?.videoJob) return;
       if (this.isInitializingBatch(current)) {
@@ -3131,7 +3193,11 @@ export class VideoGenerationEngine {
             tags: ['视频抽帧', dependency.selectionMode === 'ai-assisted' ? 'AI 辅助选帧' : '自动衔接尾帧'], createdAt: image.frozenAt || Date.now(), updatedAt: Date.now() };
           return { ...project, assets: [asset, ...project.assets] };
         }));
-        await this.options.persistState?.();
+        await checkpointOperation(
+          Promise.resolve().then(() => this.options.persistState?.()),
+          '保存恢复的项目状态',
+          this.options.checkpointOperationTimeoutMs,
+        );
       }
       if (restored.videoJob?.batchQueueState !== 'cancelled') this.checkpointErrors.delete(task.id);
     } catch (error) {
@@ -3506,6 +3572,7 @@ export class VideoGenerationEngine {
       const outputSelectionWarning = source.backend === 'comfyui' && record(task.response) && typeof task.response.outputSelectionWarning === 'string' ? task.response.outputSelectionWarning : '';
       const savedMessage = (resultSelectionRequired ? `ZIP 内 ${assets.length} 段视频已全部保存，请选择本任务使用的成片；后续尾帧衔接正在等待` : '已保存到视频资产库')
         + (outputSelectionWarning ? `；${outputSelectionWarning}` : '');
+      const filingMessage = resultSelectionRequired ? savedMessage : '成片已在视频文件夹，项目记录仍在保存';
       this.options.setState((current) => applyOwnedProjectUpdate(current, task.videoJob!.snapshot.projectId, (project) => {
         const existing = project.generationTasks.find((item) => item.id === task.id);
         if (!existing || this.disposed || this.stopping.has(task.id) || (existing as VideoGenerationTask).videoJob?.trackingStopped
@@ -3521,7 +3588,7 @@ export class VideoGenerationEngine {
                 ? existingVideoTask.videoJob!.snapshot.draft
                 : { ...existingVideoTask.videoJob!.snapshot.draft, name: storedName },
             },
-            stage: 'succeeded', completedAt: now, downloadError: undefined, message: savedMessage,
+            stage: 'succeeded', completedAt: now, downloadError: undefined, message: filingMessage,
             resultAssetIds: assets.map((asset) => asset.id), resultSelectionRequired,
             resultArchiveFileName: archiveFileName,
           },
@@ -3529,18 +3596,20 @@ export class VideoGenerationEngine {
         const provenance = snapshotVideoAssetSourceTask(completed);
         return { ...project, assets: [...assets.map((asset) => ({ ...asset, videoSourceTask: provenance })), ...project.assets], generationTasks: project.generationTasks.map((item) => item.id === task.id ? completed : item) };
       }));
+      const filedRuntime = { ...(this.runtimes.get(task.id) || runtimeOnly(task.videoJob)), stage: 'succeeded' as const, completedAt: now, progress: 100, downloadError: undefined, message: filingMessage };
+      this.runtimes.set(task.id, filedRuntime); this.options.onRuntime(task.id, filedRuntime);
+      if (!this.disposed) this.reconcile();
       try {
         await this.options.persistState?.();
       } catch (error) {
-        // A chained successor may only start after the completed asset and its
-        // provenance are durable. Keep the result visible but leave a gate that
-        // blocks the next POST until the user retries persistence/download.
+        // The file is already in the video folder and the task is completed.
+        // A library-save failure stays visible without putting the batch back into 运行中.
         const latest = this.liveTask(task.id);
         if (latest) this.patch(latest, { status: 'succeeded' }, { stage: 'succeeded', downloadError: `成片已落盘但项目保存失败：${messageOf(error)}`, message: '生成成功，项目保存失败；链式后段已暂停' });
         return;
       }
       ensureDownloadActive();
-      const runtime = { ...(this.runtimes.get(task.id) || runtimeOnly(task.videoJob)), stage: 'succeeded' as const, completedAt: now, downloadError: undefined, message: savedMessage };
+      const runtime = { ...(this.runtimes.get(task.id) || filedRuntime), stage: 'succeeded' as const, completedAt: now, downloadError: undefined, message: savedMessage };
       this.runtimes.set(task.id, runtime); this.options.onRuntime(task.id, runtime);
       const completed = this.liveTask(task.id);
       if (completed?.videoJob) await this.checkpointResult(completed);
@@ -4032,7 +4101,7 @@ export class VideoGenerationEngine {
   }
 
   dispose() {
-    this.disposed = true; this.unsubscribe?.();
+    this.disposed = true; this.unsubscribe?.(); this.unsubscribeWorkbenchProgress?.();
     for (const controller of this.continuationControllers.values()) controller.abort();
     this.continuationControllers.clear(); this.continuationPlans.clear(); this.continuationStarts.clear(); this.batchResumes.clear();
     for (const controller of this.tailSelectionControllers.values()) controller.abort();

@@ -14,7 +14,6 @@ const configuredDirectory = (environmentName, fallback) => path.resolve(
 );
 const dataDirectory = configuredDirectory('LIANHUA_DATA_DIR', path.join(root, '.qa-electron-data'));
 const outputDirectory = configuredDirectory('QA_OUTPUT', path.join(root, '.qa-electron'));
-const backupDirectory = configuredDirectory('LIANHUA_QA_BACKUP_DIR', path.join(root, '.qa-external-backup'));
 const exportPath = path.join(outputDirectory, 'qa-roundtrip.lhvd');
 const savedImagePath = path.join(outputDirectory, 'qa-saved-image.png');
 const configuredPortText = process.env.CDP_PORT?.trim();
@@ -25,7 +24,7 @@ if (configuredPort !== null && (!Number.isInteger(configuredPort) || configuredP
 const port = configuredPort ?? await findAvailableTcpPort();
 if (configuredPort !== null) await assertLoopbackPortAvailable(configuredPort);
 
-for (const target of [dataDirectory, outputDirectory, backupDirectory]) {
+for (const target of [dataDirectory, outputDirectory]) {
   prepareQaOutputDirectory(target, { workspaceRoot: root });
 }
 
@@ -36,7 +35,6 @@ const environment = {
   LIANHUA_QA_MODE: '1',
   LIANHUA_QA_EXPORT_PATH: exportPath,
   LIANHUA_QA_IMPORT_PATH: exportPath,
-  LIANHUA_QA_BACKUP_DIR: backupDirectory,
   LIANHUA_QA_SAVE_MEDIA_PATH: savedImagePath,
   CDP_PORT: String(port),
   QA_OUTPUT: outputDirectory,

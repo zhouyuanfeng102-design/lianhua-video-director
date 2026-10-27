@@ -64,6 +64,8 @@ export interface VideoGenerationDesktop {
   videoWorkbenchStatus?: () => Promise<VideoWorkbenchStatus>;
   extractWorkbenchFrames?: (request: WorkbenchFrameRequest) => Promise<WorkbenchFrameResult>;
   cancelWorkbenchJob?: (jobId: string) => Promise<boolean>;
+  /** Native local-media progress, used to keep chained tail preparation visible. */
+  onWorkbenchProgress?: (callback: (event: import('./videoWorkbenchTypes').WorkbenchProgress) => void) => () => void;
 }
 
 export type VideoGenerationBackend = 'api' | 'comfyui';

@@ -71,11 +71,15 @@ const packageHarness = (t) => {
   [exportRoot, importRoot].forEach(ensureDirectory);
   const context = vm.createContext({
     fs, path, Map, Set, Buffer, randomUUID,
+    dataRoot: temporaryRoot,
+    allocateReadableName: require('../electron/projectAssetLayout.cjs').allocateReadableName,
     assetRoot: exportRoot,
     tempRoot: ensureDirectory(path.join(temporaryRoot, 'staging')),
     ALLOWED_MEDIA_EXTENSIONS: new Set(['.png', '.jpg', '.jpeg', '.webp']),
     collectImageReferenceSnapshotsForExport,
+    collectStateMediaFiles: require('../electron/stateMediaFiles.cjs').collectStateMediaFiles,
     collectVideoFrozenAssets: () => [],
+    placeProjectAssets: require('../electron/projectAssetLayout.cjs').placeProjectAssets,
     handleTrustedIpc: (channel, callback) => handlers.set(channel, callback),
     validateStateText: JSON.parse,
     qaPath: () => bundlePath,
@@ -184,11 +188,11 @@ test('result-only project exports and imports original references after both sou
   assert.deepEqual(fs.readFileSync(path.join(h.importRoot, 'image/original.png')), conflictingOriginal);
 });
 
-test('external backups include deleted-card originals and preserve task checksum verification', async (t) => {
-  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lianhua-image-snapshot-backup-'));
+test('local saves retain task-owned originals without creating a cross-drive backup', async (t) => {
+  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lianhua-image-snapshot-local-'));
   t.after(() => {
     assert.equal(path.dirname(path.resolve(temporaryRoot)), path.resolve(os.tmpdir()));
-    assert.ok(path.basename(temporaryRoot).startsWith('lianhua-image-snapshot-backup-'));
+    assert.ok(path.basename(temporaryRoot).startsWith('lianhua-image-snapshot-local-'));
     fs.rmSync(temporaryRoot, { recursive: true, force: true });
   });
   const dataRoot = path.join(temporaryRoot, 'data');
@@ -205,58 +209,11 @@ test('external backups include deleted-card originals and preserve task checksum
   };
   const result = await store.save(JSON.stringify(state), async () => ({ mode: 'keep' }));
   assert.equal(result.ok, true);
-  assert.equal(result.backupError, '');
-  assert.ok(result.externalBackup);
-  const backupRoot = path.dirname(result.externalBackup);
-  const manifest = JSON.parse(fs.readFileSync(path.join(backupRoot, 'backup-integrity.json'), 'utf8'));
-  assert.equal(manifest.assets.length, 2, 'active and archived task references are backed up once per path');
-  assert.ok(manifest.assets.every((asset) => !asset.missing && asset.checksum === checksum(png)));
-  for (const relativePath of ['image/original.png', 'image/archived.png']) {
-    assert.deepEqual(fs.readFileSync(path.join(backupRoot, 'assets', relativePath)), png);
-  }
-  const backupState = readProjectLibrary(fs.readFileSync(result.externalBackup, 'utf8'), { root: backupRoot });
-  const frozen = backupState.project.generationTasks[0].referenceAssetSnapshots[0];
-  assert.equal(readManagedImageDataUrl({ assetRoot: path.join(backupRoot, 'assets'), relativePath: frozen.relativePath, expectedChecksum: frozen.checksum }).dataUrl,
-    `data:image/png;base64,${png.toString('base64')}`);
-
-  // A surviving asset card must not override the older task's frozen pixels.
-  const replacement = Buffer.concat([png, Buffer.from('changed original')]);
-  fs.writeFileSync(path.join(dataRoot, 'assets/image/original.png'), replacement);
-  state.project.assets = [ref({ checksum: checksum(replacement) })];
-  assert.throws(() => store.backup(JSON.stringify(state)), /媒体文件引用 SHA-256 冲突/u);
-  const replacedManifest = JSON.parse(fs.readFileSync(path.join(backupRoot, 'backup-integrity.json'), 'utf8'));
-  assert.deepEqual(replacedManifest, manifest, 'a conflicting current card cannot replace the last complete backup manifest');
-  assert.deepEqual(fs.readFileSync(path.join(backupRoot, 'assets/image/original.png')), png, 'the saved original is never overwritten with changed pixels');
-});
-
-test('external backups retain result-owned originals without a source task or reference asset record', async (t) => {
-  const temporaryRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'lianhua-image-result-backup-'));
-  t.after(() => {
-    assert.equal(path.dirname(path.resolve(temporaryRoot)), path.resolve(os.tmpdir()));
-    assert.ok(path.basename(temporaryRoot).startsWith('lianhua-image-result-backup-'));
-    fs.rmSync(temporaryRoot, { recursive: true, force: true });
-  });
-  const dataRoot = path.join(temporaryRoot, 'data');
-  const backupDirectory = path.join(temporaryRoot, 'external');
-  fs.mkdirSync(path.join(dataRoot, 'assets/image'), { recursive: true });
-  fs.writeFileSync(path.join(dataRoot, 'assets/image/original.png'), png);
-  fs.writeFileSync(path.join(dataRoot, 'assets/image/result.png'), png);
-  fs.writeFileSync(path.join(dataRoot, 'recovery-config.json'), JSON.stringify({ backupDirectory, backupOnSave: true }));
-  const store = createStateStore({ dataRoot });
-  const state = { project: { id: 'active', assets: [resultAsset()], generationTasks: [] }, projects: [], settings: {} };
-  const saved = await store.save(JSON.stringify(state), async () => ({ mode: 'keep' }));
-  assert.equal(saved.backupError, '');
-  const backupRoot = path.dirname(saved.externalBackup);
-  const manifest = JSON.parse(fs.readFileSync(path.join(backupRoot, 'backup-integrity.json'), 'utf8'));
-  assert.deepEqual(manifest.assets.map((asset) => asset.relativePath).sort(), ['image/original.png', 'image/result.png']);
-  assert.ok(manifest.assets.every((asset) => !asset.missing));
-  const restored = readProjectLibrary(fs.readFileSync(saved.externalBackup, 'utf8'), { root: backupRoot });
-  const frozen = restored.project.assets[0].imageRegenerationSnapshot.referenceAssetSnapshots[0];
-  assert.equal(readManagedImageDataUrl({ assetRoot: path.join(backupRoot, 'assets'), relativePath: frozen.relativePath, expectedChecksum: frozen.checksum }).dataUrl,
-    `data:image/png;base64,${png.toString('base64')}`);
-  fs.writeFileSync(path.join(dataRoot, 'assets/image/original.png'), Buffer.concat([png, Buffer.from('changed')]));
-  assert.throws(() => store.backup(JSON.stringify(state)), /备份不完整/u);
-  const changed = JSON.parse(fs.readFileSync(path.join(backupRoot, 'backup-integrity.json'), 'utf8'));
-  assert.equal(changed.assets.find((asset) => asset.relativePath === frozen.relativePath).missing, true);
-  assert.deepEqual(fs.readFileSync(path.join(backupRoot, 'assets/image/original.png')), png);
+  assert.equal(result.externalBackup, undefined);
+  const loaded = JSON.parse(store.load(null).content);
+  assert.equal(loaded.project.generationTasks[0].referenceAssetSnapshots[0].relativePath, 'image/original.png');
+  assert.equal(loaded.projects[0].generationTasks[0].referenceAssetSnapshots[0].relativePath, 'image/archived.png');
+  assert.deepEqual(fs.readFileSync(path.join(dataRoot, 'assets/image/original.png')), png);
+  assert.deepEqual(fs.readFileSync(path.join(dataRoot, 'assets/image/archived.png')), png);
+  assert.equal(fs.existsSync(backupDirectory), false);
 });

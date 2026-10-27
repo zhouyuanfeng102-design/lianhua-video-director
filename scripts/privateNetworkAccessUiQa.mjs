@@ -87,7 +87,7 @@ async function run() {
   browser = await chromium.launch({ headless: true });
   context = await browser.newContext({ viewport: { width: 1366, height: 900 } });
   await context.addInitScript(({ recoveryKey, auditKey, phaseKey }) => {
-    const recoveryDefault = { allowPrivateNetwork: false, backupDirectory: '', backupOnSave: false, keepCount: 20 };
+    const recoveryDefault = { allowPrivateNetwork: false, keepCount: 20 };
     if (!sessionStorage.getItem(recoveryKey)) sessionStorage.setItem(recoveryKey, JSON.stringify(recoveryDefault));
     if (!sessionStorage.getItem(auditKey)) sessionStorage.setItem(auditKey, JSON.stringify({ fullRecoveryRequests: 0, fullRecoveryCompleted: 0, storageRequests: 0, storageDelivered: 0, updates: [], modelRequests: [], projectReads: 0 }));
     const readAudit = () => JSON.parse(sessionStorage.getItem(auditKey));

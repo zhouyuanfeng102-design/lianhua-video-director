@@ -69,14 +69,20 @@ function harness(t) {
     isPathInside: (parent, child) => { const relative = path.relative(parent, child); return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative); },
     assetPathFromRelative: (relative) => path.join(assetRoot, relative),
     collectSecrets: () => ({}), secretCount: () => 0, saveSecrets: () => true,
+    rememberAssetRosterFromContent: () => {},
+    scheduleStateMaintenance: () => {},
     stripSecrets: (state) => JSON.parse(JSON.stringify(state)),
     hydrateSecrets: (state) => state,
     handleTrustedIpc: (name, handler) => { handlers.set(name, handler); },
   });
-  vm.runInContext(`${core}\n${loadHandler}\n${saveHandler}\n;globalThis.helpers = { MAX_STATE_BYTES: stateSerialization.MAX_STATE_BYTES, MAX_IMAGE_EXPORT_BYTES, validateStateText, stateAssets, atomicWriteFile, writeExternalBackup };`, context);
+  vm.runInContext(`${core}\n${loadHandler}\n${saveHandler}\n;globalThis.helpers = { MAX_STATE_BYTES: stateSerialization.MAX_STATE_BYTES, MAX_IMAGE_EXPORT_BYTES, validateStateText, stateAssets, atomicWriteFile };`, context);
   return {
     ...context.helpers, controls, root, dataRoot, assetRoot, snapshotRoot, stateFile, recoveryConfigFile,
-    save: (...args) => handlers.get('lianhua:save-state')({}, ...args),
+    save: async (...args) => {
+      const result = await handlers.get('lianhua:save-state')({}, ...args);
+      await persistence.run('maintenance');
+      return result;
+    },
     load: () => handlers.get('lianhua:load-state')(),
   };
 }
@@ -107,24 +113,6 @@ test('real 65 MiB state saves, reloads and produces a valid local recovery snaps
   const snapshots = fs.readdirSync(h.snapshotRoot).filter((name) => name.endsWith('.json'));
   assert.equal(snapshots.length, 1);
   assert.equal(readProjectLibrary(fs.readFileSync(path.join(h.snapshotRoot, snapshots[0]), 'utf8'), { root: h.dataRoot }).project.description.length, description.length);
-});
-
-test('compact active references do not omit active or archived assets from external backups', async (t) => {
-  const h = harness(t);
-  fs.writeFileSync(path.join(h.assetRoot, 'active.png'), 'active asset fixture');
-  fs.writeFileSync(path.join(h.assetRoot, 'archived.png'), 'archived asset fixture');
-  const state = {
-    project: { id: 'active', assets: [{ id: 'a', relativePath: 'active.png' }] },
-    projects: [{ id: 'archived', assets: [{ id: 'b', relativePath: 'archived.png' }] }, { id: 'active', __activeProjectReference: true }],
-    activeProjectId: 'active', settings: {},
-  };
-  assert.deepEqual(Array.from(h.stateAssets(state), (asset) => asset.id), ['a', 'b']);
-  const external = path.join(h.root, 'external');
-  fs.writeFileSync(h.recoveryConfigFile, JSON.stringify({ backupDirectory: external, backupOnSave: true, keepCount: 3 }));
-  const target = await h.writeExternalBackup(JSON.stringify(state));
-  assert.ok(target.startsWith(external));
-  assert.equal(fs.readFileSync(path.join(external, '莲华视频导演台备份', 'assets', 'active.png'), 'utf8'), 'active asset fixture');
-  assert.equal(fs.readFileSync(path.join(external, '莲华视频导演台备份', 'assets', 'archived.png'), 'utf8'), 'archived asset fixture');
 });
 
 test('interrupted/ENOSPC write keeps the original state and removes only its partial temporary file', (t) => {
@@ -165,7 +153,7 @@ test('desktop state entry points retain shared validation while durable worker s
     const next = main.indexOf('handleTrustedIpc(', start + 1);
     assert.ok(main.slice(start, next >= 0 ? next : undefined).includes('validateStateText('), `${name} must retain shared JSON and integrity validation`);
   }
-  for (const [name, operation] of [['load-state', 'load'], ['save-state', 'save'], ['recovery-status', 'status'], ['create-restore-point', 'restore-point'], ['restore-snapshot', 'restore']]) {
+  for (const [name, operation] of [['load-state', 'load'], ['save-state', 'save-local'], ['recovery-status', 'status'], ['create-restore-point', 'restore-point'], ['restore-snapshot', 'restore']]) {
     const start = main.indexOf(`handleTrustedIpc('lianhua:${name}'`);
     const next = main.indexOf('handleTrustedIpc(', start + 1);
     assert.ok(main.slice(start, next >= 0 ? next : undefined).includes(`getStatePersistence().run('${operation}'`));

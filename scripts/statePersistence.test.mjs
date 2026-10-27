@@ -202,39 +202,39 @@ test('snapshot restoration is ordered after older pending saves and keeps the di
   await assert.rejects(h.persistence.run('restore', { snapshotId: `../${path.basename(point.path)}` }), /名称无效/u);
 });
 
-test('external worker backup covers archived assets, rejects traversal, strips secrets and does not convert backup failure into local save failure', async (t) => {
+test('configured legacy cross-drive backups are no longer written during save', async (t) => {
   const h = fixture(t);
-  const assets = path.join(h.dataRoot, 'assets');
-  fs.mkdirSync(assets, { recursive: true });
-  fs.writeFileSync(path.join(assets, 'active.png'), 'active synthetic asset');
-  fs.writeFileSync(path.join(assets, 'archived.png'), 'archived synthetic asset');
+  const assetRoot = path.join(h.dataRoot, 'assets');
+  fs.mkdirSync(assetRoot, { recursive: true });
+  fs.writeFileSync(path.join(assetRoot, 'active.png'), 'local synthetic asset');
   const backupDirectory = path.join(h.root, 'backup');
-  fs.writeFileSync(path.join(h.dataRoot, 'recovery-config.json'), JSON.stringify({ backupDirectory, keepCount: 3 }));
+  fs.writeFileSync(path.join(h.dataRoot, 'recovery-config.json'), JSON.stringify({ backupDirectory, backupOnSave: true }));
   const input = JSON.stringify({ project: { id: 'active', assets: [{ id: 'active', relativePath: 'active.png' }] },
-    projects: [{ id: 'archived', assets: [{ id: 'archived', relativePath: 'archived.png' }] }],
-    settings: { imageApi: { apiKey: 'fake-key-never-in-backup' } } });
+    projects: [], settings: { imageApi: { apiKey: 'fake-key-never-written-to-backup' } } });
   const result = await h.persistence.run('save', { content: input });
-  assert.equal(result.backupError, '');
-  assert.doesNotMatch(fs.readFileSync(result.externalBackup, 'utf8'), /fake-key/u);
-  const targetRoot = path.join(backupDirectory, '莲华视频导演台备份');
-  const manifest = JSON.parse(fs.readFileSync(path.join(targetRoot, 'backup-integrity.json'), 'utf8'));
-  assert.equal(manifest.stateChecksum, result.checksum);
-  assert.equal(fs.readFileSync(path.join(targetRoot, 'assets', 'archived.png'), 'utf8'), 'archived synthetic asset');
-  const traversal = JSON.parse(input);
-  traversal.projects[0].assets.push({ id: 'escape', relativePath: '../outside.png' });
-  const rejectedBackup = await h.persistence.run('save', { content: JSON.stringify(traversal) });
-  assert.equal(rejectedBackup.ok, true, 'invalid backup paths must not discard the successful local save');
-  assert.match(rejectedBackup.backupError, /路径无效/u);
-  const backupAfterRejection = JSON.parse(fs.readFileSync(path.join(targetRoot, 'backup-integrity.json'), 'utf8'));
-  assert.deepEqual(backupAfterRejection, manifest, 'invalid paths never replace the last valid external backup index');
-  assert.equal(readSaved(h).projects[0].assets.at(-1).id, 'escape', 'local data remains intact for repair');
-  const blockedPath = path.join(h.root, 'not-a-directory');
-  fs.writeFileSync(blockedPath, 'fixture');
-  fs.writeFileSync(path.join(h.dataRoot, 'recovery-config.json'), JSON.stringify({ backupDirectory: blockedPath }));
-  const failedBackup = await h.persistence.run('save', { content: content('saved-with-backup-error') });
-  assert.equal(failedBackup.ok, true);
-  assert.ok(failedBackup.backupError);
-  assert.equal(readSaved(h).project.id, 'saved-with-backup-error');
+  assert.equal(result.ok, true);
+  assert.equal(result.externalBackup, undefined);
+  assert.equal(result.backupError, undefined);
+  assert.equal(readSaved(h).project.id, 'active');
+  assert.equal(fs.existsSync(backupDirectory), false);
+});
+test('local save resolves independently from recovery maintenance and does not create cross-drive backups', async (t) => {
+  const h = fixture(t);
+  const backupDirectory = path.join(h.root, 'deferred-backup');
+  fs.writeFileSync(path.join(h.dataRoot, 'recovery-config.json'), JSON.stringify({ backupDirectory, keepCount: 3 }));
+  const local = await h.persistence.run('save-local', { content: content('durable-before-backup') });
+  assert.equal(local.ok, true);
+  assert.equal(local.snapshotError, undefined);
+  assert.equal(readSaved(h).project.id, 'durable-before-backup');
+  assert.equal(fs.existsSync(path.join(backupDirectory, '莲华视频导演台备份')), false, 'local save does not wait for or perform optional maintenance');
+
+  const maintenance = createStatePersistence({ dataRoot: h.dataRoot, encryptSecrets: () => ({ mode: 'keep' }), keepAlive: false });
+  t.after(() => maintenance.discard());
+  const result = await maintenance.run('maintenance');
+  assert.ok(result.snapshotError === '');
+  assert.equal(result.externalBackup, undefined);
+  assert.equal(fs.existsSync(backupDirectory), false);
+  assert.equal(readSaved(h).project.id, 'durable-before-backup');
 });
 
 test('worker atomic writes retain original or complete .previous candidates after ENOSPC and blocked rename recovery', (t) => {
@@ -402,23 +402,6 @@ test('unknown or unmatched save transactions fail closed and preserve both state
     assert.equal(fs.readFileSync(h.secretVaultFile, 'utf8'), 'opaque-preserved');
     assert.equal(fs.existsSync(transactionFile), true);
   }
-});
-
-test('backup integrity never claims altered source media matches the recorded checksum', async (t) => {
-  const h = fixture(t);
-  const assetRoot = path.join(h.dataRoot, 'assets');
-  fs.mkdirSync(assetRoot);
-  fs.writeFileSync(path.join(assetRoot, 'changed.mp4'), 'altered fixture');
-  const backupDirectory = path.join(h.root, 'backup');
-  fs.writeFileSync(path.join(h.dataRoot, 'recovery-config.json'), JSON.stringify({ backupDirectory }));
-  const result = await h.persistence.run('save', { content: content('backup-integrity', {
-    assets: [{ id: 'changed', relativePath: 'changed.mp4', checksum: stateChecksum('original fixture') }],
-  }) });
-  assert.equal(result.ok, true);
-  const targetRoot = path.join(backupDirectory, '莲华视频导演台备份');
-  const manifest = JSON.parse(fs.readFileSync(path.join(targetRoot, 'backup-integrity.json'), 'utf8'));
-  assert.equal(manifest.assets[0].missing, true);
-  assert.equal(fs.existsSync(path.join(targetRoot, 'assets', 'changed.mp4')), false);
 });
 
 test('flush includes a follow-up save enqueued as the first persistence barrier resolves', async (t) => {

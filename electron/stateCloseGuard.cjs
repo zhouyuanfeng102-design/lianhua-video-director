@@ -5,8 +5,20 @@ const createStateCloseGuard = ({ window, flush, showMessage, timeoutMs = 30_000 
   let attempt;
   let waiting;
   let destroyed = false;
+  let forceClosing = false;
   let resolveDestroyed;
   const destroyedSignal = new Promise((resolve) => { resolveDestroyed = resolve; });
+  const markDestroyed = () => {
+    if (destroyed) return;
+    destroyed = true;
+    resolveDestroyed();
+    waiting?.resolve({ ok: false, cancelled: true });
+    waiting = undefined;
+  };
+  const isWindowDestroyed = () => {
+    try { return typeof window.isDestroyed === 'function' && window.isDestroyed(); }
+    catch { return true; }
+  };
   const waitForRenderer = (requestId) => new Promise((resolve) => {
     waiting = { requestId, resolve };
     try { window.webContents.send('lianhua:before-close', { requestId }); }
@@ -33,14 +45,24 @@ const createStateCloseGuard = ({ window, flush, showMessage, timeoutMs = 30_000 
     return { ok: false, cancelled: true };
   };
   const forceClose = () => {
+    if (destroyed || forceClosing || isWindowDestroyed()) {
+      allowed = true;
+      markDestroyed();
+      return;
+    }
     allowed = true;
-    destroyed = true;
-    resolveDestroyed();
+    forceClosing = true;
     try {
       if (typeof window.destroy === 'function') window.destroy();
       else window.close();
+      if (isWindowDestroyed()) markDestroyed();
     } catch (error) {
+      if (isWindowDestroyed()) {
+        markDestroyed();
+        return;
+      }
       allowed = false;
+      forceClosing = false;
       throw error;
     }
   };
@@ -103,10 +125,7 @@ const createStateCloseGuard = ({ window, flush, showMessage, timeoutMs = 30_000 
     });
   });
   window.once('closed', () => {
-    destroyed = true;
-    resolveDestroyed();
-    waiting?.resolve({ ok: false, cancelled: true });
-    waiting = undefined;
+    markDestroyed();
   });
   return {
     acknowledge: (payload) => {

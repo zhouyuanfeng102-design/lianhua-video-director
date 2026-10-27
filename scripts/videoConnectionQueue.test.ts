@@ -114,7 +114,7 @@ const fixture = () => {
     desktop, onRuntime: () => {}, pollIntervalMs: 60_000, persistState: async () => {},
   };
   const h = {
-    holder, requests, journals, desktop, remoteStates, engine: new VideoGenerationEngine(options),
+    holder, requests, journals, desktop, remoteStates, options, engine: new VideoGenerationEngine(options),
     tasks: () => [holder.state.project, ...holder.state.projects.filter((project) => project.id !== holder.state.project.id)]
       .flatMap((project) => project.generationTasks.filter((task): task is VideoGenerationTask => task.kind === 'video' || task.kind == null)),
     task: (taskId: string) => h.tasks().find((task) => task.id === taskId)!,
@@ -357,6 +357,65 @@ test('unresolved checkpoint barriers block only their frozen service and still p
     await complete(h, original);
     await waitFor(() => Boolean(h.task(waiting).remoteTaskId), 'same-service completion did not release its waiting task');
     assert.equal(h.posts().length, 3);
+  } finally { readGate.resolve(); h.engine.dispose(); }
+});
+
+test('inactive project pre-POST recovery is lazy and cannot hold the active project queue', async () => {
+  const h = fixture(); const readGate = deferred(); let reads = 0;
+  try {
+    h.configure(1);
+    const inactive: Project = { ...structuredClone(h.holder.state.project), id: 'inactive-pre-post', name: 'inactive-pre-post', assets: [], generationTasks: [] };
+    inactive.generationTasks = [{
+      id: 'inactive-pre-post-task', kind: 'video', storyboardId: '', targetId: 'fixture', status: 'submitting',
+      requestBody: {}, createdAt: 1, updatedAt: 1,
+      videoJob: {
+        stage: 'preparing', preparation: { version: 1, phase: 'preparing', uploadedImages: [] },
+        snapshot: { projectId: inactive.id, draft: draft('inactive pre-post'), connection: { backend: 'api', api: safeApi() }, images: [], clientId: 'inactive-client' },
+      },
+    }];
+    h.holder.state.projects.push(inactive);
+    h.setJournalRead(async (taskId) => {
+      if (taskId === 'inactive-pre-post-task') { reads += 1; await readGate.promise; }
+      return structuredClone(h.journals.get(taskId) || null);
+    });
+    h.restart();
+    await settle();
+    assert.equal(reads, 0, 'startup must not read an inactive project pre-POST journal');
+    const active = await h.engine.start(draft('active project starts'));
+    await waitFor(() => Boolean(h.task(active).remoteTaskId), 'active project was held by inactive pre-POST history');
+    assert.equal(h.posts().length, 1);
+
+    const current = h.holder.state.project;
+    h.holder.state.project = inactive;
+    h.holder.state.projects = [current, ...h.holder.state.projects.filter((project) => project.id !== inactive.id)];
+    h.engine.reconcile();
+    await waitFor(() => reads === 1, 'opening the inactive project must resume strict recovery');
+  } finally { readGate.resolve(); h.engine.dispose(); }
+});
+
+test('a checkpoint read that never settles becomes an explicit protected blocker instead of an endless journal wait', async () => {
+  const h = fixture(); const readGate = deferred(); let reading = false;
+  try {
+    h.configure(1);
+    h.options.checkpointOperationTimeoutMs = 20;
+    const original = await h.engine.start(draft('checkpoint times out safely'));
+    const running = h.task(original);
+    const stale: VideoGenerationTask = { ...running, remoteTaskId: undefined, status: 'submitting', response: undefined,
+      videoJob: { ...running.videoJob!, stage: 'preparing', preparation: { version: 1, phase: 'preparing', uploadedImages: [] } } };
+    h.holder.state.project.generationTasks = h.holder.state.project.generationTasks.map((task) => task.id === original ? stale : task);
+    h.setJournalRead(async (taskId) => {
+      if (taskId === original) { reading = true; await readGate.promise; }
+      return structuredClone(h.journals.get(taskId) || null);
+    });
+    h.restart();
+    await waitFor(() => reading, 'recovery did not start its journal read');
+    const waiting = await h.engine.start(draft('waiting behind uncertain journal'));
+    await waitFor(() => h.task(original).status === 'unknown', 'timed-out journal must become a protected uncertain task');
+    await settle();
+    assert.equal(h.task(waiting).remoteTaskId, undefined, 'timeout must not allow an unsafe POST through a one-slot service');
+    assert.equal(h.posts().length, 1, 'timeout must never replay or duplicate the original POST');
+    assert.match(h.task(original).videoJob?.message || '', /读取本地准备记录超时/u);
+    assert.match(h.task(waiting).videoJob?.message || '', /checkpoint times out safely/u, 'the queue must name the exact protected task instead of waiting forever on journal I/O');
   } finally { readGate.resolve(); h.engine.dispose(); }
 });
 

@@ -17,14 +17,14 @@ export const videoTaskDeletionBlocked = (
 ): boolean => {
   const live = runtime || task.videoJob;
   const explicitlyStopped = videoTaskExplicitlyStopped(task);
-  if (task.id === activeLocalTaskId || task.videoJob?.cancellationPending || runtime?.cancellationPending) return true;
+  const stoppedLocally = videoTaskStoppedLocally(task)
+    && (!runtime || runtime.stage === 'stopped' && runtime.trackingStopped === true);
+  if (task.id === activeLocalTaskId || (task.videoJob?.cancellationPending || runtime?.cancellationPending) && !stoppedLocally) return true;
   if (!explicitlyStopped && (task.videoJob && activeStages.has(task.videoJob.stage) || runtime && activeStages.has(runtime.stage))) return true;
   if (task.videoJob?.resultSelectionRequired || !task.resultAssetId && (
     task.resultUrl || task.status === 'succeeded' || task.videoJob?.generatedAt
     || task.videoJob?.resultAssetIds?.length || task.videoJob?.downloadError || runtime?.downloadError
   )) return true;
-  const stoppedLocally = videoTaskStoppedLocally(task)
-    && (!runtime || runtime.stage === 'stopped' && runtime.trackingStopped === true);
   if (videoTaskHasUnresolvedSubmission(task) && !stoppedLocally) return true;
   return !['stopped', 'failed', 'succeeded'].includes(videoTaskBatchStatus(task, runtime))
     || !(task.status === 'failed' || task.status === 'succeeded' || live?.trackingStopped && live.stage === 'stopped');

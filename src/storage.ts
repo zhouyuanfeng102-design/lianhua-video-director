@@ -3531,7 +3531,7 @@ export interface RecoveryStatus {
   stateChecksum: string;
   stateSize: number;
   snapshots: RecoverySnapshotInfo[];
-  recovery: { backupDirectory: string; backupOnSave: boolean; keepCount: number; allowPrivateNetwork?: boolean };
+  recovery: { keepCount: number; allowPrivateNetwork?: boolean };
   lastRecoveryNotice?: string | null;
   encryptionAvailable: boolean;
 }
@@ -3552,8 +3552,6 @@ export interface ManagedMediaResult {
 export type DesktopSaveResult = {
   ok: boolean;
   checksum: string;
-  externalBackup?: string | null;
-  backupError?: string;
   snapshotError?: string;
   projectHashes?: Record<string, string>;
   assetMoves?: AssetPathMove[];
@@ -3576,7 +3574,6 @@ type DesktopStateBridge = {
   recoveryStatus?: (options?: { light?: boolean }) => Promise<RecoveryStatus>;
   createRestorePoint?: (content: string) => Promise<{ ok: boolean; path: string }>;
   restoreSnapshot?: (id: string) => Promise<string>;
-  chooseBackupDirectory?: () => Promise<RecoveryStatus['recovery'] | null>;
   updateRecoveryConfig?: (patch: Partial<RecoveryStatus['recovery']>) => Promise<RecoveryStatus['recovery']>;
   importMedia?: (file: File) => Promise<ManagedMediaResult | null>;
   readVideoReferenceImage?: (payload: { relativePath: string; expectedChecksum?: string }) => Promise<{
