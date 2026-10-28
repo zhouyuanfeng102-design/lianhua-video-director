@@ -170,28 +170,6 @@ const resolveInside = (root, relative) => {
   return isInside(root, resolved) ? resolved : '';
 };
 
-const diskOwners = (dataRoot, fs) => {
-  const owners = new Map();
-  const directory = path.join(dataRoot, 'project-library');
-  let names = [];
-  try { names = fs.readdirSync(directory); } catch { return owners; }
-  for (const name of names) {
-    if (!String(name).endsWith('.json')) continue;
-    let project;
-    try { project = JSON.parse(fs.readFileSync(path.join(directory, name), 'utf8')); } catch { continue; }
-    const id = typeof project?.id === 'string' ? project.id : '';
-    if (!id) continue;
-    visitMedia(project, (object, key) => {
-      const relative = normalizeRelative(object[key]);
-      if (!relative) return;
-      let ids = owners.get(relative);
-      if (!ids) owners.set(relative, ids = new Set());
-      ids.add(id);
-    });
-  }
-  return owners;
-};
-
 const projectsOf = (state) => {
   const list = [];
   const seen = new Set();
@@ -204,9 +182,10 @@ const projectsOf = (state) => {
 };
 
 /**
- * Move files only this project references into projects/{name}/{image|video|audio}.
- * A file another project still references is copied. A missing or locked file keeps its old path.
- * Unreferenced files outside this walk are left where they are.
+ * Move files referenced by loaded projects into projects/{name}/{image|video|audio}.
+ * The old path is retained because unopened historical projects may still use it;
+ * proving otherwise would require scanning the entire project block store.
+ * A missing or locked file keeps its old path, and unreferenced files are untouched.
  */
 const placeProjectAssets = (state, { assetRoot, dataRoot = '', fs = nodeFs, deferDeletes = false } = {}) => {
   const moves = [];
@@ -227,7 +206,7 @@ const placeProjectAssets = (state, { assetRoot, dataRoot = '', fs = nodeFs, defe
       const current = normalizeRelative(object[key]);
       let destination = relocatedRelative(current, folder);
       const checksumImage = isChecksumImageRelative(current);
-      if (!destination || (destination === current && !checksumImage)) return;
+      if (!destination || destination === current) return;
       let group = groups.get(current);
       if (!group) {
         if (checksumImage) {
@@ -258,26 +237,6 @@ const placeProjectAssets = (state, { assetRoot, dataRoot = '', fs = nodeFs, defe
   }
   if (!pending.length) return { state, moves, deletes };
 
-  const owners = dataRoot ? diskOwners(dataRoot, fs) : new Map();
-  const payloadPaths = new Map();
-  for (const project of fullProjects) {
-    const paths = new Set();
-    visitMedia(project, (object, key) => {
-      const relative = normalizeRelative(object[key]);
-      if (relative) paths.add(relative);
-    });
-    payloadPaths.set(project.id, paths);
-  }
-  const shared = (relative, projectId) => {
-    const ids = new Set(owners.get(relative) || []);
-    for (const [id, paths] of payloadPaths) {
-      if (paths.has(relative)) ids.add(id);
-      else ids.delete(id);
-    }
-    ids.delete(projectId);
-    return ids.size > 0;
-  };
-
   const placed = new Map();
   for (const item of pending) {
     const key = `${item.project.id}\0${item.current}`;
@@ -300,7 +259,6 @@ const placeProjectAssets = (state, { assetRoot, dataRoot = '', fs = nodeFs, defe
       if (destinationStat) {
         if (!sameContent(destination)) { placed.set(key, ''); continue; }
         outcome = item.destination;
-        if (!shared(item.current, item.project.id)) deletes.push(source);
       } else {
         fs.mkdirSync(path.dirname(destination), { recursive: true });
         try { fs.copyFileSync(source, destination, nodeFs.constants.COPYFILE_EXCL); }
@@ -313,7 +271,6 @@ const placeProjectAssets = (state, { assetRoot, dataRoot = '', fs = nodeFs, defe
           continue;
         }
         outcome = item.destination;
-        if (!shared(item.current, item.project.id)) deletes.push(source);
       }
       placed.set(key, outcome);
     } catch {
@@ -337,18 +294,11 @@ const placeProjectAssets = (state, { assetRoot, dataRoot = '', fs = nodeFs, defe
     });
   }
 
-  const uniqueDeletes = [];
-  const seenDeletes = new Set();
-  for (const file of deletes) {
-    const key = pathKey(file);
-    if (seenDeletes.has(key) || !isInside(root, file)) continue;
-    seenDeletes.add(key);
-    if (deferDeletes) uniqueDeletes.push(file);
-    else {
-      try { if (regularFile(fs, file)) fs.unlinkSync(file); } catch { /* leftover stays */ }
-    }
-  }
-  return { state, moves, deletes: uniqueDeletes };
+  // The store contains immutable historical blocks and unopened projects may
+  // still reference old paths. Proving an old asset path is unused would scan
+  // every block on each save, so retain the source after relocating its live
+  // reference. Restore points and historical projects stay valid as well.
+  return { state, moves, deletes };
 };
 
 const VERSION_SUFFIX = /(?:\s*·\s*)?第\s*\d+\s*版$/u;

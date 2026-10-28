@@ -59,28 +59,42 @@ test('readable video versions are counted inside the directory that is asked', (
   assert.equal(allocateReadableName(['镜头.mov'], '镜头.mov', 'aaa', () => 'aaa'), '镜头.mov');
 });
 
-test('an exclusive legacy file moves into the project folder and a shared file is copied', (t) => {
+test('asset relocation avoids scanning the project store and retains original paths', (t) => {
   const root = temporary(t);
   const assetRoot = path.join(root, 'assets');
   const bytes = 'exclusive-pixels';
   const digest = checksum(bytes);
   fs.mkdirSync(path.join(assetRoot, 'image'), { recursive: true });
   fs.writeFileSync(path.join(assetRoot, 'image', 'abc.png'), bytes);
+  const projectLibrary = path.join(root, 'project-library');
+  fs.mkdirSync(projectLibrary, { recursive: true });
+  fs.writeFileSync(path.join(projectLibrary, 'historical-block.json'), '{"large":"block"}');
+  let projectLibraryScans = 0;
+  const guardedFs = new Proxy(fs, { get(target, property) {
+    if (property === 'readdirSync') return (directory, ...args) => {
+      if (path.resolve(directory) === projectLibrary) {
+        projectLibraryScans += 1;
+        throw new Error('asset relocation must not scan project blocks');
+      }
+      return target.readdirSync(directory, ...args);
+    };
+    return Reflect.get(target, property);
+  } });
   const project = {
     id: 'p1', name: '3221321',
     assets: [{ id: 'a', relativePath: 'image/abc.png', checksum: digest, url: 'lianhua-asset://local/image/abc.png',
       sourceRelativePath: 'image/abc.png' }],
   };
-  const exclusive = placeProjectAssets({ project, projects: [project] }, { assetRoot, dataRoot: root, fs, deferDeletes: true });
+  const exclusive = placeProjectAssets({ project, projects: [project] }, { assetRoot, dataRoot: root, fs: guardedFs, deferDeletes: true });
   assert.equal(exclusive.state.project.assets[0].relativePath, 'projects/3221321/image/abc.png');
   assert.equal(exclusive.state.project.assets[0].sourceRelativePath, 'projects/3221321/image/abc.png');
   assert.equal(exclusive.state.project.assets[0].url, 'lianhua-asset://local/projects/3221321/image/abc.png');
   assert.equal(fs.readFileSync(path.join(assetRoot, 'projects', '3221321', 'image', 'abc.png'), 'utf8'), bytes);
   assert.equal(fs.existsSync(path.join(assetRoot, 'image', 'abc.png')), true);
-  assert.equal(exclusive.deletes.length, 1);
+  assert.deepEqual(exclusive.deletes, []);
+  assert.equal(projectLibraryScans, 0);
 
   fs.writeFileSync(path.join(assetRoot, 'image', 'shared.png'), 'shared');
-  fs.mkdirSync(path.join(root, 'project-library'), { recursive: true });
   fs.writeFileSync(path.join(root, 'project-library', 'other.json'), JSON.stringify({
     id: 'p2', name: '另一项目', assets: [{ relativePath: 'image/shared.png' }],
   }));
@@ -115,13 +129,28 @@ test('a missing file and a file already in the project folder keep their places'
   assert.equal(fs.existsSync(path.join(assetRoot, 'image', 'missing.png')), false);
 });
 
-test('a checksum image already in the project folder takes the asset name and version', (t) => {
+test('a checksum image already in its project folder stays untouched without scanning project blocks', (t) => {
   const root = temporary(t);
   const assetRoot = path.join(root, 'assets');
   const digest = 'ab'.repeat(32);
   const source = path.join(assetRoot, 'projects', '韩立6464', 'image', `${digest}.png`);
+  const relative = `projects/韩立6464/image/${digest}.png`;
   fs.mkdirSync(path.dirname(source), { recursive: true });
   fs.writeFileSync(source, 'pixels');
+  const projectLibrary = path.join(root, 'project-library');
+  fs.mkdirSync(projectLibrary, { recursive: true });
+  fs.writeFileSync(path.join(projectLibrary, 'historical-block.json'), '{"large":"block"}');
+  let projectLibraryScans = 0;
+  const guardedFs = new Proxy(fs, { get(target, property) {
+    if (property === 'readdirSync') return (directory, ...args) => {
+      if (path.resolve(directory) === projectLibrary) {
+        projectLibraryScans += 1;
+        throw new Error('checksum image handling must not scan project blocks');
+      }
+      return target.readdirSync(directory, ...args);
+    };
+    return Reflect.get(target, property);
+  } });
   const project = {
     id: 'p1', name: '韩立6464',
     assets: [{
@@ -130,11 +159,46 @@ test('a checksum image already in the project folder takes the asset name and ve
       url: `lianhua-asset://local/projects/韩立6464/image/${digest}.png`,
     }],
   };
-  const placed = placeProjectAssets({ project, projects: [project] }, { assetRoot, dataRoot: root, fs, deferDeletes: false });
-  const relative = 'projects/韩立6464/image/后山上行与石亭前落 · 第 1 段 · 首帧 · 第 1 版.png';
+  const placed = placeProjectAssets({ project, projects: [project] }, { assetRoot, dataRoot: root, fs: guardedFs, deferDeletes: false });
+  assert.equal(placed.state.project.assets[0].relativePath, relative);
+  assert.equal(fs.readFileSync(source, 'utf8'), 'pixels');
+  assert.equal(placed.moves.length, 0);
+  assert.deepEqual(placed.deletes, []);
+  assert.equal(fs.existsSync(source), true);
+  assert.equal(projectLibraryScans, 0);
+});
+
+test('a legacy checksum image still migrates to a readable project filename', (t) => {
+  const root = temporary(t);
+  const assetRoot = path.join(root, 'assets');
+  const digest = 'cd'.repeat(32);
+  const source = path.join(assetRoot, 'image', `${digest}.png`);
+  fs.mkdirSync(path.dirname(source), { recursive: true });
+  fs.writeFileSync(source, 'pixels');
+  const projectLibrary = path.join(root, 'project-library');
+  fs.mkdirSync(projectLibrary, { recursive: true });
+  fs.writeFileSync(path.join(projectLibrary, 'historical-block.json'), '{"large":"block"}');
+  let projectLibraryScans = 0;
+  const guardedFs = new Proxy(fs, { get(target, property) {
+    if (property === 'readdirSync') return (directory, ...args) => {
+      if (path.resolve(directory) === projectLibrary) {
+        projectLibraryScans += 1;
+        throw new Error('legacy migration must not scan project blocks');
+      }
+      return target.readdirSync(directory, ...args);
+    };
+    return Reflect.get(target, property);
+  } });
+  const project = {
+    id: 'p1', name: '韩立6464',
+    assets: [{ id: 'frame', name: '首帧', relativePath: `image/${digest}.png`, checksum: checksum('pixels') }],
+  };
+  const placed = placeProjectAssets({ project, projects: [project] }, { assetRoot, dataRoot: root, fs: guardedFs });
+  const relative = 'projects/韩立6464/image/首帧 · 第 1 版.png';
   assert.equal(placed.state.project.assets[0].relativePath, relative);
   assert.equal(fs.readFileSync(path.join(assetRoot, ...relative.split('/')), 'utf8'), 'pixels');
-  assert.equal(fs.existsSync(source), false);
+  assert.equal(fs.existsSync(source), true);
+  assert.equal(projectLibraryScans, 0);
 });
 
 test('renaming a project renames only that project folder', (t) => {
@@ -150,5 +214,5 @@ test('renaming a project renames only that project folder', (t) => {
   const placed = placeProjectAssets({ project, projects: [project] }, { assetRoot, dataRoot: root, fs, deferDeletes: false });
   assert.equal(placed.state.project.assets[0].relativePath, 'projects/新名字/video/镜头.mov');
   assert.equal(fs.readFileSync(path.join(assetRoot, 'projects', '新名字', 'video', '镜头.mov'), 'utf8'), 'clip');
-  assert.equal(fs.existsSync(source), false);
+  assert.equal(fs.existsSync(source), true);
 });

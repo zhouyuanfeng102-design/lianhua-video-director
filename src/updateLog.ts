@@ -11,6 +11,16 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "3.4.1",
+    releasedAt: "2026-10-28",
+    title: "修复保存时扫描历史项目导致超时",
+    highlights: [
+      "已在项目正确目录中的哈希图片不再反复整理。",
+      "素材迁移不再扫描全部历史项目；无法确认是否仍被引用的旧文件会保留。",
+      "修复大项目库下保存状态长时间停留在“保存中”的问题。",
+    ],
+  },
+  {
     version: "3.4.0",
     releasedAt: "2026-10-28",
     title: "成片落盘后马上继续尾帧链",
