@@ -39,6 +39,12 @@ check('six reference numbers follow H3 input links rather than numeric LoadImage
   assert.deepEqual(resolveComfyH3PictureNumbers({ ...local, workflowJson: JSON.stringify({ prompt: graph() }) }, [0]), [5]);
 });
 
+check('AI App 图片槽顺序覆盖同类 RunningHub 配置，不依赖单个云端 ID', () => {
+  const mappedFields = imageIds.map((nodeId, imageIndex) => ({ nodeId, fieldName: 'image', kind: 'image' as const, imageIndex }));
+  assert.deepEqual(resolveRunningHubH3PictureNumbers({ runningHubH3ReferenceImages: undefined, runningHubMappedFields: mappedFields }, [0, 2, 5]), [1, 3, 6]);
+  assert.deepEqual(resolveRunningHubH3PictureNumbers({ runningHubH3ReferenceImages: undefined, runningHubMappedFields: mappedFields }, [5, 0]), [6, 1]);
+});
+
 check('cloud empty slots compress numbers; local retained defaults still consume pictures', () => {
   const api = compile(workflow());
   assert.deepEqual(resolveRunningHubH3PictureNumbers(api, [0, 2, 5]), [3, 2, 1]);

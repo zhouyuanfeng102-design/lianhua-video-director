@@ -361,7 +361,7 @@ await test('缺失定位仍待关联；重复定位沿用明确人物ID与本次
 
 await test('不明自定义模板、首尾帧专用接口不虚构Picture顺序，不阻断', () => {
   const { project, draft } = fixture();
-  for (const connection of [{ ...api, requestTemplate: '{"prompt":"{{prompt}}","x":"{{image_3}}"}' }, { ...api, provider: 'minimax' as const }, { ...cloud(), runningHubH3ReferenceImages: undefined }]) {
+  for (const connection of [{ ...api, requestTemplate: '{"prompt":"{{prompt}}","x":"{{image_3}}"}' }, { ...api, provider: 'minimax' as const }, { ...cloud(), runningHubH3ReferenceImages: undefined, runningHubMappedFields: undefined }]) {
     const result = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api: connection });
     assert.equal(result.draft.prompt, originalPrompt); assert.ok(result.warnings.length);
   }
@@ -651,9 +651,10 @@ await test('只有对白提及、明确画外、歧义别名、场景用途和�
   const scene = prepareVideoH3ReferenceDraft(project, { ...draft, references: [{ assetId: 'hero-image', role: 'scene' }] }, { backend: 'api', api: cloud() });
   assert.equal(scene.draft.prompt, draft.prompt);
   assert.equal(scene.characterStates.find((entry) => entry.characterId === 'hero')?.status, 'unselected');
-  const unknown = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api: { ...cloud(), runningHubH3ReferenceImages: undefined } });
-  assert.equal(unknown.draft.prompt, draft.prompt);
-  assert.equal(unknown.characterStates.find((entry) => entry.characterId === 'hero')?.status, 'pending');
+  const mapped = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api: { ...cloud(), runningHubH3ReferenceImages: undefined } });
+  assert.match(mapped.draft.prompt, /Visual identity reference for 夏提雅-女武神形态 \(known as 夏提雅\): <Picture 3>/u);
+  assert.equal(mapped.characterStates.find((entry) => entry.characterId === 'hero')?.status, 'bound');
+  assert.deepEqual(mapped.characterStates.find((entry) => entry.characterId === 'hero')?.slots, [3]);
 });
 
 await test('可信旧英文原稿完全无身份表仍按唯一英文别名补派生关联，中文名和英文名同指一个ID', () => {

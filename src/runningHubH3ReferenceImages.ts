@@ -46,5 +46,18 @@ export const compileRunningHubH3ReferenceImages = (
 };
 
 export const resolveRunningHubH3PictureNumbers = (
-  api: Pick<VideoTaskApiConfig, 'runningHubH3ReferenceImages'>, selectedSlots: readonly number[],
-): number[] | undefined => resolveH3PictureNumbers(api.runningHubH3ReferenceImages, selectedSlots);
+  api: Pick<VideoTaskApiConfig, 'runningHubH3ReferenceImages' | 'runningHubMappedFields'>, selectedSlots: readonly number[],
+): number[] | undefined => {
+  // A complete API graph is authoritative when it is available. AI App
+  // nodeInfoList imports do not contain graph links, but the saved image-slot
+  // mapping is still an explicit ordered contract: slot 1 is Picture 1,
+  // slot 2 is Picture 2, and so on. This covers every similarly configured
+  // RunningHub app instead of hard-coding one cloud ID.
+  const graphNumbers = resolveH3PictureNumbers(api.runningHubH3ReferenceImages, selectedSlots);
+  if (graphNumbers !== undefined) return graphNumbers;
+  const imageFields = api.runningHubMappedFields?.filter((field) => field.kind === 'image') || [];
+  if (imageFields.length && selectedSlots.every((slot) => imageFields.filter((field) => field.imageIndex === slot).length === 1)) {
+    return selectedSlots.map((slot) => slot + 1);
+  }
+  return undefined;
+};

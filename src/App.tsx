@@ -8618,6 +8618,25 @@ export default function App() {
       ? getOfficialSeedanceSourceFingerprint(buildOfficialSeedanceInput(project, board))
       : buildOfficialH3SourceFingerprint(board, officialH3ContextForStoryboard(project, board));
     const savedHandoff = format === 'seedance' ? sourceBoard.seedance25Output?.sequencePromptHandoff : sourceBoard.sequencePromptHandoff;
+    const selectedStyle = activeStyle || defaultStylePresets[0];
+    const generationBoard: Storyboard = {
+      ...sourceBoard,
+      stylePresetId: styleId,
+      directorStyleId,
+      directorStyleName,
+      directorStyleSummary,
+      cameraTerms: [...cameraTerms],
+      lightingTerms: [...lightingTerms],
+      visualStyle,
+      extraRequirement,
+      creativeDirection: buildVideoCreativeDirection({
+        directorStyle: { id: directorStyleId, name: directorStyleName, summary: directorStyleSummary },
+        visualStyle: { name: visualStyle, prompt: resolveVisualStylePrompt(visualStyle) },
+        stylePreset: { id: selectedStyle.id, name: selectedStyle.name, visual: selectedStyle.visual,
+          camera: selectedStyle.camera, lighting: selectedStyle.lighting, sound: selectedStyle.sound },
+        cameraTerms, lightingTerms, extraRequirement,
+      }),
+    };
     const previousPrompt = batchIdentity || mode === 'continuity-repair' || mode === 'translate-english' && savedHandoff
       ? 'required' : 'when-available';
     const handoff = plan && segment && (mode !== 'translate-english' || savedHandoff)
@@ -8708,11 +8727,11 @@ export default function App() {
     setBusy(true);
     try {
       const result = await generateSingleSegmentPrompt({
-        board: sourceBoard, targetPromptFormat: format,
-        executionContext: videoPromptExecutionForStoryboard(snapshot.project, snapshot.settings, sourceBoard),
+        board: generationBoard, targetPromptFormat: format,
+        executionContext: videoPromptExecutionForStoryboard(snapshot.project, snapshot.settings, generationBoard),
         ...(mode === 'regenerate' ? { voiceFactScope: 'source-grounded-new-draft' as const } : {}),
         buildSeedanceInput: (board) => buildOfficialSeedanceInput(stateRef.current.project, board),
-        context: officialH3ContextForStoryboard(snapshot.project, sourceBoard),
+        context: officialH3ContextForStoryboard(snapshot.project, generationBoard),
         sequenceHandoff: handoff?.context,
         sequenceSegmentContext: plan && segment && isSemanticSequencePlan(plan) ? semanticSegmentSourceContext(plan, segment) : undefined,
         converter: snapshot.converterPresets.find((entry) => entry.id === sourceBoard.converterPresetId && entry.enabled)
