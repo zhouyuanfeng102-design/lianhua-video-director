@@ -270,7 +270,7 @@ const renderStoryVisualEvent = (event: StoryVisualEvent, quotes: readonly StoryV
     const utterances = selectedQuotes.length ? selectedQuotes : typeof event.dialogue === 'string' ? [event.dialogue] : [];
     // Stage two does not author speech. In particular, quoted concepts in
     // action/narration events never become dialogue merely by having quotes.
-    if (event.action) lines.push(event.action);
+    if (event.action) lines.push(`发话动作：${event.action}`);
     for (const utterance of utterances) lines.push(`${event.speaker || event.actor || '说话人未明确'}：“${utterance}”`);
   } else {
     const subject = [event.actor, event.target ? `对象：${event.target}` : ''].filter(Boolean).join('，');
@@ -327,7 +327,21 @@ const mergeStoryVisualSceneStaging = (sceneId: string, records: unknown[]): Scen
 export const assembleStoryVisualSceneParagraphs = (
   plan: StoryVisualActionPlan, detailParagraphs: readonly StoryVisualParagraph[],
 ): StoryVisualParagraph[] => {
-  if (!plan.scenes?.length) return [...detailParagraphs];
+  if (!plan.scenes?.length) {
+    const hasStructuredEvents = plan.events.some((event) => event.kind === 'action' || event.kind === 'dialogue' || event.kind === 'narration');
+    if (!hasStructuredEvents) return [...detailParagraphs];
+    const quotes = plan.sourceQuotes || storyVisualSourceQuotes(plan.sourceParagraphs);
+    const details = detailParagraphs.flatMap((paragraph) => paragraph.eventDetails || [])
+      .filter((detail) => plan.events.some((event) => event.id === detail.eventId && event.kind !== 'dialogue'));
+    const text = plan.events.map((event) => renderStoryVisualEvent(event, quotes,
+      details.filter((detail) => detail.eventId === event.id))).filter(Boolean).join('\n\n');
+    if (!text.trim()) return [...detailParagraphs];
+    return [{ id: 'structured-events', sourceParagraphIds: union([], plan.events.flatMap((event) => event.sourceParagraphIds)),
+      eventIds: plan.events.map((event) => event.id), text,
+      eventDetails: details.map((detail) => ({ ...detail,
+        ...(detail.stagingAdditions ? { stagingAdditions: [...detail.stagingAdditions] } : {}) })),
+      stagingAdditions: strings(details.flatMap((detail) => detail.stagingAdditions || [])) }];
+  }
   const scenes = normalizeStoryVisualScenes(plan.scenes, plan.events);
   const eventDetails = detailParagraphs.flatMap((paragraph) => paragraph.eventDetails || [])
     .filter((detail) => plan.events.some((event) => event.id === detail.eventId && event.kind !== 'dialogue'));

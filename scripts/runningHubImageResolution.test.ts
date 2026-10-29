@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { importRunningHubImageWorkflow, buildRunningHubImageRequest, validateRunningHubImageConfig } from '../src/runningHubImage';
 import { assertImageResolutionPlanForConfig, resolveImageResolution, resolveImageResolutionCapabilities } from '../src/imageResolution';
 import { defaultImageOutputSize, resolveImageOutputSize } from '../src/imageOutputSize';
+import { defaultStoryboardImageOutputSize, resolveStoryboardImageOutputSize } from '../src/storyboardImageOutputSize';
 import type { ImageApiConfig } from '../src/types';
 import { IMAGE_V3_CURL } from './fixtures/runningHubImageV3';
 
@@ -167,6 +168,52 @@ test('blank but explicitly mapped pixel fields keep exact custom override capabi
   const request = buildRunningHubImageRequest(current, { prompt: 'exact pixels', ...size, sizeOverride: true });
   const nodes = request.body.nodeInfoList as typeof body.nodeInfoList;
   assert.equal(nodes[0].fieldValue, '1025'); assert.equal(nodes[1].fieldValue, '1023');
+});
+
+test('megapixel resolution keeps the cloud value and writes only the matched aspect option', () => {
+  const imported = importRunningHubImageWorkflow(JSON.stringify({
+    endpoint: 'https://www.runninghub.ai/openapi/v2/run/ai-app/2104225323949101057',
+    instanceType: 'default', usePersonalQueue: false,
+    nodeInfoList: [
+      { nodeId: '497', fieldName: 'prompt', fieldValue: '旧提示词', description: 'Prompt' },
+      { nodeId: '532', fieldName: 'value', fieldValue: '2.0000000000000004', description: '分辨率' },
+      { nodeId: '13', fieldName: 'aspect_ratio', fieldValue: '9:16 (Portrait Widescreen)', description: '画面比例' },
+    ],
+  }), 'Qwen Image2.1');
+  imported.workflow.mapping.parameters = {
+    resolution: { nodeId: '532', inputName: 'value' },
+    aspect_ratio: { nodeId: '13', inputName: 'aspect_ratio' },
+  };
+  imported.workflow.fieldControls = { '["13","aspect_ratio"]': { kind: 'select', options: ['1:1 (Square)', '16:9 (Widescreen)', '9:16 (Portrait Widescreen)'] } };
+  const current = { ...config(), runningHubWorkflows: [imported.workflow], activeRunningHubWorkflowId: imported.workflow.id };
+  const frozen = JSON.stringify(current);
+  for (const mode of ['1k', '2k', '4k'] as const) {
+    const size = resolveStoryboardImageOutputSize({ ...defaultStoryboardImageOutputSize(), mode }, '16:9', current);
+    assert.equal(size.issue, '');
+    assert.equal(size.resolutionPlan?.encoding.kind, 'megapixels');
+    assert.ok(size.width >= 64 && size.height >= 64);
+    assert.match(size.layoutNote, /百万像素原值/);
+    const request = buildRunningHubImageRequest(current, { prompt: '分镜画面', sizeOverride: true, ...size });
+    const nodes = request.body.nodeInfoList as Array<{ nodeId: string; fieldName: string; fieldValue: unknown }>;
+    assert.equal(nodes.find((node) => node.nodeId === '532' && node.fieldName === 'value')?.fieldValue, '2.0000000000000004');
+    assert.equal(nodes.find((node) => node.nodeId === '13')?.fieldValue, '16:9 (Widescreen)');
+    assert.match(JSON.stringify(request.body), /2\.0000000000000004/);
+    assertImageResolutionPlanForConfig(size.resolutionPlan!, current);
+  }
+  const portrait = resolveStoryboardImageOutputSize(defaultStoryboardImageOutputSize(), '9:16', current);
+  const portraitRequest = buildRunningHubImageRequest(current, { prompt: '竖屏分镜', sizeOverride: true, ...portrait });
+  const portraitNodes = portraitRequest.body.nodeInfoList as Array<{ nodeId: string; fieldValue: unknown }>;
+  assert.equal(portraitNodes.find((node) => node.nodeId === '13')?.fieldValue, '9:16 (Portrait Widescreen)');
+  assert.equal(portraitNodes.find((node) => node.nodeId === '532')?.fieldValue, '2.0000000000000004');
+  const unmatched = resolveStoryboardImageOutputSize(defaultStoryboardImageOutputSize(), '21:9', current);
+  assert.match(unmatched.issue, /没有唯一/);
+  assert.doesNotMatch(unmatched.issue, /短边不足64/);
+  const unbound = structuredClone(current);
+  unbound.runningHubWorkflows![0].mapping.parameters = {};
+  const blocked = resolveStoryboardImageOutputSize(defaultStoryboardImageOutputSize(), '16:9', unbound);
+  assert.match(blocked.issue, /宽度和高度/);
+  assert.doesNotMatch(blocked.issue, /短边不足64/);
+  assert.equal(JSON.stringify(current), frozen);
 });
 
 console.log(`RunningHub image resolution and gates: ${checks} targeted offline checks passed.`);

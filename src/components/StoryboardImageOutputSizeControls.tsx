@@ -16,7 +16,8 @@ export function StoryboardImageOutputSizeControls({ value, resolved, aspectRatio
   const workflowDefault = workflowSize && value.mode === 'default';
   const legacy = !(workflowSize && value.mode === 'default') && (value.mode === 'default' || !custom && value.resolutionVersion !== 1);
   const namedResolution = resolved.resolutionPlan?.encoding.kind === 'tier';
-  const sizeLabel = resolved.workflowSizeMode === 'tier' ? '档位估算（以返回为准）' : namedResolution ? resolved.resolutionPlan?.verified ? '原生预期' : '档位估算（以返回为准）' : '请求';
+  const cloudEstimate = resolved.workflowSizeMode === 'tier' || resolved.workflowSizeMode === 'megapixels' || resolved.resolutionPlan?.encoding.kind === 'megapixels';
+  const sizeLabel = cloudEstimate ? '档位估算（以返回为准）' : namedResolution ? resolved.resolutionPlan?.verified ? '原生预期' : '档位估算（以返回为准）' : '请求';
   return <div className="image-output-size-controls storyboard-image-output-size-controls" role="group" aria-label="分镜生图分辨率">
     <div className="image-output-size-row">
       <label className="storyboard-image-output-size-mode"><span>生图分辨率</span><select aria-label="分镜图分辨率" value={legacy ? `legacy-${value.mode}` : value.mode} disabled={disabled} onChange={(event) => onChange({ ...value, mode: event.target.value.replace(/^legacy-/u, '') as StoryboardImageOutputSizePreference['mode'], resolutionVersion: 1 })}>

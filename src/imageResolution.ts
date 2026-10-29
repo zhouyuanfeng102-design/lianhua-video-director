@@ -1,7 +1,7 @@
 import type { ImageApiConfig } from './types';
 import type { RunningHubVideoWorkflow } from './runningHubVideoTypes';
 import { resolveImageProtocol, type ImageProtocolSetting, type ResolvedImageProtocol } from './imageProtocol';
-import { runningHubImageSizeMode, runningHubImageTierParameters } from './runningHubImageSize';
+import { runningHubImageMegapixelAspectParameters, runningHubImageSizeMode, runningHubImageTierParameters } from './runningHubImageSize';
 
 export type ImageResolutionTier = '1K' | '2K' | '4K';
 export type ImageResolutionProfile = 'auto' | 'pixel-long-edge' | 'gpt-image-legacy' | 'gpt-image-modern' | 'gemini-k' | 'gemini-1k' | 'grok-k';
@@ -9,7 +9,8 @@ export type ImageResolutionProtocol = ImageProtocolSetting;
 export type ImageResolutionEncoding =
   | { kind: 'width-height'; width: number; height: number }
   | { kind: 'size'; value: string }
-  | { kind: 'tier'; value: ImageResolutionTier };
+  | { kind: 'tier'; value: ImageResolutionTier }
+  | { kind: 'megapixels' };
 
 /** Frozen, credential-free execution facts. A retry must use this plan as saved. */
 export interface ImageResolutionPlan {
@@ -75,6 +76,8 @@ export const normalizeImageResolutionPlan = (value: unknown): ImageResolutionPla
   } else if (value.encoding.kind === 'tier' && TIERS.includes(value.encoding.value as ImageResolutionTier)
     && (value.tier === 'custom' || value.tier === value.encoding.value)) {
     encoding = { kind: 'tier', value: value.encoding.value as ImageResolutionTier };
+  } else if (value.encoding.kind === 'megapixels' && TIERS.includes(value.tier as ImageResolutionTier)) {
+    encoding = { kind: 'megapixels' };
   } else return undefined;
   return { version: 1, tier: value.tier as ImageResolutionPlan['tier'], logicalAspectRatio: value.logicalAspectRatio,
     expected: { width, height }, encoding, profile: value.profile as ImageResolutionProfile, verified: value.verified };
@@ -104,7 +107,8 @@ export const runningHubImageDimensionOverrideIssue = (input: ImageResolutionConf
   if (config.backend !== 'runninghub') return '';
   const workflow = config.runningHubWorkflows?.find((item) => item.id === config.activeRunningHubWorkflowId);
   if (!workflow) return '请先选择 RunningHub 图像工作流，再设置生图宽高。';
-  if (intent === 'tier' && runningHubImageSizeMode(workflow) === 'tier') return '';
+  const sizeMode = runningHubImageSizeMode(workflow);
+  if (intent === 'tier' && (sizeMode === 'tier' || sizeMode === 'megapixels')) return '';
   const parameters = workflow.mapping?.parameters;
   if (!['width', 'height'].every((key) => {
     const binding = parameters?.[key];
@@ -147,10 +151,13 @@ export const resolveImageResolutionCapabilities = (input: ImageResolutionConfigI
   const declared = config.imageSupportedResolutions;
   const localBackend = config.backend === 'comfyui' || config.backend === 'sd_webui' || config.backend === 'novelai' || config.backend === 'runninghub';
   const workflow = config.runningHubWorkflows?.find((item) => item.id === config.activeRunningHubWorkflowId);
-  const cloudTiers = config.backend === 'runninghub' && runningHubImageSizeMode(workflow) === 'tier';
+  const sizeMode = config.backend === 'runninghub' ? runningHubImageSizeMode(workflow) : undefined;
+  const cloudTiers = sizeMode === 'tier';
+  const megapixelSize = sizeMode === 'megapixels';
   const supportedTiers = cloudTiers ? TIERS.filter((tier) => {
     try { runningHubImageTierParameters(workflow!, tier); return true; } catch { return false; }
-  }) : config.backend === 'runninghub' && runningHubImageDimensionOverrideIssue(input, 'tier') ? []
+  }) : megapixelSize ? [...TIERS]
+    : config.backend === 'runninghub' && runningHubImageDimensionOverrideIssue(input, 'tier') ? []
     : Array.isArray(declared) ? nativeTiers.filter((tier) => declared.includes(tier))
     : localBackend ? ['1K' as const] : nativeTiers;
   const official = protocol === 'gemini' && /^gemini-(?:3|3\.1)-(?:pro|flash)-image(?:-preview)?$/u.test(model)
@@ -159,7 +166,8 @@ export const resolveImageResolutionCapabilities = (input: ImageResolutionConfigI
     || protocol === 'openai-images' && /^gpt-image-1(?:\.5|-mini)?$/u.test(model);
   const verified = profile !== 'pixel-long-edge' && Boolean(official);
   const note = config.backend === 'runninghub'
-    ? cloudTiers ? '档位通过已绑定的云端分辨率字段提交；比例通过已绑定的比例字段提交，未绑定时由工作流决定。显示像素为估算，实际尺寸以工作流返回为准。'
+    ? megapixelSize ? '分辨率按已绑定的百万像素字段原值提交，不换算为 K；画面比例写入已绑定的比例字段。显示像素为估算，实际尺寸以工作流返回为准。'
+      : cloudTiers ? '档位通过已绑定的云端分辨率字段提交；比例通过已绑定的比例字段提交，未绑定时由工作流决定。显示像素为估算，实际尺寸以工作流返回为准。'
       : supportedTiers.length ? `按长边1024/2048/4096及${step}像素步长映射到已绑定的云端宽高字段；档位仅作像素映射，实际支持范围由所选工作流决定。`
       : '当前云端工作流没有完整宽高映射，可保留工作流默认尺寸；显式像素设置需先绑定宽高字段。'
     : profile === 'pixel-long-edge'
@@ -226,6 +234,7 @@ export interface ResolveImageResolutionInput {
 }
 const dimensionEncoding = (capabilities: ImageResolutionCapabilities, config: ResolutionConfig, width: number, height: number, nativeTier?: ImageResolutionTier): ImageResolutionEncoding => {
   const workflow = config.runningHubWorkflows?.find((item) => item.id === config.activeRunningHubWorkflowId);
+  if (config.backend === 'runninghub' && nativeTier && runningHubImageSizeMode(workflow) === 'megapixels') return { kind: 'megapixels' };
   if (config.backend === 'runninghub' && nativeTier && runningHubImageSizeMode(workflow) === 'tier') return { kind: 'tier', value: nativeTier };
   if ((capabilities.protocol === 'gemini' || capabilities.protocol === 'xai'
     || capabilities.protocol === 'openai-chat' && capabilities.profile.startsWith('gemini')) && nativeTier) return { kind: 'tier', value: nativeTier };
@@ -239,14 +248,18 @@ export const resolveImageResolution = (input: ResolveImageResolutionInput): Reso
   let issue = protocolIssue(capabilities, config.backend) || runningHubImageDimensionOverrideIssue(input.config, input.tier === 'custom' ? 'pixels' : 'tier'); let alignment = '';
   const warnings: string[] = [];
   let encodedTier: ImageResolutionTier | undefined = input.tier === 'custom' ? undefined : input.tier;
+  const activeWorkflow = config.runningHubWorkflows?.find((item) => item.id === config.activeRunningHubWorkflowId);
+  const keepMegapixels = encodedTier !== undefined && config.backend === 'runninghub' && runningHubImageSizeMode(activeWorkflow) === 'megapixels';
   if (issue) return { width, height, issue, layoutNote: '' };
   if (!aspect) return { width, height, issue: '生图画面比例无效，无法计算所选分辨率；不会自动降档。', layoutNote: '' };
   const requestedAspect = aspect;
-  if (config.backend === 'runninghub' && input.tier !== 'custom') {
-    const workflow = config.runningHubWorkflows?.find((item) => item.id === config.activeRunningHubWorkflowId);
-    if (runningHubImageSizeMode(workflow) === 'tier') {
-      try { runningHubImageTierParameters(workflow!, input.tier, input.logicalAspectRatio); }
+  if (config.backend === 'runninghub' && encodedTier) {
+    if (runningHubImageSizeMode(activeWorkflow) === 'tier') {
+      try { runningHubImageTierParameters(activeWorkflow!, encodedTier, input.logicalAspectRatio); }
       catch (cause) { return { width, height, issue: cause instanceof Error ? cause.message : '云端分辨率档位无法匹配。', layoutNote: '' }; }
+    } else if (keepMegapixels) {
+      try { runningHubImageMegapixelAspectParameters(activeWorkflow!, input.logicalAspectRatio); }
+      catch (cause) { return { width, height, issue: cause instanceof Error ? cause.message : '云端画面比例无法匹配。', layoutNote: '' }; }
     }
   }
   if (input.tier !== 'custom' && !capabilities.supportedTiers.includes(input.tier)) warnings.push(`当前模型或工作流未声明支持${input.tier}原生生图；仍按所选档位提交，由后端决定是否支持，不自动降档或执行放大。`);
@@ -344,7 +357,10 @@ export const resolveImageResolution = (input: ResolveImageResolutionInput): Reso
   if (!issue && capabilities.profile === 'grok-k' && !['1:1', '2:3', '3:2', '3:4', '4:3', '9:16', '16:9'].includes(canonicalAspect(aspect!.label))) {
     warnings.push('当前 Grok 档案未声明该画面比例；仍按所选比例提交，由后端决定是否支持。');
   }
-  const layoutNote = `${input.tier === 'custom' ? '自定义生图' : input.tier} · 画幅${aspect.label}${capabilities.profile === 'pixel-long-edge' && input.tier !== 'custom' ? ` · ${config.backend === 'runninghub' ? '像素' : '本机'}长边目标${EDGES[input.tier]}px` : !capabilityWarning && (encodedTier && capabilities.supportedTiers.includes(encodedTier) || capabilities.profile.startsWith('gpt')) ? ' · 模型原生规格' : ' · 按所选像素提交'}${alignment} · ${capabilities.note}`;
+  const sizePhrase = keepMegapixels ? ` · 百万像素原值 · 显示按长边${EDGES[encodedTier!]}估算`
+    : capabilities.profile === 'pixel-long-edge' && encodedTier ? ` · ${config.backend === 'runninghub' ? '像素' : '本机'}长边目标${EDGES[encodedTier]}px`
+    : !capabilityWarning && (encodedTier && capabilities.supportedTiers.includes(encodedTier) || capabilities.profile.startsWith('gpt')) ? ' · 模型原生规格' : ' · 按所选像素提交';
+  const layoutNote = `${input.tier === 'custom' ? '自定义生图' : input.tier} · 画幅${aspect.label}${sizePhrase}${alignment} · ${capabilities.note}`;
   if (issue) return { width, height, issue, layoutNote };
   const resolutionPlan: ImageResolutionPlan = { version: 1, tier: input.tier, logicalAspectRatio: canonicalAspect(aspect!.label), expected: { width, height },
     encoding: dimensionEncoding(capabilities, config, width, height, encodedTier), profile: capabilities.profile, verified: capabilities.verified && !warnings.length };
@@ -359,11 +375,17 @@ export const assertImageResolutionPlanForConfig = (plan: ImageResolutionPlan, in
   const capabilities = resolveImageResolutionCapabilities(input);
   const configIssue = protocolIssue(capabilities, input.backend);
   if (configIssue) throw new Error(configIssue);
-  const dimensionIssue = runningHubImageDimensionOverrideIssue(input, saved.encoding.kind === 'tier' ? 'tier' : 'pixels');
+  const replayTier = saved.encoding.kind === 'tier' ? saved.encoding.value
+    : saved.encoding.kind === 'megapixels' && TIERS.includes(saved.tier as ImageResolutionTier) ? saved.tier as ImageResolutionTier : undefined;
+  const dimensionIssue = runningHubImageDimensionOverrideIssue(input, saved.encoding.kind === 'tier' || saved.encoding.kind === 'megapixels' ? 'tier' : 'pixels');
   if (dimensionIssue) throw new Error(dimensionIssue);
   if (input.backend === 'runninghub' && saved.encoding.kind === 'tier') {
     const workflow = input.runningHubWorkflows?.find((item) => item.id === input.activeRunningHubWorkflowId);
     runningHubImageTierParameters(workflow!, saved.encoding.value, saved.logicalAspectRatio);
+  }
+  if (input.backend === 'runninghub' && saved.encoding.kind === 'megapixels') {
+    const workflow = input.runningHubWorkflows?.find((item) => item.id === input.activeRunningHubWorkflowId);
+    runningHubImageMegapixelAspectParameters(workflow!, saved.logicalAspectRatio);
   }
   if (saved.profile.startsWith('gemini') && saved.encoding.kind === 'tier') {
     const nativeTier = TIERS.find((candidate) => {
@@ -373,6 +395,6 @@ export const assertImageResolutionPlanForConfig = (plan: ImageResolutionPlan, in
     if (!nativeTier || saved.tier !== 'custom' && nativeTier !== saved.tier
       || saved.encoding.kind === 'tier' && saved.encoding.value !== nativeTier) throw new Error('原任务尺寸与保存的 Gemini 原生档位不一致；未提交。');
   }
-  const expectedEncoding = dimensionEncoding(capabilities, configFields(input), saved.expected.width, saved.expected.height, saved.encoding.kind === 'tier' ? saved.encoding.value : undefined);
+  const expectedEncoding = dimensionEncoding(capabilities, configFields(input), saved.expected.width, saved.expected.height, replayTier);
   if (expectedEncoding.kind !== saved.encoding.kind) throw new Error('当前生图协议与原任务分辨率编码不同；请恢复原配置。');
 };

@@ -5,7 +5,7 @@ import {
   LEGACY_STORYBOARD_SPATIAL_FRAME_RULE_V1_8_1,
 } from '../src/spatialContinuityRules';
 import {
-  VIDEO_INTERACTION_RULES, VIDEO_INTERACTION_TRANSLATION_RULE,
+  HEAD_ON_CHEST_RULE, VIDEO_INTERACTION_RULES, VIDEO_INTERACTION_TRANSLATION_RULE,
 } from '../src/videoInteractionRules';
 import {
   VIDEO_ACTING_CAMERA_RULES, VIDEO_CONTINUOUS_SCENE_RULE, VIDEO_NATURAL_PERFORMANCE_RULE,
@@ -45,7 +45,7 @@ assert.match(SCENE_STAGING_GENERATION_RULE, /动作方向和最终位置分别�
 assert.match(SPATIAL_COORDINATE_RULE, /身体的前方不等于摄影机前景/u);
 assert.match(SCENE_STAGING_GENERATION_RULE, /转身、回头或改换目标须由剧情事件/u);
 assert.match(SCENE_STAGING_GENERATION_RULE, /主观视点、正脸、反打和环绕都可以/u);
-assert.match(SCENE_STAGING_GENERATION_RULE, /头、胸髋、眼神与武器可因当前动作合理不同向/u);
+assert.match(SCENE_STAGING_GENERATION_RULE, /头留在胸口朝向的这一侧，可以在肩线内看向当前对象，不能转到胸口的反面/u);
 assert.match(SCENE_STAGING_GENERATION_RULE, /对话中人物停步偏头看向同伴时[\s\S]*不把它扩写成身体转身或掉头/u);
 assert.match(SCENE_STAGING_GENERATION_RULE, /原文明确已转身面对同伴[\s\S]*重新面向路线前方、沿同一方向继续/u);
 assert.match(VIDEO_WORLD_SPACE_CAMERA_RULE, /cameraTarget[\s\S]*bodyFacing、gazeTarget及actionTarget分开/u);
@@ -54,7 +54,12 @@ assert.match(VIDEO_WORLD_SPACE_CAMERA_RULE, /越肩的肩、后脑与背部属�
 assert.match(VIDEO_WORLD_SPACE_CAMERA_RULE, /换机位时从同一世界站位重新推导投影/u);
 assert.match(VIDEO_WORLD_SPACE_CAMERA_RULE, /听者可以仅有肩背入画或处于画外[\s\S]*不得为了同框正脸把听者搬到说话者身后/u);
 assert.match(VIDEO_WORLD_SPACE_CAMERA_RULE, /原剧情或用户明确成立的分身、镜像、倒影[\s\S]*按原意保留/u);
+assert.match(VIDEO_NATURAL_PERFORMANCE_RULE, /机位和身份图不构成这个动作/u);
 assert.match(VIDEO_NATURAL_PERFORMANCE_RULE, /完整身份不强制露脸/u);
+assert.match(VIDEO_INTERACTION_RULES, new RegExp(HEAD_ON_CHEST_RULE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'u'));
+assert.match(VIDEO_INTERACTION_TRANSLATION_RULE, /head stays on the chest that faces them/u);
+assert.match(VIDEO_WORLD_SPACE_CAMERA_RULE, /身后写后脑和耳/u);
+assert.match(STORYBOARD_FRAME_VISIBILITY_RULE, /身后的可见面是后脑和耳廓/u);
 assert.match(VIDEO_NATURAL_PERFORMANCE_RULE, /说话者口型跟随自己的原话与停顿/u);
 assert.match(STORYBOARD_FRAME_VISIBILITY_RULE, /先描述当前可见面[\s\S]*从角色资料选入相应可见外貌/u);
 

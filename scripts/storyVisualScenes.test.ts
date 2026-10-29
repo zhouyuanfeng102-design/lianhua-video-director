@@ -166,6 +166,13 @@ assert.equal(renderStoryVisualScenes(oldPlan, oldParagraphs), '旧稿原样保�
 
 const fallbackSpeech = { ...plan, events: [event('fallback-line', { sceneId: 'return', kind: 'dialogue', speaker: '夏娃', dialogue: '没有引用编号的旧对白。' })] };
 assert.match(renderStoryVisualScenes(fallbackSpeech, []), /夏娃：“没有引用编号的旧对白。”/u);
+const sceneFreeSpeech: StoryVisualActionPlan = { version: 1, sourceParagraphs, events: [
+  event('door-answer', { kind: 'dialogue', actor: '玉小刚', speaker: '玉小刚', action: '玉小刚低声应门，声音从门后传来。', dialogue: '进来。' }),
+], summary: '门外有人敲门，玉小刚隔门应答。' };
+const sceneFreeRendered = renderStoryVisualScenes(sceneFreeSpeech, [{ id: 'body', sourceParagraphIds: ['p1'], eventIds: [],
+  text: '玉小刚低声应门。人物发声，声音从门后传来。', stagingAdditions: [] }]);
+assert.match(sceneFreeRendered, /玉小刚：“进来。”/u, 'structured dialogue is serialized even when the model supplies no scene records');
+assert.doesNotMatch(sceneFreeRendered, /人物发声/u, 'model-authored generic prose cannot replace structured dialogue');
 const unassigned = { ...plan, events: [...plan.events, event('unassigned', { action: '原文事件仍然保留。' })] };
 assert.match(renderStoryVisualScenes(unassigned, []), /原文事件仍然保留/u);
 

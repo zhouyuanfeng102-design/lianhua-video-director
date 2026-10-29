@@ -170,10 +170,12 @@ try {
   const spokenCueData = JSON.parse(spokenCueUser.match(/<story_expansion_data>\s*([\s\S]*?)\s*<\/story_expansion_data>/u)![1]);
   assert.equal(spokenCueData.dialogueMode, 'not-required', 'the source needs no invented dialogue');
   assert.ok(spokenCuePrompt.includes(SPOKEN_CUE_CONTENT_RULE), 'no-invention mode preserves concrete speech already written in narrative');
-  assert.match(spokenCuePrompt, /明确话题或信息.*不一定是逐字台词.*自然、完整、可念的一句/u,
+  assert.match(spokenCuePrompt, /明确话题、对象、回应目的或信息.*最短自然完整句/u,
     'expansion naturalizes a narrated topic instead of passing its summary off as a quote');
-  assert.match(spokenCuePrompt, /只有“接着说下去”等没有具体话题或原句时才不新增台词/u,
-    'a speech action without a topic remains non-verbal rather than invented dialogue');
+  assert.match(spokenCuePrompt, /“低声应门”|“人物发声”|“声音从门后传来”/u,
+    'generic speech cues are not accepted as the final spoken content');
+  assert.match(spokenCuePrompt, /非词汇人声.*没有词语或沟通目的的声音位置说明/u,
+    'nonverbal vocalizations and location-only cues do not become invented dialogue');
   assert.match(spokenCuePrompt, /听者只倾听、反应或行动，不能代说/u,
     'the listener is not given an invented reply');
   assert.ok(spokenCuePrompt.includes('dialogueMode=not-required只表示不强制增加原文没有的对白'),

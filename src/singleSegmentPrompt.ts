@@ -1,7 +1,9 @@
 import { convertStoryboardDraftToFinal, hasCurrentTextApiConversion } from './appEffects';
 import { orderSemanticPromptContext, orderTextPromptData } from './textPromptLayout';
 import { characterVoiceIdentityFacts } from './characterVoiceFacts';
-import { applyConvertedPromptToShots } from './masterTimeline';
+import { applyConvertedPromptToShots, canonicalDialogueFieldRange } from './masterTimeline';
+import { extractSourceDialogues } from './promptEngine';
+import { getPromptDialogues } from './promptDialogueLanguage';
 import {
   applyOfficialH3Prompt,
   applyAiAuthoredOfficialH3Prompt,
@@ -52,7 +54,7 @@ import {
 import { hasNsfwDetailSignal } from './promptConstraints';
 import { STORY_CAUSALITY_RULE, STORY_CAUSALITY_TRANSLATION_RULE, STORY_UNDERSTANDING_CONTEXT_RULE } from './storyCausalityRules';
 import { CHARACTER_PARTICIPATION_RULE, characterParticipationAliases, resolvePromptCharacterParticipation, stampCharacterParticipation } from './characterParticipation';
-import type { ConverterPreset, H3IdentityBindings, RuleSet, Storyboard } from './types';
+import type { ConverterPreset, H3IdentityBindings, RuleSet, Storyboard, VideoShot } from './types';
 import type { VideoPromptExecutionContext } from './videoPromptExecutionContext';
 import {
   generateSeedanceBilingualOutput,
@@ -176,30 +178,190 @@ const savedStagingFacts = (
 
 /** English refresh reads the identity/performance paired with the saved Chinese
  * only. A project's currently edited cast and semantic plan have no authority. */
-export const savedH3TranslationFacts = (bindings?: H3IdentityBindings) => {
+export const savedH3TranslationFacts = (bindings?: H3IdentityBindings, canonicalShots: readonly VideoShot[] = []) => {
   const sourceCharacters = bindings?.characters.map((entry) => ({
     id: entry.characterId, name: entry.name, ...(entry.relationship ? { relationship: entry.relationship } : {}),
   })) || [];
   const sourceDialogues: PromptTranslationSourceDialogue[] = [];
   const sourceEvents: PromptTranslationSourceEvent[] = [];
+  const performanceDialogueCounts = new Map<string, number>();
   for (const shot of bindings?.performance?.shots || []) for (const event of shot.events) {
     sourceEvents.push({ id: event.eventId, description: event.sourceFact
       || (event.kind === 'visual' ? event.description : event.kind === 'speech' ? event.text : event.vocalDescription) });
-    if (event.kind === 'speech') sourceDialogues.push({ id: event.dialogueId, text: event.text,
-      ...(event.speakerCharacterIds.length === 1 ? { speakerCharacterId: event.speakerCharacterIds[0] } : {}),
-      ...(event.listenerCharacterIds ? { listenerCharacterIds: [...event.listenerCharacterIds] } : {}),
-    });
+    if (event.kind === 'speech') {
+      sourceDialogues.push({ id: event.dialogueId, text: event.text,
+        ...(event.speakerCharacterIds.length === 1 ? { speakerCharacterId: event.speakerCharacterIds[0] } : {}),
+        ...(event.listenerCharacterIds ? { listenerCharacterIds: [...event.listenerCharacterIds] } : {}),
+      });
+      const key = `${shot.shotIndex}\u0000${dialogueOccurrenceKey(event.text,
+        event.speakerCharacterIds.length === 1 ? `id:${event.speakerCharacterIds[0]}` : '')}`;
+      performanceDialogueCounts.set(key, (performanceDialogueCounts.get(key) || 0) + 1);
+    }
+  }
+  const canonicalDialogueCounts = new Map<string, number>();
+  for (const [shotIndex, shot] of canonicalShots.entries()) {
+    const shotNumber = Number.isFinite(shot.index) ? shot.index : shotIndex + 1;
+    const source = canonicalShotDialogue(shot);
+    const dialogues = canonicalShotDialogues(source, shot.startSec);
+    for (const [dialogueIndex, dialogue] of dialogues.entries()) {
+      const speaker = dialogue.speaker || shot.subject.trim();
+      const key = `${shotNumber}\u0000${dialogueOccurrenceKey(dialogue.text, canonicalDialogueSpeakerKey(speaker, bindings))}`;
+      const occurrence = (canonicalDialogueCounts.get(key) || 0) + 1;
+      canonicalDialogueCounts.set(key, occurrence);
+      if (occurrence <= (performanceDialogueCounts.get(key) || 0)) continue;
+      const speakerCharacterId = bindings?.characters.find((entry) => entry.name === speaker)?.characterId;
+      sourceDialogues.push({ id: `${shot.id || shotNumber}-dialogue-${dialogueIndex + 1}`, text: dialogue.text,
+        ...(speakerCharacterId ? { speakerCharacterId } : {}),
+      });
+    }
   }
   return { sourceCharacters, sourceDialogues, sourceEvents };
+};
+
+const canonicalShotDialogue = (shot: VideoShot): string => {
+  if (shot.dialogue?.trim()) return shot.dialogue;
+  const range = canonicalDialogueFieldRange(shot.prompt || '');
+  return range ? shot.prompt.slice(range.start, range.end) : '';
+};
+
+const canonicalDialogueCue = (source: string, start: number, speaker: string, clipOffsetSec = 0) => {
+  const clauses = source.slice(0, start).split(/[\r\n；;]/u).filter((part) => part.trim());
+  const prefix = clauses[clauses.length - 1]?.trim() || '';
+  const timeRange = prefix.match(/(?:第\s*)?(\d+(?:\.\d+)?)\s*s\s*[–—-]\s*(\d+(?:\.\d+)?)\s*s/iu);
+  const speakerIndex = speaker ? prefix.lastIndexOf(speaker) : -1;
+  const annotation = speakerIndex >= 0
+    ? prefix.slice(speakerIndex + speaker.length).replace(/^[\s,，:：]+|[\s,，:：]+$/gu, '').trim()
+    : '';
+  return {
+    ...(timeRange ? { startSec: Number(timeRange[1]) + clipOffsetSec, endSec: Number(timeRange[2]) + clipOffsetSec } : {}),
+    ...(annotation ? { annotation } : {}),
+  };
+};
+
+const canonicalShotDialogues = (source: string, clipOffsetSec = 0): Array<{ speaker: string; text: string; startSec?: number; endSec?: number; annotation?: string }> => {
+  const quoted = getPromptDialogues(source).map((dialogue) => ({ speaker: dialogue.speaker, text: dialogue.content,
+    ...canonicalDialogueCue(source, dialogue.start, dialogue.speaker, clipOffsetSec) }));
+  if (quoted.length) return quoted;
+  return extractSourceDialogues(source).map((dialogue) => ({ speaker: dialogue.speakerCandidate, text: dialogue.text,
+    ...canonicalDialogueCue(source, dialogue.sourceStart, dialogue.speakerCandidate, clipOffsetSec) }));
+};
+
+const dialogueOccurrenceKey = (text: string, speakerKey: string): string =>
+  `${speakerKey}\u0000${text.trim()}`;
+
+const canonicalDialogueSpeakerKey = (speaker: string, bindings?: H3IdentityBindings): string => {
+  if (!speaker) return '';
+  const character = bindings?.characters.find((entry) => entry.name === speaker);
+  return character ? `id:${character.characterId}` : `name:${speaker.trim()}`;
+};
+
+const h3DialogueLanguage = (text: string): string => {
+  if (/\p{Script=Han}/u.test(text)) return 'Chinese';
+  if (/[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(text)) return 'Japanese';
+  if (/\p{Script=Hangul}/u.test(text)) return 'Korean';
+  if (/\p{Script=Cyrillic}/u.test(text)) return 'Russian';
+  if (/\p{Script=Arabic}/u.test(text)) return 'Arabic';
+  return 'English';
+};
+
+const appendCanonicalDialoguesToH3 = (
+  prompt: string,
+  canonicalShots: readonly VideoShot[],
+  mode: 'integrated' | 'full-reference',
+  identityBindings?: H3IdentityBindings,
+  audioMode?: string,
+): string => {
+  if (audioMode === 'none') return prompt;
+  const bodyName = mode === 'full-reference' ? 'detailed_description' : 'integrated_multimodal_description';
+  const sections = [...prompt.matchAll(/^(subject_definitions|summary|retention_analysis|detailed_description|integrated_multimodal_description|overall_soundscape|non_diegetic_music)\s*[:：][ \t]*/gmu)];
+  const bodyHeader = sections.find((section) => section[1] === bodyName);
+  if (!bodyHeader) return prompt;
+  const bodyStart = bodyHeader.index! + bodyHeader[0].length;
+  const bodyEnd = sections.find((section) => section.index! > bodyHeader.index!)?.index ?? prompt.length;
+  let body = prompt.slice(bodyStart, bodyEnd);
+  const shotMarkers = [...body.matchAll(/^\[Shot\s+(\d+)\][^\r\n]*/gmu)];
+  if (!shotMarkers.length) return prompt;
+  const speakerTokens = new Map<string, string>();
+  const usedSpeakerTokens = new Set([...body.matchAll(/\(S(\d+)\)/gu)].map((match) => `(S${match[1]})`));
+  for (const entry of identityBindings?.characters || []) {
+    if (entry.speakerToken) { speakerTokens.set(entry.name, entry.speakerToken); usedSpeakerTokens.add(entry.speakerToken); }
+  }
+  let nextSpeakerNumber = Math.max(0, ...[...usedSpeakerTokens].map((token) => Number(token.match(/\d+/u)?.[0] || 0))) + 1;
+  const additions: Array<{ shotIndex: number; text: string }> = [];
+  for (const [shotIndex, shot] of canonicalShots.entries()) {
+    const shotNumber = Number.isFinite(shot.index) ? shot.index : shotIndex + 1;
+    const lines = canonicalShotDialogues(canonicalShotDialogue(shot), shot.startSec).flatMap((dialogue) => {
+      const speaker = dialogue.speaker || shot.subject.trim();
+      const key = speaker || `shot-${shotIndex + 1}`;
+      let token = speakerTokens.get(key);
+      if (!token) {
+        const escaped = key.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+        const existing = escaped ? new RegExp(`${escaped}\\s+\\(S\\d+\\)`, 'gu').exec(body)?.[0].match(/\(S\d+\)/u)?.[0] : undefined;
+        while (usedSpeakerTokens.has(`(S${nextSpeakerNumber})`)) nextSpeakerNumber += 1;
+        token = existing || `(S${nextSpeakerNumber++})`;
+        speakerTokens.set(key, token);
+        usedSpeakerTokens.add(token);
+      }
+      const time = dialogue.startSec !== undefined && dialogue.endSec !== undefined
+        ? `From ${dialogue.startSec.toFixed(2)} to ${dialogue.endSec.toFixed(2)} seconds of this clip, `
+        : dialogue.startSec !== undefined ? `At ${dialogue.startSec.toFixed(2)} seconds of this clip, ` : '';
+      const annotation = dialogue.annotation ? ` ${dialogue.annotation}` : '';
+      const text = `${time}${speaker || 'Voice source'} ${token}${annotation} says: <d>[${h3DialogueLanguage(dialogue.text)}] ${dialogue.text}</d>`;
+      return [{ text, dialogueText: dialogue.text, speakerKey: canonicalDialogueSpeakerKey(speaker, identityBindings) }];
+    });
+    if (!lines.length) continue;
+    const markerIndex = shotMarkers.findIndex((marker) => Number(marker[1]) === shotNumber);
+    if (markerIndex < 0) continue;
+    const start = shotMarkers[markerIndex].index!;
+    const end = shotMarkers[markerIndex + 1]?.index ?? body.length;
+    const shotBody = body.slice(start, end);
+    const existingDialogueCounts = new Map<string, number>();
+    const parsedDialogues = getPromptDialogues(shotBody);
+    const parsedTextCounts = new Map<string, number>();
+    for (const dialogue of parsedDialogues) {
+      const textKey = dialogueOccurrenceKey(dialogue.content, '');
+      parsedTextCounts.set(textKey, (parsedTextCounts.get(textKey) || 0) + 1);
+      const key = dialogueOccurrenceKey(dialogue.content, canonicalDialogueSpeakerKey(dialogue.speaker, identityBindings));
+      existingDialogueCounts.set(key, (existingDialogueCounts.get(key) || 0) + 1);
+    }
+    const rawTextCounts = new Map<string, number>();
+    for (const match of shotBody.matchAll(/<d>\[[^\]]+\]\s*([\s\S]*?)<\/d>/gu)) {
+      const textKey = dialogueOccurrenceKey(match[1], '');
+      const occurrence = (rawTextCounts.get(textKey) || 0) + 1;
+      rawTextCounts.set(textKey, occurrence);
+      if (occurrence <= (parsedTextCounts.get(textKey) || 0)) continue;
+      const key = dialogueOccurrenceKey(match[1], '');
+      existingDialogueCounts.set(key, (existingDialogueCounts.get(key) || 0) + 1);
+    }
+    const canonicalOccurrences = new Map<string, number>();
+    const missing = lines.filter((line) => {
+      const key = dialogueOccurrenceKey(line.dialogueText, line.speakerKey);
+      const occurrence = (canonicalOccurrences.get(key) || 0) + 1;
+      canonicalOccurrences.set(key, occurrence);
+      const unknownSpeakerCount = line.speakerKey ? existingDialogueCounts.get(dialogueOccurrenceKey(line.dialogueText, '')) || 0 : 0;
+      return occurrence > (existingDialogueCounts.get(key) || 0) + unknownSpeakerCount;
+    });
+    if (missing.length) additions.push({ shotIndex: shotNumber, text: missing.map((line) => line.text).join('\n') });
+  }
+  for (const { shotIndex, text } of additions.reverse()) {
+    const markerIndex = shotMarkers.findIndex((marker) => Number(marker[1]) === shotIndex);
+    if (markerIndex < 0) continue;
+    const start = shotMarkers[markerIndex].index!;
+    const end = shotMarkers[markerIndex + 1]?.index ?? body.length;
+    body = `${body.slice(0, end).trimEnd()}\n${text}\n${body.slice(end).replace(/^\s*/u, '')}`;
+  }
+  return `${prompt.slice(0, bodyStart)}${body}${prompt.slice(bodyEnd)}`;
 };
 
 /** Render explicit performance, or preserve the entire legacy body inside the
  * known H3 layout. Neither path guesses roles from missing section titles. */
 export const renderDeliveredH3Performance = (delivery: ReturnType<typeof readH3DeliveryEnvelope>,
-  mode: 'integrated' | 'full-reference', layout: H3SectionLayoutOptions = {}): ReturnType<typeof readH3DeliveryEnvelope> => {
+  mode: 'integrated' | 'full-reference', layout: H3SectionLayoutOptions = {}, canonicalShots: readonly VideoShot[] = []): ReturnType<typeof readH3DeliveryEnvelope> => {
   const bindings = delivery.identityBindings;
-  if (!bindings?.performance) return { ...delivery,
-    h3Prompt: serializeAuthoredH3Prompt(delivery.h3Prompt, { ...layout, mode, language: 'zh' }) };
+  if (!bindings?.performance) {
+    const prompt = serializeAuthoredH3Prompt(delivery.h3Prompt, { ...layout, mode, language: 'zh' });
+    return { ...delivery, h3Prompt: appendCanonicalDialoguesToH3(prompt, canonicalShots, mode, bindings, layout.audioMode) };
+  }
   const matches = [...delivery.h3Prompt.matchAll(/^(subject_definitions|summary|retention_analysis|detailed_description|integrated_multimodal_description|overall_soundscape|non_diegetic_music)\s*[:：][ \t]*/gmu)];
   const sections = new Map(matches.map((match, index) => [match[1],
     delivery.h3Prompt.slice(match.index! + match[0].length, matches[index + 1]?.index ?? delivery.h3Prompt.length).trim()]));
@@ -255,7 +417,9 @@ export const renderDeliveredH3Performance = (delivery: ReturnType<typeof readH3D
       return currentEvidence ? [{ ...entry, evidence: currentEvidence }] : [];
     }),
   } : undefined;
-  return { ...delivery, h3Prompt: rendered.prompt, identityBindings: {
+  const h3Prompt = appendCanonicalDialoguesToH3(rendered.prompt, canonicalShots, mode,
+    { ...bindings, characters: rendered.characters }, layout.audioMode);
+  return { ...delivery, h3Prompt, identityBindings: {
     version: 1, characters: rendered.characters, events: rendered.events, performance: rendered.plan,
   }, ...(characterParticipation ? { characterParticipation } : {}) };
 };
@@ -650,7 +814,7 @@ export async function generateSingleSegmentPrompt(
     delivery = renderDeliveredH3Performance(delivery,
       (chooseDeliveryFormat ? deliveryMediaMode === 'full-reference'
         : /^subject_definitions\s*[:：]/mu.test(delivery.h3Prompt) || /^subject_definitions\s*[:：]/mu.test(official.officialPromptZh || '')) ? 'full-reference' : 'integrated',
-      { audioMode: official.audioMode, ...(preserveExistingAudio ? { preservedAudioPrompt: official.officialPromptZh } : {}) });
+      { audioMode: official.audioMode, ...(preserveExistingAudio ? { preservedAudioPrompt: official.officialPromptZh } : {}) }, synchronized.shots);
     const prompt = delivery.h3Prompt;
     assertCurrent();
     // The AI owns the adopted performance. New sidecars serialize their roles
@@ -728,7 +892,7 @@ export async function generateSingleSegmentPrompt(
     try {
       let englishIdentityBindings: H3IdentityBindings | undefined;
       let englishDeliveryWarnings: string[] = [];
-      const savedFacts = savedH3TranslationFacts(official.h3IdentityBindings);
+      const savedFacts = savedH3TranslationFacts(official.h3IdentityBindings, official.shots);
       const english = await translateVideoPromptToEnglish({
         promptFormat: 'h3',
         h3AudioMode: official.audioMode,

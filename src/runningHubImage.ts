@@ -1,6 +1,6 @@
 import type { ImageApiConfig } from './types';
 import type { ImageResolutionPlan } from './imageResolution';
-import { runningHubImageTierParameters } from './runningHubImageSize';
+import { runningHubImageMegapixelAspectParameters, runningHubImageTierParameters } from './runningHubImageSize';
 import { repairRunningHubImageV3LegacySlots, syncRunningHubImageSlots } from './runningHubImageSlots';
 import { applyRunningHubImageV3AspectGate, isRunningHubImageV3Workflow, runningHubImageV3OptionalImage } from './runningHubImageV3';
 import type { RunningHubVideoImportResult, RunningHubVideoWorkflow } from './runningHubVideoTypes';
@@ -100,6 +100,8 @@ export const buildRunningHubImageRequest = (config: ImageApiConfig, input: Runni
   if (input.sizeOverride) {
     if (input.resolutionPlan?.encoding.kind === 'tier') {
       Object.assign(parameters, runningHubImageTierParameters(workflow, input.resolutionPlan.encoding.value, input.resolutionPlan.logicalAspectRatio));
+    } else if (input.resolutionPlan?.encoding.kind === 'megapixels') {
+      Object.assign(parameters, runningHubImageMegapixelAspectParameters(workflow, input.resolutionPlan.logicalAspectRatio));
     } else for (const dimension of ['width', 'height'] as const) {
       if (!workflow.mapping.parameters?.[dimension]) throw new Error(`RunningHub ${dimension} 尚未绑定云端尺寸字段，不能忽略所选像素。`);
       if (!Number.isSafeInteger(input[dimension]) || (input[dimension] ?? 0) < 64) throw new Error('图片宽和高必须是至少 64 的整数。');

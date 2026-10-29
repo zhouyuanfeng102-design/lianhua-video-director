@@ -57,14 +57,15 @@ check('K spelling and full declared resolution options are retained', () => {
 });
 
 check('MP, P presets and linked fields cannot be guessed as K tiers', () => {
-  for (const original of ['0.8', 0.8, '1080P', '2048x2048', ['source', 0], false]) {
+  for (const original of ['0.8', 0.8, '2.0000000000000004', '1080P', '2048x2048', ['source', 0], false]) {
     const value = workflow(); resolutionValue(value, original);
-    assert.equal(runningHubImageSizeMode(value), 'default', String(original));
+    const megapixel = original === '0.8' || original === 0.8 || original === '2.0000000000000004';
+    assert.equal(runningHubImageSizeMode(value), megapixel ? 'megapixels' : 'default', String(original));
     assert.throws(() => runningHubImageTierParameters(value, '2K'), /未绑定可识别.*MP.*P/u);
   }
   const value = workflow();
   value.fieldControls = { '["189","value"]': { kind: 'number', unit: 'MP' } };
-  assert.equal(runningHubImageSizeMode(value), 'default');
+  assert.equal(runningHubImageSizeMode(value), 'megapixels');
   assert.throws(() => runningHubImageTierParameters(value, '2K'), /MP/u);
 });
 

@@ -1594,13 +1594,13 @@ const storyVisualBatches = (paragraphs: StoryVisualActionPlan['sourceParagraphs'
 };
 
 const STORY_VISUAL_PLAN_OUTPUT = [
-  `先建立完整的场景稿，再整理场景内的有序事件。请返回 scenes 与 events；每句直接对白单独作为 kind=dialogue 的事件，按原文发生顺序与动作交错排列，不能缩进一个大动作的摘要。${SPOKEN_CUE_CONTENT_RULE}这种发声内容必须作为kind=dialogue，speaker填写实际说话人；引号内或明确逐字原话的dialogue逐字保留，只有话题转述时才在获准生成范围整理为自然完整句。动作、叙述、知识、内心、回忆分别按原意记录，不擅自变成有声台词。`,
+  `先建立完整的场景稿，再整理场景内的有序事件。请返回 scenes 与 events；每句直接对白单独作为 kind=dialogue 的事件，按原文发生顺序与动作交错排列，不能缩进一个大动作的摘要。${SPOKEN_CUE_CONTENT_RULE}凡是 kind=dialogue，dialogue 必须填写该事件完整、可朗读的词语句子，speaker填写实际说话人；“低声应门”“人物发声”“声音从门后传来”等只能写进发话动作或声源位置，不能作为 dialogue 内容。若上下文已明确沟通目的（例如门内人物回应敲门），直接依据同一事件写最短完整句；纯笑、哭、咳、喘等没有词语的人声不要伪造成台词。引号内或明确逐字原话的dialogue逐字保留，只有话题转述时才在获准生成范围整理为自然完整句。动作、叙述、知识、内心、回忆分别按原意记录，不擅自变成有声台词。`,
   'scenes 每项为 {"id":"s1","title":"场景标题","time":"原文故事时间词，未说明时写未说明","timeRelation":"相对前场的时间关系及跨度，不编造具体日数","location":"实际地点","setting":"有依据的环境、关键物件及初始状态","participants":[{"id":"稳定人物ID，优先已有项目ID","name":"稳定姓名或女仆等明确称谓","aliases":[],"existingEntityId":"只有对应已有项目实体时填写","presence":"present/offscreen/mentioned","eventIds":["参与的事件ID"]}],"eventIds":["按顺序的事件ID"],"sourceParagraphIds":["p1"]}。同地跳时建立新场次；同时异地另建场次；连续场次跨批沿用 precedingScenes 的id，不因请求批次另造一场。',
   '人物以每件事的实际参与关系确定：没有姓名但有独立动作或对白的女仆、店员也保留稳定身份；在场、画外参与、仅被提及分别记录。群体称谓按完整上下文落实已确定成员，未知成员保留原称呼与未知项，不猜人数；不要将后文才出现者提前放入现场。人物先前持抱、背负、持物、伤势必须随实际动作延续。',
-  'sourceQuotes 是原文所有带引号片段的词法目录，包含道具名、引述和对白，目录本身不代表发言。你结合全文判断真正对白，为每句对白事件填写speaker、dialogue和sourceQuoteIds（对应片段ID）；引号内或明确逐字原话直接采用片段原字，不交给第二阶段重写。一个引号片段确含多人发言时，逐事件填写原话并留空sourceQuoteIds，不将整段错误归给一个人。无引号但只有明确话题转述时，dialogue写该说话人依据原事实整理的自然完整句，不把摘要原样当台词；未知说话人保持未知。',
+  'sourceQuotes 是原文所有带引号片段的词法目录，包含道具名、引述和对白，目录本身不代表发言。你结合全文判断真正对白，为每句对白事件填写speaker、完整dialogue和sourceQuoteIds（对应片段ID）；引号内或明确逐字原话直接采用片段原字，不交给第二阶段重写。一个引号片段确含多人发言时，逐事件填写原话并留空sourceQuoteIds，不将整段错误归给一个人。无引号但有明确话题、对象或回应目的时，dialogue写该说话人依据原事实整理的最短完整句，不把摘要或“应门/回应声”原样当台词；delivery/channel单独表达低声、隔门和画外位置。没有词语的非对白人声保留为非词汇声音，不填虚构台词；未知说话人保持未知。',
   '第一阶段：理解剧情并建立事实动作表，不写画面正文。通读完整原文与已有状态，理解当前focusParagraphIds，完整记录每个实际行动及其次数、对白、因果、必要设定和心理判断；状态、习惯、限力、无兵刃等原则附着于相应action/phases/result或summary，不单独当作耗时动作，也不删掉同句中真实发生的几个照面、收手或整理。明确三步仍是三步，未定量的多次行动不擅定次数；同时发生的动作直接在phases写清同时，受压后下沉、脱开后释放等保留先后。实际执行、意图、尝试、中断、条件、否定和回忆按原意区分；不采用未知编排，不把未发生动作写成已发生，不重复其他批次事件。',
   '事件表完整保留已有请求、共同拒绝、笑容与旁观反应，actor/target/action写出上下文已经确定的成员及其角色，不用“被拒绝后转身”替代群体回应本身；不确定成员仍用原称呼并说明未知。时间跳跃写入它所连接事件的action/phases或状态，相关sourceParagraphIds/evidence保留能说明前后时间关系的原文，不只留在全文summary，也不把经过数日独立扩写为未发生的生活事件。',
-  '只返回一个 JSON 对象，包含上述scenes数组及：{"version":1,"summary":"仅供跨批承接的状态摘要，不能代替事件和对白","events":[{"id":"e1","sceneId":"s1","kind":"action/dialogue/narration","participantIds":["稳定人物ID"],"sourceParagraphIds":["p1"],"evidence":"对应原文原句，保留真实动作动词与限定","actor":"动作发出者","target":"作用对象","action":"原文已发生动作；对白事件不在此复述台词","phases":["有原文依据的连续过程，真实重复发生的动作保留次数"],"speaker":"仅对白填写说话人","dialogue":"仅对白填写完整原话","sourceQuoteIds":["p1-q1"],"result":"已发生结果，未知留空","uncertainties":["不能确定的事实"]}]}。',
+  '只返回一个 JSON 对象，包含上述scenes数组及：{"version":1,"summary":"仅供跨批承接的状态摘要，不能代替事件和对白","events":[{"id":"e1","sceneId":"s1","kind":"action/dialogue/narration","participantIds":["稳定人物ID"],"sourceParagraphIds":["p1"],"evidence":"对应原文原句，保留真实动作动词与限定","actor":"动作发出者","target":"作用对象","action":"原文已发生动作；对白事件不在此复述台词","phases":["有原文依据的连续过程，真实重复发生的动作保留次数"],"speaker":"仅对白填写说话人","dialogue":"仅对白填写完整可朗读句子；不要填低声应门、人物发声或声音从门后传来","sourceQuoteIds":["p1-q1"],"result":"已发生结果，未知留空","uncertainties":["不能确定的事实"]}]}。',
   `${NSFW_PROSE_JOINED_MOTION_RULE} evidence 仍逐字摘录原文。action 和 phases 在已经进入且双方还连着时写成这一条持续的缓慢起伏，不把这一条记成多次撞击。打斗、摔倒和兵器的真实重复次数仍保留。`,
   'sourceParagraphIds 只能使用数据中稳定编号，evidence 使用能证明本事件的最短连续原句片段（通常20–80字），必须逐字来自对应原文，不使用省略号拼接，不复制整个长段或全文。每项事件由原文支撑，不遗漏后段、对白、设定和未能直接拍摄的因果。summary 不得将推测确定化。不要返回 sourceParagraphs，程序保留原文；不要代码围栏或额外文字。',
   '单个原段被预算拆分时，sourceParagraphs条目的sourceStart/sourceEnd是原段内字符范围。事件可返回sourceStart/sourceEnd表示其在第一个sourceParagraphId原段内的实际范围，沿用原段字符坐标；只记录本批范围的实际事件，不重演前批或抢写后批。',
@@ -1609,7 +1609,7 @@ const STORY_VISUAL_PLAN_OUTPUT = [
 ].join('\n');
 
 const STORY_VISUAL_BODY_OUTPUT = [
-  '第二阶段：保持actionPlan.scenes、events、原对白、人物身份、时间地点与结果，细化focusEvents中已有动作。每个动作以eventDetails关联原事件，分别写清普通操作、人物互动、对话反应和打斗的具体过程；不再改写整段小说，也不重新生成场次、事件列表或台词。对白与必要说明由程序按第一阶段顺序直接排版。前后事件仅用于承接。',
+  '第二阶段：保持actionPlan.scenes、events、原对白、人物身份、时间地点与结果，细化focusEvents中已有动作。每个动作以eventDetails关联原事件，分别写清普通操作、人物互动、对话反应和打斗的具体过程；不再改写整段小说，也不重新生成场次、事件列表或台词。对白事件的完整dialogue由第一阶段事件记录直接排版，eventDetails不得用“人物发声”“低声应门”“声音从门后传来”等泛化词替换或覆盖它；前后事件仅用于承接。',
   'detailed 继续充分细化动作和打斗：姿态、手脚配合、执行路径、接触或落空、停续、受力、回应、环境影响与终态；相容且不影响事实的衔接列在stagingAdditions。faithful仅写已有依据的过程。原文一指击退就细化这一击，不扩成多回合；抱着和背着走开不能补成放下；掏出树枝不能变成捡起；损坏原因未知不能补踩坏。会改变能力机制、动作性质、命中、伤势或结果的未知细节不作确定选择，保持事实与未知边界。',
   NSFW_PROSE_JOINED_MOTION_RULE,
   '已经进入且还连着时，正文不把这一段写成每一击的执行路径、停续和受力。',
@@ -1757,7 +1757,7 @@ const requestStoryVisualConversion = async (
     context?.onProgress?.('visualizing', batchIndex + 1, visualBatches.length);
   }
   const sceneParagraphs = assembleStoryVisualSceneParagraphs(actionPlan, paragraphs);
-  const text = actionPlan.scenes?.length ? sceneParagraphs.map((paragraph) => paragraph.text).join('\n\n') : bodies.join('\n\n');
+  const text = actionPlan.events.length ? sceneParagraphs.map((paragraph) => paragraph.text).join('\n\n') : bodies.join('\n\n');
   return { text, actionPlan, paragraphs: sceneParagraphs, engineVersion: STORY_VISUAL_ENGINE_VERSION, detailMode, warnings: [] };
 };
 
@@ -1783,15 +1783,17 @@ export const requestStoryVisualParagraphRewrite = async (
   };
   const protocol = [STORY_VISUAL_BODY_OUTPUT,
     '本次仅重做 paragraphId 对应的一个段落。阅读完整原文、currentVisualStory、可选 actionPlan 与前后段落，自己确认本段承担的真实动作与因果，使局部动作与完整剧情连续；不输出或改写其他段落。metadata 缺失或引用不一致时以完整原文和当前正文理解该段，不以缺少标注为由拒绝重做。',
-    actionPlan?.scenes?.length
-      ? '只返回 {"paragraph":{"id":"与paragraphId相同","sceneId":"沿用原场次","sourceParagraphIds":["保留原段范围"],"eventIds":["保留原段事件"],"eventDetails":[{"eventId":"原动作事件id","text":"重新细化该动作的过程","stagingAdditions":[]}],"stagingAdditions":[]}}。只改变本场动作细化，不重写对白、人物、时间地点和事实结果。'
+    actionPlan?.events.length
+      ? actionPlan.scenes?.length
+        ? '只返回 {"paragraph":{"id":"与paragraphId相同","sceneId":"沿用原场次","sourceParagraphIds":["保留原段范围"],"eventIds":["保留原段事件"],"eventDetails":[{"eventId":"原动作事件id","text":"重新细化该动作的过程","stagingAdditions":[]}],"stagingAdditions":[]}}。只改变本场动作细化，不重写对白、人物、时间地点和事实结果。'
+        : '只返回 {"paragraph":{"id":"与paragraphId相同","sourceParagraphIds":["保留原段范围"],"eventIds":["保留原段事件"],"eventDetails":[{"eventId":"原动作事件id","text":"重新细化该动作的过程","stagingAdditions":[]}],"stagingAdditions":[]}}。只重做原动作事件细化；完整对白仍由原actionPlan.events直出，不改写或遗漏。'
       : '本条是历史自然段：只返回 {"paragraph":{"id":"与 paragraphId 相同","sourceParagraphIds":["保留原段范围"],"eventIds":["保留原段事件"],"text":"重做后的完整自然段落，保留原对白","stagingAdditions":[]}}；同步本段可选sceneStaging，保留适用battleStaging和邻段状态，不为填字段新增事件。',
   ].join('\n');
   const raw = await requestStoryVisualText(withTextApiUsageContext(config, {}, 'story-visual-rewrite'), protocol, data, signal, rules, context);
   if (signal?.aborted) throw createAbortError();
   const parsed = readStoryVisualObject(raw);
   const returnedParagraph = normalizeStoryVisualParagraphs([parsed?.paragraph])[0];
-  if (actionPlan?.scenes?.length && returnedParagraph) {
+  if (actionPlan?.events.length && returnedParagraph) {
     const replacement = { ...returnedParagraph, id: paragraph.id, sceneId: paragraph.sceneId,
       sourceParagraphIds: paragraph.sourceParagraphIds, eventIds: paragraph.eventIds };
     const nextParagraphs = assembleStoryVisualSceneParagraphs(actionPlan,
@@ -1873,8 +1875,8 @@ export const requestStoryPreparationWithReview = async (
       ? '当前模式：AI画面描述转化（optimize）。先通读完整原文并理解实际发生的剧情，再转成自然连贯、可观察的剧情画面描述。理清人物身份与称呼、动作发出者和对象、真实说话关系、事件顺序和因果。不是文学润色或扩写新故事，也不是逐句硬翻、机械拆字段、换标题或套模板；若普通剧情原稿已经清楚可用，保留合适原段落。不要求增加篇幅，允许更短或同长，不为凑长度虚构细节。'
       : '当前模式：扩写补全（expand）。保留原核心剧情，补足动作准备、执行、反应、环境和因果衔接，增加真实剧情信息，不以同义改写或重复原文冒充扩写。篇幅按本次资料的 targetLength 理解；它只是近似目标，允许自然浮动，不得把字数当成必须精确满足的硬性条件。',
     optimizing
-      ? `用户完整原文是剧情事实的最高依据。保留核心人物、数量、称呼和代号、关键事件、因果与结果；不得新增人物或情节，不虚构未知身份、外貌、地点、时间、动机、知识、具体衣物和材质。动作与反应只依据原文写清，指代不明时保留不确定性，不猜成事实。引号内和明确逐字原话保留原字、原语种、原说话人及出现顺序；同一说话人的合理拆句、合句和排版调整可以接受，但不改写原话或补造事实。${SPOKEN_CUE_CONTENT_RULE}非对白描述使用中文；只有发声动词后没有具体话题或原句时，交谈概述才不代表可以补写台词。`
-      : `扩写仍必须逐字保留原文已有的引号台词和说话人；${SPOKEN_CUE_CONTENT_RULE}本数据中的dialogueMode=not-required只表示不强制增加原文没有的对白，不否认原文已明确说话人和话题的转述，应在不增加事实的前提下整理成自然完整台词。仅当原剧情没有具体发声内容、或明确要求需要时补充自然对白，不为了增长字数强塞台词，不改变已有事件的事实与结局。`,
+      ? `用户完整原文是剧情事实的最高依据。保留核心人物、数量、称呼和代号、关键事件、因果与结果；不得新增人物或情节，不虚构未知身份、外貌、地点、时间、动机、知识、具体衣物和材质。动作与反应只依据原文写清，指代不明时保留不确定性，不猜成事实。引号内和明确逐字原话保留原字、原语种、原说话人及出现顺序；同一说话人的合理拆句、合句和排版调整可以接受，但不改写原话或补造事实。${SPOKEN_CUE_CONTENT_RULE}非对白描述使用中文；只要完整上下文已成立明确的词语发话和沟通目的，即使原文只写“应门/回应”也要整理为最短完整句，不以没有引号或没有直陈话题为由退回成声音提示。`
+      : `扩写仍必须逐字保留原文已有的引号台词和说话人；${SPOKEN_CUE_CONTENT_RULE}本数据中的dialogueMode=not-required只表示不强制增加原文没有的对白，不否认原文已成立的发话事件；已明确说话人、对象或沟通目的的转述要在不增加事实的前提下整理成自然完整台词。仅在上下文没有词语发话事件、也没有明确增加对白要求时，不强行新增台词；不改变已有事件的事实与结局。`,
     optimizing
       ? '按真实场景与事件推进组织自然中文段落，可加简短场景标题；不强制出场人物/剧情/对白/背景信息等固定栏目。写清谁在哪里、做什么、作用于谁、对方如何反应及后续结果。原对白放在对应动作和剧情时刻，不能集中挪到附录后丢失时序，也不重复转述同一句话。'
       : '',
@@ -1913,8 +1915,8 @@ export const requestStoryPreparationWithReview = async (
       ? '把非对白中的文学比喻、作者评价和重复说明改为有原文依据的直接描述，让环境状态、既有动作和可见反应及结果更清楚；必要的不可见设定或动机保留简短说明，不强行补造画面，不增加新动作或未知细节。'
       : `扩写要增加真实剧情信息：补足环境、动作准备与执行过程、人物反应、阻碍、转折和可见结果；不得只做同义改写、重复原句或堆砌形容词。\n${NSFW_PROSE_JOINED_MOTION_RULE}`,
     optimizing
-      ? '对话规则：依据完整上下文判断谁在说话；引号内和明确逐字原话留在对应动作和剧情时刻，保留原字、原语种、说话人、出现顺序以及与动作的先后/同时关系，不在叙述中重复。同一说话人的拆合句可调整排版但不能删改原话。只有说话人和话题转述时，才在获准转化阶段整理自然完整句，不把摘要机械当台词或增加事实。动作、神态、语气和发声方式不属于人名，不把“只”“语气平静却带着宠溺”“应道”“低声道”“笑盈盈道”等当人物；身份未明确就保留原代词或说明未明确，不猜实名。明确听者只倾听、反应或行动，不能代说。不因人物在交谈或预设要求丰富对白而虚构台词。'
-      : `对话规则：${SPOKEN_CUE_CONTENT_RULE}原文已有对白，或明确要求增加对话、对白、台词、独白时，必须依据人物身份、关系、情绪、知识边界和当前剧情扩写自然台词；保留已有对白的说话人、关键信息和立场，新增台词必须推动动作、冲突、信息或情绪变化。`,
+      ? '对话规则：依据完整上下文判断谁在说话；引号内和明确逐字原话留在对应动作和剧情时刻，保留原字、原语种、说话人、出现顺序以及与动作的先后/同时关系，不在叙述中重复。同一说话人的拆合句可调整排版但不能删改原话。只要上下文已经成立词语发话和沟通目的，就在获准转化阶段整理最短自然完整句；不把摘要机械当台词或增加事实。动作、神态、语气和发声方式不属于人名，不把“只”“语气平静却带着宠溺”“应道”“低声道”“笑盈盈道”等当人物；身份未明确就保留原代词或说明未明确，不猜实名。明确听者只倾听、反应或行动，不能代说。不因人物在交谈或预设要求丰富对白而虚构台词。'
+      : `对话规则：${SPOKEN_CUE_CONTENT_RULE}原文已有对白，或明确要求增加对话、对白、台词、独白时，必须依据人物身份、关系、情绪、知识边界和当前剧情扩写自然台词；保留已有对白的说话人、关键信息和立场，新增台词必须推动动作、冲突、信息或情绪变化。最终正文不能只留下“人物发声”“低声应门”或“声音从门后传来”。`,
     optimizing
       ? '对白推荐使用“说话人：台词”或清楚的小说发言形式，可包中文引号，不要求标点和行数机械一致。原文中的道具名、术语、标牌文字、文字引用不是人物发言，不要误作对白。直接阅读完整 sourceTextOrRequirement，自行理解和整理其中人物、对白、动作及场景，不依赖任何本地预抽取的清单；不能把上下文碎片当姓名。'
       : '要求对白时，每句必须能明确判断说话人，并使用中文引号，或使用“说话人：台词。”格式；不得用带引号的道具名、术语或标题冒充对白。',
@@ -3877,6 +3879,7 @@ const STORYBOARD_STABLE_SUBJECT_CONTRACT = [
 
 const STORYBOARD_AI_FULL_TEXT_REVIEW = [
   '以完整 sourceStory 为当前演出剧情来源，直接阅读全文；storyUnderstandingContext若有仅辅助理解本段指代与因果，不扩大当前段范围。自行识别剧情事件、对白、说话人、因果和段落关系，不依赖本地抽取、句子 ID 或关键词覆盖率。',
+  `${SPOKEN_CUE_CONTENT_RULE}逐镜dialogue必须写出完整可朗读句；“低声应门”“人物发声”“声音从门后传来”只能描述delivery/channel，不能成为对白内容或sound字段内容。明确的非词汇笑、哭、咳、喘留作实际vocal声音，不伪造台词。`,
   STORY_CAUSALITY_RULE,
   '在同一次回答内先完成分镜，再把完整原文与自己的整个分镜逐项对照自检；自行修正遗漏、错误归属、重复对白、人物/物种外貌冲突、声音时刻和不合理节奏后，只输出最终完整方案。不要输出未经自检的中间稿。',
   '语义覆盖由你根据上下文判断，不要求每句旁白逐字复写为单独镜头；有必要保留的事件和原对白不能以概括替代。原对白保持原语言、说话人和先后关系，按剧情安排停顿，不按本地字数或语速配额裁剪。',
@@ -4176,6 +4179,7 @@ export const requestShotRecommendation = async (
       '只返回一个严格 JSON 对象，不要 Markdown、解释、代码围栏或额外对象。',
       STORYBOARD_SOURCE_PLANNING_AUTHORITY_RULE,
       STORYBOARD_SPEECH_FIRST_PLANNING_RULE,
+      SPOKEN_CUE_CONTENT_RULE,
       DIALOGUE_VOICE_IDENTITY_RULE,
       'shots 必须按时间先后排列：第一镜 startSec=0，相邻镜首尾连续，最后一镜 endSec=总时长；每镜 endSec 必须大于 startSec。',
       ...(initialParams.requiredSegmentDurationSec ? [VIDEO_SEQUENCE_TEXT_HANDOFF_PLANNING_RULE] : []),
@@ -4193,7 +4197,7 @@ export const requestShotRecommendation = async (
       VIDEO_PROMPT_FOCUS_RULE,
       VIDEO_PRIVATE_SCOPE_SELECTION_RULE,
       '每镜 sourceExcerpt 可填写你从完整 sourceStory 中自行选择的原文依据；该字段只帮助用户追溯，不是本地内容覆盖门禁。不要把改写文字冒充逐字原文；无需填写本地句子 ID。',
-      '同时自行填写 space（空间关系）、performance（可见表演）、direction（朝向）和 dialogue（每句完整原对白及本镜相对起止区间，无对白写“无”）。程序直接排版你的字段，不会替你从 action 抽台词、按字数重排对白时间、猜测说话人、补写动作/镜头/光影/音效。action 中保留完整动作与发生顺序，sound 只写当前镜实际可听且有事件或接触依据的声音，交代发声对象、接触材质与随动作起止的关系；不从题材、风格、参考图或静置/携带的道具推导拟音。',
+      '同时自行填写 space（空间关系）、performance（可见表演）、direction（朝向）和 dialogue（每句完整可朗读原对白及本镜相对起止区间，无词语对白写“无”）。dialogue 必须写出真实说话人、声道、听者和完整台词；“低声应门”“人物发声”“声音从门后传来”只能作为delivery/channel或动作背景，不能代替dialogue文字。程序直接排版你的字段，不会替你从 action 抽台词、按字数重排对白时间、猜测说话人、补写动作/镜头/光影/音效。action 中保留完整动作与发生顺序，sound 只写当前镜实际可听的非词汇人声、环境声和动作声，不能把台词或泛化发声提示塞进sound；交代发声对象、接触材质与随动作起止的关系，不从题材、风格、参考图或静置/携带的道具推导拟音。',
       STORYBOARD_SCENE_STAGING_OUTPUT_RULE,
       'dialogue 在每句原话旁直接注明完整说话人、项目已知身份、画内/背影/画外声源及相对起止时刻；有原剧情或用户确认的声线时才附具体音色，没有特殊声线要求时保持项目已知的性别与基本发声身份，不为填“声音身份”自行补造少年音、男声、音高或特殊音色。怯懦、结巴、低声和喊叫只表达本句表演，不能改变人物声音身份；本轮候选自行补出的声线不是用户确认事实。身份资料用于辨认，是否出场或发声仍由本段剧情决定。未获授权的其他人物在该句期间不发该句、不做同步说话口型。',
       STORYBOARD_STABLE_SUBJECT_CONTRACT,
@@ -4210,7 +4214,7 @@ export const requestShotRecommendation = async (
       ...(params.executionContext ? ['executionContext是当前视频连接的已知事实，与提示词格式独立；unknown表示未知，不从模型名称猜测输入或参数能力。不因这些资料增删动作、次数、对白或改变固定时长、当前规划权限，不把内部连接字段写入交付正文。'] : []),
       '每个 shots 项包含 startSec、endSec、sourceExcerpt、purpose、subject、action、camera、transition、lighting、sound、result。',
       '若数据中提供 requiredShotCount，shots 数量必须与其完全一致；未提供时由你独立决定最合适的镜头数量。',
-      `JSON 字段格式示意：${JSON.stringify({ reason: '连续场面的叙事职责与必要观察安排', breakdown: ['本次具体依据'], aiReview: { status: 'passed', summary: '本次对照全文的结论', issues: [] }, shots: [{ startSec: 0, endSec: params.durationSec, durationSec: params.durationSec, localTimeRangeSec: [0, params.durationSec], sourceExcerpt: '对应原文依据', purpose: '本镜承担的完整叙事职责', subject: '剧情中的稳定主体名', action: '本镜内多个真实动作、对白及回应的连续过程', camera: '能表达观看重点的景别、机位与简单连续摄影', transition: '开场或实际换镜的叙事触发与状态承接', lighting: '场面光影', sound: '实际声音', result: '本镜结束时供后续继承的状态', space: '人物和物体的空间关系', performance: '剧情触发的可见表演', direction: '具名人物的朝向与作用目标', dialogue: '无，或本镜相对起点–终点秒 @原说话人（有依据的声音身份、在画/画外、听者）：完整原台词', visiblePrivatePartsByCharacter: {} }] })}。这里只示意字段，不设定本次镜数、镜长或语速，也不要求一镜到底；实际分镜覆盖本次获准总时长。主体名、原文、动作、时间和对白均替换为当前剧情。visiblePrivatePartsByCharacter 可省略，没有本镜明确可见需求时保持空对象。`,
+      `JSON 字段格式示意：${JSON.stringify({ reason: '连续场面的叙事职责与必要观察安排', breakdown: ['本次具体依据'], aiReview: { status: 'passed', summary: '本次对照全文的结论', issues: [] }, shots: [{ startSec: 0, endSec: params.durationSec, durationSec: params.durationSec, localTimeRangeSec: [0, params.durationSec], sourceExcerpt: '对应原文依据', purpose: '本镜承担的完整叙事职责', subject: '剧情中的稳定主体名', action: '本镜内多个真实动作、对白及回应的连续过程', camera: '能表达观看重点的景别、机位与简单连续摄影', transition: '开场或实际换镜的叙事触发与状态承接', lighting: '场面光影', sound: '非词汇人声、环境声或动作声；不放台词', result: '本镜结束时供后续继承的状态', space: '人物和物体的空间关系', performance: '剧情触发的可见表演', direction: '具名人物的朝向与作用目标', dialogue: '无，或本镜相对起点–终点秒 @原说话人（有依据的声音身份、在画/画外、听者）：完整可朗读原台词', visiblePrivatePartsByCharacter: {} }] })}。这里只示意字段，不设定本次镜数、镜长或语速，也不要求一镜到底；实际分镜覆盖本次获准总时长。主体名、原文、动作、时间和对白均替换为当前剧情。visiblePrivatePartsByCharacter 可省略，没有本镜明确可见需求时保持空对象。`,
       '摄影选择对照例仅说明场面组织，不是本次剧情或镜数配额：若原文是“门开，来者进入半步停住，室内人物持武器站立”，先以门口与室内的空间关系连续表达入场和相遇，不默认分别拍每人、武器和脸的介绍镜；若原文在连续交谈或攻防后揭示一项当前机位看不清的关键线索，可在揭示时换观察位置，新镜接续同一行动与原话，不重新起手。不要把例子的人物、武器或线索补进当前剧情。',
       '普通转头、迈步、持物和表情变化使用自然先后与连续速度表达；数字时间主要服务真正切点、完整发话区间及确需同步的关键事件，不逐个小动作安排毫秒刻度。每个shots项内部保持真实连续摄影，不在其camera或action里暗藏未列出的反打、插入镜头或“切到特写”。',
       '镜头总数必须在 1—900 之间。',

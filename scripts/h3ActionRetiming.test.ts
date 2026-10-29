@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
-import { generateSingleSegmentPrompt, renderDeliveredH3Performance } from '../src/singleSegmentPrompt';
+import { generateSingleSegmentPrompt, renderDeliveredH3Performance, savedH3TranslationFacts } from '../src/singleSegmentPrompt';
 import { applyAiAuthoredOfficialH3Prompt } from '../src/officialPrompt';
 import { serializeAuthoredH3Prompt } from '../src/h3DeliverySections';
 import { translateVideoPromptToEnglish } from '../src/promptTranslation';
 import { sourceContentHash } from '../src/sourceIntegrity';
-import type { H3IdentityBindings, H3PerformancePlan, Storyboard } from '../src/types';
+import type { H3IdentityBindings, H3PerformancePlan, Storyboard, VideoShot } from '../src/types';
 
 // Synthetic offline responses only. No application state or external API.
 const actions = ['甲颔首回礼并抬手起势。', '甲虚晃同时横移，乙跟随转身。', '甲连续三拳、低扫两次，乙逐次格挡避让并持续按肩至甲下沉后脱开。'];
@@ -39,6 +39,60 @@ const performance: H3PerformancePlan = { version: 1, timeBase: 'clip', descripti
   overallSoundscape: soundscape, nonDiegeticMusic: 'N/A',
 };
 const legacy = `[Shot 1] ${knownBindings.characters.map((entry) => entry.referenceAnchor).join(' ')} ${actions.join('')} 甲说<d>[Chinese] 请继续。</d>`;
+
+const authoredDoorDialogue = '第1.1s–2.1s @玉小刚（成年男性，低而稳，画外，隔门，听者：小舞）：“进来。”';
+const canonicalDialogueShot: VideoShot = { ...baseline.shots[0], subject: '玉小刚', dialogue: authoredDoorDialogue,
+  prompt: `【0s-5s】主体：@玉小刚，正在 [站在门后]；空间：门内；光影：昏暗；镜头：固定中景；台词：${authoredDoorDialogue}；音效：门外轻敲。` };
+const dialogueFallback = renderDeliveredH3Performance({ h3Prompt: 'integrated_multimodal_description:\n[Shot 1] 玉小刚的声音从门后传来。\n\noverall_soundscape:\n门外敲门声。\n\nnon_diegetic_music:\nN/A', envelope: true },
+  'integrated', {}, [canonicalDialogueShot]);
+assert.ok(dialogueFallback.h3Prompt.includes('<d>[Chinese] 进来。</d>'), 'canonical six-field dialogue is serialized when performance is absent');
+assert.match(dialogueFallback.h3Prompt, /From 1\.10 to 2\.10 seconds of this clip, 玉小刚 \(S1\).*成年男性，低而稳，画外，隔门，听者：小舞.*says: <d>\[Chinese\] 进来。<\/d>/u);
+assert.deepEqual(savedH3TranslationFacts(undefined, [canonicalDialogueShot]).sourceDialogues.map((entry) => entry.text), ['进来。'],
+  'English translation receives the exact original-language words from canonical shots');
+const sidecarDialogueFallback = renderDeliveredH3Performance({ h3Prompt: 'integrated_multimodal_description:\n[Shot 1] 玉小刚站在门后。\n\noverall_soundscape:\n门外敲门声。\n\nnon_diegetic_music:\nN/A',
+  envelope: true, identityBindings: { ...knownBindings, performance: { version: 1, timeBase: 'clip', descriptionLanguage: 'zh',
+    characters: [{ characterId: 'door-speaker', name: '玉小刚', visualDescription: '成年男性。' }],
+    shots: [{ shotIndex: 1, startSec: 0, visualDescription: '玉小刚站在门后。', events: [
+      { eventId: 'door-action', kind: 'visual', description: '门外有人敲门。', startSec: 0, endSec: 1 },
+    ] }], overallSoundscape: '门外敲门声。', nonDiegeticMusic: 'N/A' } } },
+  'integrated', {}, [canonicalDialogueShot]);
+assert.match(sidecarDialogueFallback.h3Prompt, /玉小刚 \(S1\).*成年男性，低而稳，画外，隔门，听者：小舞.*says: <d>\[Chinese\] 进来。<\/d>/u,
+  'canonical dialogue is retained when an existing performance sidecar omits the speech event');
+const repeatedDialogueShot: VideoShot = { ...canonicalDialogueShot, startSec: 5,
+  dialogue: '第1.1s–2.1s @玉小刚（成年男性，低而稳，画外，隔门，听者：小舞）：“进来。”；第3.1s–4.1s @玉小刚（成年男性，低而稳，画外，隔门，听者：小舞）：“进来。”' };
+const repeatedDialogueBindings: H3IdentityBindings = { version: 1,
+  characters: [{ characterId: 'door-speaker', name: '玉小刚', referenceAnchor: '声音身份：玉小刚。' }],
+  performance: { version: 1, timeBase: 'clip', descriptionLanguage: 'zh',
+    characters: [{ characterId: 'door-speaker', name: '玉小刚', visualDescription: '成年男性。' }],
+    shots: [{ shotIndex: 1, startSec: 5, visualDescription: '玉小刚站在门后。', events: [
+      { eventId: 'door-speech-1', dialogueId: 'door-dialogue-1', kind: 'speech', text: '进来。', language: 'Chinese',
+        speakerCharacterIds: ['door-speaker'], channel: 'off-screen', startSec: 1.1, endSec: 2.1 },
+    ] }], overallSoundscape: '门外敲门声。', nonDiegeticMusic: 'N/A' } };
+const repeatedDialogueFacts = savedH3TranslationFacts(repeatedDialogueBindings, [repeatedDialogueShot]);
+assert.deepEqual(repeatedDialogueFacts.sourceDialogues.map((entry) => entry.text), ['进来。', '进来。'],
+  'translation facts retain repeated source speech that the performance sidecar omitted');
+const repeatedDialogueDelivery = renderDeliveredH3Performance({ h3Prompt: '', envelope: true,
+  identityBindings: repeatedDialogueBindings }, 'integrated', {}, [repeatedDialogueShot]);
+assert.equal([...repeatedDialogueDelivery.h3Prompt.matchAll(/<d>\[Chinese\] 进来。<\/d>/gu)].length, 2,
+  'H3 backfill retains the second occurrence of identical dialogue');
+assert.match(repeatedDialogueDelivery.h3Prompt, /From 8\.10 to 9\.10 seconds of this clip/u,
+  'shot-relative dialogue timing is converted to clip time from the canonical shot start');
+const punctuationBindings = structuredClone(repeatedDialogueBindings);
+punctuationBindings.performance!.shots[0].events = [{ eventId: 'door-speech-question', dialogueId: 'door-dialogue-question', kind: 'speech',
+  text: '进来？', language: 'Chinese', speakerCharacterIds: ['door-speaker'], channel: 'off-screen', startSec: 6.1, endSec: 7.1 }];
+assert.deepEqual(savedH3TranslationFacts(punctuationBindings, [{ ...repeatedDialogueShot,
+  dialogue: '第1.1s–2.1s @玉小刚（成年男性，低而稳，画外，隔门，听者：小舞）：“进来！”' }]).sourceDialogues.map((entry) => entry.text),
+['进来？', '进来！'], 'punctuation-distinct canonical dialogue is retained in translation facts');
+const legacySubjectBindings: H3IdentityBindings = { version: 1,
+  characters: [{ characterId: 'door-speaker', name: '玉小刚', referenceAnchor: '声音身份：玉小刚。' }],
+  performance: { version: 1, timeBase: 'clip', descriptionLanguage: 'zh',
+    characters: [{ characterId: 'door-speaker', name: '玉小刚', visualDescription: '成年男性。' }],
+    shots: [{ shotIndex: 1, startSec: 5, visualDescription: '玉小刚站在门后。', events: [
+      { eventId: 'door-speech-legacy', dialogueId: 'door-dialogue-legacy', kind: 'speech', text: '进来。', language: 'Chinese',
+        speakerCharacterIds: ['door-speaker'], channel: 'off-screen', startSec: 6.1, endSec: 7.1 },
+    ] }], overallSoundscape: '门外敲门声。', nonDiegeticMusic: 'N/A' } };
+assert.deepEqual(savedH3TranslationFacts(legacySubjectBindings, [{ ...repeatedDialogueShot, dialogue: '玉小刚：“进来。”' }])
+  .sourceDialogues.map((entry) => entry.text), ['进来。'], 'legacy speaker fallback matches the shot subject against the performance sidecar');
 
 const wrapped = renderDeliveredH3Performance({ h3Prompt: legacy, envelope: true, identityBindings: knownBindings }, 'integrated');
 assert.ok(wrapped.h3Prompt.includes(legacy), 'a missing sidecar must preserve the entire authored body');

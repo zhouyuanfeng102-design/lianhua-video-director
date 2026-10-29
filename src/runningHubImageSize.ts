@@ -20,6 +20,18 @@ const boundField = (workflow: RunningHubVideoWorkflow, key: string): BoundField 
   } catch { return undefined; }
 };
 const megapixels = ({ node, control }: BoundField): boolean => isRunningHubMegapixelsField(node.fieldName) || control?.unit === 'MP';
+/** A decimal spelling such as 2.0000000000000004 is a megapixel magnitude, even when it rounds to an integer. */
+const decimalMegapixelValue = (value: unknown): boolean => {
+  if (typeof value === 'number') return Number.isFinite(value) && value > 0 && !Number.isInteger(value);
+  if (typeof value !== 'string') return false;
+  const text = value.trim();
+  if (!/^\d+\.\d+$/u.test(text)) return false;
+  const parsed = Number(text);
+  return Number.isFinite(parsed) && parsed > 0;
+};
+const megapixelResolution = (field: BoundField | undefined): field is BoundField => Boolean(
+  field && (megapixels(field) || decimalMegapixelValue(field.node.fieldValue)),
+);
 const pixelField = ({ node }: BoundField): boolean => typeof node.fieldValue === 'string'
   || typeof node.fieldValue === 'number' && Number.isFinite(node.fieldValue);
 const numericEdge = (value: unknown): number | undefined => {
@@ -40,13 +52,15 @@ const tierField = (field: BoundField | undefined): field is BoundField => Boolea
   && (optionsOf(field)?.some(option => optionTier(option) && compatibleOption(field, option))
     ?? (numericEdge(field.node.fieldValue) !== undefined || typeof field.node.fieldValue === 'string' && /^[124]k$/iu.test(field.node.fieldValue.trim()))));
 
-export const runningHubImageSizeMode = (workflow?: RunningHubVideoWorkflow): 'pixels' | 'tier' | 'default' => {
+export const runningHubImageSizeMode = (workflow?: RunningHubVideoWorkflow): 'pixels' | 'tier' | 'megapixels' | 'default' => {
   if (!workflow) return 'default';
   const width = boundField(workflow, 'width'); const height = boundField(workflow, 'height');
   if (width && height && !megapixels(width) && !megapixels(height)
     && pixelField(width) && pixelField(height)
     && (width.node.nodeId !== height.node.nodeId || width.node.fieldName !== height.node.fieldName)) return 'pixels';
-  return tierField(boundField(workflow, 'resolution')) ? 'tier' : 'default';
+  const resolution = boundField(workflow, 'resolution');
+  if (megapixelResolution(resolution)) return 'megapixels';
+  return tierField(resolution) ? 'tier' : 'default';
 };
 
 const ratio = (value: string): number | undefined => {
@@ -54,6 +68,28 @@ const ratio = (value: string): number | undefined => {
   if (!match) return undefined;
   const result = Number(match[1]) / Number(match[2]);
   return Number.isFinite(result) && result > 0 ? result : undefined;
+};
+
+const aspectParameter = (workflow: RunningHubVideoWorkflow, aspect: string | undefined): Record<string, unknown> => {
+  if (aspect === undefined || !workflow.mapping.parameters?.aspect_ratio) return {};
+  const field = boundField(workflow, 'aspect_ratio');
+  const requested = ratio(aspect);
+  if (!field || typeof field.node.fieldValue !== 'string' || requested === undefined) throw new Error('RunningHub 画面比例需要有效的比例和真实文本字段映射。');
+  const ratioOptions = optionsOf(field);
+  if (ratioOptions) {
+    const matched = ratioOptions.filter(option => { const candidate = ratio(option); return candidate !== undefined && Math.abs(candidate - requested) < 1e-8; });
+    if (matched.length !== 1) throw new Error(`RunningHub 画面比例字段没有唯一的 ${aspect} 选项；不会忽略所选比例。`);
+    return { aspect_ratio: matched[0] };
+  }
+  return { aspect_ratio: aspect };
+};
+
+/** Keep the bound megapixel node unchanged and write only a matched aspect option. */
+export const runningHubImageMegapixelAspectParameters = (
+  workflow: RunningHubVideoWorkflow, aspect?: string,
+): Record<string, unknown> => {
+  if (!megapixelResolution(boundField(workflow, 'resolution'))) throw new Error('当前 RunningHub 工作流未绑定百万像素分辨率字段；不会把 K 档换算成百万像素。');
+  return aspectParameter(workflow, aspect);
 };
 
 /** Tier and ratio overrides preserve the cloud field's wire type and option spelling. */
@@ -71,17 +107,5 @@ export const runningHubImageTierParameters = (
     value = matched[0];
   } else if (numericEdge(resolution.node.fieldValue) !== undefined) value = edges[tier];
   else value = /k$/u.test(String(resolution.node.fieldValue).trim()) ? tier.toLowerCase() : tier;
-  const parameters: Record<string, unknown> = { resolution: coerceRunningHubVideoNodeValue(resolution.node.fieldValue, value, '生图分辨率') };
-  if (aspect !== undefined && workflow.mapping.parameters?.aspect_ratio) {
-    const field = boundField(workflow, 'aspect_ratio');
-    const requested = ratio(aspect);
-    if (!field || typeof field.node.fieldValue !== 'string' || requested === undefined) throw new Error('RunningHub 画面比例需要有效的比例和真实文本字段映射。');
-    const ratioOptions = optionsOf(field);
-    if (ratioOptions) {
-      const matched = ratioOptions.filter(option => { const candidate = ratio(option); return candidate !== undefined && Math.abs(candidate - requested) < 1e-8; });
-      if (matched.length !== 1) throw new Error(`RunningHub 画面比例字段没有唯一的 ${aspect} 选项；不会忽略所选比例。`);
-      parameters.aspect_ratio = matched[0];
-    } else parameters.aspect_ratio = aspect;
-  }
-  return parameters;
+  return { resolution: coerceRunningHubVideoNodeValue(resolution.node.fieldValue, value, '生图分辨率'), ...aspectParameter(workflow, aspect) };
 };

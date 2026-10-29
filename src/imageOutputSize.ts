@@ -77,7 +77,7 @@ export interface ResolvedImageOutputSize {
   warning?: string;
   layoutNote: string;
   resolutionPlan?: ImageResolutionPlan;
-  workflowSizeMode?: 'pixels' | 'tier' | 'default';
+  workflowSizeMode?: 'pixels' | 'tier' | 'megapixels' | 'default';
   workflowAspect?: boolean;
   workflowAspectGate?: boolean;
 }
@@ -177,6 +177,9 @@ export const resolveImageOutputSize = (
 export const imageReturnedSizeWarning = (requested: { width: number; height: number; resolutionPlan?: ImageResolutionPlan }, actual: { width: number; height: number } | undefined): string => {
   if (!actual || requested.width === actual.width && requested.height === actual.height) return '';
   const plan = requested.resolutionPlan;
+  if (plan?.encoding.kind === 'megapixels') {
+    return `本次按已绑定的百万像素原值提交；${requested.width}×${requested.height}为版式估算，实际尺寸由工作流决定。返回${actual.width}×${actual.height}，原图已保留。`;
+  }
   if (plan?.encoding.kind === 'tier') {
     if (plan.profile === 'pixel-long-edge') return `本次按${plan.encoding.value}云端档位提交；${requested.width}×${requested.height}为版式估算，实际尺寸由工作流决定。返回${actual.width}×${actual.height}，原图已保留。`;
     if (plan.profile === 'grok-k') {

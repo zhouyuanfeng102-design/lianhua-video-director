@@ -14,7 +14,8 @@ export function ImageOutputSizeControls({ lane, value, resolved, disabled, capab
   const workflowAspect = resolved.workflowAspect || workflowDefault;
   const legacy = value.mode === 'default' && !workflowSize || value.mode === '1x' || value.mode === '2x';
   const namedResolution = resolved.resolutionPlan?.encoding.kind === 'tier';
-  const sizeLabel = resolved.workflowSizeMode === 'tier' ? '档位估算（以返回为准）' : namedResolution ? resolved.resolutionPlan?.verified ? '原生预期' : '档位估算（以返回为准）' : '请求';
+  const cloudEstimate = resolved.workflowSizeMode === 'tier' || resolved.workflowSizeMode === 'megapixels' || resolved.resolutionPlan?.encoding.kind === 'megapixels';
+  const sizeLabel = cloudEstimate ? '档位估算（以返回为准）' : namedResolution ? resolved.resolutionPlan?.verified ? '原生预期' : '档位估算（以返回为准）' : '请求';
   const sizeSummary = workflowDefault ? '工作流默认尺寸' : `${sizeLabel} ${resolved.width} × ${resolved.height} px${resolved.layoutNote ? ` · ${resolved.layoutNote}` : ''}`;
   return <div className="image-output-size-controls" role="group" aria-label={`${label}生图分辨率设置`}>
     <div className="image-output-size-row">

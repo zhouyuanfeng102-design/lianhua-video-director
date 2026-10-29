@@ -386,11 +386,11 @@ const videoH3ReferenceUsageEdit = (
   const multiViewPictures = unique(multiViewNumbers).map((number) => `<Picture ${number}>`).join(language === 'zh' ? '、' : ', ');
   const text = [
     selectedUses.length ? language === 'zh'
-      ? `本段参考图用途：${selectedUses.join('；')}。人物朝向与动作时序按正文推进，静态姿态不延长动作。`
-      : `Reference uses for this clip: ${selectedUses.join('; ')}. Facing and action timing follow the written sequence; still poses do not prolong actions.` : '',
+      ? `本段参考图用途：${selectedUses.join('；')}。人物朝向与动作时序按正文推进，静态姿态不延长动作。正面身份图只锁五官和衣服，不把参考图的正脸贴到后脑上。`
+      : `Reference uses for this clip: ${selectedUses.join('; ')}. Facing and action timing follow the written sequence; still poses do not prolong actions. A front identity image locks features and clothes only and does not place that front face on the back of the head.` : '',
     multiViewPictures ? language === 'zh'
-      ? `多视图身份参考：${multiViewPictures} 各自展示其已关联的同一个人物的多个角度，仅参考身份与外观；图内不同视角不是同时入画的多个人，实际人数、站位、朝向与动作沿用本镜正文。`
-      : `Multi-view identity references: ${multiViewPictures} each show multiple angles of their respective single bound character, for identity and appearance only; the views are not multiple people entering the frame. Character count, placement, facing and action follow the current shot.` : '',
+      ? `多视图身份参考：${multiViewPictures} 各自展示其已关联的同一个人物的多个角度，仅参考身份与外观；图内不同视角不是同时入画的多个人，实际人数、站位、朝向与动作沿用本镜正文。正面参考不把正脸贴到后脑。`
+      : `Multi-view identity references: ${multiViewPictures} each show multiple angles of their respective single bound character, for identity and appearance only; the views are not multiple people entering the frame. Character count, placement, facing and action follow the current shot. A front view does not place that face on the back of the head.` : '',
   ].filter(Boolean).join('\n');
   return { start, end: start, text: `${text}\n` };
 };

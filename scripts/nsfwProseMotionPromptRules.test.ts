@@ -33,6 +33,7 @@ assert.match(LIANHUA_NSFW_CREATIVE_GUIDANCE, /跟这串缓慢起伏连在一起/
 assert.doesNotMatch(LIANHUA_NSFW_CREATIVE_GUIDANCE, /跟这一下对齐/u);
 assert.match(NSFW_PROSE_JOINED_MOTION_RULE, /甲的手握住乙的肉棒/u);
 assert.match(NSFW_PROSE_JOINED_MOTION_RULE, /两套句子不并列/u);
+assert.match(NSFW_PROSE_JOINED_MOTION_RULE, /起伏时胸口和髋朝向对方，头留在这侧胸口上/u);
 assert.match(NSFW_PROSE_JOINED_MOTION_RULE, /不是成人情节时不使用这句/u);
 assert.match(NSFW_PROSE_JOINED_MOTION_RULE, /拳脚、摔倒、撞门/u);
 

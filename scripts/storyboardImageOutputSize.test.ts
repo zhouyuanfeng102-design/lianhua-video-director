@@ -122,8 +122,15 @@ for (const aspect of ['', 'portrait', '0:9', '16:0', '-16:9', '16:-9', '16:9 tra
   assert.equal(result.sizeOverride, true);
   checks++;
 }
+for (const backend of ['openai', 'sd_webui', 'comfyui'] as const) {
+  assert.match(resolveStoryboardImageOutputSize(preference('1k'), '32:1', backend).issue, /短边不足64/u);
+  checks++;
+}
+assert.equal(resolveStoryboardImageOutputSize(preference('1k'), '32:1', 'novelai').issue, '', '64-pixel alignment reaches the minimum edge'); checks++;
 for (const backend of ['openai', 'novelai', 'sd_webui', 'comfyui'] as const) {
-  assert.match(resolveStoryboardImageOutputSize(preference('1k'), '10000:1', backend).issue, /短边不足64/u);
+  const blocked = resolveStoryboardImageOutputSize(preference('1k'), '10000:1', backend);
+  assert.match(blocked.issue, /画面比例无效/);
+  assert.doesNotMatch(blocked.issue, /短边不足64/);
   checks++;
 }
 assert.match(resolveStoryboardImageOutputSize({ ...custom, mode: '8k' } as unknown as StoryboardImageOutputSizePreference, '16:9', 'openai').issue, /不会自动改用默认尺寸/u); checks++;

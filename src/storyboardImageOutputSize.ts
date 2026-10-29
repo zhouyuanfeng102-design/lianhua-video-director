@@ -112,8 +112,9 @@ export const resolveStoryboardImageOutputSize = (
     return { ...resolved, sizeOverride: true, layoutNote: `旧规格 · 保留长边${longSide}px及原像素对齐；重新选择K档位后使用当前模型规格` };
   }
   const resolved = resolveImageResolution({ tier: preference.mode.toUpperCase() as '1K' | '2K' | '4K', logicalAspectRatio: aspect.label, config: api });
+  const computedShortSide = resolved.width > 0 && resolved.height > 0 && Math.min(resolved.width, resolved.height) < 64;
   return { ...resolved, ...cloudContext, sizeOverride: true, layoutNote: `${cloudContext.workflowAspect ? '比例由云端工作流决定，分镜画布仅作估算' : `按分镜 ${aspect.label}`} · ${resolved.layoutNote}`,
-    issue: resolved.height < 64 || resolved.width < 64
+    issue: computedShortSide
       ? '按分镜比例计算的短边不足64像素，请提高分辨率或使用自定义尺寸；不会暗中更改画面比例。'
       : resolved.issue };
 };
