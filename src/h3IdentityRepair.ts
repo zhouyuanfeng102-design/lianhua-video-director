@@ -15,6 +15,10 @@ export interface RepairH3IdentityBindingsInput {
   isCurrent?: () => boolean;
   /** Missing metadata never grants permission to add the whole project cast. */
   targetCharacterIds?: readonly string[];
+  /** IDs chosen in this repair action, kept distinct from fallback targets. */
+  selectedCharacterIds?: readonly string[];
+  /** Current-source participation resolved for this prompt language. */
+  visibleParticipation?: readonly { characterId: string; presence: 'visible' | 'offscreen' | 'mentioned'; visibleShotIndexes: readonly number[]; visibleEvidence?: readonly string[] }[];
   /** Compatibility budget: zero disables the request; positive budgets allow one request. */
   maxAttempts?: number;
 }
@@ -119,28 +123,52 @@ export const repairH3IdentityBindings = async (input: RepairH3IdentityBindingsIn
   const targets = [...new Set(input.targetCharacterIds ?? existing.characters.map((binding) => binding.characterId))];
   if (!targets.length) throw new H3IdentityRepairError('请先明确选择本次需要绑定的出镜人物；没有选择时不会补全项目人物。', 0);
   for (const id of targets) if (!characterMap.has(id)) throw new H3IdentityRepairError('本次选择的人物ID不在当前人物资料中，不能建立绑定、替换身份或删除记录。', 0);
+  const deterministicBindings = new Map<string, Binding>();
+  const explicitSelections = new Set(input.selectedCharacterIds || []);
+  for (const id of targets) {
+    if (!explicitSelections.has(id)) continue;
+    const participation = input.visibleParticipation?.find((entry) => entry.characterId === id && entry.presence === 'visible');
+    if (!participation) continue;
+    const old = existing.characters.find((entry) => entry.characterId === id);
+    if (old && exactOnce(prompt, old.referenceAnchor)) continue;
+    const character = characterMap.get(id)!;
+    const directEvidence = participation.visibleEvidence?.find((evidence) => exactOnce(prompt, evidence));
+    if (directEvidence) {
+      deterministicBindings.set(id, { ...old, characterId: id, name: character.name, referenceAnchor: directEvidence });
+    }
+  }
+  const workingBindings: H3IdentityBindings = {
+    ...existing,
+    characters: [
+      ...existing.characters.map((binding) => deterministicBindings.get(binding.characterId) || binding),
+      ...[...deterministicBindings].filter(([id]) => !existing.characters.some((binding) => binding.characterId === id)).map(([, binding]) => binding),
+    ],
+  };
   const repairTargets = targets.filter((id) => {
-    const binding = existing.characters.find((entry) => entry.characterId === id);
+    const binding = workingBindings.characters.find((entry) => entry.characterId === id);
     return !binding || !exactOnce(prompt, binding.referenceAnchor);
   });
+  const allRepairedIds = [...new Set([...deterministicBindings.keys(), ...repairTargets])];
   const finish = (resultPrompt: string, identityBindings: H3IdentityBindings, attempts: number,
     insertedSentences: string[] = [], edits: H3IdentityRepairResult['edits'] = []): H3IdentityRepairResult => {
     assertCurrent();
     return {
       prompt: resultPrompt, identityBindings, attempts, insertedSentences, edits,
       changed: resultPrompt !== prompt || input.bindings === undefined || JSON.stringify(identityBindings) !== JSON.stringify(existing),
-      promptChanged: resultPrompt !== prompt, repairedCharacterIds: [...repairTargets],
+      promptChanged: resultPrompt !== prompt, repairedCharacterIds: allRepairedIds,
     };
   };
-  if (!repairTargets.length) return finish(prompt, existing, 0);
+  if (!repairTargets.length) {
+    return finish(prompt, workingBindings, 0);
+  }
   if (input.maxAttempts !== undefined && (!Number.isFinite(input.maxAttempts) || input.maxAttempts < 1)) {
     throw new H3IdentityRepairError('本次人物图片绑定修复没有可用请求预算，原稿保持不变。', 0);
   }
   const payload = JSON.stringify({
-    characters, sourcePrompt: prompt, identityBindings: existing, repairTargets,
-    retainedIdentityBindings: existing.characters,
+    characters, sourcePrompt: prompt, identityBindings: workingBindings, repairTargets,
+    retainedIdentityBindings: workingBindings.characters,
     insertionIdentityDeclarations: repairTargets.map((id) => ({ characterId: id,
-      sentence: insertionDeclaration(characterMap.get(id)!, existing.characters.find((binding) => binding.characterId === id), input.language) })),
+      sentence: insertionDeclaration(characterMap.get(id)!, workingBindings.characters.find((binding) => binding.characterId === id), input.language) })),
     language: input.language,
   }).replace(/</gu, '\\u003c').replace(/>/gu, '\\u003e');
   let response: string;
@@ -162,7 +190,7 @@ export const repairH3IdentityBindings = async (input: RepairH3IdentityBindingsIn
       if (!object(item) || typeof item.characterId !== 'string' || !repairTargets.includes(item.characterId)
         || repaired.has(item.characterId)) throw new Error('修复人物ID与本次目标不一致或重复，不能应用。');
       const character = characterMap.get(item.characterId)!;
-      const old = existing.characters.find((binding) => binding.characterId === item.characterId);
+      const old = workingBindings.characters.find((binding) => binding.characterId === item.characterId);
       if (typeof item.unresolvedReason === 'string') throw new Error(`人物“${character.name}”未取得定位结果：${item.unresolvedReason}`);
       if (typeof item.referenceAnchor !== 'string' || !item.referenceAnchor.trim()) throw new Error(`人物“${character.name}”缺少可读取的定位文本。`);
       if (item.insertIdentitySentence !== undefined) {
@@ -185,8 +213,8 @@ export const repairH3IdentityBindings = async (input: RepairH3IdentityBindingsIn
     const identityBindings: H3IdentityBindings = {
       version: 1,
       characters: [
-        ...existing.characters.map((binding) => repaired.get(binding.characterId) || binding),
-        ...targets.filter((id) => !existing.characters.some((binding) => binding.characterId === id)).map((id) => repaired.get(id)!),
+        ...workingBindings.characters.map((binding) => repaired.get(binding.characterId) || binding),
+        ...targets.filter((id) => !workingBindings.characters.some((binding) => binding.characterId === id)).map((id) => repaired.get(id)!),
       ],
     };
     return finish(inserted.prompt, identityBindings, 1, insertions.map((item) => item.sentence), inserted.edits);

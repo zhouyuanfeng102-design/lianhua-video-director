@@ -11,6 +11,16 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "3.4.3",
+    releasedAt: "2026-10-29",
+    title: "修复 H3 人物参考图待关联",
+    highlights: [
+      "已有明确人物身份、本段出镜记录和本次选图时，沿用这些信息关联人物参考图。",
+      "失效的旧定位句不再挡住确定的人物关联；剧情内容不改写。",
+      "缺少明确出镜依据时仍保留待关联提示，不阻止生成。",
+    ],
+  },
+  {
     version: "3.4.1",
     releasedAt: "2026-10-28",
     title: "修复保存时扫描历史项目导致超时",

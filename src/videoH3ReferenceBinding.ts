@@ -491,8 +491,9 @@ const prepareVideoH3ReferenceDraftInternal = (
     if (!number) continue;
     owners.forEach((owner) => characterPictures.set(owner.id, unique([...(characterPictures.get(owner.id) || []), number])));
   }
-  const identities = binding.identities.characters || [];
-  const identityIssues = getH3IdentityBindingIssues(binding.basePrompt, binding.identities, referenceProject.characters);
+  let identities = binding.identities.characters || [];
+  const requestIdentities = binding.identities;
+  const identityIssues = getH3IdentityBindingIssues(binding.basePrompt, requestIdentities, referenceProject.characters);
   // An old H3 can contain the same authored identity sentence more than once
   // (for example in both the definitions and a shot).  That damages the text
   // locator, but it does not undo a proven characterId -> asset association.
@@ -576,9 +577,17 @@ const prepareVideoH3ReferenceDraftInternal = (
     if (!numbers.length) continue;
     const issues = identityIssues.filter((issue) => issue.characterId === identity.characterId);
     if (issues.length && !recoverableIdentityIssue(identity, issues)) {
+      const onlyLocatorIssues = issues.every((issue) => ['anchor-empty', 'anchor-missing', 'anchor-ambiguous'].includes(issue.code));
+      const visible = participation.characters.find((entry) => entry.characterId === identity.characterId && entry.presence === 'visible');
+      const character = referenceProject.characters.find((entry) => entry.id === identity.characterId);
+      const edit = onlyLocatorIssues && visible && character ? participationReferenceEdit(binding.basePrompt, character,
+        referenceProject.characters, visible!.visibleShotIndexes, numbers) : undefined;
+      if (edit) {
+        edits.push(edit); markBound(identity.characterId, numbers);
+        continue;
+      }
       const reason = `人物“${identity.name || '未命名'}”的 H3 身份锚点已失效：${unique(issues.map((issue) => issue.message)).join('；')}。本次未绑定该人物图片，未猜测或改写其剧情。`;
-      warnings.push(reason); markPending(identity.characterId, reason);
-      continue;
+      warnings.push(reason); markPending(identity.characterId, reason); continue;
     }
     if (issues.length) warnings.push(`人物“${identity.name || '未命名'}”的身份句重复；沿用已确认人物ID和本次明确选图关联，不改写剧情。`);
     const end = binding.basePrompt.indexOf(identity.referenceAnchor) + identity.referenceAnchor.length;
@@ -623,7 +632,7 @@ const prepareVideoH3ReferenceDraftInternal = (
           ...(event.kind === 'vocal' ? { vocalDescription: remapPictures(event.vocalDescription) } : {}),
           reactions: event.reactions?.map((reaction) => ({ ...reaction, description: remapPictures(reaction.description) })) }) })),
   } : undefined;
-  const executionIdentities: H3IdentityBindings = { ...binding.identities,
+  const executionIdentities: H3IdentityBindings = { ...requestIdentities,
     ...(executionPerformance ? { performance: executionPerformance } : {}),
     ...(binding.identities.events ? { events: binding.identities.events.map((event) => {
       let referenceAnchor = event.referenceAnchor;

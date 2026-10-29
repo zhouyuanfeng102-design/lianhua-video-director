@@ -856,6 +856,23 @@ await test('有无章节均在已证明的后镜补无身份句人物，可信�
   }
 });
 
+await test('已有身份ID的旧定位句失效时沿用本段确定的出镜镜头和本次选图', () => {
+  for (const language of ['zh', 'en'] as const) {
+    const { project, draft, board, config } = lateParticipationH3Fixture(language, false);
+    for (const [metadata, authoredLanguage] of [[board.h3IdentityBindings!, 'zh'], [board.h3IdentityBindingsEn!, 'en']] as const) {
+      metadata.characters.push({ characterId: 'd', name: '丁', subjectToken: '<Subject 4>', referenceAnchor: `stale ${authoredLanguage} locator` });
+    }
+    draft.prompt = language === 'zh' ? board.officialPromptZh! : board.officialPromptEn!;
+    const result = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api: config });
+    assert.equal(result.characterStates.find((entry) => entry.characterId === 'd')?.status, 'bound');
+    assert.deepEqual(result.characterStates.find((entry) => entry.characterId === 'd')?.slots, [6]);
+    assert.match(result.draft.prompt, /Visual identity reference for 丁: <Picture 6>\./u);
+    assert.ok(result.draft.prompt.indexOf('Visual identity reference for 丁: <Picture 6>.') > result.draft.prompt.indexOf('[Shot 3] At 00:08.000'));
+    assert.ok(result.draft.prompt.indexOf('Visual identity reference for 丁: <Picture 6>.') < result.draft.prompt.indexOf('[Shot 4] At 00:12.000'));
+    assert.deepEqual(multiViewPictureNumbers(result.draft.prompt), [3, 4, 5, 6]);
+  }
+});
+
 await test('无身份句后镜关联仍尊重画外提及记录和英文原稿来源，不凭已选图猜入画', () => {
   for (const condition of ['offscreen', 'mentioned', 'unlinked-english'] as const) {
     const { project, draft, board, config } = lateParticipationH3Fixture('en', false);

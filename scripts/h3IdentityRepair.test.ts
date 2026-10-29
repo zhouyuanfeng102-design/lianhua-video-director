@@ -54,6 +54,42 @@ await group(async () => {
 });
 
 await group(async () => {
+  const result = await repairH3IdentityBindings(input({ targetCharacterIds: ['alice'], selectedCharacterIds: ['alice'],
+    visibleParticipation: [{ characterId: 'alice', presence: 'visible', visibleShotIndexes: [1],
+      visibleEvidence: ['Alice (S1) opens the door from 0 to 2 seconds.'] }],
+    request: async () => assert.fail('current visible participation and selected image repair the stale locator without a model call'),
+  }));
+  assert.equal(result.attempts, 0);
+  assert.equal(result.prompt, prompt);
+  assert.equal(result.identityBindings.characters[0].referenceAnchor, 'Alice (S1) opens the door from 0 to 2 seconds.');
+  assert.equal(result.identityBindings.characters[0].speakerToken, '(S1)');
+  assert.deepEqual(getH3IdentityBindingIssues(result.prompt, result.identityBindings, characters), []);
+});
+
+await group(async () => {
+  for (const presence of ['offscreen', 'mentioned'] as const) {
+    let calls = 0;
+    const result = await repairH3IdentityBindings(input({ targetCharacterIds: ['alice'], selectedCharacterIds: ['alice'],
+      visibleParticipation: [{ characterId: 'alice', presence, visibleShotIndexes: [], visibleEvidence: [] }],
+      request: async () => { calls++; return reply([repairedAlice]); },
+    }));
+    assert.equal(calls, 1, `${presence} participation is not promoted to visible by a selected image`);
+    assert.equal(result.attempts, 1);
+  }
+});
+
+await group(async () => {
+  let calls = 0;
+  const result = await repairH3IdentityBindings(input({ targetCharacterIds: ['alice'],
+    visibleParticipation: [{ characterId: 'alice', presence: 'visible', visibleShotIndexes: [1],
+      visibleEvidence: ['Alice (S1) opens the door from 0 to 2 seconds.'] }],
+    request: async () => { calls++; return reply([repairedAlice]); },
+  }));
+  assert.equal(calls, 1, 'fallback targets without an explicit current image selection use the existing repair request');
+  assert.equal(result.attempts, 1);
+});
+
+await group(async () => {
   const result = await repairH3IdentityBindings(input({ bindings: { version: 1, characters: [
     { ...stale.characters[0], referenceAnchor: anchor }, stale.characters[1],
   ] }, request: async () => { throw new Error('Already-current bindings must not call the model.'); } }));

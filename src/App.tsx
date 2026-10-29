@@ -8554,14 +8554,19 @@ export default function App() {
     const busyEpoch = getBusyEpoch();
     try {
       notify("正在修复人物图片绑定，只调整定位记录及必要身份说明，原剧情与对白保持不变。");
-      const repair = (targetLanguage: "zh" | "en") => repairH3IdentityBindings({
-        prompt: targetLanguage === "zh" ? sourceBoard.officialPromptZh! : sourceBoard.officialPromptEn!,
+      const repair = (targetLanguage: "zh" | "en") => {
+        const prompt = targetLanguage === "zh" ? sourceBoard.officialPromptZh! : sourceBoard.officialPromptEn!;
+        const targetParticipation = resolveStoryboardCharacterParticipation(sourceBoard, context.characters || [], prompt);
+        return repairH3IdentityBindings({
+        prompt,
         bindings: targetLanguage === "zh" ? sourceBoard.h3IdentityBindings : sourceBoard.h3IdentityBindingsEn,
         characters: context.characters || [], language: targetLanguage === "zh" ? "中文" : "英文",
-        targetCharacterIds: repairTargetIds, isCurrent,
+        targetCharacterIds: repairTargetIds, selectedCharacterIds: characterIds,
+        visibleParticipation: targetParticipation.characters, isCurrent,
         request: (system, user) => requestTextModel(requestTextApi, system, user,
           operation.controller.signal, { disableThinking: true }),
       });
+      };
       const zh = language === "zh" ? await repair("zh") : undefined;
       const en = language === "en" || language === "zh" && hasCurrentOfficialH3EnglishPrompt(sourceBoard, context)
         ? await repair("en") : undefined;
