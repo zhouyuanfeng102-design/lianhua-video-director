@@ -1574,6 +1574,9 @@ const projectArray = <T extends { id: string }>(incoming: unknown, fallback: T[]
 );
 
 const IMAGE_TASK_INTERRUPTED_ERROR = '上次图像生成因应用关闭或刷新而中断，请返回图像工作台重新生成。';
+const acceptedImageRemoteTaskId = (value: unknown): string => (
+  typeof value === 'string' && /^[A-Za-z0-9_-]{1,80}$/u.test(value.trim()) ? value.trim() : ''
+);
 const IMAGE_TASK_INVALID_ERROR = '图像任务记录不完整，请返回图像工作台重新生成。';
 const AUTOFILL_TASK_INTERRUPTED_ERROR = '上次 AI 补齐因应用关闭或刷新而中断，请返回图像工作台重新执行。';
 const AUTOFILL_TASK_INVALID_ERROR = 'AI 补齐任务记录不完整，请返回图像工作台重新执行。';
@@ -2060,8 +2063,10 @@ const normalizeGenerationTasks = (incoming: unknown, projectId: string): Generat
       return task;
     }
     if (task.kind !== 'image') return task;
-    const interrupted = task.status === 'queued' || task.status === 'running';
+    const remoteTaskId = acceptedImageRemoteTaskId(task.remoteTaskId);
     const preparationStage = normalizeImageTaskPreparationStage(task.preparationStage);
+    const keepObserving = task.status === 'running' && Boolean(remoteTaskId);
+    const interrupted = (task.status === 'queued' || task.status === 'running') && !keepObserving;
     const storyboardBatch = task.assetKind === 'storyboard' || task.imageGenerationMode === 'image-to-image';
     const status = interrupted
       ? 'failed'
@@ -2084,8 +2089,8 @@ const normalizeGenerationTasks = (incoming: unknown, projectId: string): Generat
         ? { imageInputMode: task.imageInputMode } : {}),
       ...normalizeStoryboardImageFrameMetadata(task),
       ...normalizePrivateReferenceMetadata(task.referenceScope, task.nsfwPrivatePart),
-      status,
-      ...(preparationStage ? { preparationStage } : {}),
+      status: keepObserving ? 'running' : status,
+      ...(keepObserving || !preparationStage ? {} : { preparationStage }),
       prompt: typeof task.prompt === 'string' ? task.prompt : '',
       ...(typeof task.negativePrompt === 'string' && task.negativePrompt
         ? { negativePrompt: task.negativePrompt }
@@ -2179,13 +2184,16 @@ const normalizeGenerationTasks = (incoming: unknown, projectId: string): Generat
       ...(typeof task.bindingWarning === 'string' && task.bindingWarning
         ? { bindingWarning: task.bindingWarning }
         : {}),
+      ...(remoteTaskId ? { remoteTaskId } : {}),
       ...(typeof task.resultUrl === 'string' && task.resultUrl
         ? { resultUrl: task.resultUrl }
         : {}),
       ...(typeof task.resultAssetId === 'string' && task.resultAssetId
         ? { resultAssetId: task.resultAssetId }
         : {}),
-      ...(interrupted
+      ...(keepObserving
+        ? {}
+        : interrupted
         ? { error: preparationStage
             ? `上次图像任务在“${imagePreparationStageLabel(preparationStage)}”准备阶段因应用关闭或刷新而中断，尚未完成生图准备；任务记录已保留，请确认后重新生成。`
             : IMAGE_TASK_INTERRUPTED_ERROR }

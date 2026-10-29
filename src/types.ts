@@ -1508,6 +1508,8 @@ export interface ImageGenerationTask extends StoryboardImageFrameMetadata {
   conversionIdentityContext?: string;
   converterSystemPrompt?: string;
   bindingWarning?: string;
+  /** Accepted RunningHub task id. Later queries and restarts use this id and do not submit again. */
+  remoteTaskId?: string;
   resultUrl?: string;
   resultAssetId?: string;
   error?: string;

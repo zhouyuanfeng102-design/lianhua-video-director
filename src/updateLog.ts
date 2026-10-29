@@ -11,6 +11,16 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "3.4.7",
+    releasedAt: "2026-10-30",
+    title: "云端生图断线后继续查询原任务",
+    highlights: [
+      "RunningHub 已接受的生图任务会记下云端任务号。查询连接中断后继续查询这一条，不重新提交。",
+      "重新打开软件时，已记下任务号且仍在生成中的图片继续查询原任务。还没拿到任务号的中断记录仍标为失败。",
+      "不新增按钮、校验或第二次付费提交。",
+    ],
+  },
+  {
     version: "3.4.6",
     releasedAt: "2026-10-30",
     title: "百万像素分镜图按原值提交",

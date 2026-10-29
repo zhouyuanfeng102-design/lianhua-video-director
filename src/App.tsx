@@ -156,6 +156,7 @@ import { matchingStoryVisualConversion, rememberStoryVisualConversion, storyVisu
 import type { StoryVisualDetailMode } from "./storyVisualAction";
 import { VideoGenerationSettings } from "./components/VideoGenerationSettings";
 import { useVideoGenerationController } from "./useVideoGenerationController";
+import { recordRunningHubImageTaskId, resumableRunningHubImageKey, useRunningHubImageResume } from "./runningHubImageResume";
 import { useVideoRuntimes } from "./videoRuntimeStore";
 import type { WorkbenchMediaSource, WorkbenchProgress } from "./videoWorkbenchTypes";
 import type { TailFrameSelectionContext, TailFrameSelectionResult } from "./components/PreviousVideoTailDialog";
@@ -9864,6 +9865,13 @@ export default function App() {
   const [openVideoSettings, setOpenVideoSettings] = useState(false);
   useEffect(() => { setVideoLaunchRequest(undefined); setAssetLibrarySection("image"); setVideoAssetStoryboardFilter(""); setPromptSourceRequest(undefined); }, [state.project.id]);
   const videoController = useVideoGenerationController({ state, setState: setBackgroundState, getCurrentProjectId, getCurrentState, ready: desktopStateReady, notify });
+  useRunningHubImageResume({
+    ready: desktopStateReady,
+    getState: getCurrentState,
+    setState: setBackgroundState,
+    notify,
+    resumeKey: desktopStateReady ? resumableRunningHubImageKey(state) : "",
+  });
   const videoWorkbenchController = useVideoWorkbenchController({ state, getCurrentState, setState: setBackgroundState, ready: desktopStateReady, notify });
   const tailFrameExtractionRef = useRef<{ token: string; projectId: string; cancelled: boolean; controller?: AbortController }>();
   const [tailFrameAiProgress, setTailFrameAiProgress] = useState<WorkbenchProgress>();
@@ -14852,7 +14860,8 @@ function DirectorView(ctx: AppContext) {
                   ...project, generationTasks: patchImageGenerationTask(project.generationTasks, task.id, { preparationStage: undefined }),
                 })));
                 return requestImageModel(imageApi, { ...input, signal, referenceImages: references.referenceImages,
-                  primaryReferenceImageCount: references.primaryReferenceImageCount, preserveReferenceImageOrder: true }, () => {
+                  primaryReferenceImageCount: references.primaryReferenceImageCount, preserveReferenceImageOrder: true,
+                  onRemoteTaskId: recordRunningHubImageTaskId(setBackgroundState, getCurrentState, requestedProjectId, task) }, () => {
                   assertTaskCurrent();
                   imageModelInvoked = true;
                 });
@@ -20041,6 +20050,7 @@ function ImageWorkbenchView(ctx: AppContext) {
               height: requestedOutputSize.height,
               sizeOverride: requestedOutputSize.sizeOverride,
               resolutionPlan: requestedOutputSize.resolutionPlan,
+              onRemoteTaskId: recordRunningHubImageTaskId(setBackgroundState, getCurrentState, requestedProjectId, task),
               ...buildImageGenerationReferenceOptions(
                 requestedUseReferenceImage,
                 requestedUploadedPreview,
@@ -20558,7 +20568,8 @@ function ImageWorkbenchView(ctx: AppContext) {
                 ...project, generationTasks: patchImageGenerationTask(project.generationTasks, task.id, { preparationStage: undefined }),
               })));
               return requestImageModel(imageApi, { ...input, signal, referenceImages: references.referenceImages,
-                primaryReferenceImageCount: references.primaryReferenceImageCount, preserveReferenceImageOrder: true }, assertTaskCurrent);
+                primaryReferenceImageCount: references.primaryReferenceImageCount, preserveReferenceImageOrder: true,
+                onRemoteTaskId: recordRunningHubImageTaskId(setBackgroundState, getCurrentState, requestedProjectId, task) }, assertTaskCurrent);
             },
           });
           if (signal.aborted) throw new GenerationTaskCancelledError();
@@ -24633,7 +24644,8 @@ async function regenerateImageTask(ctx: AppContext, requestedTask: ImageGenerati
           if (directImageRetry && (references.referenceImages.length !== task.referenceAssetSnapshots?.length
             || references.referenceImages.some((image) => !image.trim()))) throw new Error("角色参考图快照与实际上传图片不完整，尚未提交生图。");
           return requestImageModel(imageApi, { ...input, signal, referenceImages: references.referenceImages,
-            primaryReferenceImageCount: references.primaryReferenceImageCount, preserveReferenceImageOrder: true }, () => {
+            primaryReferenceImageCount: references.primaryReferenceImageCount, preserveReferenceImageOrder: true,
+            onRemoteTaskId: recordRunningHubImageTaskId(setBackgroundState, ctx.getCurrentState, requestedProjectId, task) }, () => {
             // Checked inside the transport FIFO after reference uploads and
             // immediately before the paid generation POST, never just enqueue.
             assertSubmissionCurrent();
@@ -25395,7 +25407,7 @@ function GenerationTasksView(ctx: AppContext) {
                   正在{imagePreparationStageLabel(task.preparationStage)}{task.status === "queued" ? "，完成后进入图片队列" : ""}。
                 </div>}
                 <div className="field-hint">
-                  {imageAssetKindLabel(task.assetKind)} · {variantLabel} · 请求 {task.width}×{task.height}{resultAsset?.imageRequestSize && resultAsset.width && resultAsset.height ? ` · 实际 ${resultAsset.width}×${resultAsset.height}` : ''} · {task.model || task.backend} · {new Date(task.updatedAt).toLocaleString()}
+                  {imageAssetKindLabel(task.assetKind)} · {variantLabel} · 请求 {task.width}×{task.height}{resultAsset?.imageRequestSize && resultAsset.width && resultAsset.height ? ` · 实际 ${resultAsset.width}×${resultAsset.height}` : ''} · {task.model || task.backend}{task.remoteTaskId ? ` · 云端任务 ${task.remoteTaskId}` : ""} · {new Date(task.updatedAt).toLocaleString()}
                 </div>
                 <div className="field-hint image-task-prompt-config" aria-label="本次生图规则与预设">
                   <span title={promptConfig.rule.title}><strong>生图规则：</strong>{promptConfig.rule.text}</span>

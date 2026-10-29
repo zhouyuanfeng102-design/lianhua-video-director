@@ -2,13 +2,14 @@
 
 [返回项目首页](../../README.md) · [下载最新便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-当前版本：[3.4.6](发布说明-3.4.6.md)。
+当前版本：[3.4.7](发布说明-3.4.7.md)。
 
 历史发布说明按版本归档，原文件名、版本号和正文内容均保留。以下按数字版本倒序排列。
 
 <details>
-<summary>3.4.x（7 份）</summary>
+<summary>3.4.x（8 份）</summary>
 
+- [3.4.7](发布说明-3.4.7.md)
 - [3.4.6](发布说明-3.4.6.md)
 - [3.4.5](发布说明-3.4.5.md)
 - [3.4.4](发布说明-3.4.4.md)

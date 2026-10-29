@@ -729,6 +729,8 @@ export interface ImageGenerationOptions {
   resolutionPlan?: ImageResolutionPlan;
   /** Optional cancellation for preparation, submission, polling and result reading. */
   signal?: AbortSignal;
+  /** Called once, after RunningHub accepts the paid image task and before status queries. */
+  onRemoteTaskId?: (taskId: string) => void | Promise<void>;
 }
 
 const trimSlash = (value: string): string => value.trim().replace(/\/+$/, '');
@@ -823,7 +825,7 @@ const browserMultipartBody = (multipart: HttpMultipart): FormData => {
   return body;
 };
 
-const requestHttp = async (url: string, init: HttpRequestInit): Promise<HttpResult> => {
+export const requestHttp = async (url: string, init: HttpRequestInit): Promise<HttpResult> => {
   // Also repair old saved references on the outgoing copy. Never rewrite the
   // original asset, drop a selected image, or infer a different reference.
   if (init.multipart) {
@@ -7082,7 +7084,7 @@ const requestImageModelOnce = async (config: ImageApiConfig, input: string | Ima
       ? (window as Window & { lianhuaDesktop?: { downloadImage?: (url: string) => Promise<string> } }).lianhuaDesktop : undefined;
     const referenceImages = normalizedReferenceImages(options);
     return requestRunningHubImage(config, { prompt, width, height, sizeOverride: options.sizeOverride, resolutionPlan: plan,
-      referenceCount: referenceImages.length, referenceImages, signal: options.signal }, {
+      referenceCount: referenceImages.length, referenceImages, signal: options.signal, onRemoteTaskId: options.onRemoteTaskId }, {
       request: requestHttp,
       ...(desktop?.downloadImage ? { downloadImage: (url: string) => desktop.downloadImage!(url) } : {}),
     }, onStart);

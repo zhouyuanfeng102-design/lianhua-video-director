@@ -33,6 +33,7 @@ export type ImageGenerationTaskPatch = Partial<Pick<
   | 'resultAssetId'
   | 'error'
   | 'bindingWarning'
+  | 'remoteTaskId'
   | 'imagePromptRuleSetId'
   | 'imagePromptRuleSetName'
   | 'imagePromptRuleSetVersion'

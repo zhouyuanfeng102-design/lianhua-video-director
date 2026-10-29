@@ -3,8 +3,9 @@ import test from 'node:test';
 import { buildRunningHubImageRequest, importRunningHubImageWorkflow, isRunningHubImageWorkflowReady,
   normalizeRunningHubImageConfig, selectedRunningHubImageWorkflow, validateRunningHubImageConfig } from '../src/runningHubImage';
 import { requestRunningHubImage } from '../src/services/runningHubImage';
+import { createImageGenerationTask } from '../src/generationTasks';
 import { createInitialState, normalizeState, serializeStateForStorage } from '../src/storage';
-import type { ImageApiConfig } from '../src/types';
+import type { ImageApiConfig, ImageGenerationTask } from '../src/types';
 import { requestImageModel } from '../src/services/llm';
 import { captureImageApiSnapshot, resolveImageApiForRegeneration } from '../src/imageApiSelection';
 import { exportRunningHubVideoWorkflow, normalizeRunningHubVideoConfig } from '../src/runningHubVideo';
@@ -230,6 +231,63 @@ test('cancellation and bounded timeout stop observation without replaying origin
     now: () => clock, timeoutMs: 20, wait: async () => { clock = 21; },
   }), /等待超时/u);
   assert.equal(requests, 1);
+});
+
+test('a status-query disconnect keeps the accepted task and queries it again without another paid POST', async () => {
+  const order: string[] = [];
+  let queries = 0;
+  const result = await requestRunningHubImage(config(), {
+    prompt: 'authored',
+    onRemoteTaskId: async (taskId) => { order.push(`save:${taskId}`); },
+  }, {
+    request: async (url) => {
+      if (url.includes('/query')) {
+        queries += 1;
+        order.push('query');
+        if (queries === 1) throw new Error('Client network socket disconnected before secure TLS connection was established（错误码：ECONNRESET；阶段：TLS 握手；接口：https://www.runninghub.ai；路由：系统代理；未取得 HTTP 响应）');
+        return response({ taskId: 'cloud-original', status: 'SUCCESS', results: [{ outputType: 'png', url: 'https://cdn.example.test/final.png' }] });
+      }
+      order.push('post');
+      return response({ taskId: 'cloud-original', status: 'QUEUED' });
+    },
+    wait: async () => {},
+  });
+  assert.deepEqual(order, ['post', 'save:cloud-original', 'query', 'query']);
+  assert.equal(result.url, 'https://cdn.example.test/final.png');
+});
+
+test('an HTTP rejection of the original task query stops without another submission', async () => {
+  let posts = 0;
+  let queries = 0;
+  await assert.rejects(requestRunningHubImage(config(), { prompt: 'authored' }, {
+    request: async (url) => {
+      if (url.includes('/query')) {
+        queries += 1;
+        return response({ message: 'rejected' }, 401);
+      }
+      posts += 1;
+      return response({ taskId: 'cloud-original', status: 'RUNNING' });
+    },
+    wait: async () => {},
+  }), /请求失败（HTTP 401）/u);
+  assert.equal(posts, 1);
+  assert.equal(queries, 1);
+});
+
+test('reload keeps an accepted RunningHub image task runnable and still stops an unaccepted one', () => {
+  const initial = createInitialState();
+  const fields = { name: '合成人物', assetKind: 'character' as const, imageVariant: 'reference' as const, prompt: 'kept', width: 1024, height: 1024, backend: 'runninghub' as const, model: 'Qwen' };
+  const accepted = createImageGenerationTask({ id: 'accepted', ...fields, remoteTaskId: '2115846555894636546' }, 10, 'running');
+  const unaccepted = createImageGenerationTask({ id: 'unaccepted', ...fields }, 11, 'running');
+  const project = { ...initial.project, generationTasks: [accepted, unaccepted] };
+  const restored = normalizeState(JSON.parse(serializeStateForStorage({ ...initial, project, projects: [project], activeProjectId: project.id }).serialized));
+  const tasks = restored.project.generationTasks as ImageGenerationTask[];
+  assert.equal(tasks.find((task) => task.id === 'accepted')?.status, 'running');
+  assert.equal(tasks.find((task) => task.id === 'accepted')?.remoteTaskId, '2115846555894636546');
+  assert.equal(tasks.find((task) => task.id === 'accepted')?.error, undefined);
+  assert.equal(tasks.find((task) => task.id === 'unaccepted')?.status, 'failed');
+  assert.match(tasks.find((task) => task.id === 'unaccepted')?.error || '', /重新生成/u);
+  assert.equal(tasks.find((task) => task.id === 'unaccepted')?.remoteTaskId, undefined);
 });
 
 const image = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+Z6k9WQAAAABJRU5ErkJggg==';
