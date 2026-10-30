@@ -58,6 +58,14 @@ assert.match(VIDEO_NATURAL_PERFORMANCE_RULE, /机位和身份图不构成这个�
 assert.match(VIDEO_NATURAL_PERFORMANCE_RULE, /完整身份不强制露脸/u);
 assert.match(VIDEO_INTERACTION_RULES, new RegExp(HEAD_ON_CHEST_RULE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'u'));
 assert.match(VIDEO_INTERACTION_TRANSLATION_RULE, /head stays on the chest that faces them/u);
+assert.match(HEAD_ON_CHEST_RULE, /胸口、腹部、髋和双膝指向同一方向/u);
+assert.match(HEAD_ON_CHEST_RULE, /每人的眼睛落在对方的眼睛上/u);
+assert.match(VIDEO_INTERACTION_TRANSLATION_RULE, /her chest, abdomen, pelvis and knees face the same direction, and her knees point toward him/u);
+assert.match(VIDEO_INTERACTION_TRANSLATION_RULE, /her eyes are on his eyes, and his eyes are on her eyes/u);
+assert.match(VIDEO_AI_SHOT_COVERAGE_RULE, /摄影机站在两人连线的侧面/u);
+assert.match(HEAD_ON_CHEST_RULE, /she stays standing with straight knees/u);
+assert.match(VIDEO_INTERACTION_TRANSLATION_RULE, /she does not crouch, squat, or kneel/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /俯、下移、往裙摆或地面看只动摄影机/u);
 assert.match(VIDEO_WORLD_SPACE_CAMERA_RULE, /身后写后脑和耳/u);
 assert.match(STORYBOARD_FRAME_VISIBILITY_RULE, /身后的可见面是后脑和耳廓/u);
 assert.match(VIDEO_NATURAL_PERFORMANCE_RULE, /说话者口型跟随自己的原话与停顿/u);

@@ -98,7 +98,8 @@ for (const action of ['旅人轻扶同伴的手臂', '旅人轻拉同伴衣袖',
 }
 const impactPrompt = renderShotPrompt({ ...baseShot, action: '旅人快跑后肩膀撞上木门', sound: '' },
   2, [], [baseShot], 'stereo', defaultRuleSets[0]!);
-assert.match(impactPrompt, /动作层-\[脚步声与接触碰撞声\]/u, 'actual footsteps and forceful collision must remain available');
+assert.match(impactPrompt, /动作层-\[很重的脚步声；接触碰撞声\]/u, 'a run and a real impact stay as two sounds');
+assert.doesNotMatch(impactPrompt, /脚步声与接触碰撞声/u);
 const faintKissCue = '第1.2s中景轻吻非常轻，几乎听不见';
 const faintKissDraft = renderShotPrompt({ ...baseShot, action: '成年旅人轻吻同伴脸颊', camera: '中景固定', sound: faintKissCue },
   2, [], [baseShot], 'stereo', defaultRuleSets[0]!);

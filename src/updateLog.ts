@@ -1,3 +1,7 @@
+/**
+ * Source marker: LVD-ORIGIN-2026-A7C4-19F2
+ * Original project: https://github.com/zhouyuanfeng102-design/lianhua-video-director
+ */
 export interface UpdateLogEntry {
   version: string;
   releasedAt: string;
@@ -10,6 +14,26 @@ export interface UpdateLogEntry {
  * renderer because portable builds do not ship the repository Markdown files.
  */
 export const updateLogEntries = [
+  {
+    version: "3.5.1",
+    releasedAt: "2026-10-30",
+    title: "对视、轻脚步和站姿不随镜头变",
+    highlights: [
+      "两人对话或对视时，眼睛落在对方眼睛上。要同时看见两张脸时，摄影机站在两人连线的侧面。",
+      "普通走路写成很轻的鞋底声，停在对白下面。跑、跺脚或摔倒才把那一下写重。",
+      "人还站着时，镜头往下看只动摄影机，双膝保持伸直。已生成的旧稿保持原样。",
+    ],
+  },
+  {
+    version: "3.5.0",
+    releasedAt: "2026-10-30",
+    title: "腿和上半身同一个朝向",
+    highlights: [
+      "原文没有写拧腰、侧躺或回头时，同一人的胸口、腹部、髋和双膝指向同一个方向。",
+      "有人站在她两腿之间时，髋正面和双膝朝向他。侧面机位不把腿拧到胸口反面。",
+      "这是共用的视频规则。已生成的旧提示词和成片保持原样。",
+    ],
+  },
   {
     version: "3.4.9",
     releasedAt: "2026-10-30",

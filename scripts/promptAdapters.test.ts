@@ -403,7 +403,8 @@ assert.ok(
   `H3 should still compact repeated global preset prose without deleting shot events (h3=${protectedPresetH3.length}, canonical=${protectedPresetCanonical.length})`,
 );
 assert.equal(countMatches(protectedPresetH3, /台词：无/gu), 6, 'preset compaction must retain the authored no-dialogue instruction in every Shot');
-assert.match(protectedPresetH3, /\[Shot 5\][\s\S]*脚步声与接触碰撞声/u, 'preset compaction must retain the real synchronized foley event');
+assert.match(protectedPresetH3, /\[Shot 5\][\s\S]*接触碰撞声/u, 'preset compaction must retain the real synchronized foley event');
+assert.doesNotMatch(protectedPresetH3, /\[Shot 5\][\s\S]*很轻的鞋底脚步声/u);
 assert.equal(countMatches(protectedPresetH3, /non_diegetic_music: N\/A/gu), 1, 'the score decision appears once in its official footer');
 assert.equal(
   countMatches(protectedPresetH3, new RegExp(protectedPresetSound, 'gu')),

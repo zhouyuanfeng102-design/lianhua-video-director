@@ -154,6 +154,8 @@ assert.match(AUDIO_H3_DELIVERY_RULE, /话题摘要不能机械当成台词.*不�
 assert.match(DIALOGUE_DELIVERY_RULE, /有明确说话人和话题但仅为转述时，在获准生成阶段整理成自然完整台词/u);
 assert.match(NO_DIALOGUE_PERFORMANCE_RULE, /不写不可辨低声、不构成可辨台词/u);
 assert.match(NATURAL_ACTION_AUDIO_RULE, /铜铃、风铃、门环、耳环、杯盏和金属饰只有原文写明它自己响的那一下才出声/u);
+assert.match(NATURAL_ACTION_AUDIO_RULE, /普通走路、迈过门槛、沿走廊走写成很轻的鞋底声/u);
+assert.match(AUDIO_TRANSLATION_SCOPE_RULE, /soft footsteps of the sole on that floor, quiet and under the lowered voices/u);
 assert.match(NO_DIALOGUE_PERFORMANCE_RULE, /无对白不等于整轨静音.*笑声、咳嗽、哭泣等非语言声及必要动作声/u);
 assert.match(NO_DIALOGUE_PERFORMANCE_RULE, /不等于嘴唇永久闭合或表情冻结.*微笑、亲吻、进食等非说话动作/u);
 assert.match(NO_DIALOGUE_PERFORMANCE_RULE, /只覆盖原定无对白区间.*不删其它镜头或其它时刻的真实台词/u);

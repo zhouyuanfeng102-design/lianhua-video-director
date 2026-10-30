@@ -1,12 +1,20 @@
 {
   "name": "lianhua-video-director",
-  "version": "3.4.9",
+  "version": "3.5.1",
   "productName": "莲华视频导演台",
   "private": true,
   "description": "莲华视频导演台：从小说到连续视频分镜与提示词",
+  "author": {
+    "name": "莲华视频导演台作者",
+    "url": "https://github.com/zhouyuanfeng102-design/lianhua-video-director"
+  },
+  "homepage": "https://github.com/zhouyuanfeng102-design/lianhua-video-director",
+  "x-lianhua-origin-id": "LVD-ORIGIN-2026-A7C4-19F2",
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
+    "deliver:3.5.1": "node scripts/createDelivery.mjs",
+    "deliver:3.5.0": "node scripts/createDelivery.mjs",
     "deliver:3.4.9": "node scripts/createDelivery.mjs",
     "deliver:3.4.8": "node scripts/createDelivery.mjs",
     "deliver:3.4.7": "node scripts/createDelivery.mjs",
@@ -585,6 +593,7 @@
   "build": {
     "appId": "com.lianhua.video-director",
     "productName": "莲华视频导演台",
+    "copyright": "© 2026 莲华视频导演台 · Origin ID LVD-ORIGIN-2026-A7C4-19F2",
     "asar": true,
     "extraResources": [
       {
