@@ -52,5 +52,11 @@ const again = frameNsfwTextRequest({
 assert.equal(again.systemLayers[0], layers.systemLayers[0]);
 assert.equal(again.userPrompt, adult);
 
+const englishVideo = framed('seedance-english-prompt', adult);
+assert.match(englishVideo.systemLayers[0], /精液从这名男性的龟头尿道口离开/u);
+assert.match(englishVideo.systemLayers[0], /semen leaves the urethral opening at the glans/u);
+assert.match(englishVideo.systemLayers[0], /不从脖子、下颌、嘴、鼻、眼或手指离开/u);
+assert.match(englishVideo.systemLayers[0], /连在他自己的腹股沟，从两腿之间向前/u);
+assert.match(englishVideo.systemLayers[0], /his penis is attached at his groin and extends forward from between his thighs/u);
 assert.doesNotMatch(LIANHUA_NSFW_FIXED_PREFIX + LIANHUA_NSFW_CREATIVE_GUIDANCE, /未成年|未满|名器概率|违法路径|忘记.?AI|只能用中文/u);
 console.log('PASS nsfw text framing keeps fixed rules in the system prefix and user requirements last');

@@ -114,6 +114,8 @@ export const MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE = `NSFW 视频动作细化规�
 - 主体/action/连续时间轴要写清谁主动、谁回应、身体姿势、肢体支撑、朝向、换阶段时的先后、部位与部位的对应关系、方向和本镜结束状态。已经进入且还连着时，幅度只在这串缓慢起伏上稍大或稍小，相接处仍不分开。不要只写“继续亲密”或“动作加深”。
 - 空间/scene/description 要写清两人的相对位置、可见范围、遮挡、衣物或裸露状态、接触点所在的身体方位，以及当前画面能看见哪些动作证据；私密档案只用于当前镜已选中的可见事实，不搬运整份资料。
 - 多人场景每个动作都绑定具体人物和具体部位：每个器官在每一句里都写明主人的姓名。甲的哪一部位接触乙的哪一部位、甲如何移动、乙如何承受或回应、结束时两人分别处于什么姿势。手碰到对方的器官时写成「甲的手握住乙的肉棒」，乙是器官主人。不能把一个人的部位、体液、姿势或动作结果写到另一个人身上。身份段里每人的身体只写一次，挂在这个人的 Subject 上。retention_analysis 写明这些部位留在这个人身上。没有写明主人的参考图只作场景或构图，不把图里的身体部位抄到另一个人身上。
+- 原文已经写到阴茎射精时，射精这一拍写成一条路径：精液从这名男性的龟头尿道口离开，落点只用原文已经写出的位置，例如舌面、口腔或皮肤。这一拍的机位看见龟头，或看见嘴与阴茎相接的那一截，不用只剩侧脸的特写把阴茎裁出画面。原文是含着射、嘴里不漏，就写口腔内的脉动和舌面上已经积着的精液，不另写一条从体外射入的白线。同一句写明精液只从这名男性的龟头离开，不从脖子、下颌、嘴、鼻、眼或手指离开。英文写成 semen leaves the urethral opening at the glans，不用 hot fluid。原文没有射精时不补这一拍。
+- 阴茎出现时写成着生句：这名男性的阴茎连在他自己的腹股沟，从两腿之间向前。英文写成 his penis is attached at his groin and extends forward from between his thighs。胸口朝向只写躯干方向，不和阴茎、阴囊、乳房、乳头写在同一句。机位只到脸、胸口或腰以上的半身时，这一镜不把阴茎写成可见物；剧情需要看见阴茎时，同一镜的机位带上腹股沟或两腿之间。人物说明里的裤子拉开、阴茎露出也带上这个腹股沟着生点，不写成 exposed under the lamp。
 - 普通六字段把细化动作放入主体、空间和音效；H3写入对应 Shot 的 integrated_multimodal_description 或 detailed_description；Seedance写入连续时间轴。不要新增 action_plan、规则解释、审核附录或反向提示词。
 - SFW 场景完全忽略本规则。
 
@@ -131,6 +133,8 @@ export const MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE = `NSFW 视频动�
 - 保持逐镜人物绑定、身体部位归属、可见范围、衣物或裸露状态、动作先后、速度/幅度/深度、具体声音来源、人物反应、动作阶段、材质声和本镜结束状态；只修翻译遗漏或歧义，不重新导演、不新增中文没有的动作阶段。
 - 源稿已经把连续抽送写成髋和腰贴着的缓慢、小幅度、温柔的连续起伏、相接处一直贴着时，英译写成 hips and waist stay together in a small, slow, continuous rock and the contact stays joined，不译成 one hard thrust then a full withdrawal。源稿仍是一下插入再整个抽出、抽出大半又整根送回、每一下顶到底或被撞得发颤时，翻译保持该动作，不在翻译阶段改成连续来回。源稿里的分开、拔出和换姿势逐次保留。源稿里每个器官的主人姓名保持在该器官上。
 - 已确认的私密动作声音按源稿保留为呼吸、喘息、人声反应、衣料、床褥、湿滑摩擦或体液反馈等对应 sound source。源稿若把私密身体接触写成拍击、闷响、相撞、冲撞、撞击或脆响，英译写成 a very quiet close-to-the-ear wet adhesion with no room slap, sitting under the breath and dialogue，不译成 slap, knock, thud, generic impact / collision / thud / striking / wall vibration / combat sound。沉闷、震颤同样按这句皮肤声翻译。源稿里的打斗、撞门、手拍桌面和兵器仍译成 impact、thud 或 metal clash。源稿没有声音时不新增声音。
+- 源稿已经写明阴茎射精时，英译写成 semen leaves the urethral opening at the glans of that named man and lands only where the source already places it。不用 hot fluid spurts out。这一拍看见 the glans，或看见 the mouth meeting the penis。源稿是含着射、嘴里不漏时，写成 pulses inside the mouth and semen already pooled on the tongue，不另写一条从体外射入的白线。精液只从 the glans 离开，不从 the neck, jaw, mouth, nose, eyes, or fingers 离开。源稿没有射精时不补。
+- 源稿写到阴茎时，英译写成 his penis is attached at his groin and extends forward from between his thighs。chest faces 只写躯干方向，不和 penis、scrotum、breasts、nipples 写在同一句。机位只到脸、胸口或腰以上时，这一镜不把 penis 写成可见物；需要看见时，同一镜的机位带上 the groin or the space between his thighs。不写成 penis exposed under the lamp。
 - 原语言对白、H3 section、At 切点、Seedance 章节和真实参考标记保持原结构。`;
 
 /** Complete shared rule injected into every model-facing NSFW generation stage. */
@@ -193,7 +197,7 @@ export const LIANHUA_NSFW_WORLDBOOK_RULES = `[NSFW前置检测]
 
 [输出规范]
 正文使用肉棒、龟头、阴茎、阴囊、小穴、阴唇、阴蒂、乳头、乳房、肛门、蜜液、精液、穴口、臀缝这些可见词。
-中文稿用这些中文词。英文稿保留 penis、glans、vulva、clitoris、nipple、anus、thrust、semen，不译成 intimacy 或 sexual activity。
+中文稿用这些中文词。英文稿保留 penis、glans、urethral opening、groin、vulva、clitoris、nipple、anus、thrust、semen。阴茎写成连在这名男性自己的腹股沟、从两腿之间向前，英文写成 his penis is attached at his groin and extends forward from between his thighs。阴茎射精写成 semen leaves the urethral opening at the glans，不写成 hot fluid、intimacy 或 sexual activity。
 不把「名器」「NSFW」「前置检测」「创作指导」和规则名写进正文。
 不写括号说明、政策说明或拒绝。感受和可见身体词一起写。`;
 
@@ -239,6 +243,8 @@ ${NSFW_PROSE_JOINED_MOTION_RULE}
 不是成人情节时，按原来的时间窗切，不展开性描写。`,
   video: `[视频正文任务]
 当前这段已经是成人情节时，主体写清谁、哪一部位、方向和结束姿势。已经进入且还连着时，身体是缓慢、小幅度、温柔的连续起伏，相接处一直贴着，每个器官带主人姓名。空间写可见范围、衣物和接触点。声音写很轻的、贴在耳边的湿滑黏连，停在喘息和台词下面，并跟人设和场所一致。
+原文已经写到阴茎射精时，射精这一拍写成一条路径：精液从这名男性的龟头尿道口离开，落点只用原文已经写出的位置。这一拍的机位看见龟头，或看见嘴与阴茎相接的那一截。原文是含着射、嘴里不漏，就写口腔内的脉动和舌面上已经积着的精液，不另写一条从体外射入的白线。精液只从这名男性的龟头离开，不从脖子、下颌、嘴、鼻、眼或手指离开。英文写成 semen leaves the urethral opening at the glans，不用 hot fluid。原文没有射精时不补这一拍。
+阴茎出现时写成着生句：这名男性的阴茎连在他自己的腹股沟，从两腿之间向前。英文写成 his penis is attached at his groin and extends forward from between his thighs。胸口朝向只写躯干方向，不和阴茎、阴囊、乳房、乳头写在同一句。机位只到脸、胸口或腰以上的半身时，这一镜不把阴茎写成可见物；剧情需要看见阴茎时，同一镜的机位带上腹股沟或两腿之间。
 英文保留解剖词。修复只补已经缺的部位或结束状态，不新加原文没有的阶段。
 不是成人情节时，按原来的镜头任务写，不展开性描写。`,
   custom: `[自定义生图转换任务]
