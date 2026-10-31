@@ -39,6 +39,32 @@ check('six reference numbers follow H3 input links rather than numeric LoadImage
   assert.deepEqual(resolveComfyH3PictureNumbers({ ...local, workflowJson: JSON.stringify({ prompt: graph() }) }, [0]), [5]);
 });
 
+check('ImageToVideo Picture order follows first_frame then last_frame, including retained defaults', () => {
+  const i2vGraph = {
+    start: { class_type: 'LoadImage', inputs: { image: 'start.png' } },
+    end: { class_type: 'LoadImage', inputs: { image: 'end.png' } },
+    text: { class_type: 'Text', inputs: { value: 'original I2V prompt' } },
+    h3: { class_type: 'MiniMaxH3ImageToVideo', inputs: {
+      prompt: ['text', 0], last_frame: ['end', 0], first_frame: ['start', 0],
+    } },
+  };
+  const local = { workflowJson: JSON.stringify(i2vGraph), mapping: {
+    prompt: [{ nodeId: 'text', inputName: 'value' }],
+    images: [{ nodeId: 'start', inputName: 'image' }, { nodeId: 'end', inputName: 'image' }],
+  } };
+  assert.deepEqual(resolveComfyH3PictureNumbers(local, [0]), [1]);
+  assert.deepEqual(resolveComfyH3PictureNumbers(local, [1]), [2]);
+  assert.deepEqual(resolveComfyH3PictureNumbers(local, [0, 1]), [1, 2]);
+  const unknownSource = structuredClone(i2vGraph);
+  unknownSource.h3.inputs.first_frame = ['unknown-batch', 0];
+  assert.equal(resolveComfyH3PictureNumbers({ ...local, workflowJson: JSON.stringify(unknownSource) }, [1]), undefined);
+  const singleSlot = { workflowJson: JSON.stringify({
+    text: i2vGraph.text,
+    h3: { class_type: 'MiniMaxH3ImageToVideo', inputs: { prompt: ['text', 0], first_frame: ['unknown-transform', 0] } },
+  }), mapping: { prompt: local.mapping.prompt, images: [local.mapping.images[0]] } };
+  assert.equal(resolveComfyH3PictureNumbers(singleSlot, [0]), undefined);
+});
+
 check('AI App 图片槽顺序覆盖同类 RunningHub 配置，不依赖单个云端 ID', () => {
   const mappedFields = imageIds.map((nodeId, imageIndex) => ({ nodeId, fieldName: 'image', kind: 'image' as const, imageIndex }));
   assert.deepEqual(resolveRunningHubH3PictureNumbers({ runningHubH3ReferenceImages: undefined, runningHubMappedFields: mappedFields }, [0, 2, 5]), [1, 3, 6]);

@@ -4,13 +4,13 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的 Windows 桌面工作台。
 
-当前版本：**3.5.5** · 2026-10-31 · Windows 64 位 · 便携运行
+当前版本：**3.5.9** · 2026-10-31 · Windows 64 位 · 便携运行
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows 便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-3.5.5.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-3.5.9.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
 1. 下载上面的 EXE，放在可写入的文件夹里，双击运行，无需安装 Node.js。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
@@ -42,17 +42,28 @@
 - **自定义生图+反推图片提示词**：输入要求生成图片，或复用上传/资产库参考图，通过视觉 API 反推可复制的提示词与人物、物品、场景、风格详情。反推同步显示在聊天和资料任务，支持后台执行、停止、重试及项目保存恢复；原有生图支持原文直发或规则转换，结果自动入库。
 - **项目与资产管理**：管理图片、视频和音频，保存项目包、备份资料并导出提示词。
 
-## 最新更新 · v3.5.5
+## 最新更新 · v3.5.9
 
-- 图像工作台从资产库选参考图时，可以一次勾选多张，顺序按点选先后。
-- 私密资料图和普通图都可以当作本次参考图。
-- 分镜和视频的自动配图仍不自动带上私密图。已生成的旧稿保持原样。
+- 推、跟、摇要落到身上的部位并停住。衣服留在身体外面，道具件数不增加。
+- 口交时嘴唇留在龟头，敞开的衣边留在原处。第一句台词之前嘴闭合。
+- 这是共用规则。已生成的旧提示词和成片保持原样。
 
 更新程序不改写项目存档。
 
 本版定向测试结果见发布说明，测试不调用真实模型或提交视频生成。
 
-[查看本版完整说明](docs/releases/发布说明-3.5.5.md) · [历史版本归档](docs/releases/README.md)
+[查看本版完整说明](docs/releases/发布说明-3.5.9.md) · [历史版本归档](docs/releases/README.md)
+
+## 上一版更新 · v3.5.8
+
+- ComfyUI MiniMax H3 ImageToVideo 只有一个图片槽时即可继续提交，不要求追踪中间节点路径或猜测 H3 图片编号；明确能解析的关系仍同步。
+- 多个图片槽或首尾帧关系不明确时，继续保留原有谨慎处理。
+
+更新程序不改写项目存档。
+
+本版定向测试结果见发布说明，测试不调用真实模型或提交视频生成。
+
+[查看上一版完整说明](docs/releases/发布说明-3.5.8.md) · [历史版本归档](docs/releases/README.md)
 
 ## 从源码运行
 

@@ -17,6 +17,7 @@ import {
   LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_1_0, LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_0_1,
   LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_1, stripLegacyVideoActingCameraRules,
 } from '../src/videoActingCameraRules';
+import { VIDEO_SPATIAL_CONTINUITY_RULE } from '../src/videoConversionRules';
 import { VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT,
   VIDEO_PROMPT_ENGLISH_AI_REVIEW_SYSTEM_PROMPT,
   VIDEO_PROMPT_ENGLISH_DOCUMENT_TRANSLATION_SYSTEM_PROMPT } from '../src/promptTranslation';
@@ -72,6 +73,18 @@ assert.match(VIDEO_INTERACTION_TRANSLATION_RULE, /She remains kneeling bent over
 assert.match(VIDEO_CAMERA_SELECTION_RULE, /The camera tilts down with small amplitude at slow speed from her face toward her waist\. Her knees remain on the platform/u);
 assert.match(VIDEO_INTERACTION_TRANSLATION_RULE, /his chest and eyes face that person, not the lens/u);
 assert.match(VIDEO_CAMERA_SELECTION_RULE, /拍正面和嘴清楚可见不表示脸转向镜头/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /She keeps stepping toward the destination\. Her chest and the foot she steps with face that destination\. The camera moves backward in front of her at her pace\. Her face stays toward the person ahead/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /They remain in one file along the path\. The leader remains ahead, his chest and stepping foot facing the destination\. The next person remains behind that leader, chest toward that leader's back\. A later side view or a view of a face changes only the camera\. The order along the path stays the same/u);
+assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /She keeps stepping toward the destination\. Her chest and the foot she steps with face that destination/u);
+assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /The order along the path stays the same/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /后面每一镜开头用同一句再写一次先后/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /His other hand remains behind his back\. Five fingers remain on that palm/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /The thread remains from his palm to her wrist/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /The camera pushes in with small amplitude at slow speed toward her shoulder and stops at a medium shot/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /The robe remains outside the arm and the torso\. The sleeve follows that arm/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /Exactly two threads remain/u);
+assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /Exactly two threads remain/u);
+assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /The thread remains from his palm to her wrist/u);
 assert.match(VIDEO_WORLD_SPACE_CAMERA_RULE, /身后写后脑和耳/u);
 assert.match(STORYBOARD_FRAME_VISIBILITY_RULE, /身后的可见面是后脑和耳廓/u);
 assert.match(VIDEO_NATURAL_PERFORMANCE_RULE, /说话者口型跟随自己的原话与停顿/u);
@@ -91,6 +104,10 @@ for (const system of [VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT,
   assert.match(system, /不在翻译阶段重新导演/u);
 }
 assert.ok(VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('让摄影机运动以camera为主语')
+  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('She keeps stepping toward the destination')
+  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('They remain in one file along the path')
+  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('The thread remains from his palm to her wrist')
+  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('stops at a medium shot')
   && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('不得把retreating')
   && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('除非源稿明确表示人物本人倒退或折返'));
 assert.ok(VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT

@@ -22,7 +22,8 @@ export const H3_CLIP_TIME_RULE = [
  * section 4.4 and ref-en.txt sections 5.1/5.4 (official repository).
  */
 export const H3_DIALOGUE_FORMAT_RULE = [
-  'MiniMax H3具体对白、发话动作和时序写在现有integrated_multimodal_description或full-reference的detailed_description逐镜正文内部，不增加section、镜数、At切点或参考图标签。实际说话、歌唱或发出画外人声的声源使用稳定(S1)、(S2)等编号；它们是声源ID，不是稳定性等级、图片槽位或人物重要性。不发声的人物不分配声源ID。同一声源跨镜保持同一编号；原稿明确同声说话的已编号声源可合用(S1,S2)，不把原来的轮流说话改成齐声。full-reference中编号按目标视频全局发声顺序建立，subject_definitions已有Subject/Audio声源引用一致复用同一声源ID，不各自重新编号或新增无依据的音频参考。',
+  'MiniMax H3具体对白、发话动作和时序写在现有integrated_multimodal_description或full-reference的detailed_description逐镜正文内部，不增加section、镜数、At切点或参考图标签。实际说话、歌唱或发出画外人声的声源使用稳定(S1)、(S2)等编号；它们是声源ID，不是稳定性等级、图片槽位或人物重要性。编号按本段第一次出声的顺序：先说话的人是(S1)，下一个人是(S2)。不发声的人物不分配声源ID。同一声源跨镜保持同一编号；原稿明确同声说话的已编号声源可合用(S1,S2)，不把原来的轮流说话改成齐声。full-reference中编号按目标视频全局发声顺序建立，subject_definitions已有Subject/Audio声源引用一致复用同一声源ID，不各自重新编号或新增无依据的音频参考。台词：无的镜头不给任何人标(S1)。身份句、Identity句和参考图职责里不写声源编号。本段第一句台词之前，能看见的嘴保持闭合。英文写成 Before the first line, every visible mouth stays closed。',
+  '有台词时，每句按这个结构写在<d>紧前，姓名、声线和原话换成这一镜的。先说话的人写成：小舞 (S1)，年轻女性，声音偏高、偏亮、句子短，人在画面里，嘴张开，嘴唇随这句开合。唐三和大长老的嘴闭合。她说：<d>[Chinese] 三哥……</d>。英文写成 Xiao Wu (S1), a young woman with a high, bright, short voice, is on screen. Her mouth opens and her lips move with the words. Tang San\'s mouth stays closed, and the Grand Elder\'s mouth stays closed. She says: <d>[Chinese] 三哥……</d>。下一个人换下一个编号，并换一句不同的音高和音色。同一个人再次开口，沿用他第一次的编号和同一句声线。不写自然发声或 natural voice 让几个人共用一条声线。脸能看见的人说话，写他的嘴张开，另外几个人的嘴闭合。原文就是背对镜头说的，声音仍用这个人的编号和声线，画面里能看见的嘴保持闭合，不把这句安到正脸那个人身上。',
   '中文H3最终复核根据完整原稿将台词整理成官方<d>[Language] 台词</d>语法；引号内和明确逐字原话使用<d>[Chinese] 原话</d>并逐字保留原字与标点，不翻译、不润色、不替换成“催促声/交谈声”。有明确说话人和话题但只是转述时，沿用已确认事实整理成自然、完整、可念的一句，不把话题摘要机械塞进<d>，也不增加新事实。人物身份、声线（仅有事实依据时）、声源ID、动作、发话时刻、语气和口型安排全部写在<d>之外，并明确唯一发声者及非说话人的聆听/无说话口型状态。“台词：无/Dialogue: none/None/N/A”是无台词状态，不是可朗读内容，不能写成<d>None</d>或给无对白镜头分配新的讲话声源。视觉身份、姓名和参考职责保留在原有视觉描述或定义中，不转入<d>或旁白；原剧情真实呼喊姓名的台词仍逐字保留。普通画外人物发声照原场景保留；原稿确属旁白时使用says in an off-screen voiceover，并在该<d>后明确对应画内人物没有说话口型，保留原剧情非说话动作，不能把旁白改成另一人物张口代说。',
   '多人交接对白时，在每句<d>紧邻的镜内正文中写出确定的完整姓名与同一声源ID，以及本段视频时间的完整发话区间、面向谁、画内或画外状态；必要时复用已有的简短可辨识外貌或人物参考身份，不只写“她/另一人/左边的人”，也不只在遥远的开场定义一次说话人。保留经本次有权排程阶段确认的完整发话区间和口部动作先后：亲吻接触结束、离开后才张口说话，不把“之后/then/after”合成“同时/while”；倾听者不代说，但不冻结自然表情。Picture图片编号、Subject人物编号与S声源编号互相独立，不能按相同数字互换；同一人物的身份、声源和台词始终对应，未发声人物不因上传了参考图就增加声音。',
   DIALOGUE_VOICE_IDENTITY_RULE,
@@ -38,7 +39,7 @@ export const H3_DIALOGUE_FORMAT_RULE = [
  * while this client only checks the transport structure.
  */
 export const H3_FINAL_BODY_FORMAT_RULE = [
-  '最终正文只能使用官方H3的两种结构：无完整参考图时的三字段 integrated_multimodal_description、overall_soundscape、non_diegetic_music；full-reference时的六字段 subject_definitions、summary、retention_analysis、detailed_description、overall_soundscape、non_diegetic_music，字段名称和顺序固定。',
+  '最终正文只能使用官方H3的两种结构：无完整参考图时的三字段 integrated_multimodal_description、overall_soundscape、non_diegetic_music；full-reference时的六字段 subject_definitions、summary、retention_analysis、detailed_description、overall_soundscape、non_diegetic_music，字段名称和顺序固定。全部[Shot N]写在同一个integrated_multimodal_description或detailed_description里。最后一镜写完，再写一次overall_soundscape，然后是non_diegetic_music。两镜之间不插入这两个字段，也不把字段名重复写一遍。',
   'full-reference 的 detailed_description 在 [Shot 1] 之前写用户已选画面风格和导演调度，各用原文一句；没有这两项时不另编画风，前言可以省略。三字段结构没有前言位置，把同一句写在 [Shot 1] 正文开头。前言属于该字段正文，不是额外section或镜头，也不逐镜重复。',
   '逐镜正文要自然连贯地写成可播放的视觉、动作、声音和对白叙述，不要堆成“主体/空间/光影/镜头/台词/音效”等普通六字段标签清单，也不要把官方H3三字段误写成普通时间轴。压缩重复修饰而非动作：稳定外貌、服饰和光照简述一次，后镜只写变化；动作句直接交代谁向谁做什么、速度与同时回应、接触结果及下一行动，音效贴随同一次事件，不再复述整套动作。完整保留每项行动、明确次数、完整对白和已采用时间，不按固定字数截断，不把多个照面压成一次；翻译保持手扫/腿扫、支撑肢/发力肢及持续接触的区别，不以笼统的sweep或fight替代已明确的实施方式。',
   HEAD_ON_CHEST_RULE,

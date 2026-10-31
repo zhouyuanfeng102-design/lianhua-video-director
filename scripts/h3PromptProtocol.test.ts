@@ -14,6 +14,14 @@ import {
 
 assert.match(H3_DIALOGUE_FORMAT_RULE, /有明确说话人和话题但只是转述时.*自然、完整、可念的一句.*不把话题摘要机械塞进/u,
   'H3 converts narrated speech topics into clear dialogue without misquoting the summary');
+assert.match(H3_DIALOGUE_FORMAT_RULE, /Her mouth opens and her lips move with the words\. Tang San's mouth stays closed, and the Grand Elder's mouth stays closed/u,
+  'each spoken line names the speaker, opens that mouth, and closes the listeners');
+assert.match(H3_DIALOGUE_FORMAT_RULE, /台词：无的镜头不给任何人标\(S1\)。身份句、Identity句和参考图职责里不写声源编号/u,
+  'a silent shot does not attach a speaker id to an identity line');
+assert.match(H3_DIALOGUE_FORMAT_RULE, /Before the first line, every visible mouth stays closed/u,
+  'mouths stay closed until the first written line');
+assert.match(H3_FINAL_BODY_FORMAT_RULE, /全部\[Shot N\]写在同一个integrated_multimodal_description或detailed_description里/u,
+  'every shot stays inside one description before the single soundscape');
 
 assert.doesNotMatch(H3_FINAL_BODY_FORMAT_RULE, /最终英文正文|英文风格|中文正文可作为/u,
   'the shared format contract does not select a delivery language');

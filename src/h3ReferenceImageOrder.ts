@@ -84,13 +84,20 @@ export const readH3ReferenceImageOrders = (graph: unknown): H3ReferenceImageOrde
   };
   return Object.keys(graph).flatMap((consumerNodeId): H3ReferenceImageOrder[] => {
     const node = nodeAt(consumerNodeId);
-    if (node?.classType !== 'MiniMaxH3ReferenceToVideo') return [];
-    // DynamicCombo's flattened inputs retain insertion order, as does execute(ref_images).values().
-    const entries = Object.entries(node.inputs).flatMap(([inputName, value]): Array<[string, unknown]> => {
-      if (/^ref_images\.ref_image_\d+$/u.test(inputName)) return [[inputName, value]];
-      if (inputName === 'ref_images' && record(value)) return Object.entries(value).map(([name, image]) => [`ref_images.${name}`, image]);
-      return [];
-    });
+    if (!node) return [];
+    let entries: Array<[string, unknown]>;
+    if (node.classType === 'MiniMaxH3ImageToVideo') {
+      entries = (['first_frame', 'last_frame'] as const)
+        .filter((inputName) => inputName in node.inputs)
+        .map((inputName): [string, unknown] => [inputName, node.inputs[inputName]]);
+    } else if (node.classType === 'MiniMaxH3ReferenceToVideo') {
+      // DynamicCombo's flattened inputs retain insertion order, as does execute(ref_images).values().
+      entries = Object.entries(node.inputs).flatMap(([inputName, value]): Array<[string, unknown]> => {
+        if (/^ref_images\.ref_image_\d+$/u.test(inputName)) return [[inputName, value]];
+        if (inputName === 'ref_images' && record(value)) return Object.entries(value).map(([name, image]) => [`ref_images.${name}`, image]);
+        return [];
+      });
+    } else return [];
     return [{ consumerNodeId, prompt: promptSources(consumerNodeId, 'prompt'),
       images: entries.map(([inputName, value]) => ({ inputName, ...imageSource(value) })) }];
   });
@@ -147,7 +154,8 @@ export const resolveComfyH3PictureNumbers = (
 ): number[] | undefined => {
   let graph: unknown; try { graph = JSON.parse(workflow.workflowJson); } catch { return undefined; }
   if (record(graph) && record(graph.prompt)) graph = graph.prompt;
+  const orders = readH3ReferenceImageOrders(graph);
   // Local Comfy binding preserves defaults in unselected inputs.
-  return resolveH3PictureNumbers(compileH3ReferenceImageOrders(readH3ReferenceImageOrders(graph), workflow.mapping,
+  return resolveH3PictureNumbers(compileH3ReferenceImageOrders(orders, workflow.mapping,
     (_source, _slotIndex, present) => present), selectedSlots);
 };

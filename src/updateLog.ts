@@ -15,6 +15,46 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "3.5.9",
+    releasedAt: "2026-10-31",
+    title: "H3 运镜落点、衣服和口交着生",
+    highlights: [
+      "推、跟、摇要落到身上的部位并停住。衣服留在身体外面，道具件数不增加。",
+      "口交时嘴唇留在龟头，敞开的衣边留在原处。第一句台词之前嘴闭合。",
+      "这是共用规则。已生成的旧提示词和成片保持原样。",
+    ],
+  },
+  {
+    version: "3.5.8",
+    releasedAt: "2026-10-31",
+    title: "H3 单图首帧不再要求追踪节点路径",
+    highlights: [
+      "ComfyUI MiniMax H3 ImageToVideo 只有一个已绑定图片槽时即可继续提交，不要求追踪不透明中间节点或猜测图片编号。",
+      "明确能解析的 first_frame / last_frame 关系仍同步，无法证明的关系保留原文。",
+      "多图关系仍按原有明确映射处理；不新增按钮、校验、重试或模型请求。",
+    ],
+  },
+  {
+    version: "3.5.7",
+    releasedAt: "2026-10-31",
+    title: "ComfyUI H3 图片槽按实际输入顺序绑定",
+    highlights: [
+      "MiniMax H3 ImageToVideo 的 first_frame 和 last_frame 分别映射到 Picture 1、Picture 2。",
+      "已明确 H3 图片槽不再显示未声明图片消费顺序的误报。",
+      "无法追溯的图片路径继续保留原有提示；不新增按钮、校验、重试或模型请求。",
+    ],
+  },
+  {
+    version: "3.5.6",
+    releasedAt: "2026-10-31",
+    title: "走路朝目的地，镜头在前只后退",
+    highlights: [
+      "走路、被牵或被拖时，胸口和迈出的脚朝目的地。",
+      "摄影机在前面时沿同一路线后退，人继续朝目的地迈步。",
+      "这是共用规则。已生成的旧提示词和成片保持原样。",
+    ],
+  },
+  {
     version: "3.5.5",
     releasedAt: "2026-10-31",
     title: "参考图可多选，私密图也能选",

@@ -351,6 +351,12 @@ assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /She remains kneel
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /semen leaves the urethral opening at the glans/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /his penis is attached at his groin and extends forward from between his thighs/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /her vulva is on the front of her pelvis between her thighs, anterior to the perineum/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /Her pelvis remains flush against his groin/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /The fluid remains on that named skin and runs down that surface/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /That hand remains on that named part/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /Her lips remain around the glans\. His penis remains attached at his groin/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /The open collar remains at that edge\. The cloth stays outside the torso/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /His penis remains attached at his groin\. The tip remains inside her vaginal opening\. Her pelvis remains flush against his groin/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /不从 the neck, jaw, mouth, nose, eyes, or fingers 离开/u);
 assert.doesNotMatch(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /年龄门禁|未满|未成年/u);
 assert.doesNotMatch(MOSE_JIANGHU_NSFW_VIDEO_SOUND_RULE, /年龄门禁|未满|未成年/u);

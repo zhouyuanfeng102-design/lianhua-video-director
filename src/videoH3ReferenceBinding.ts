@@ -161,6 +161,9 @@ export const videoH3PictureNumbers = (
   if (context.backend === 'comfyui') {
     const numbers = context.workflow && resolveComfyH3PictureNumbers(context.workflow, slots);
     if (numbers) return { numbers };
+    // A single configured image slot is sufficient for I2V submission. Keep
+    // the authored Picture text untouched when the graph path is opaque.
+    if (references.length === 1 && context.workflow?.mapping.images.length === 1 && slots[0] === 0) return {};
     return { warning: '当前 ComfyUI 工作流未声明 H3 实际图片消费顺序，已保留正文，未按输入槽猜测图片编号。' };
   }
   const api = context.api;

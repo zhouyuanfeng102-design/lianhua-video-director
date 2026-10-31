@@ -1,6 +1,6 @@
 {
   "name": "lianhua-video-director",
-  "version": "3.5.5",
+  "version": "3.5.9",
   "productName": "莲华视频导演台",
   "private": true,
   "description": "莲华视频导演台：从小说到连续视频分镜与提示词",
@@ -13,6 +13,10 @@
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
+    "deliver:3.5.9": "node scripts/createDelivery.mjs",
+    "deliver:3.5.8": "node scripts/createDelivery.mjs",
+    "deliver:3.5.7": "node scripts/createDelivery.mjs",
+    "deliver:3.5.6": "node scripts/createDelivery.mjs",
     "deliver:3.5.5": "node scripts/createDelivery.mjs",
     "deliver:3.5.4": "node scripts/createDelivery.mjs",
     "deliver:3.5.3": "node scripts/createDelivery.mjs",
@@ -498,7 +502,7 @@
     "preview": "vite preview",
     "desktop": "npm run build && electron .",
     "desktop:dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && electron . --dev\"",
-    "pack:win": "npm run build && node node_modules/electron-builder/out/cli/cli.js --win portable --x64",
+    "pack:win": "npm run build && node node_modules/electron-builder/out/cli/cli.js --win portable --x64 --config.electronDist=node_modules/electron/dist",
     "deliver:1.1.5": "node scripts/createDelivery.mjs",
     "test:video-cancellation-ui": "node scripts/videoCancellationUiQa.mjs",
     "test:renderer-crash-recovery": "node --test scripts/rendererCrashRecovery.test.mjs scripts/rendererCrashRecoveryElectron.test.mjs",
