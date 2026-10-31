@@ -391,6 +391,9 @@ const videoH3ReferenceUsageEdit = (
     multiViewPictures ? language === 'zh'
       ? `多视图身份参考：${multiViewPictures} 各自展示其已关联的同一个人物的多个角度，仅参考身份与外观；图内不同视角不是同时入画的多个人，实际人数、站位、朝向与动作沿用本镜正文。正面参考不把正脸贴到后脑。`
       : `Multi-view identity references: ${multiViewPictures} each show multiple angles of their respective single bound character, for identity and appearance only; the views are not multiple people entering the frame. Character count, placement, facing and action follow the current shot. A front view does not place that face on the back of the head.` : '',
+    language === 'zh'
+      ? '本镜每个已写姓名的人只有一个身体，只站在这一镜正文写的那一个位置。多视图、开场构图和通用参考里已经出现的同一个人只提供外观或场面，不在画面里再复制一个。摄影机模拟某人的视角时，这个人不再作为第二个身体画进同一镜；机位在他身旁，或他留在画外作为视点。'
+      : 'Each named person in this shot has one body, standing only where this shot places them. A multi-view sheet, opening frame, or general reference of that person supplies appearance or scene only and does not add another copy. When the camera uses that person\'s viewpoint, that person is not drawn as a second body in the same shot; the camera stays beside them, or they remain off-screen as the viewpoint.',
   ].filter(Boolean).join('\n');
   return { start, end: start, text: `${text}\n` };
 };

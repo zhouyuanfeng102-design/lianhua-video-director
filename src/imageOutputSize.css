@@ -12,7 +12,7 @@
 .image-output-size-error { margin: 4px 0 0; color: #b43f62; font-size: calc(10px * var(--ui-font-scale, 1)); line-height: 1.4; overflow-wrap: anywhere; }
 @media (max-height: 800px) {
   .image-view .image-output-head .card-title p { display: none; }
-  .image-view .image-selected-reference-preview { min-height: 30px; grid-template-columns: 24px minmax(0, 1fr) auto; gap: 5px; padding: 2px 5px; }
+  .image-view .image-selected-reference-preview { min-height: 30px; grid-template-columns: auto minmax(0, 1fr) auto; gap: 5px; padding: 2px 5px; }
   .image-view .image-selected-reference-preview img { width: 24px; height: 24px; }
 }
 @media (max-height: 760px) {

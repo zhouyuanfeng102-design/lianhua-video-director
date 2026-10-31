@@ -342,8 +342,12 @@ assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /精液从这名男性的龟�
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /连在他自己的腹股沟，从两腿之间向前/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /骨盆前面、两腿之间、会阴之前/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /胸口、腹部、髋和双膝指向同一方向/u);
-assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /跪伏、趴跪不套用这句同向/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /跪伏、趴跪、俯撑不套用这句同向/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /Both knees remain on the platform, shins folded behind the hips along the platform/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /The camera tilts down with small amplitude at slow speed from her face toward her waist\. Her knees remain on the platform/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /her chest, abdomen, pelvis and knees face the same direction, and her knees point toward him/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /不译成 chest, pelvis and knees face the same direction/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /She remains kneeling bent over/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /semen leaves the urethral opening at the glans/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /his penis is attached at his groin and extends forward from between his thighs/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /her vulva is on the front of her pelvis between her thighs, anterior to the perineum/u);

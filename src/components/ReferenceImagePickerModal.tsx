@@ -19,12 +19,15 @@ export interface ReferenceImagePickerModalProps {
   open: boolean;
   assets: ReferenceAsset[];
   selectedAssetId: string;
+  selectedAssetIds?: readonly string[];
+  multiple?: boolean;
   busy?: boolean;
   title?: string;
   hint?: string;
   confirmLabel?: string;
   onClose: () => void;
   onConfirm: (asset: ReferenceAsset) => void;
+  onConfirmMany?: (assets: ReferenceAsset[]) => void;
 }
 
 const ASSET_TYPE_LABELS: Record<AssetType, string> = {
@@ -104,23 +107,29 @@ export function ReferenceImagePickerModal({
   open,
   assets,
   selectedAssetId,
+  selectedAssetIds,
+  multiple = false,
   busy = false,
   title = '从资产库选择参考图',
   hint = '选择当前项目中任意一张可用图片。',
   confirmLabel = '使用所选图片',
   onClose,
   onConfirm,
+  onConfirmMany,
 }: ReferenceImagePickerModalProps) {
   const titleId = useId();
   const searchId = useId();
   const [query, setQuery] = useState('');
   const [draftAssetId, setDraftAssetId] = useState(selectedAssetId);
+  const [draftAssetIds, setDraftAssetIds] = useState<string[]>([...selectedAssetIds || []]);
+  const selectedIdsKey = (selectedAssetIds || []).join('\n');
 
   useEffect(() => {
     if (!open) return;
     setQuery('');
     setDraftAssetId(selectedAssetId);
-  }, [open, selectedAssetId]);
+    setDraftAssetIds(selectedIdsKey ? selectedIdsKey.split('\n') : []);
+  }, [open, selectedAssetId, selectedIdsKey]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -143,6 +152,13 @@ export function ReferenceImagePickerModal({
   const selectedAsset = useMemo(
     () => assets.find((asset) => asset.id === draftAssetId),
     [assets, draftAssetId],
+  );
+  const selectedAssets = useMemo(
+    () => draftAssetIds.flatMap((id) => {
+      const asset = assets.find((item) => item.id === id);
+      return asset ? [asset] : [];
+    }),
+    [assets, draftAssetIds],
   );
 
   if (!open) return null;
@@ -192,7 +208,7 @@ export function ReferenceImagePickerModal({
 
         <div className="reference-image-picker-list">
           {visibleAssets.length > 0 ? visibleAssets.map((asset) => {
-            const selected = asset.id === draftAssetId;
+            const selected = multiple ? draftAssetIds.includes(asset.id) : asset.id === draftAssetId;
             return (
               <button
                 key={asset.id}
@@ -200,7 +216,15 @@ export function ReferenceImagePickerModal({
                 type="button"
                 aria-pressed={selected}
                 disabled={busy}
-                onClick={() => setDraftAssetId(asset.id)}
+                onClick={() => {
+                  if (!multiple) {
+                    setDraftAssetId(asset.id);
+                    return;
+                  }
+                  setDraftAssetIds((current) => current.includes(asset.id)
+                    ? current.filter((id) => id !== asset.id)
+                    : [...current, asset.id]);
+                }}
               >
                 <ReferenceImageThumbnail asset={asset} />
                 <span className="reference-image-picker-info">
@@ -223,7 +247,13 @@ export function ReferenceImagePickerModal({
 
         <div className="reference-image-picker-footer">
           <span className="field-hint">
-            {selectedAsset ? <ReferenceImageName name={`已选：${selectedAsset.name}`} /> : '尚未选择图片'}
+            {multiple
+              ? selectedAssets.length
+                ? `已选 ${selectedAssets.length} 张`
+                : '尚未选择图片'
+              : selectedAsset
+                ? <ReferenceImageName name={`已选：${selectedAsset.name}`} />
+                : '尚未选择图片'}
           </span>
           <div className="row">
             <button className="btn ghost" type="button" onClick={onClose}>
@@ -232,8 +262,12 @@ export function ReferenceImagePickerModal({
             <button
               className="btn primary"
               type="button"
-              disabled={!selectedAsset || busy}
+              disabled={busy || (!multiple && !selectedAsset)}
               onClick={() => {
+                if (multiple) {
+                  onConfirmMany?.(selectedAssets);
+                  return;
+                }
                 if (selectedAsset) onConfirm(selectedAsset);
               }}
             >

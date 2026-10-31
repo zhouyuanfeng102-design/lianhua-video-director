@@ -66,7 +66,10 @@ assert.match(VIDEO_AI_SHOT_COVERAGE_RULE, /摄影机站在两人连线的侧面/
 assert.match(HEAD_ON_CHEST_RULE, /she stays standing with straight knees/u);
 assert.match(VIDEO_INTERACTION_TRANSLATION_RULE, /she does not crouch, squat, or kneel/u);
 assert.match(VIDEO_CAMERA_SELECTION_RULE, /俯、下移、往裙摆或地面看只动摄影机/u);
-assert.match(HEAD_ON_CHEST_RULE, /she kneels bent over, knees and hips pointing along the platform/u);
+assert.match(HEAD_ON_CHEST_RULE, /She remains kneeling bent over\. Both knees remain on the platform, shins folded behind the hips along the platform/u);
+assert.match(HEAD_ON_CHEST_RULE, /The camera tilts down with small amplitude at slow speed from her face toward her waist\. Her knees remain on the platform/u);
+assert.match(VIDEO_INTERACTION_TRANSLATION_RULE, /She remains kneeling bent over\. Both knees remain on the platform/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /The camera tilts down with small amplitude at slow speed from her face toward her waist\. Her knees remain on the platform/u);
 assert.match(VIDEO_INTERACTION_TRANSLATION_RULE, /his chest and eyes face that person, not the lens/u);
 assert.match(VIDEO_CAMERA_SELECTION_RULE, /拍正面和嘴清楚可见不表示脸转向镜头/u);
 assert.match(VIDEO_WORLD_SPACE_CAMERA_RULE, /身后写后脑和耳/u);

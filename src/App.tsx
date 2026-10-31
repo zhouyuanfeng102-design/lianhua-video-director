@@ -470,7 +470,6 @@ import {
   executeStoryboardImageGeneration,
   getStoryboardMorphologyNegativePrompt,
   hasUsableStoryboardReferencePixels,
-  isUsableStoryboardReferenceAsset,
   mergeStoryboardImageIdentityEnrichment,
   prepareStoryboardImageIdentityContext,
   resolveStoryboardReferenceImages,
@@ -18111,7 +18110,7 @@ function ImageWorkbenchView(ctx: AppContext) {
   type ImageGenerationOutputPane = "prompt" | "preview";
   interface ImageGenerationLaneState {
     referencePreview: string;
-    selectedReferenceAssetId: string;
+    selectedReferenceAssetIds: string[];
     useReferenceImage: boolean;
     generatedPrompt: string;
     generatedImagePreview: string;
@@ -18125,7 +18124,7 @@ function ImageWorkbenchView(ctx: AppContext) {
   }
   const createImageGenerationLaneState = (): ImageGenerationLaneState => ({
     referencePreview: "",
-    selectedReferenceAssetId: "",
+    selectedReferenceAssetIds: [],
     useReferenceImage: false,
     generatedPrompt: "",
     generatedImagePreview: "",
@@ -18239,7 +18238,7 @@ function ImageWorkbenchView(ctx: AppContext) {
     });
   }, [assetForm.style, assetFormStyleSource, inheritedImageVisualStyle, setAssetForm]);
   const uploadedPreview = activeImageGenerationLane.referencePreview;
-  const selectedReferenceAssetId = activeImageGenerationLane.selectedReferenceAssetId;
+  const selectedReferenceAssetIds = activeImageGenerationLane.selectedReferenceAssetIds;
   const useReferenceImage = activeImageGenerationLane.useReferenceImage;
   const generatedPrompt = activeImageGenerationLane.generatedPrompt;
   const imageGenerationCount = activeImageGenerationLane.generationCount;
@@ -18247,7 +18246,6 @@ function ImageWorkbenchView(ctx: AppContext) {
   const negativePrompt = activeImageGenerationLane.negativePrompt;
   const autofillRequirement = activeImageGenerationLane.autofillRequirement;
   const setUploadedPreview = (value: string) => patchActiveImageGenerationLane({ referencePreview: value });
-  const setSelectedReferenceAssetId = (value: string) => patchActiveImageGenerationLane({ selectedReferenceAssetId: value });
   const setUseReferenceImage = (value: boolean) => patchActiveImageGenerationLane({ useReferenceImage: value });
   const setNegativePrompt = (value: string) => {
     latestImageBatchIdRef.current[imageGenerationMode] = "";
@@ -18384,41 +18382,25 @@ function ImageWorkbenchView(ctx: AppContext) {
       || imageVariant === "private-four-in-one"
       || imageVariant === "private-close-up"
     );
-  const selectableReferenceAssets = useMemo(() => privateVariantSelected
-    ? state.project.assets.filter((asset) => isMatchingNsfwPrivateWorkbenchReference(
-        asset,
-        selectedEntityId,
-        nsfwPrivatePart,
-      ))
-    : filterStoryboardReferenceAssets(state.project.assets),
-    [state.project.assets, privateVariantSelected, selectedEntityId, nsfwPrivatePart]);
-  const selectedReferenceAsset = state.project.assets.find(
-    (asset: ReferenceAsset) => asset.id === selectedReferenceAssetId,
+  const selectableReferenceAssets = useMemo(
+    () => state.project.assets.filter((asset) => hasUsableStoryboardReferencePixels(asset)),
+    [state.project.assets],
   );
+  const selectedReferenceAssets = selectedReferenceAssetIds.flatMap((id) => {
+    const asset = state.project.assets.find((item: ReferenceAsset) => item.id === id);
+    return asset ? [asset] : [];
+  });
+  const selectedReferenceAsset = selectedReferenceAssets[0];
   useEffect(() => {
-    if (!selectedReferenceAssetId) return;
-    const candidate = state.project.assets.find((asset) => asset.id === selectedReferenceAssetId);
-    const referenceAllowed = privateVariantSelected
-      ? isMatchingNsfwPrivateWorkbenchReference(
-          candidate,
-          selectedEntityId,
-          nsfwPrivatePart,
-        )
-      : assetKind === "grid"
-        ? candidate?.role === "grid" && hasUsableStoryboardReferencePixels(candidate)
-        : isUsableStoryboardReferenceAsset(candidate);
-    if (referenceAllowed) return;
-    setUploadedPreview("");
-    setSelectedReferenceAssetId("");
-    setUseReferenceImage(false);
-  }, [
-    nsfwPrivatePart,
-    assetKind,
-    privateVariantSelected,
-    selectedEntityId,
-    selectedReferenceAssetId,
-    state.project.assets,
-  ]);
+    if (!selectedReferenceAssetIds.length) return;
+    const allowed = new Set(selectableReferenceAssets.map((asset) => asset.id));
+    const nextIds = selectedReferenceAssetIds.filter((id) => allowed.has(id));
+    if (nextIds.length === selectedReferenceAssetIds.length) return;
+    patchActiveImageGenerationLane({
+      selectedReferenceAssetIds: nextIds,
+      ...(nextIds.length ? {} : { referencePreview: "", useReferenceImage: false }),
+    });
+  }, [selectableReferenceAssets, selectedReferenceAssetIds]);
   const variantOptions = IMAGE_VARIANT_OPTIONS[
     assetKind as ImageAssetKind
   ].map(getImageVariantGenerationSpec);
@@ -18508,9 +18490,6 @@ function ImageWorkbenchView(ctx: AppContext) {
     if (availablePart !== nsfwPrivatePart || nextVariant !== privateImageVariant) {
       latestImageBatchIdRef.current.private = "";
       patchImageGenerationLane("private", {
-        referencePreview: "",
-        selectedReferenceAssetId: "",
-        useReferenceImage: false,
         generatedPrompt: "",
         generatedImagePreview: "",
         generatedImages: [],
@@ -18529,7 +18508,7 @@ function ImageWorkbenchView(ctx: AppContext) {
     latestImageBatchIdRef.current.private = "";
     patchImageGenerationLane("private", {
       referencePreview: "",
-      selectedReferenceAssetId: "",
+      selectedReferenceAssetIds: [],
       useReferenceImage: false,
       generatedPrompt: "",
       generatedImagePreview: "",
@@ -18616,7 +18595,7 @@ function ImageWorkbenchView(ctx: AppContext) {
   const imageSubmissionInputsRef = useRef<Record<string, unknown>>({});
   const dossierAutofillInputsRef = useRef<Record<string, unknown>>({});
   dossierAutofillInputsRef.current = { projectId: state.project.id, assetKind, selectedEntityId,
-    assetForm, characterDossier, autofillRequirement, uploadedPreview, selectedReferenceAssetId, imageGenerationMode };
+    assetForm, characterDossier, autofillRequirement, uploadedPreview, selectedReferenceAssetId: selectedReferenceAssetIds.join("\n"), imageGenerationMode };
   const imageApiReference = imageApiSelection.profileId
     ? state.settings.imageApiProfiles.find((profile) => profile.id === imageApiSelection.profileId) || null
     : state.settings.imageApi;
@@ -18624,7 +18603,7 @@ function ImageWorkbenchView(ctx: AppContext) {
     projectId: state.project.id, assetKind, selectedEntityId, targetEpoch: autofillTargetEpochRef.current,
     assetForm, characterDossier, boundEntity: entities.find((entity) => entity.id === selectedEntityId),
     imageGenerationMode, imageVariant, nsfwPrivatePart, imageSizePreference, imageGenerationCount,
-    uploadedPreview, useReferenceImage, selectedReferenceAssetId, negativePrompt, autofillRequirement,
+    uploadedPreview, useReferenceImage, selectedReferenceAssetId: selectedReferenceAssetIds.join("\n"), negativePrompt, autofillRequirement,
     activeImagePromptRuleSetId, activeImagePromptPresetId,
     // Compare immutable source identities instead of serializing API configs
     // during every render.  This both detects a real API switch and avoids a
@@ -19469,9 +19448,11 @@ function ImageWorkbenchView(ctx: AppContext) {
             && currentIdentity.privateImageVariant === requestedImageVariant);
       if (targetStillMatches) {
         latestImageBatchIdRef.current[requestedGenerationMode] = "";
-        patchImageGenerationLane(requestedGenerationMode, {
+        patchImageGenerationLane(requestedGenerationMode, (current) => ({
           referencePreview: dataUrl,
-          selectedReferenceAssetId: asset.id,
+          selectedReferenceAssetIds: current.selectedReferenceAssetIds.includes(asset.id)
+            ? current.selectedReferenceAssetIds
+            : [...current.selectedReferenceAssetIds, asset.id],
           useReferenceImage: true,
           generatedPrompt: "",
           generatedImagePreview: "",
@@ -19479,7 +19460,7 @@ function ImageWorkbenchView(ctx: AppContext) {
           selectedGeneratedAssetId: "",
           outputLabel: "",
           outputPane: "prompt",
-        });
+        }));
         notify(
           requestedAssetKind === "grid"
             ? `九宫格母版“${file.name}”已上传并绑定，可直接返回导演台。`
@@ -19494,11 +19475,12 @@ function ImageWorkbenchView(ctx: AppContext) {
     }
     event.target.value = "";
   };
-  const selectReferenceFromLibrary = async (asset: ReferenceAsset) => {
-    if (!selectableReferenceAssets.some((candidate) => candidate.id === asset.id)) {
-      notify("当前图片不可用，或私密资料图与所选人物、部位不匹配。", "error");
-      setReferencePickerOpen(false);
-      return;
+  const selectReferencesFromLibrary = async (assets: ReferenceAsset[]) => {
+    const allowed = new Set(selectableReferenceAssets.map((candidate) => candidate.id));
+    const ids: string[] = [];
+    for (const asset of assets) {
+      if (!allowed.has(asset.id) || ids.includes(asset.id)) continue;
+      ids.push(asset.id);
     }
     const requestedProjectId = state.project.id;
     const requestedGenerationMode = imageGenerationMode;
@@ -19509,15 +19491,15 @@ function ImageWorkbenchView(ctx: AppContext) {
     const requestedTargetEpoch = autofillTargetEpochRef.current;
     setReferenceSelectionBusy(true);
     try {
-      const [dataUrl] = await resolveStoryboardReferenceImages(
-        [asset.id],
+      const dataUrls = ids.length ? await resolveStoryboardReferenceImages(
+        ids,
         state.project.assets,
         {
           readManagedImageDataUrl: window.lianhuaDesktop?.readManagedImageDataUrl,
           downloadImage: window.lianhuaDesktop?.downloadImage,
         },
-      );
-      if (!dataUrl) throw new Error("所选资产没有可读取的图片像素。");
+      ) : [];
+      if (ids.length && !dataUrls.length) throw new Error("所选资产没有可读取的图片像素。");
       const currentIdentity = imageWorkbenchIdentityRef.current;
       const targetStillMatches = isCurrentProjectOperation(requestedProjectId, getCurrentProjectId())
         && currentIdentity.assetKind === requestedAssetKind
@@ -19530,9 +19512,9 @@ function ImageWorkbenchView(ctx: AppContext) {
       if (!targetStillMatches) return;
       latestImageBatchIdRef.current[requestedGenerationMode] = "";
       patchImageGenerationLane(requestedGenerationMode, {
-        referencePreview: dataUrl,
-        selectedReferenceAssetId: asset.id,
-        useReferenceImage: true,
+        referencePreview: dataUrls[0] || "",
+        selectedReferenceAssetIds: ids,
+        useReferenceImage: ids.length > 0,
         generatedPrompt: "",
         generatedImagePreview: "",
         generatedImages: [],
@@ -19541,9 +19523,9 @@ function ImageWorkbenchView(ctx: AppContext) {
         outputPane: "prompt",
       });
       setReferencePickerOpen(false);
-      notify(requestedAssetKind === "grid"
-        ? `已从资产库选择并绑定九宫格母版：${asset.name}`
-        : `已选择资产库参考图：${asset.name}`);
+      notify(ids.length
+        ? `已选择 ${ids.length} 张参考图`
+        : "已清空参考图");
     } catch (error) {
       if (isCurrentProjectOperation(requestedProjectId, getCurrentProjectId())) {
         notify(error instanceof Error ? error.message : "资产库参考图读取失败。", "error");
@@ -19665,13 +19647,12 @@ function ImageWorkbenchView(ctx: AppContext) {
     }
     let requestedAssetForm = { ...assetForm };
     const requestedGridStates = gridStates?.map((item) => ({ ...item })) || [];
-    const requestedUploadedPreview = uploadedPreview;
     const requestedUseReferenceImage = useReferenceImage;
     const requestedReferenceAssetIds = requestedUseReferenceImage
-      ? [state.project.assets.find((asset) => assetPreviewUrl(asset) === requestedUploadedPreview)?.id || selectedReferenceAssetId].filter(Boolean)
+      ? selectedReferenceAssetIds.filter((id) => state.project.assets.some((asset) => asset.id === id))
       : [];
     if (requestedImageApi.enabled && requestedImageApi.backend === "runninghub") {
-      const issue = validateRunningHubImageConfig(requestedImageApi, requestedUseReferenceImage && requestedUploadedPreview ? 1 : 0);
+      const issue = validateRunningHubImageConfig(requestedImageApi, requestedReferenceAssetIds.length);
       if (issue) { notify(issue, "error"); setView("settings"); return; }
     }
     const requestedTextApi = textApiForProject(cloneImageBatchConfig(state.settings.textApi), state.project, { operationId: requestedBatchId });
@@ -19940,7 +19921,7 @@ function ImageWorkbenchView(ctx: AppContext) {
       converterSystemPrompt: converterRules,
       referenceAssetIds: [...requestedReferenceAssetIds],
       primaryReferenceAssetIds: [...requestedReferenceAssetIds],
-      imageInputMode: buildImageGenerationReferenceOptions(requestedUseReferenceImage, requestedUploadedPreview).referenceImages?.length ? 'image-to-image' : 'text-to-image',
+      imageInputMode: requestedReferenceAssetIds.length ? 'image-to-image' : 'text-to-image',
       ...imagePromptTrace,
     }, createdAt + index, "queued"));
     setState((current: AppState) => applyOwnedProjectUpdate(
@@ -20041,6 +20022,16 @@ function ImageWorkbenchView(ctx: AppContext) {
           let dataUrl = "";
           let remoteUrl = "";
           if (requestedImageApi.enabled) {
+            const referenceImages = requestedReferenceAssetIds.length
+              ? await resolveStoryboardReferenceImages(
+                requestedReferenceAssetIds,
+                getCurrentState().project.assets,
+                {
+                  readManagedImageDataUrl: window.lianhuaDesktop?.readManagedImageDataUrl,
+                  downloadImage: window.lianhuaDesktop?.downloadImage,
+                },
+              )
+              : [];
             const result = await requestImageModel(imageBatchMemberApi(requestedImageApi, task.seed), {
               prompt: convertedPrompt,
               signal,
@@ -20051,10 +20042,10 @@ function ImageWorkbenchView(ctx: AppContext) {
               sizeOverride: requestedOutputSize.sizeOverride,
               resolutionPlan: requestedOutputSize.resolutionPlan,
               onRemoteTaskId: recordRunningHubImageTaskId(setBackgroundState, getCurrentState, requestedProjectId, task),
-              ...buildImageGenerationReferenceOptions(
-                requestedUseReferenceImage,
-                requestedUploadedPreview,
-              ),
+              ...(referenceImages.length ? {
+                referenceImages,
+                primaryReferenceImageCount: referenceImages.length,
+              } : {}),
             }, () => {
               // This is inside the transport FIFO, immediately before its actual POST.
               if (!imageBatchTaskIsActive(getCurrentState(), requestedProjectId, task)) {
@@ -21115,7 +21106,7 @@ function ImageWorkbenchView(ctx: AppContext) {
                             setNsfwPrivatePart("full-body");
                             patchImageGenerationLane("private", {
                               referencePreview: "",
-                              selectedReferenceAssetId: "",
+                              selectedReferenceAssetIds: [],
                               useReferenceImage: false,
                               generatedPrompt: "",
                               generatedImagePreview: "",
@@ -21282,10 +21273,10 @@ function ImageWorkbenchView(ctx: AppContext) {
                     ? "已有九宫格母版"
                     : "普通参考图"}
                 hint={imageGenerationMode === "private"
-                  ? "可选择普通图片作为本次参考；已有私密资料图按当前人物与部位匹配。上传图片会绑定当前人物与当前部位。"
+                  ? "可多选普通图和私密图作为本次参考。上传图片会加入当前选择，并绑定当前人物与当前部位。"
                   : assetKind === "grid"
-                    ? "上传现成的 3×3 图片会直接保存并绑定；也可作为参考重新生成。"
-                    : "可以上传新图片，或选择当前项目资产库中的普通图片。"}
+                    ? "上传现成的 3×3 图片会直接保存并绑定；也可从资产库多选参考图，包含私密图。"
+                    : "可以上传新图片，或从资产库多选普通图和私密图。点选顺序就是提交顺序。"}
               >
                 <div className="image-reference-input">
                   <div className="row image-reference-controls">
@@ -21315,18 +21306,26 @@ function ImageWorkbenchView(ctx: AppContext) {
                     {imageGenerationMode === "ordinary" && (
                       <Button
                         icon={<Eye size={15} />}
-                        disabled={!uploadedPreview || busy || autofillBusy || referenceSelectionBusy}
+                        disabled={!selectedReferenceAssets.length || busy || autofillBusy || referenceSelectionBusy}
                         onClick={analyzeUploadedReference}
                       >
                         AI 识图
                       </Button>
                     )}
                   </div>
-                  {uploadedPreview && (
+                  {(selectedReferenceAssets.length > 0 || uploadedPreview) && (
                     <div className="image-selected-reference-preview">
-                      <img src={uploadedPreview} alt={`${imageGenerationMode === "private" ? "私密" : "普通"}参考图缩略图`} />
+                      <span className="image-selected-reference-thumbs">
+                        {selectedReferenceAssets.length > 0
+                          ? selectedReferenceAssets.map((asset) => (
+                            <img key={asset.id} src={assetPreviewUrl(asset) || uploadedPreview} alt="" />
+                          ))
+                          : <img src={uploadedPreview} alt="" />}
+                      </span>
                       <span className="image-selected-reference-name">
-                        {selectedReferenceAsset?.name || "已上传的参考图"}
+                        {selectedReferenceAssets.length > 1
+                          ? `已选 ${selectedReferenceAssets.length} 张`
+                          : selectedReferenceAssets[0]?.name || selectedReferenceAsset?.name || "已上传的参考图"}
                       </span>
                       <Badge tone="green">当前通道参考</Badge>
                     </div>
@@ -21339,7 +21338,7 @@ function ImageWorkbenchView(ctx: AppContext) {
                   name={`use-reference-image-${imageGenerationMode}`}
                   type="checkbox"
                   checked={useReferenceImage}
-                  disabled={!uploadedPreview || (!supportsReferenceImageInput && !useReferenceImage) || busy || autofillBusy}
+                  disabled={!selectedReferenceAssets.length || (!supportsReferenceImageInput && !useReferenceImage) || busy || autofillBusy}
                   onChange={(event) => {
                     setUseReferenceImage(event.target.checked);
                     clearImageGenerationOutputs(imageGenerationMode);
@@ -21545,10 +21544,14 @@ function ImageWorkbenchView(ctx: AppContext) {
       <ReferenceImagePickerModal
         open={referencePickerOpen}
         assets={selectableReferenceAssets}
-        selectedAssetId={selectedReferenceAssetId}
+        selectedAssetId={selectedReferenceAssetIds[0] || ""}
+        selectedAssetIds={selectedReferenceAssetIds}
+        multiple
         busy={referenceSelectionBusy}
+        hint="可多选当前项目中的普通图和私密图。点选顺序就是提交顺序。"
         onClose={() => setReferencePickerOpen(false)}
-        onConfirm={(asset) => void selectReferenceFromLibrary(asset)}
+        onConfirm={() => undefined}
+        onConfirmMany={(assets) => void selectReferencesFromLibrary(assets)}
       />
     </div>
   );

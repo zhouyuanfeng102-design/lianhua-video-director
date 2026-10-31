@@ -755,7 +755,7 @@ const headerlessH3Fixture = (language: 'zh' | 'en') => {
 };
 const withoutHeaderlessPictureBindings = (prompt: string): string => prompt
   .replace(/ Visual identity reference for [甲乙丙丁]: <Picture \d+>(?:, <Picture \d+>)*\./gu, '')
-  .replace(/(?:本段参考图用途：|Reference uses for this clip:|多视图身份参考：|Multi-view identity references:)[^\r\n]*\r?\n/gu, '');
+  .replace(/(?:本段参考图用途：|Reference uses for this clip:|多视图身份参考：|Multi-view identity references:|本镜每个已写姓名的人只有一个身体|Each named person in this shot has one body)[^\r\n]*\r?\n/gu, '');
 const multiViewPictureNumbers = (prompt: string): number[] => {
   const line = prompt.match(/(?:多视图身份参考：|Multi-view identity references:)[^\r\n]*/u)?.[0] || '';
   return [...line.matchAll(/<Picture (\d+)>/gu)].map((match) => Number(match[1]));
@@ -905,6 +905,7 @@ await test('可信中英文无字段标题H3原稿按锚点关联首尾加四人
       : /<Picture 1> opening composition reference; <Picture 2> ending composition reference/u);
     assert.deepEqual(multiViewPictureNumbers(result.draft.prompt), [3, 4, 5], 'only explicitly marked multi-view character pictures get single-character semantics');
     assert.match(result.draft.prompt, language === 'zh' ? /不同视角不是同时入画的多个人/u : /views are not multiple people entering the frame/u);
+    assert.match(result.draft.prompt, language === 'zh' ? /每个已写姓名的人只有一个身体/u : /Each named person in this shot has one body/u);
     assert.match(result.draft.prompt, /“\[Shot 1\] At 99:99\.999 <Picture 99>”/u, 'quoted shot and picture tokens remain literal');
     if (language === 'en') assert.match(result.draft.prompt, /\[Shot 1\] At 00:00\.000 Identity:/u, 'the first-shot time prefix is not split by a reference note');
     assert.match(result.draft.prompt, /\[Shot 2\] At 00:07\.500/u);

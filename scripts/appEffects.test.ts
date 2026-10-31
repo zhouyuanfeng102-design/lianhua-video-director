@@ -3275,10 +3275,10 @@ const imageWorkbenchReferenceSelector = appSource.slice(
   appSource.indexOf('const selectableReferenceAssets ='),
   appSource.indexOf('const selectedReferenceAsset ='),
 );
-assert.match(imageWorkbenchReferenceSelector, /privateVariantSelected[\s\S]*isMatchingNsfwPrivateWorkbenchReference\(/u,
-  'retiring grid creation does not loosen the dedicated private-image reference scope');
-assert.match(imageWorkbenchReferenceSelector, /:\s*filterStoryboardReferenceAssets\(state\.project\.assets\)/u,
-  'ordinary image creation uses its existing storyboard reference filter for every active asset kind');
+assert.match(imageWorkbenchReferenceSelector, /hasUsableStoryboardReferencePixels\(asset\)/u,
+  'the image workbench picker lists every readable image, including private profiles');
+assert.doesNotMatch(imageWorkbenchReferenceSelector, /filterStoryboardReferenceAssets\(state\.project\.assets\)/u,
+  'ordinary image creation no longer hides private images from this explicit picker');
 assert.doesNotMatch(imageWorkbenchReferenceSelector, /usableGridAssets|assetKind\s*===\s*"grid"/u,
   'ordinary image creation cannot restore a retired grid-only selection branch');
 assert.doesNotMatch(

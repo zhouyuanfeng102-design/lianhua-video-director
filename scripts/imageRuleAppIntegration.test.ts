@@ -245,13 +245,13 @@ for (const requiredCheck of [
 }
 assert.match(
   imageWorkbench,
-  /privateVariantSelected\s*\?\s*state\.project\.assets\.filter\(\(asset\)\s*=>\s*isMatchingNsfwPrivateWorkbenchReference\(\s*asset,\s*selectedEntityId,\s*nsfwPrivatePart,?\s*\)\)\s*:\s*filterStoryboardReferenceAssets\(state\.project\.assets\)/u,
-  'private mode must retain matching private references and all active ordinary creation kinds retain the non-private filter',
+  /state\.project\.assets\.filter\(\(asset\)\s*=>\s*hasUsableStoryboardReferencePixels\(asset\)\)/u,
+  'the image workbench picker lists every readable image, including private profiles',
 );
 assert.match(
   imageWorkbench,
-  /privateVariantSelected\s*\?\s*isMatchingNsfwPrivateWorkbenchReference\(\s*candidate,\s*selectedEntityId,\s*nsfwPrivatePart,?\s*\)\s*:\s*assetKind\s*===\s*"grid"\s*\?\s*candidate\?\.role\s*===\s*"grid"\s*&&\s*hasUsableStoryboardReferencePixels\(candidate\)\s*:\s*isUsableStoryboardReferenceAsset\(candidate\)/u,
-  'selected references must be invalidated when the character, part or mode changes, and grid selections require real grid pixels',
+  /selectedReferenceAssetIds\.filter\(\(id\)\s*=>\s*allowed\.has\(id\)\)/u,
+  'an explicit image-workbench selection stays while its files remain readable',
 );
 assert.doesNotMatch(imageWorkbench, /\busableGridAssets\b/u,
   'active image creation must not reintroduce a grid-only picker after retirement');
