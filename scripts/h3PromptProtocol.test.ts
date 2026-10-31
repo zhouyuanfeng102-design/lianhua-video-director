@@ -20,6 +20,10 @@ assert.match(H3_DIALOGUE_FORMAT_RULE, /台词：无的镜头不给任何人标\(
   'a silent shot does not attach a speaker id to an identity line');
 assert.match(H3_DIALOGUE_FORMAT_RULE, /Before the first line, every visible mouth stays closed/u,
   'mouths stay closed until the first written line');
+assert.match(H3_DIALOGUE_FORMAT_RULE, /While he says these lines, his weight stays on one foot and his hand keeps a small motion until the last line ends/u,
+  'a spoken stretch keeps one body motion until the last line ends');
+assert.match(H3_DIALOGUE_FORMAT_RULE, /The sign reads "OPEN"/u,
+  'quotation marks stay on sign text');
 assert.match(H3_FINAL_BODY_FORMAT_RULE, /全部\[Shot N\]写在同一个integrated_multimodal_description或detailed_description里/u,
   'every shot stays inside one description before the single soundscape');
 

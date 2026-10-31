@@ -663,7 +663,7 @@ export async function generateSingleSegmentPrompt(
     const hasOpeningFrame = currentReferences.some((reference) => reference.role === 'first-frame');
     const hasEndingFrame = currentReferences.some((reference) => reference.role === 'last-frame');
     const deliveryBoundaryRule = hasOpeningFrame && hasEndingFrame
-      ? '本次明确有首尾帧锚点：首帧对应0.00秒，尾帧对应片段结束；正文描述两端之间连续可达的变化，并在最后一镜抵达尾帧。'
+      ? '本次明确有首尾帧锚点：首帧对应0.00秒，尾帧对应片段结束；正文描述两端之间连续可达的变化，并在最后一镜抵达尾帧。原文没有分成多镜时用一镜走到尾帧。英文写成 One shot carries the change from the first frame to the last frame。'
       : hasOpeningFrame
         ? '本次明确有首帧锚点：首帧对应0.00秒，从该帧已有状态继续向后发展。'
         : hasEndingFrame
@@ -749,7 +749,7 @@ export async function generateSingleSegmentPrompt(
           : '本次使用三个官方章节：integrated_multimodal_description、overall_soundscape、non_diegetic_music；不为未来可能添加的图片预造Subject/Picture/Audio或全参考说明。'} ${deliveryPromptMode === 'i2va'
             ? '这是I2VA：把唯一首帧作为0.00秒的Picture 1，从首帧已有状态向后写动作发展，不重复静态首帧来代替动作。'
             : deliveryPromptMode === 'fl2va'
-              ? '这是FL2VA：把首帧和尾帧作为两端锚点，写出两端之间连续且可到达的中间变化，最后一镜抵达尾帧。'
+              ? '这是FL2VA：把首帧和尾帧作为两端锚点。原文没有分成多镜时用一镜走到尾帧。英文写成 One shot carries the change from the first frame to the last frame。中间写出能走到尾帧的变化。'
               : deliveryPromptMode === 'l2va'
                 ? '这是L2VA：从合理的前置状态逐步发展，并在最后一镜收束到尾帧，不把尾帧说明提前成开场状态。'
                 : deliveryPromptMode === 'ref2va'

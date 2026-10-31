@@ -78,10 +78,44 @@ assert.match(VIDEO_CAMERA_SELECTION_RULE, /They remain in one file along the pat
 assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /She keeps stepping toward the destination\. Her chest and the foot she steps with face that destination/u);
 assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /The order along the path stays the same/u);
 assert.match(VIDEO_CAMERA_SELECTION_RULE, /后面每一镜开头用同一句再写一次先后/u);
-assert.match(VIDEO_CAMERA_SELECTION_RULE, /His other hand remains behind his back\. Five fingers remain on that palm/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /His other hand remains at his side\. Five fingers remain on that palm/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /The sole of the stepping foot meets the floor and stays until the other foot passes/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /Her eyes remain the size in the reference and blink once\. Her upper and lower teeth remain inside her lips\. Her tongue remains inside her mouth/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /The nearer body hides the part of the farther body it covers\. The farther chest does not show through her torso/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /The reflection is the same person in the same clothes\. It is not a second body/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /Her hair remains tied as in the first frame/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /Her rabbit ears remain on her head\. The collar remains around the neck/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /The reference supplies only this person\. The corridor remains the shot place/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /Only the named people are in this shot\. No one else enters from a doorway or forms in the background/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /One lamp keeps this color and this direction\. Each person has one shadow away from that lamp/u);
+assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /Only the named people are in this shot/u);
+assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /His other hand remains at his side/u);
 assert.match(VIDEO_CAMERA_SELECTION_RULE, /The thread remains from his palm to her wrist/u);
 assert.match(VIDEO_CAMERA_SELECTION_RULE, /The camera pushes in with small amplitude at slow speed toward her shoulder and stops at a medium shot/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /Xiao Wu remains on the stone platform, still in the frame\. Tang San remains where this shot already placed him, still in the frame/u);
+assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /still in the frame/u);
 assert.match(VIDEO_CAMERA_SELECTION_RULE, /The robe remains outside the arm and the torso\. The sleeve follows that arm/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /His beard remains outside the collar, from his chin to his chest/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /The hem stays against her legs/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /Her soles meet the stone and she stops\. Her weight stays on her soles/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /The Grand Elder remains a head taller than Xiao Wu/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /Her shoulders turn with her head until her chin stays in front of her shoulder\. Her chest stays with that turn/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /The action stays at real-time speed/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /This shot has one camera move/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /The camera holds this frame\. It stays at this distance/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /The camera arcs around her with small amplitude at slow speed\. Her feet, hips and shoulders stay facing the path\. The doorway slides across the frame/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /The letter is already in her hand\. She raises that hand/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /His palm meets the door\. The door swings open and stays open/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /Her rear foot skids, her knees fold, and her soles meet the stone\. She stops\. Dust rises after she stops\. Her hair settles after her body stops/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /The camera pulls out with large amplitude at her walking speed\. Her whole body stays in the frame/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /Her thighs meet the seat\. She stays seated/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /His arms remain around her back, outside her torso/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /The scar remains on her right cheek, below the outer corner of that eye/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /That hand stays beside her waist, palm toward the path\. Five fingers remain separated on that palm/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /One shot carries the change from the first frame to the last frame/u);
+assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /His beard remains outside the collar, from his chin to his chest/u);
+assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /The action stays at real-time speed/u);
+assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /His palm meets the door\. The door swings open and stays open/u);
 assert.match(VIDEO_CAMERA_SELECTION_RULE, /Exactly two threads remain/u);
 assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /Exactly two threads remain/u);
 assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /The thread remains from his palm to her wrist/u);
@@ -107,7 +141,18 @@ assert.ok(VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('让摄影�
   && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('She keeps stepping toward the destination')
   && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('They remain in one file along the path')
   && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('The thread remains from his palm to her wrist')
+  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('His other hand remains at his side')
+  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('It is not a second body')
+  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('Her hair remains tied as in the first frame')
+  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('One lamp keeps this color and this direction')
   && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('stops at a medium shot')
+  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('still in the frame')
+  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('While he says these lines, his weight stays on one foot and his hand keeps a small motion until the last line ends')
+  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('His beard remains outside the collar, from his chin to his chest')
+  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('Her shoulders turn with her head until her chin stays in front of her shoulder. Her chest stays with that turn')
+  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('The action stays at real-time speed')
+  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('One shot carries the change from the first frame to the last frame')
+  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('The sign reads "OPEN"')
   && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('不得把retreating')
   && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('除非源稿明确表示人物本人倒退或折返'));
 assert.ok(VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT
