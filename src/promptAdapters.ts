@@ -877,6 +877,25 @@ export const h3MediaModeForReferences = (references: readonly PromptReferenceInp
   return boundaryOnly ? 'keyframe' : 'full-reference';
 };
 
+/** Semantic H3 writing contract for the existing delivery call. The legacy
+ * envelope remains unchanged; this finer mode tells the author where motion
+ * starts and ends. */
+export type H3PromptMode = 't2va' | 'i2va' | 'fl2va' | 'l2va' | 'ref2va';
+
+export const h3PromptModeForReferences = (references: readonly PromptReferenceInput[]): H3PromptMode => {
+  const assets = references.map(normalizeReference);
+  if (!assets.length) return 't2va';
+  const hasOtherReference = assets.some((asset) => asset.mediaType !== 'image'
+    || !['first-frame', 'last-frame'].includes(asset.role));
+  if (hasOtherReference) return 'ref2va';
+  const hasFirst = assets.some((asset) => asset.role === 'first-frame');
+  const hasLast = assets.some((asset) => asset.role === 'last-frame');
+  if (hasFirst && hasLast) return 'fl2va';
+  if (hasFirst) return 'i2va';
+  if (hasLast) return 'l2va';
+  return 'ref2va';
+};
+
 /**
  * A visual anchor can arrive from an editable style preset as a delimiter-only
  * value (for example `｜`) or with a stray delimiter at either edge.  Such a

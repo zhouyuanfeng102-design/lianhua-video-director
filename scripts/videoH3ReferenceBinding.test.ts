@@ -368,6 +368,38 @@ await test('不明自定义模板、首尾帧专用接口不虚构Picture顺序�
   assert.deepEqual(videoH3PictureNumbers(draft.references, { backend: 'api', api: { ...api, requestTemplate: '{"prompt":"{{prompt}}","photos":"{{images}}"}' } }).numbers, [1, 2, 3]);
 });
 
+await test('ComfyUI唯一I2V图片槽即使上游路径不透明也使用Picture 1', () => {
+  const { draft } = fixture();
+  const reference = draft.references[0];
+  const result = videoH3PictureNumbers([reference], {
+    backend: 'comfyui',
+    workflow: {
+      id: 'opaque-single-i2v', name: 'opaque single I2V', createdAt: 1, updatedAt: 1,
+      workflowJson: JSON.stringify({
+        prompt: { class_type: 'Text', inputs: { value: '' } },
+        h3: { class_type: 'MiniMaxH3ImageToVideo', inputs: { prompt: ['prompt', 0], first_frame: ['transform', 0] } },
+      }),
+      mapping: { prompt: [{ nodeId: 'prompt', inputName: 'value' }], images: [{ nodeId: 'transform', inputName: 'image' }] },
+    },
+  });
+  assert.deepEqual(result.numbers, [1]);
+  assert.equal(result.warning, undefined);
+
+  const nonZeroSlot = videoH3PictureNumbers([{ ...reference, slotIndex: 7 }], {
+    backend: 'comfyui',
+    workflow: {
+      id: 'opaque-single-i2v-non-zero-slot', name: 'opaque single I2V non-zero slot', createdAt: 1, updatedAt: 1,
+      workflowJson: JSON.stringify({
+        prompt: { class_type: 'Text', inputs: { value: '' } },
+        h3: { class_type: 'MiniMaxH3ImageToVideo', inputs: { prompt: ['prompt', 0], first_frame: ['transform', 0] } },
+      }),
+      mapping: { prompt: [{ nodeId: 'prompt', inputName: 'value' }], images: [{ nodeId: 'transform', inputName: 'image' }] },
+    },
+  });
+  assert.deepEqual(nonZeroSlot.numbers, [1]);
+  assert.equal(nonZeroSlot.warning, undefined);
+});
+
 await test('重复声源元数据原样携带，不影响各自明确的人物图片关联', () => {
   const { project, draft } = fixture(); const bindings = draft.h3ReferenceBinding!.identities.characters;
   bindings[1].speakerToken = bindings[0].speakerToken;

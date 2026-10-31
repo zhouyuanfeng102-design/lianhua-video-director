@@ -73,13 +73,14 @@ const assertFixedDurationRequest = (payload: HttpPayload): void => {
   assert.equal(data.durationMode, 'fixed');
   assert.equal(data.segmentDurationSec, 15);
   assert.equal(data.requestedTotalDurationSec, 90);
-  assert.equal(data.totalDurationSec, 90);
-  assert.equal(data.requiredSegmentCount, 6);
+  assert.equal(Object.hasOwn(data, 'totalDurationSec'), false);
+  assert.equal(Object.hasOwn(data, 'requiredSegmentCount'), false);
   assert.equal(data.durationAdjustmentPolicy, 'fixed-total-duration');
   const system = prompt(payload, 'system');
   assert.match(system, /T=90秒/u);
-  assert.match(system, /N=6段/u);
-  assert.doesNotMatch(system, /N不固定|N完全由你|ai-chooses-segment-count|增加足额D段|D保持不变，仍由你按全部剧情决定N/u);
+  assert.match(system, /目标段数6仅供参考/u);
+  assert.match(system, /实际段数N不预先锁死/u);
+  assert.doesNotMatch(system, /成功结果的segments数组必须实际完整输出6项|T、D、N均固定/u);
 };
 const assertAiDurationRequest = (payload: HttpPayload): void => {
   const data = planningEnvelope(payload);
@@ -471,9 +472,9 @@ test('invalid input D or disabled API does not enter the repair loop', async () 
   assert.equal(requests.length, 0);
 });
 
-test('fixed 90-second generation sends an explicit six-window contract and saves exact AI bodies', async () => {
+test('fixed target keeps the requested context but publishes every returned window', async () => {
   const request = fixedInput();
-  const authored = response(6);
+  const authored = { ...response(5), segmentCount: 6 };
   const before = JSON.stringify({ request, authored });
   const requests = install((payload) => { assertFixedDurationRequest(payload); return textReply(authored); });
   const plan = await requestSemanticSequencePlan(config(), request, undefined, options);
@@ -487,14 +488,14 @@ test('fixed 90-second generation sends an explicit six-window contract and saves
   assert.match(rule, /正文记号与记录逐句对应，语言、归属与continuation一致/u);
   assert.match(rule, /段界只负责生成窗口/u);
   assert.equal(plan.durationMode, 'fixed');
-  assert.equal(plan.requestedTotalDurationSec, 90);
-  assert.equal(plan.totalDurationSec, 90);
-  assert.equal(plan.segments.length, 6);
+  assert.equal(plan.requestedTotalDurationSec, 75);
+  assert.equal(plan.totalDurationSec, 75);
+  assert.equal(plan.segments.length, 5);
   assert.equal(plan.semanticPlanningSnapshot!.durationMode, 'fixed');
-  assert.equal(plan.semanticPlanningSnapshot!.requestedTotalDurationSec, 90);
+  assert.equal(plan.semanticPlanningSnapshot!.requestedTotalDurationSec, 75);
   assert.deepEqual(plan.segments.map((segment) => segment.content), authored.segments.map((segment) => segment.content));
   assert.deepEqual(plan.segments.map((segment) => segment.semanticSource), authored.segments.map((segment) => segment.semanticSource));
-  assert.deepEqual(plan.segments.map((segment) => [segment.globalStartSec, segment.globalEndSec]), [[0, 15], [15, 30], [30, 45], [45, 60], [60, 75], [75, 90]]);
+  assert.deepEqual(plan.segments.map((segment) => [segment.globalStartSec, segment.globalEndSec]), [[0, 15], [15, 30], [30, 45], [45, 60], [60, 75]]);
   assert.deepEqual(validateSemanticSequencePlan(plan), []);
   assert.equal(JSON.stringify({ request, authored }), before);
 });
@@ -550,8 +551,6 @@ test('all former recovery conditions terminate after one request without changin
     { name: 'missing segments', result: textReply({ reason: 'Missing required array', fitStatus: 'balanced' }) },
     { name: 'missing fitStatus', result: textReply(noStatus) },
     { name: 'unknown fitStatus', result: textReply({ ...response(), fitStatus: 'unknown-state' }) },
-    { name: 'legacy count disagreement', result: textReply({ ...response(2), segmentCount: 9 }) },
-    { name: 'fixed count disagreement', result: textReply(response(5)), input: fixedInput() },
     ...(['length', 'reasoning_only', 'empty_content'] as const).map((code) => ({ name: code, result: outputFailure(code),
       check: (error: unknown) => error instanceof TextModelResponseError && error.code === code })),
     ...([400, 422] as const).flatMap((status) => [

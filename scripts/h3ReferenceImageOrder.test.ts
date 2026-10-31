@@ -62,6 +62,8 @@ check('ImageToVideo Picture order follows first_frame then last_frame, including
     text: i2vGraph.text,
     h3: { class_type: 'MiniMaxH3ImageToVideo', inputs: { prompt: ['text', 0], first_frame: ['unknown-transform', 0] } },
   }), mapping: { prompt: local.mapping.prompt, images: [local.mapping.images[0]] } };
+  // The low-level resolver stays conservative when the source path is opaque;
+  // the submission layer handles the unique I2V slot as Picture 1.
   assert.equal(resolveComfyH3PictureNumbers(singleSlot, [0]), undefined);
 });
 

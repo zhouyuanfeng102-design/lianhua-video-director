@@ -15,6 +15,26 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "3.6.1",
+    releasedAt: "2026-10-31",
+    title: "语义分段完整保留实际返回段数",
+    highlights: [
+      "AI 返回多少个完整 segments，就保存并显示多少段，不再因固定目标 T÷D 不一致而丢弃整份结果。",
+      "固定模式按实际 N×D 统一计划时长，旧 segmentCount 或总时长声明不再覆盖完整数组。",
+      "不新增运行时校验、拦截、重试、按钮或模型请求；历史提示词和成片保持原样。",
+    ],
+  },
+  {
+    version: "3.6.0",
+    releasedAt: "2026-10-31",
+    title: "H3 单图绑定与首尾帧模式",
+    highlights: [
+      "ComfyUI MiniMax H3 ImageToVideo 只有一个明确图片槽时，直接对应 Picture 1；多图片槽继续按明确映射处理，不猜编号。",
+      "H3 新稿根据本次素材区分 T2VA、I2VA、FL2VA、L2VA 与 Ref2VA，写清首帧、尾帧和中间运动的关系。",
+      "不新增运行时校验、拦截、重试、按钮或模型请求；历史提示词和成片保持原样。",
+    ],
+  },
+  {
     version: "3.5.9",
     releasedAt: "2026-10-31",
     title: "H3 运镜落点、衣服和口交着生",

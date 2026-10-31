@@ -213,7 +213,7 @@ const SEMANTIC_SEQUENCE_NSFW_SCOPE_RULE = [
 const semanticSequenceWindowInstruction = (input: SemanticSequencePlanningInput): string => [
   `本次任务收束：按完整story重新安排全片，单个生成窗口D=${input.segmentDurationSec}秒。sourceParagraphs、paragraphs、events及phases是来源记录，不是已分好的视频段，也不自带D秒额度。`,
   input.durationMode === 'fixed'
-    ? `全片T=${input.requestedTotalDurationSec}秒固定，窗口内部按全部既有动作和发话的自然时间安排。`
+    ? `本次用户目标T=${input.requestedTotalDurationSec}秒，单段窗口D=${input.segmentDurationSec}秒。按完整剧情自然安排窗口；成功结果的实际段数只以完整segments数组长度为准，实际总时长为N×D，不能为凑T删掉已返回的完整段。`
     : '全片总长与段数未指定；由全部真实行动连续推进后的时间决定窗口数，不能从来源记录条数反推段数。',
   '先按人物目标、动作触发、互动回应与结果连续演完整场，再在D秒的时间边界切分；普通正文换段不让现场时间停住，短动作完成就接续后续已有动作或发话；原文明确“数日后”等时间省略则在对应位置保留，不能当成同一时刻的连续动作。场景建立可以与入场和准备同时呈现；没有原文依据时，不让另一人等前一人完整做完自己的自然段才开始其动作。原文确有先后、等待、恢复、慢行或长发话时仍按原意保留。',
   '反例仅用于说明时间错误，不能抄进剧情：把一次普通颔首排成5秒、一次短促虚晃排成6秒、随后后撤排成4秒，再用收回站稳填满15秒，是把短动作慢放来凑窗口。正确安排是让这些短促动作及对方回应在自然节拍内接续完成，余下时间继续后面的原有行动；不减少动作次数、不删除整理喘息、不凭空加招。实际速度依据原文、能力、距离与表演，不能把反例秒数换成另一套固定配额。',
@@ -228,10 +228,10 @@ const requiredFixedSegmentCount = (input: SemanticSequencePlanningInput): number
 const semanticSequencePlanningRule = (input: SemanticSequencePlanningInput): string => input.durationMode !== 'fixed'
   ? SEMANTIC_SEQUENCE_PLANNING_RULE
   : [
-      '固定模式沿用下述共同的全片动作时间安排与窗口分配规则，只额外受T、D、N约束：在固定T秒内安排完整事件、原话和必要反应，调整尚未确认的窗口归属，不删招、减回合、丢真实整理喘息或改短T。结合完整制作要求自然安排发话与动作，不按字数、句数、固定语速或最低镜数套公式，不靠抢话、声音重叠、零时长末点事件或机械加速朗读硬塞预算，不用凝视、换景、空镜或重复结尾填时。首轮回答内先调整全片未确认的分配，不能因第一次局部安排拥挤就认定固定时长做不到；T、D、N固定后不得套用AI适配的加窗权限，确实仍无法给完整串行动作安排自然过程时按下述失败诊断返回insufficient，不能静默加长、越界完成或把动作移出用户固定范围。',
+      '固定模式沿用下述共同的全片动作时间安排与窗口分配规则：以用户目标T秒和单段D秒作为规划参考，在完整剧情内安排全部事件、原话和必要反应，不删招、减回合、丢真实整理喘息。实际段数N不预先锁死，成功结果以完整segments数组实际返回的元素数量为准，实际总时长为N×D；不得为了凑目标T删掉已经完整返回的段，也不得截断或补写数组。结合完整制作要求自然安排发话与动作，不按字数、句数、固定语速或最低镜数套公式，不靠抢话、声音重叠、零时长末点事件或机械加速朗读硬塞预算，不用凝视、换景、空镜或重复结尾填时。若确实无法给完整串行动作安排自然过程时按下述失败诊断返回insufficient，不能静默删剧情、越界完成或伪造成功。',
       SEMANTIC_SEQUENCE_COMMON_RULE,
-      `本阶段durationAdjustmentPolicy=fixed-total-duration，durationMode=fixed：用户自定义全片总时长T=${input.requestedTotalDurationSec}秒，每段D=${input.segmentDurationSec}秒，已确定N=${requiredFixedSegmentCount(input)}段。T、D、N均固定；成功结果的segments数组必须实际完整输出${requiredFixedSegmentCount(input)}项，每段完整D秒，总长精确T秒，不另外填写segmentCount。不能擅自增减段数或更改总时长。`,
-      '固定模式的失败诊断例外：上述完整segments与片段字段要求用于成功结果。若本次内部重新分配后仍未排好完整剧情，明确返回fitStatus=insufficient，并用非空reason说明具体冲突的发话或必须串行动作；这只是本次规划失败的自评，不宣称已经证实客观最低时长。失败结果可以只返回reason、fitStatus，或令segments为空数组，不必为失败诊断凑齐N段。固定模式不会自动拿相同预算重新完整生成，不能靠加段、删对白或谎报成功处理失败。',
+      `本阶段durationAdjustmentPolicy=fixed-total-duration，durationMode=fixed：用户目标T=${input.requestedTotalDurationSec}秒，每段D=${input.segmentDurationSec}秒；T是规划预算参考，D是每段固定窗口，目标段数${requiredFixedSegmentCount(input)}仅供参考，不是成功返回的硬性数量。成功结果不另外填写segmentCount；由完整segments数组决定实际N并按N×D计算实际总时长。`,
+      '固定模式的失败诊断例外：上述完整segments与片段字段要求用于成功结果。若本次内部重新分配后仍未排好完整剧情，明确返回fitStatus=insufficient，并用非空reason说明具体冲突的发话或必须串行动作；这只是本次规划失败的自评，不宣称已经证实客观最低时长。失败结果可以只返回reason、fitStatus，或令segments为空数组。固定模式不会自动拿相同预算重新完整生成，不能靠删对白或谎报成功处理失败。',
     ].join('\n');
 
 /** One unambiguous JSON data envelope, with no clipping or embedded tag exit. */
@@ -251,8 +251,6 @@ const sourcePayload = (input: SemanticSequencePlanningInput) => orderTextPromptD
   durationMode: input.durationMode ?? 'ai-estimated',
   ...(input.durationMode === 'fixed' ? {
     requestedTotalDurationSec: input.requestedTotalDurationSec,
-    totalDurationSec: input.requestedTotalDurationSec,
-    requiredSegmentCount: requiredFixedSegmentCount(input),
     durationAdjustmentPolicy: 'fixed-total-duration',
   } : { durationAdjustmentPolicy: 'ai-chooses-segment-count' }),
 }, ['story', 'originalSourceContext', 'characterContinuity', 'creativeDirection', 'pacing', 'title']);

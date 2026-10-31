@@ -161,9 +161,12 @@ export const videoH3PictureNumbers = (
   if (context.backend === 'comfyui') {
     const numbers = context.workflow && resolveComfyH3PictureNumbers(context.workflow, slots);
     if (numbers) return { numbers };
-    // A single configured image slot is sufficient for I2V submission. Keep
-    // the authored Picture text untouched when the graph path is opaque.
-    if (references.length === 1 && context.workflow?.mapping.images.length === 1 && slots[0] === 0) return {};
+    // I2V has one image consumer and H3 defines that sole image as Picture 1.
+    // The upstream path may be opaque (for example a transform node), but a
+    // single selected physical slot has no competing ordinal to guess. Keep
+    // the conservative multi-slot/ambiguous path below unchanged.
+    if (references.length === 1
+      && (!context.workflow || context.workflow.mapping.images.length === 1)) return { numbers: [1] };
     return { warning: '当前 ComfyUI 工作流未声明 H3 实际图片消费顺序，已保留正文，未按输入槽猜测图片编号。' };
   }
   const api = context.api;

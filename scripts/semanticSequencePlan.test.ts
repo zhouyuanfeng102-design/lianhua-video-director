@@ -58,28 +58,21 @@ test('new wire protocol derives N from complete AI segments without requiring a 
   }
 });
 
-test('legacy counts remain compatible only when consistent; contradictions report both safe numeric values', () => {
+test('legacy count metadata never overrides or deletes the complete segments array', () => {
   assert.deepEqual(parseSemanticSequenceResponse(JSON.stringify(response()), input()), response());
   for (const [declared, actual] of [[8, 6], [3, 4]]) {
     const authored = { ...wireResponse(actual), segmentCount: declared };
     const before = JSON.stringify(authored);
-    assert.throws(() => parseSemanticSequenceResponse(before, input()), (error: unknown) => {
-      assert.ok(error instanceof SemanticSequenceTechnicalError);
-      assert.equal(error.kind, 'invalid-shape');
-      assert.match(error.message, new RegExp(`AI 声明 ${declared} 段，实际返回 ${actual} 段`));
-      assert.match(error.message, /segmentCount 与 segments 数量不一致/u);
-      return true;
-    });
+    const parsed = parseSemanticSequenceResponse(before, input());
+    assert.equal(parsed.segmentCount, actual);
+    assert.equal(parsed.segments.length, actual);
     assert.equal(JSON.stringify(authored), before, 'no local trimming, padding or count correction');
   }
   const privateMarker = 'SYNTHETIC_PRIVATE_COUNT_VALUE';
   for (const count of [null, true, '2', [], {}, privateMarker, 0, -1, 1.5, 901, Number.MAX_SAFE_INTEGER + 1]) {
-    assert.throws(() => parseSemanticSequenceResponse(JSON.stringify({ ...wireResponse(), segmentCount: count }), input()), (error: unknown) => {
-      assert.ok(error instanceof SemanticSequenceTechnicalError);
-      assert.match(error.message, /旧格式段数字段 segmentCount 必须为 1–900 的整数/u);
-      assert.doesNotMatch(error.message, new RegExp(privateMarker));
-      return true;
-    });
+    const parsed = parseSemanticSequenceResponse(JSON.stringify({ ...wireResponse(), segmentCount: count }), input());
+    assert.equal(parsed.segmentCount, 2);
+    assert.equal(parsed.segments.length, 2);
   }
 });
 
@@ -106,12 +99,16 @@ test('fixed totals use actual array length with or without a legacy count, never
   assert.equal(plan.totalDurationSec, 90);
   assert.equal(plan.requestedTotalDurationSec, 90);
   assert.equal(plan.segments.length, 6);
-  for (const count of [5, 7]) for (const candidate of [wireResponse(count), { ...wireResponse(count), segmentCount: 6 }]) {
-    assert.throws(() => parseSemanticSequenceResponse(JSON.stringify(candidate), request), (error: unknown) => {
-      assert.ok(error instanceof SemanticSequenceTechnicalError);
-      assert.match(error.message, new RegExp(`固定总时长需要 6 段（90 秒 ÷ 每段 15 秒），实际返回 ${count} 段`));
-      return true;
-    });
+  for (const count of [5, 7]) for (const candidate of [wireResponse(count),
+    { ...wireResponse(count), segmentCount: 6 }, { ...wireResponse(count), segmentCount: 6, totalDurationSec: 90 }]) {
+    const parsed = parseSemanticSequenceResponse(JSON.stringify(candidate), request);
+    const actual = materialize(parsed, request);
+    assert.equal(parsed.segmentCount, count);
+    assert.equal(parsed.segments.length, count);
+    assert.equal(actual.segments.length, count);
+    assert.equal(actual.totalDurationSec, count * 15);
+    assert.equal(actual.requestedTotalDurationSec, count * 15);
+    assert.deepEqual(validateSemanticSequencePlan(actual), []);
   }
 });
 
@@ -268,7 +265,9 @@ test('N can independently grow or shrink; only numerical capacity limits constra
   assert.throws(() => materialize(response(900), input(4.01)), SemanticSequenceTechnicalError);
   for (const duration of [0, 0.99, 300.01, 1.111, Infinity, NaN]) assert.throws(() => assertSemanticSequencePlanningInput(input(duration)), SemanticSequenceTechnicalError);
   for (const count of [0, -1, 1.5, 901]) {
-    assert.throws(() => parseSemanticSequenceResponse(JSON.stringify({ ...response(), segmentCount: count }), input()), SemanticSequenceTechnicalError);
+    const parsed = parseSemanticSequenceResponse(JSON.stringify({ ...response(), segmentCount: count }), input());
+    assert.equal(parsed.segmentCount, 2);
+    assert.equal(parsed.segments.length, 2);
   }
 });
 
@@ -299,7 +298,7 @@ test('fixed request totals are strict numbers and full D multiples; input copyin
   assert.throws(() => assertSemanticSequencePlanningInput({ ...input(), durationMode: 'unknown' as 'fixed' }), SemanticSequenceTechnicalError);
 });
 
-test('fixed mode requires exactly T divided by D AI bodies and preserves every authored field', () => {
+test('fixed mode preserves every authored field while publishing the actual returned window count', () => {
   const request: SemanticSequencePlanningInput = { ...input(12.34), durationMode: 'fixed', requestedTotalDurationSec: 37.02 };
   const authored = response(3);
   const before = JSON.stringify({ request, authored });
@@ -313,9 +312,11 @@ test('fixed mode requires exactly T divided by D AI bodies and preserves every a
   assert.equal(JSON.stringify({ request, authored }), before);
   assert.deepEqual(validateSemanticSequencePlan(plan), []);
   for (const count of [1, 2, 4]) {
-    assert.throws(() => parseSemanticSequenceResponse(JSON.stringify(response(count)), request),
-      (error: unknown) => error instanceof SemanticSequenceTechnicalError && error.kind === 'invalid-shape' && /固定总时长需要 3 段.*实际返回/u.test(error.message));
-    assert.throws(() => materialize(response(count), request), SemanticSequenceTechnicalError);
+    const actual = materialize(response(count), request);
+    assert.equal(actual.segments.length, count);
+    assert.equal(actual.totalDurationSec, Math.round(12.34 * 100) * count / 100);
+    assert.equal(actual.requestedTotalDurationSec, actual.totalDurationSec);
+    assert.deepEqual(validateSemanticSequencePlan(actual), []);
   }
 });
 
@@ -471,9 +472,11 @@ test('JSON failures distinguish missing, malformed and unfinished output without
   assert.equal(defaultError.message, 'AI 语义分段结构无效：合成字段错误');
 });
 
-test('wrong optional numeric fields are repaired by the model, not locally retimed', () => {
+test('non-authoritative totals are ignored while window and source fields stay strict', () => {
   const request = input(15);
-  assert.throws(() => parseSemanticSequenceResponse(JSON.stringify({ ...response(), totalDurationSec: 29 }), request), SemanticSequenceTechnicalError);
+  const staleTotal = parseSemanticSequenceResponse(JSON.stringify({ ...response(), totalDurationSec: 29 }), request);
+  assert.equal(staleTotal.segmentCount, 2);
+  assert.equal(staleTotal.segments.length, 2);
   assert.throws(() => parseSemanticSequenceResponse(JSON.stringify({ ...response(), segmentDurationSec: 10 }), request), SemanticSequenceTechnicalError);
   const wrongWindow = { ...response(), segments: response().segments.map((segment, index) => ({ ...segment, durationSec: index === 0 ? 10 : 15 })) };
   assert.throws(() => parseSemanticSequenceResponse(JSON.stringify(wrongWindow), request), SemanticSequenceTechnicalError);

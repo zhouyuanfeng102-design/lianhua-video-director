@@ -562,27 +562,13 @@ export const parseSemanticSequenceResponse = (raw: string, input: SemanticSequen
   const segmentCount = Array.isArray(value.segments) ? value.segments.length : 0;
   if (!Array.isArray(value.segments) || !segmentCount) issues.push('segments 必须是非空数组');
   if (segmentCount > 900) issues.push(`实际返回 ${segmentCount} 段，分段数量不得超过 900 段`);
-  // Older providers may retain the previous schema. A contradictory count can
-  // signal omitted story, so only the model may resolve it against the source.
-  if (has(value, 'segmentCount')) {
-    if (!Number.isSafeInteger(value.segmentCount) || (value.segmentCount as number) < 1 || (value.segmentCount as number) > 900) {
-      issues.push('旧格式段数字段 segmentCount 必须为 1–900 的整数；新格式无需填写该字段');
-    } else if (Array.isArray(value.segments) && value.segmentCount !== segmentCount) {
-      issues.push(`分段数量不一致：AI 声明 ${value.segmentCount} 段，实际返回 ${segmentCount} 段（segmentCount 与 segments 数量不一致）`);
-    }
-  }
-  if (input.durationMode === 'fixed' && Array.isArray(value.segments)) {
-    const requiredCount = Math.round(input.requestedTotalDurationSec! * 100) / Math.round(input.segmentDurationSec * 100);
-    if (segmentCount !== requiredCount) {
-      issues.push(`固定总时长需要 ${requiredCount} 段（${input.requestedTotalDurationSec} 秒 ÷ 每段 ${input.segmentDurationSec} 秒），实际返回 ${segmentCount} 段`);
-    }
-  }
+  // Older providers may retain summary fields. The complete segments array is
+  // authoritative; summary counts and totals never trim or reject its bodies.
   if (typeof value.reason !== 'string') issues.push('reason 必须是字符串');
   if (fitStatus === undefined) issues.push(fitStatusIssue(value));
   const totalUnits = Math.round(input.segmentDurationSec * 100) * segmentCount;
   if (totalUnits > 360000) issues.push(`实际 ${segmentCount} 段 × 每段 ${input.segmentDurationSec} 秒 = ${totalUnits / 100} 秒，超过全片 3600 秒上限`);
   if (has(value, 'segmentDurationSec') && value.segmentDurationSec !== input.segmentDurationSec) issues.push('segmentDurationSec 必须等于输入 D');
-  if (has(value, 'totalDurationSec') && value.totalDurationSec !== totalUnits / 100) issues.push('totalDurationSec 必须等于 D × N');
   if (issues.length || fitStatus === undefined) throw new SemanticSequenceTechnicalError(issues);
   const windows = requestedSegmentDurationWindows(totalUnits / 100, input.segmentDurationSec);
   const segments = (value.segments as unknown[]).map((item, index): SemanticSequenceResponseSegment => {
@@ -608,6 +594,10 @@ export const materializeSemanticSequencePlan = (
   const parsed = parseSemanticSequenceResponse(JSON.stringify(response), snapshot);
   if (!parsed.segments.length) throw new SemanticSequenceTechnicalError(['本次 AI 固定时长规划失败的诊断不能保存为分段计划']);
   const totalDurationSec = Math.round(snapshot.segmentDurationSec * 100) * parsed.segments.length / 100;
+  // A fixed request is a planning target. Once the complete response is
+  // accepted, the published plan follows the actual returned windows so all
+  // later UI, restore, and generation consumers agree on N x D.
+  const publishedRequestedTotalDurationSec = snapshot.durationMode === 'fixed' ? totalDurationSec : undefined;
   const windows = requestedSegmentDurationWindows(totalDurationSec, snapshot.segmentDurationSec);
   const now = options.now ?? Date.now();
   if (!options.planId.trim() || !Number.isFinite(now)) throw new SemanticSequenceTechnicalError(['计划 ID 或创建时间无效']);
@@ -615,14 +605,14 @@ export const materializeSemanticSequencePlan = (
     id: options.planId, title: snapshot.title, sourceStoryTitle: snapshot.title, sourceStoryContent: snapshot.story,
     sourceContentHash: sourceContentHash(snapshot.story), planningMode: 'semantic-segments', planningStage: 'segmented',
     durationMode: snapshot.durationMode ?? 'ai-estimated',
-    ...(snapshot.durationMode === 'fixed' ? { requestedTotalDurationSec: snapshot.requestedTotalDurationSec } : {}),
+    ...(publishedRequestedTotalDurationSec !== undefined ? { requestedTotalDurationSec: publishedRequestedTotalDurationSec } : {}),
     totalDurationSec, segmentDurationSec: snapshot.segmentDurationSec,
     segmentationMode: 'natural', segmentationSource: 'ai', segmentationReason: parsed.reason, estimateReason: parsed.reason,
     fitStatus: parsed.fitStatus,
     semanticPlanningSnapshot: {
       version: 1, directorSettingsFingerprint: snapshot.directorSettingsFingerprint,
       ...(snapshot.durationMode !== undefined ? { durationMode: snapshot.durationMode } : {}),
-      ...(snapshot.durationMode === 'fixed' ? { requestedTotalDurationSec: snapshot.requestedTotalDurationSec } : {}),
+      ...(publishedRequestedTotalDurationSec !== undefined ? { requestedTotalDurationSec: publishedRequestedTotalDurationSec } : {}),
       creativeDirection: snapshot.creativeDirection, pacing: snapshot.pacing,
       characterContinuity: copyCharacters(snapshot.characterContinuity),
       ...(snapshot.originalSourceContext ? { originalSourceContext: normalizeStoryVisualConversionSnapshot(snapshot.originalSourceContext)! } : {}),
@@ -699,7 +689,7 @@ export const validateSemanticSequencePlan = (plan: VideoSequencePlan): string[] 
   if (!Array.isArray(plan.segments) || !plan.segments.length || plan.segments.length > 900) issues.push('语义分段数量必须为 1–900');
   const totalUnits = Math.round(plan.segmentDurationSec * 100) * (Array.isArray(plan.segments) ? plan.segments.length : 0);
   if (!Number.isFinite(plan.totalDurationSec) || plan.totalDurationSec !== totalUnits / 100 || totalUnits > 360000) issues.push('语义分段总时长必须等于 D × N，且不超过 3600 秒');
-  if (plan.durationMode === 'fixed' && Math.round(plan.requestedTotalDurationSec! * 100) !== totalUnits) issues.push('固定模式分段数量必须准确等于 T ÷ D');
+  if (plan.durationMode === 'fixed' && Math.round(plan.requestedTotalDurationSec! * 100) !== totalUnits) issues.push('固定模式发布计划的总时长必须等于实际 D × N');
   if (issues.length) return [...new Set(issues)];
   const windows = requestedSegmentDurationWindows(plan.totalDurationSec, plan.segmentDurationSec);
   const ids = new Set<string>();

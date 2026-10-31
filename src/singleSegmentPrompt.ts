@@ -15,7 +15,7 @@ import {
   type OfficialH3ProjectContext,
 } from './officialPrompt';
 import { buildBudgetedOfficialH3References } from './officialReferenceBudget';
-import { h3MediaModeForReferences, type PromptReferenceInput } from './promptAdapters';
+import { h3MediaModeForReferences, h3PromptModeForReferences, type PromptReferenceInput } from './promptAdapters';
 import { translateVideoPromptToEnglish } from './promptTranslation';
 import { createRuntimeErrorLogEntry } from './runtimeErrorLog';
 import { resolveConfirmedMasterSliceSource, type ConfirmedMasterSliceSourceContext } from './confirmedMasterSliceSource';
@@ -659,6 +659,16 @@ export async function generateSingleSegmentPrompt(
     const existingBindings = official.h3IdentityBindings;
     const currentReferences = getSingleSegmentReferences(official, input.context);
     const deliveryMediaMode = h3MediaModeForReferences(currentReferences);
+    const deliveryPromptMode = h3PromptModeForReferences(currentReferences);
+    const hasOpeningFrame = currentReferences.some((reference) => reference.role === 'first-frame');
+    const hasEndingFrame = currentReferences.some((reference) => reference.role === 'last-frame');
+    const deliveryBoundaryRule = hasOpeningFrame && hasEndingFrame
+      ? '本次明确有首尾帧锚点：首帧对应0.00秒，尾帧对应片段结束；正文描述两端之间连续可达的变化，并在最后一镜抵达尾帧。'
+      : hasOpeningFrame
+        ? '本次明确有首帧锚点：首帧对应0.00秒，从该帧已有状态继续向后发展。'
+        : hasEndingFrame
+          ? '本次明确有尾帧锚点：尾帧对应片段结束，从合理前置状态逐步发展并在最后一镜收束到尾帧。'
+          : '';
     const chooseDeliveryFormat = input.purpose === 'reference-refresh'
       || !/^(?:subject_definitions|integrated_multimodal_description)\s*[:：]/mu.test(official.officialPromptZh || '');
     const requiresParticipation = initialDelivery || synchronizeCanonical || Boolean(official.h3CharacterParticipation);
@@ -694,6 +704,7 @@ export async function generateSingleSegmentPrompt(
       } : {}),
       currentReferences: referenceFacts(currentReferences),
       deliveryMediaMode,
+      deliveryPromptMode,
       ...(input.sequenceHandoff ? { sequenceHandoff: input.sequenceHandoff } : {}),
       ...(input.purpose === 'continuity-repair' ? { revisionScope: 'adjacent-segment-continuity-only' } : {}),
       ...(input.purpose === 'reference-refresh' ? { revisionScope: 'reference-refresh-non-audio-only' } : {}),
@@ -733,9 +744,17 @@ export async function generateSingleSegmentPrompt(
       H3_FINAL_BODY_FORMAT_RULE,
       H3_PERFORMANCE_DELIVERY_RULE,
       chooseDeliveryFormat
-        ? `deliveryMediaMode=${deliveryMediaMode}由本次实际currentReferences决定。${deliveryMediaMode === 'full-reference'
+        ? `deliveryMediaMode=${deliveryMediaMode}，deliveryPromptMode=${deliveryPromptMode}，均由本次实际currentReferences决定。${deliveryMediaMode === 'full-reference'
           ? '本次必须由你交付六个官方章节：subject_definitions、summary、retention_analysis、detailed_description、overall_soundscape、non_diegetic_music。原逐镜执行正文完整保真进入detailed_description，其他章节仅说明本次真实参考的身份、用途和保留关系，不重新导剧情或推断参考图中的朝向。'
-          : '本次使用三个官方章节：integrated_multimodal_description、overall_soundscape、non_diegetic_music；不为未来可能添加的图片预造Subject/Picture/Audio或全参考说明。'}`
+          : '本次使用三个官方章节：integrated_multimodal_description、overall_soundscape、non_diegetic_music；不为未来可能添加的图片预造Subject/Picture/Audio或全参考说明。'} ${deliveryPromptMode === 'i2va'
+            ? '这是I2VA：把唯一首帧作为0.00秒的Picture 1，从首帧已有状态向后写动作发展，不重复静态首帧来代替动作。'
+            : deliveryPromptMode === 'fl2va'
+              ? '这是FL2VA：把首帧和尾帧作为两端锚点，写出两端之间连续且可到达的中间变化，最后一镜抵达尾帧。'
+              : deliveryPromptMode === 'l2va'
+                ? '这是L2VA：从合理的前置状态逐步发展，并在最后一镜收束到尾帧，不把尾帧说明提前成开场状态。'
+                : deliveryPromptMode === 'ref2va'
+                  ? `这是Ref2VA：区分Subject与Picture的职责，并在对应镜头说明参考内容何时生效；Picture、Video、Audio编号只沿用本次明确输入映射，没有明确映射时不猜编号。${deliveryBoundaryRule}`
+                  : '这是T2VA：从文字建立完整的场景、动作、镜头和声音时间线，不加入未提供的图片锚点。'}`
         : '本次有限更新保留candidatePrompt已有官方章节和所有真实参考标签；实际参考清单只用于理解既有职责，不借本次表达重写为另一份剧情。',
       ...(input.sequenceSegmentContext ? [] : [SAVED_STAGING_SOURCE_POSITION_RULE]),
       actionRetiming

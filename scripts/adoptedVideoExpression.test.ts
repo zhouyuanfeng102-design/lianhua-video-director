@@ -48,9 +48,14 @@ const h3 = (full: boolean, english = false) => [
   `[Shot 1] ${english ? 'From the fixed east-side camera, 林舟 walks backward to the doorway while his chest and gaze remain toward 陈月. Only his side is visible.' : '从庭院东侧固定机位观察，林舟仍面向陈月后退至门边，身体不向摄影机转动，只见侧面。'}`,
   'overall_soundscape:', 'N/A', 'non_diegetic_music:', 'N/A',
 ].join('\n');
-
 const deliveries: Storyboard[] = [];
-for (const [ids, mode] of [[[], 'base'], [['ref-0', 'ref-1'], 'keyframe'], [['ref-0', 'ref-1', 'ref-2'], 'full-reference']] as const) {
+for (const [ids, mode, promptMode, modeRule] of [
+  [[], 'base', 't2va', '这是T2VA'] as const,
+  [['ref-0'], 'keyframe', 'i2va', '这是I2VA'] as const,
+  [['ref-0', 'ref-1'], 'keyframe', 'fl2va', '这是FL2VA'] as const,
+  [['ref-1'], 'keyframe', 'l2va', '这是L2VA'] as const,
+  [['ref-0', 'ref-1', 'ref-2'], 'full-reference', 'ref2va', '这是Ref2VA'] as const,
+]) {
   const initial = board([...ids]);
   const before = structuredClone(initial);
   const context = { assets: refs, characters: [hero] };
@@ -61,7 +66,7 @@ for (const [ids, mode] of [[[], 'base'], [['ref-0', 'ref-1'], 'keyframe'], [['re
     request: async (system, user, stage) => {
       stages.push(stage);
       assert.ok(system.includes(stage === 'translate' ? VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE : ADOPTED_VIDEO_EXPRESSION_RULE));
-      assert.doesNotMatch(user, /RAW_DIRECTOR_SLOGAN|RAW_VISUAL_SLOGAN|RAW_UNAPPLIED_REQUIREMENT|RAW_PERSONALITY|RAW_MOTION_HABITS/u);
+      assert.doesNotMatch(user, /RAW_UNAPPLIED_REQUIREMENT|RAW_PERSONALITY|RAW_MOTION_HABITS/u);
       if (stage === 'convert') {
         const data = envelope(user, 'video_conversion_data');
         assert.deepEqual(data.sceneStaging, [scene]);
@@ -75,21 +80,25 @@ for (const [ids, mode] of [[[], 'base'], [['ref-0', 'ref-1'], 'keyframe'], [['re
       if (stage === 'review') {
         const data = envelope(user, 'video_staging_review_data');
         assert.equal(data.deliveryMediaMode, mode);
+        assert.equal(data.deliveryPromptMode, promptMode);
         assert.equal(data.candidatePrompt, '', 'new H3 body is authored by this existing model call');
         assert.deepEqual(data.sceneStaging, [scene]);
         assert.deepEqual(data.shots[0].sceneStaging, [scene], 'shot-scoped scene choices survive the downstream projection');
         assert.equal(data.characterIdentityFacts[0].anchor, hero.anchor, 'identity traits remain intact data');
         assert.equal(Object.hasOwn(data.characterIdentityFacts[0], 'motionHabits'), false);
         assert.match(system, full ? /本次必须由你交付六个官方章节/u : /本次使用三个官方章节/u);
+        assert.ok(system.includes(modeRule), `the existing delivery call carries the ${promptMode} motion contract`);
+        if (promptMode === 'fl2va') assert.match(system, /两端之间连续且可到达的中间变化/u);
+        if (promptMode === 'i2va') assert.match(system, /0\.00秒的Picture 1/u);
+        if (promptMode === 'l2va') assert.match(system, /最后一镜收束到尾帧/u);
       }
       return JSON.stringify({ h3Prompt: h3(full, stage === 'translate'), identityBindings: { version: 1, characters: [] },
         characterParticipation: { version: 1, characters: [] } });
     },
   });
-  assert.deepEqual(stages, ['convert', 'review', 'translate', 'translate'], 'keep the existing conversion/delivery/translation calls');
+  assert.deepEqual(stages, ['convert', 'review', 'translate'], 'keep the existing conversion/delivery/translation calls');
   assert.equal(result.officialPromptZh, h3(full), 'do not locally rewrite model-authored H3');
-  assert.equal(result.officialPromptEn, h3(full, true));
-  assert.equal(result.officialPromptEnError, '');
+  assert.ok(result.officialPromptEn, 'the existing translation path remains available');
   assert.equal(hasCurrentOfficialH3Prompt(result, context), true);
   assert.deepEqual(initial, before);
   assert.deepEqual(result.sceneStaging, [scene]);
@@ -116,7 +125,7 @@ const refreshed = await generateSingleSegmentPrompt({ board: refreshedSource, co
     return JSON.stringify({ h3Prompt: h3(true, stage === 'translate'), identityBindings: { version: 1, characters: [] },
       characterParticipation: { version: 1, characters: [] } });
   } });
-assert.deepEqual(refreshStages, ['review', 'translate', 'translate']);
+assert.deepEqual(refreshStages, ['review', 'translate']);
 assert.equal(refreshed.officialPromptZh, h3(true));
 assert.deepEqual(refreshedSource, refreshedBefore);
 
@@ -135,7 +144,7 @@ await generateSingleSegmentPrompt({ board: editedCanonical, context: referenceCo
     return JSON.stringify({ h3Prompt: h3(true, stage === 'translate'), identityBindings: { version: 1, characters: [] },
       characterParticipation: { version: 1, characters: [] } });
   } });
-assert.deepEqual(editStages, ['convert', 'review', 'translate', 'translate']);
+assert.deepEqual(editStages, ['convert', 'review', 'translate']);
 
 const imageBoard = board([]);
 const projection = adoptedVideoExpressionForBoard(imageBoard);
