@@ -15,6 +15,16 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "3.5.2",
+    releasedAt: "2026-10-30",
+    title: "跪伏不拧身，面向场内不看镜头",
+    highlights: [
+      "跪伏、趴跪时，膝盖和髋朝前，胸口和脸朝下，肩膀不转到髋的反面。",
+      "面向另一个人或支撑面时，摄影机看侧脸。拍正面和嘴清楚可见不表示脸转向镜头。",
+      "这是共用规则。已生成的旧提示词和成片保持原样。",
+    ],
+  },
+  {
     version: "3.5.1",
     releasedAt: "2026-10-30",
     title: "对视、轻脚步和站姿不随镜头变",

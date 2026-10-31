@@ -1,4 +1,4 @@
-import { resolveImageOutputSize, runningHubImageSizeContext, type ResolvedImageOutputSize } from './imageOutputSize';
+import { resolveImageOutputSize, runningHubImageSizeContext, type ImageOutputAspect, type ResolvedImageOutputSize } from './imageOutputSize';
 import type { ImageApiConfig } from './types';
 import { resolveImageResolution } from './imageResolution';
 
@@ -7,6 +7,8 @@ export type StoryboardImageOutputSizeMode = 'default' | '1k' | '2k' | '4k' | 'cu
 /** Shared only by storyboard stills, including opening/ending frames. */
 export interface StoryboardImageOutputSizePreference {
   mode: StoryboardImageOutputSizeMode;
+  /** Omitted or variant keeps the storyboard video aspect. A chosen ratio is image-only. */
+  aspect?: ImageOutputAspect;
   width: number;
   height: number;
   resolutionVersion?: 1;
@@ -14,9 +16,10 @@ export interface StoryboardImageOutputSizePreference {
 
 const MODES: readonly StoryboardImageOutputSizeMode[] = ['default', '1k', '2k', '4k', 'custom'];
 const PRESET_MODES = ['1k', '2k', '4k'] as const;
+const STORYBOARD_IMAGE_ASPECTS: readonly ImageOutputAspect[] = ['variant', '1:1', '3:4', '4:3', '9:16', '16:9', '3:2', '2:3'];
 
 export const defaultStoryboardImageOutputSize = (): StoryboardImageOutputSizePreference => ({
-  mode: '1k', width: 1024, height: 1024, resolutionVersion: 1,
+  mode: '1k', aspect: 'variant', width: 1024, height: 1024, resolutionVersion: 1,
 });
 const legacyStoryboardImageOutputSize = (): StoryboardImageOutputSizePreference => ({ mode: 'default', width: 1024, height: 1024 });
 
@@ -32,7 +35,10 @@ export const normalizeStoryboardImageOutputSize = (input: unknown): StoryboardIm
     if (typeof value === 'number' && Number.isFinite(value)) return value;
     return mode === 'custom' ? 0 : 1024;
   };
+  const aspect = STORYBOARD_IMAGE_ASPECTS.includes(candidate.aspect as ImageOutputAspect)
+    ? candidate.aspect as ImageOutputAspect : undefined;
   return { mode, width: dimension(candidate.width), height: dimension(candidate.height),
+    ...(aspect ? { aspect } : {}),
     ...(candidate.resolutionVersion === 1 ? { resolutionVersion: 1 as const } : {}) };
 };
 
@@ -75,7 +81,9 @@ export const resolveStoryboardImageOutputSize = (
 ): ResolvedImageOutputSize => {
   const canvas = defaultCanvas(aspectRatio);
   const cloudContext = runningHubImageSizeContext(api);
-  const aspect = parseAspectRatio(aspectRatio);
+  const chosenAspect = preference.aspect && preference.aspect !== 'variant' ? preference.aspect : aspectRatio;
+  const aspect = parseAspectRatio(chosenAspect);
+  const aspectSource = preference.aspect && preference.aspect !== 'variant' ? '所选' : '分镜';
   if (preference.mode === 'default') {
     return { ...canvas, ...cloudContext, sizeOverride: false, issue: '', layoutNote: cloudContext.workflowSizeMode ? '工作流默认尺寸 · 像素仅作版式估算' : '规格默认 · 保留原分镜画布' };
   }
@@ -86,11 +94,12 @@ export const resolveStoryboardImageOutputSize = (
       canvas, api, 'reference',
     );
     const label = customAspectLabel(resolved.width, resolved.height);
+    const storyboardAspect = parseAspectRatio(aspectRatio);
     const nativeAspect = resolved.resolutionPlan?.logicalAspectRatio;
-    const nominalMatches = aspect && nativeAspect && Math.abs(Number(nativeAspect.split(':')[0]) / Number(nativeAspect.split(':')[1]) - aspect.ratio) < 1e-8;
-    const differs = aspect && !nominalMatches && Math.abs(resolved.width * aspect.height - resolved.height * aspect.width) > 1e-8;
-    return { ...resolved, ...(differs ? { warning: [resolved.warning, `自定义画幅与分镜推荐比例${aspect!.label}不同；按实际像素提交。`].filter(Boolean).join(' ') } : {}), layoutNote: label
-      ? `自定义比例 ${label}${nativeAspect && nativeAspect !== label ? ` · 原生${nativeAspect}画幅` : ''}${differs ? ` · 与分镜比例 ${aspect.label} 不同，按自定义像素提交` : ''}`
+    const nominalMatches = storyboardAspect && nativeAspect && Math.abs(Number(nativeAspect.split(':')[0]) / Number(nativeAspect.split(':')[1]) - storyboardAspect.ratio) < 1e-8;
+    const differs = storyboardAspect && !nominalMatches && Math.abs(resolved.width * storyboardAspect.height - resolved.height * storyboardAspect.width) > 1e-8;
+    return { ...resolved, ...(differs ? { warning: [resolved.warning, `自定义画幅与分镜推荐比例${storyboardAspect.label}不同；按实际像素提交。`].filter(Boolean).join(' ') } : {}), layoutNote: label
+      ? `自定义比例 ${label}${nativeAspect && nativeAspect !== label ? ` · 原生${nativeAspect}画幅` : ''}${differs ? ` · 与分镜比例 ${storyboardAspect.label} 不同，按自定义像素提交` : ''}`
       : '自定义宽高按输入原样提交，不自动降档' };
   }
 
@@ -113,8 +122,8 @@ export const resolveStoryboardImageOutputSize = (
   }
   const resolved = resolveImageResolution({ tier: preference.mode.toUpperCase() as '1K' | '2K' | '4K', logicalAspectRatio: aspect.label, config: api });
   const computedShortSide = resolved.width > 0 && resolved.height > 0 && Math.min(resolved.width, resolved.height) < 64;
-  return { ...resolved, ...cloudContext, sizeOverride: true, layoutNote: `${cloudContext.workflowAspect ? '比例由云端工作流决定，分镜画布仅作估算' : `按分镜 ${aspect.label}`} · ${resolved.layoutNote}`,
+  return { ...resolved, ...cloudContext, sizeOverride: true, layoutNote: `${cloudContext.workflowAspect ? '比例由云端工作流决定，分镜画布仅作估算' : `按${aspectSource} ${aspect.label}`} · ${resolved.layoutNote}`,
     issue: computedShortSide
-      ? '按分镜比例计算的短边不足64像素，请提高分辨率或使用自定义尺寸；不会暗中更改画面比例。'
+      ? `按${aspectSource}比例计算的短边不足64像素，请提高分辨率或使用自定义尺寸；不会暗中更改画面比例。`
       : resolved.issue };
 };

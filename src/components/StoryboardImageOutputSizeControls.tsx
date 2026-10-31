@@ -1,4 +1,4 @@
-import { IMAGE_OUTPUT_MAX_SIDE, type ResolvedImageOutputSize } from '../imageOutputSize';
+import { IMAGE_OUTPUT_ASPECTS, IMAGE_OUTPUT_MAX_SIDE, type ImageOutputAspect, type ResolvedImageOutputSize } from '../imageOutputSize';
 import type { StoryboardImageOutputSizePreference } from '../storyboardImageOutputSize';
 import '../imageOutputSize.css';
 import '../storyboardImageOutputSize.css';
@@ -12,6 +12,7 @@ export function StoryboardImageOutputSizeControls({ value, resolved, aspectRatio
   onChange: (value: StoryboardImageOutputSizePreference) => void;
 }) {
   const custom = value.mode === 'custom';
+  const selectedAspect: ImageOutputAspect = value.aspect && value.aspect !== 'variant' ? value.aspect : 'variant';
   const workflowSize = Boolean(resolved.workflowSizeMode);
   const workflowDefault = workflowSize && value.mode === 'default';
   const legacy = !(workflowSize && value.mode === 'default') && (value.mode === 'default' || !custom && value.resolutionVersion !== 1);
@@ -31,7 +32,15 @@ export function StoryboardImageOutputSizeControls({ value, resolved, aspectRatio
       {custom ? <>
         <label className="image-output-size-number"><span>宽</span><input aria-label="分镜图宽度像素" type="number" min={64} max={IMAGE_OUTPUT_MAX_SIDE} step={1} value={Number.isFinite(value.width) ? value.width || '' : ''} disabled={disabled} onChange={(event) => onChange({ ...value, width: Number(event.target.value), resolutionVersion: 1 })} /></label>
         <label className="image-output-size-number"><span>高</span><input aria-label="分镜图高度像素" type="number" min={64} max={IMAGE_OUTPUT_MAX_SIDE} step={1} value={Number.isFinite(value.height) ? value.height || '' : ''} disabled={disabled} onChange={(event) => onChange({ ...value, height: Number(event.target.value), resolutionVersion: 1 })} /></label>
-      </> : <span className="storyboard-image-output-size-aspect">{resolved.workflowAspect || workflowDefault ? '工作流比例（云端决定）' : `分镜比例 ${aspectRatio || '未设置'}`}</span>}
+      </> : <label><span>比例</span><select aria-label="分镜图画面比例" value={value.mode === 'default' ? 'variant' : selectedAspect} disabled={disabled || value.mode === 'default'} onChange={(event) => onChange({ ...value, aspect: event.target.value as ImageOutputAspect, resolutionVersion: 1 })}>
+        {resolved.workflowAspect || workflowDefault ? <>
+          <option value="variant">工作流比例</option>
+          {selectedAspect !== 'variant' && <option value={selectedAspect} disabled>{IMAGE_OUTPUT_ASPECTS.find((item) => item.value === selectedAspect)?.label || selectedAspect} · 需绑定比例字段</option>}
+        </> : <>
+          <option value="variant">跟随分镜比例{aspectRatio ? `（${aspectRatio}）` : ''}</option>
+          {IMAGE_OUTPUT_ASPECTS.filter((item) => item.value !== 'variant').map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+        </>}
+      </select></label>}
     </div>
     <div className="image-output-size-summary">
       <span>{workflowDefault ? '工作流默认尺寸' : `${sizeLabel} ${resolved.width} × ${resolved.height} px`}{resolved.layoutNote ? ` · ${resolved.layoutNote}` : ''}</span>

@@ -340,10 +340,13 @@ await generateOfficialSeedancePrompt({
 assert.equal(seedanceSystem.includes(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE), true);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /精液从这名男性的龟头尿道口离开/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /连在他自己的腹股沟，从两腿之间向前/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /骨盆前面、两腿之间、会阴之前/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /胸口、腹部、髋和双膝指向同一方向/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /跪伏、趴跪不套用这句同向/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /her chest, abdomen, pelvis and knees face the same direction, and her knees point toward him/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /semen leaves the urethral opening at the glans/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /his penis is attached at his groin and extends forward from between his thighs/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /her vulva is on the front of her pelvis between her thighs, anterior to the perineum/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /不从 the neck, jaw, mouth, nose, eyes, or fingers 离开/u);
 assert.doesNotMatch(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /年龄门禁|未满|未成年/u);
 assert.doesNotMatch(MOSE_JIANGHU_NSFW_VIDEO_SOUND_RULE, /年龄门禁|未满|未成年/u);

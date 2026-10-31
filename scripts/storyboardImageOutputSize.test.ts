@@ -158,6 +158,16 @@ for (const malformed of [NaN, Infinity, null, undefined, '2048']) {
 }
 assert.deepEqual(normalizeStoryboardImageOutputSize({ ...custom, mode: 'unknown' }), { mode: 'default', width: 2048, height: 2048 }, 'an unknown mode does not erase remembered custom pixels'); checks++;
 
+const followed = resolveStoryboardImageOutputSize({ mode: '2k', width: 1024, height: 1024, resolutionVersion: 1 }, '16:9', declaredApi('openai'));
+const chosen = resolveStoryboardImageOutputSize({ mode: '2k', aspect: '9:16', width: 1024, height: 1024, resolutionVersion: 1 }, '16:9', declaredApi('openai'));
+assert.deepEqual([followed.width, followed.height], [2048, 1152]);
+assert.match(followed.layoutNote, /按分镜 16:9/u);
+assert.deepEqual([chosen.width, chosen.height], [1152, 2048]);
+assert.match(chosen.layoutNote, /按所选 9:16/u);
+assert.equal(normalizeStoryboardImageOutputSize({ mode: '2k', width: 1024, height: 1024, resolutionVersion: 1 }).aspect, undefined);
+assert.equal(normalizeStoryboardImageOutputSize({ mode: '2k', aspect: '9:16', width: 1024, height: 1024, resolutionVersion: 1 }).aspect, '9:16');
+checks += 5;
+
 const state = createInitialState();
 const secondState = createInitialState();
 assert.notEqual(state.settings.storyboardImageOutputSize, secondState.settings.storyboardImageOutputSize);

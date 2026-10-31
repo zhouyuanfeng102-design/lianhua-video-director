@@ -4,13 +4,13 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的 Windows 桌面工作台。
 
-当前版本：**3.5.1** · 2026-10-30 · Windows 64 位 · 便携运行
+当前版本：**3.5.2** · 2026-10-30 · Windows 64 位 · 便携运行
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows 便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-3.5.1.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-3.5.2.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
 1. 下载上面的 EXE，放在可写入的文件夹里，双击运行，无需安装 Node.js。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
@@ -42,17 +42,17 @@
 - **自定义生图+反推图片提示词**：输入要求生成图片，或复用上传/资产库参考图，通过视觉 API 反推可复制的提示词与人物、物品、场景、风格详情。反推同步显示在聊天和资料任务，支持后台执行、停止、重试及项目保存恢复；原有生图支持原文直发或规则转换，结果自动入库。
 - **项目与资产管理**：管理图片、视频和音频，保存项目包、备份资料并导出提示词。
 
-## 最新更新 · v3.5.1
+## 最新更新 · v3.5.2
 
-- 两人对话或对视时，眼睛落在对方眼睛上。要同时看见两张脸时，摄影机站在侧面。
-- 普通走路写成很轻的鞋底声，停在对白下面。
-- 人还站着时，镜头往下看只动摄影机，双膝保持伸直。已生成的旧稿保持原样。
+- 跪伏、趴跪时，膝盖和髋朝前，胸口和脸朝下，肩膀不转到髋的反面。
+- 面向另一个人或支撑面时，摄影机看侧脸。拍正面和嘴清楚可见不表示脸转向镜头。
+- 这是共用规则。已生成的旧提示词和成片保持原样。
 
 更新程序不改写项目存档。
 
 本版定向测试结果见发布说明，测试不调用真实模型或提交视频生成。
 
-[查看本版完整说明](docs/releases/发布说明-3.5.1.md) · [历史版本归档](docs/releases/README.md)
+[查看本版完整说明](docs/releases/发布说明-3.5.2.md) · [历史版本归档](docs/releases/README.md)
 
 ## 从源码运行
 

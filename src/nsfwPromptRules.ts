@@ -116,7 +116,8 @@ export const MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE = `NSFW 视频动作细化规�
 - 多人场景每个动作都绑定具体人物和具体部位：每个器官在每一句里都写明主人的姓名。甲的哪一部位接触乙的哪一部位、甲如何移动、乙如何承受或回应、结束时两人分别处于什么姿势。手碰到对方的器官时写成「甲的手握住乙的肉棒」，乙是器官主人。不能把一个人的部位、体液、姿势或动作结果写到另一个人身上。身份段里每人的身体只写一次，挂在这个人的 Subject 上。retention_analysis 写明这些部位留在这个人身上。没有写明主人的参考图只作场景或构图，不把图里的身体部位抄到另一个人身上。
 - 原文已经写到阴茎射精时，射精这一拍写成一条路径：精液从这名男性的龟头尿道口离开，落点只用原文已经写出的位置，例如舌面、口腔或皮肤。这一拍的机位看见龟头，或看见嘴与阴茎相接的那一截，不用只剩侧脸的特写把阴茎裁出画面。原文是含着射、嘴里不漏，就写口腔内的脉动和舌面上已经积着的精液，不另写一条从体外射入的白线。同一句写明精液只从这名男性的龟头离开，不从脖子、下颌、嘴、鼻、眼或手指离开。英文写成 semen leaves the urethral opening at the glans，不用 hot fluid。原文没有射精时不补这一拍。
 - 阴茎出现时写成着生句：这名男性的阴茎连在他自己的腹股沟，从两腿之间向前。英文写成 his penis is attached at his groin and extends forward from between his thighs。胸口朝向只写躯干方向，不和阴茎、阴囊、乳房、乳头写在同一句。机位只到脸、胸口或腰以上的半身时，这一镜不把阴茎写成可见物；剧情需要看见阴茎时，同一镜的机位带上腹股沟或两腿之间。人物说明里的裤子拉开、阴茎露出也带上这个腹股沟着生点，不写成 exposed under the lamp。
-- 原文没有写拧腰、侧躺或回头时，同一个人在这一镜里只有一个朝向：胸口、腹部、髋和双膝指向同一方向，双腿不朝胸口的反面。有人站在她两腿之间时，她的髋正面和双膝朝向他，与胸口同向。英文写成 her chest, abdomen, pelvis and knees face the same direction, and her knees point toward him。侧面、正面、斜侧面只说明摄影机在哪，不改变髋和腿。原文明确写了拧身、回头或侧躺时，才分开写上半身和腿，并写明是哪一处在转。
+- 写到外阴、阴唇或阴道口时，加一句着生：它在这名女性骨盆前面、两腿之间、会阴之前，阴唇包着阴道口。英文写成 her vulva is on the front of her pelvis between her thighs, anterior to the perineum; the labia frame the vaginal opening。原文写了肛门时，肛门在臀缝里、会阴之后。两个开口不写成同一个洞，也不放进同一次探入或同一个特写目标。手指、拇指或阴茎按原文接触外阴时，落点是两腿之间的阴唇；原文没有写肛门接触，就不写成探进臀缝。后侧、从身后看不把外阴搬到臀瓣上。这一镜要看见外阴时，机位从两腿之间的前侧或下侧看，臀瓣留在会阴后面。不用一句话同时把臀缝和阴道口当成同一个按压点。
+- 原文没有写拧腰、侧躺或回头时，同一个人在这一镜里只有一个朝向：胸口、腹部、髋和双膝指向同一方向，双腿不朝胸口的反面。有人站在她两腿之间时，她的髋正面和双膝朝向他，与胸口同向。英文写成 her chest, abdomen, pelvis and knees face the same direction, and her knees point toward him。侧面、正面、斜侧面只说明摄影机在哪，不改变髋和腿。原文明确写了拧身、回头或侧躺时，才分开写上半身和腿，并写明是哪一处在转。跪伏、趴跪不套用这句同向：膝盖和髋沿着支撑面朝前，胸口和脸朝下对着支撑面，背朝上，肩膀不转到髋的反面。英文写成 she kneels bent over, knees and hips pointing along the platform, chest and face down toward the platform, back toward the ceiling; her shoulders are not turned opposite her hips。原文没有写回头时，脸保持朝下。
 - 普通六字段把细化动作放入主体、空间和音效；H3写入对应 Shot 的 integrated_multimodal_description 或 detailed_description；Seedance写入连续时间轴。不要新增 action_plan、规则解释、审核附录或反向提示词。
 - SFW 场景完全忽略本规则。
 
@@ -136,6 +137,7 @@ export const MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE = `NSFW 视频动�
 - 已确认的私密动作声音按源稿保留为呼吸、喘息、人声反应、衣料、床褥、湿滑摩擦或体液反馈等对应 sound source。源稿若把私密身体接触写成拍击、闷响、相撞、冲撞、撞击或脆响，英译写成 a very quiet close-to-the-ear wet adhesion with no room slap, sitting under the breath and dialogue，不译成 slap, knock, thud, generic impact / collision / thud / striking / wall vibration / combat sound。沉闷、震颤同样按这句皮肤声翻译。源稿里的打斗、撞门、手拍桌面和兵器仍译成 impact、thud 或 metal clash。源稿没有声音时不新增声音。
 - 源稿已经写明阴茎射精时，英译写成 semen leaves the urethral opening at the glans of that named man and lands only where the source already places it。不用 hot fluid spurts out。这一拍看见 the glans，或看见 the mouth meeting the penis。源稿是含着射、嘴里不漏时，写成 pulses inside the mouth and semen already pooled on the tongue，不另写一条从体外射入的白线。精液只从 the glans 离开，不从 the neck, jaw, mouth, nose, eyes, or fingers 离开。源稿没有射精时不补。
 - 源稿写到阴茎时，英译写成 his penis is attached at his groin and extends forward from between his thighs。chest faces 只写躯干方向，不和 penis、scrotum、breasts、nipples 写在同一句。机位只到脸、胸口或腰以上时，这一镜不把 penis 写成可见物；需要看见时，同一镜的机位带上 the groin or the space between his thighs。不写成 penis exposed under the lamp。
+- 源稿写到外阴、阴唇或阴道口时，英译写成 her vulva is on the front of her pelvis between her thighs, anterior to the perineum; the labia frame the vaginal opening。源稿写了肛门时，anus 在 the gluteal cleft、会阴之后。不把 gluteal cleft 和 vaginal opening 译成同一个探入或同一个特写目标。接触外阴的手指或阴茎落在两腿之间的 labia。源稿没有写肛门接触时，不译成 probing into the gluteal cleft。后侧机位不把 vulva 搬到 the buttocks 上；要看见外阴时，机位从两腿之间的前侧或下侧看。
 - 源稿没有写拧腰、侧躺或回头时，英译写成 her chest, abdomen, pelvis and knees face the same direction, and her knees point toward him。有人站在她两腿之间时，双膝朝向他。side、front 和 three-quarter 只说明摄影机在哪，不把腿译到胸口的反面。源稿明确写了拧身、回头或侧躺时，才分开译上半身和腿。
 - 原语言对白、H3 section、At 切点、Seedance 章节和真实参考标记保持原结构。`;
 
@@ -247,7 +249,8 @@ ${NSFW_PROSE_JOINED_MOTION_RULE}
 当前这段已经是成人情节时，主体写清谁、哪一部位、方向和结束姿势。已经进入且还连着时，身体是缓慢、小幅度、温柔的连续起伏，相接处一直贴着，每个器官带主人姓名。空间写可见范围、衣物和接触点。声音写很轻的、贴在耳边的湿滑黏连，停在喘息和台词下面，并跟人设和场所一致。
 原文已经写到阴茎射精时，射精这一拍写成一条路径：精液从这名男性的龟头尿道口离开，落点只用原文已经写出的位置。这一拍的机位看见龟头，或看见嘴与阴茎相接的那一截。原文是含着射、嘴里不漏，就写口腔内的脉动和舌面上已经积着的精液，不另写一条从体外射入的白线。精液只从这名男性的龟头离开，不从脖子、下颌、嘴、鼻、眼或手指离开。英文写成 semen leaves the urethral opening at the glans，不用 hot fluid。原文没有射精时不补这一拍。
 阴茎出现时写成着生句：这名男性的阴茎连在他自己的腹股沟，从两腿之间向前。英文写成 his penis is attached at his groin and extends forward from between his thighs。胸口朝向只写躯干方向，不和阴茎、阴囊、乳房、乳头写在同一句。机位只到脸、胸口或腰以上的半身时，这一镜不把阴茎写成可见物；剧情需要看见阴茎时，同一镜的机位带上腹股沟或两腿之间。
-原文没有写拧腰、侧躺或回头时，同一个人在这一镜里只有一个朝向：胸口、腹部、髋和双膝指向同一方向，双腿不朝胸口的反面。有人站在她两腿之间时，她的髋正面和双膝朝向他，与胸口同向。英文写成 her chest, abdomen, pelvis and knees face the same direction, and her knees point toward him。侧面、正面、斜侧面只说明摄影机在哪，不改变髋和腿。
+写到外阴、阴唇或阴道口时，它在这名女性骨盆前面、两腿之间、会阴之前，阴唇包着阴道口。英文写成 her vulva is on the front of her pelvis between her thighs, anterior to the perineum; the labia frame the vaginal opening。原文写了肛门时，肛门在臀缝里、会阴之后。两个开口不写成同一个洞，也不放进同一次探入。原文没有写肛门接触，就不写成探进臀缝。后侧机位不把外阴搬到臀瓣上；要看见外阴时，机位从两腿之间的前侧或下侧看。
+原文没有写拧腰、侧躺或回头时，同一个人在这一镜里只有一个朝向：胸口、腹部、髋和双膝指向同一方向，双腿不朝胸口的反面。有人站在她两腿之间时，她的髋正面和双膝朝向他，与胸口同向。英文写成 her chest, abdomen, pelvis and knees face the same direction, and her knees point toward him。侧面、正面、斜侧面只说明摄影机在哪，不改变髋和腿。跪伏、趴跪不套用这句同向：膝盖和髋沿着支撑面朝前，胸口和脸朝下对着支撑面，背朝上。英文写成 she kneels bent over, knees and hips pointing along the platform, chest and face down toward the platform, back toward the ceiling; her shoulders are not turned opposite her hips。
 英文保留解剖词。修复只补已经缺的部位或结束状态，不新加原文没有的阶段。
 不是成人情节时，按原来的镜头任务写，不展开性描写。`,
   custom: `[自定义生图转换任务]
