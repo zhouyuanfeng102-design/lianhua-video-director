@@ -21763,98 +21763,112 @@ function AssetsView(ctx: AppContext) {
     return Boolean(asset && isVideoDirectorImage(asset));
   });
   const upload = async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+    const files = [...(event.target.files || [])];
+    event.target.value = "";
+    if (!files.length) return;
     const requestedProjectId = state.project.id;
-    try {
-      const mediaType: ReferenceAsset["mediaType"] =
-        uploadKind === "video" ? "video" : uploadKind === "audio" ? "audio" : uploadKind === "clay-render" ? "clay-render" : "image";
-      const probe = mediaType === "video"
-        ? await probeVideoFile(file)
-        : mediaType === "audio"
-          ? await probeAudioFile(file)
-          : {};
-      const managedMedia = desktopBridge()?.importMedia
-        ? await desktopBridge()?.importMedia?.(file)
-        : null;
-      const dataUrl = !managedMedia && (mediaType === "image" || mediaType === "clay-render")
-        ? await readImageAsDataUrl(file)
-        : undefined;
-      const role: AssetRole =
-        uploadKind === "character"
-          ? "character"
-          : uploadKind === "location"
-            ? "scene"
-            : uploadKind === "prop"
-              ? "prop"
-              : uploadKind === "grid"
-                ? "grid"
-                : uploadKind === "first-frame"
-                  ? "first-frame"
-                  : uploadKind === "last-frame"
-                    ? "last-frame"
-                    : uploadKind === "audio"
-                      ? "audio"
-                      : uploadKind === "video"
-                        ? "motion"
-                        : "composition";
-      const type: AssetType = uploadKind;
-      const existingDuplicate = managedMedia
-        ? state.project.assets.find((item: ReferenceAsset) => item.checksum === managedMedia.checksum)
-        : undefined;
-      const asset: ReferenceAsset = {
-        id: createId("asset"),
-        name: file.name,
-        type,
-        role,
-        fileName: file.name,
-        dataUrl,
-        url: managedMedia?.url,
-        relativePath: managedMedia?.relativePath,
-        checksum: managedMedia?.checksum,
-        sizeBytes: managedMedia?.sizeBytes || file.size,
-        managed: Boolean(managedMedia?.managed),
-        missing: false,
-        duplicateOfAssetId: existingDuplicate?.id,
-        mimeType: managedMedia?.mimeType || (dataUrl ? referenceImageMimeType(dataUrl) : file.type || undefined),
-        importedAt: Date.now(),
-        mediaType,
-        referenceRole: uploadKind === "first-frame" ? "first-frame" : uploadKind === "last-frame" ? "last-frame" : uploadKind === "audio" ? "audio" : uploadKind === "video" ? "motion" : uploadKind === "clay-render" ? "clay-render" : uploadRole,
-        source: "upload",
-        durationSec: probe.durationSec || (uploadDurationSec > 0 ? uploadDurationSec : undefined),
-        width: probe.width,
-        height: probe.height,
-        sampleRate: probe.sampleRate,
-        channelCount: probe.channelCount,
-        waveform: probe.waveform,
-        sourceEntityId: uploadEntityId || undefined,
-        sourceEntityKind: (["character", "location", "prop"] as string[]).includes(uploadKind)
-          ? uploadKind as "character" | "location" | "prop"
-          : undefined,
-        targetBindings: activeStoryboard?.targetModelId ? [activeStoryboard.targetModelId] : [],
-        tags: [uploadKind, mediaType, "用户上传"],
-        createdAt: Date.now(),
-        updatedAt: Date.now(),
-      };
-      const derived: ReferenceAsset[] = [];
-      if (mediaType === "video" && probe.firstFrameDataUrl && probe.lastFrameDataUrl && managedMedia) {
-        const firstFrame = createFrameAsset(probe.firstFrameDataUrl, managedMedia, "first-frame", createId);
-        const lastFrame = createFrameAsset(probe.lastFrameDataUrl, managedMedia, "last-frame", createId);
-        asset.firstFrameAssetId = firstFrame.id;
-        asset.lastFrameAssetId = lastFrame.id;
-        derived.push(firstFrame, lastFrame);
+    const mediaType: ReferenceAsset["mediaType"] =
+      uploadKind === "video" ? "video" : uploadKind === "audio" ? "audio" : uploadKind === "clay-render" ? "clay-render" : "image";
+    const role: AssetRole =
+      uploadKind === "character"
+        ? "character"
+        : uploadKind === "location"
+          ? "scene"
+          : uploadKind === "prop"
+            ? "prop"
+            : uploadKind === "grid"
+              ? "grid"
+              : uploadKind === "first-frame"
+                ? "first-frame"
+                : uploadKind === "last-frame"
+                  ? "last-frame"
+                  : uploadKind === "audio"
+                    ? "audio"
+                    : uploadKind === "video"
+                      ? "motion"
+                      : "composition";
+    const created: ReferenceAsset[] = [];
+    const derivedAll: ReferenceAsset[] = [];
+    const failures: string[] = [];
+    let duplicateCount = 0;
+    const knownChecksums = new Map(
+      state.project.assets.flatMap((item: ReferenceAsset) => item.checksum ? [[item.checksum, item.id] as const] : []),
+    );
+    for (const file of files) {
+      try {
+        const probe = mediaType === "video"
+          ? await probeVideoFile(file)
+          : mediaType === "audio"
+            ? await probeAudioFile(file)
+            : {};
+        const managedMedia = desktopBridge()?.importMedia
+          ? await desktopBridge()?.importMedia?.(file)
+          : null;
+        const dataUrl = !managedMedia && (mediaType === "image" || mediaType === "clay-render")
+          ? await readImageAsDataUrl(file)
+          : undefined;
+        const duplicateId = managedMedia?.checksum ? knownChecksums.get(managedMedia.checksum) : undefined;
+        if (duplicateId) duplicateCount += 1;
+        const asset: ReferenceAsset = {
+          id: createId("asset"),
+          name: file.name,
+          type: uploadKind,
+          role,
+          fileName: file.name,
+          dataUrl,
+          url: managedMedia?.url,
+          relativePath: managedMedia?.relativePath,
+          checksum: managedMedia?.checksum,
+          sizeBytes: managedMedia?.sizeBytes || file.size,
+          managed: Boolean(managedMedia?.managed),
+          missing: false,
+          duplicateOfAssetId: duplicateId,
+          mimeType: managedMedia?.mimeType || (dataUrl ? referenceImageMimeType(dataUrl) : file.type || undefined),
+          importedAt: Date.now(),
+          mediaType,
+          referenceRole: uploadKind === "first-frame" ? "first-frame" : uploadKind === "last-frame" ? "last-frame" : uploadKind === "audio" ? "audio" : uploadKind === "video" ? "motion" : uploadKind === "clay-render" ? "clay-render" : uploadRole,
+          source: "upload",
+          durationSec: probe.durationSec || (uploadDurationSec > 0 ? uploadDurationSec : undefined),
+          width: probe.width,
+          height: probe.height,
+          sampleRate: probe.sampleRate,
+          channelCount: probe.channelCount,
+          waveform: probe.waveform,
+          sourceEntityId: uploadEntityId || undefined,
+          sourceEntityKind: (["character", "location", "prop"] as string[]).includes(uploadKind)
+            ? uploadKind as "character" | "location" | "prop"
+            : undefined,
+          targetBindings: activeStoryboard?.targetModelId ? [activeStoryboard.targetModelId] : [],
+          tags: [uploadKind, mediaType, "用户上传"],
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+        };
+        if (mediaType === "video" && probe.firstFrameDataUrl && probe.lastFrameDataUrl && managedMedia) {
+          const firstFrame = createFrameAsset(probe.firstFrameDataUrl, managedMedia, "first-frame", createId);
+          const lastFrame = createFrameAsset(probe.lastFrameDataUrl, managedMedia, "last-frame", createId);
+          asset.firstFrameAssetId = firstFrame.id;
+          asset.lastFrameAssetId = lastFrame.id;
+          derivedAll.push(firstFrame, lastFrame);
+        }
+        if (asset.checksum) knownChecksums.set(asset.checksum, asset.id);
+        created.push(asset);
+      } catch (error) {
+        failures.push(`${file.name}：${error instanceof Error ? error.message : "读取失败"}`);
       }
+    }
+    if (created.length) {
+      const ids = created.map((asset) => asset.id);
       setState((current: AppState) => applyOwnedProjectUpdate(
         current,
         requestedProjectId,
         (project) => ({
           ...project,
-          assets: [asset, ...derived, ...project.assets],
+          assets: [...created, ...derivedAll, ...project.assets],
           characters:
             uploadKind === "character" && uploadEntityId
               ? project.characters.map((item) =>
                   item.id === uploadEntityId
-                    ? { ...item, assetIds: [asset.id, ...item.assetIds] }
+                    ? { ...item, assetIds: [...ids, ...item.assetIds.filter((id) => !ids.includes(id))] }
                     : item,
                 )
               : project.characters,
@@ -21862,7 +21876,7 @@ function AssetsView(ctx: AppContext) {
             uploadKind === "location" && uploadEntityId
               ? project.locations.map((item) =>
                   item.id === uploadEntityId
-                    ? { ...item, assetIds: [asset.id, ...item.assetIds] }
+                    ? { ...item, assetIds: [...ids, ...item.assetIds.filter((id) => !ids.includes(id))] }
                     : item,
                 )
               : project.locations,
@@ -21870,21 +21884,23 @@ function AssetsView(ctx: AppContext) {
             uploadKind === "prop" && uploadEntityId
               ? project.props.map((item) =>
                   item.id === uploadEntityId
-                    ? { ...item, assetIds: [asset.id, ...item.assetIds] }
+                    ? { ...item, assetIds: [...ids, ...item.assetIds.filter((id) => !ids.includes(id))] }
                     : item,
                 )
               : project.props,
         }),
       ));
-      if (isCurrentProjectOperation(requestedProjectId, getCurrentProjectId())) {
-        notify(`${mediaType === "image" ? "图片" : mediaType === "video" ? "视频及首尾帧" : mediaType === "audio" ? "音频及波形" : "Clay Render"}已加入资产库${existingDuplicate ? "，检测到重复内容并复用文件" : ""}。`);
-      }
-    } catch (error) {
-      if (isCurrentProjectOperation(requestedProjectId, getCurrentProjectId())) {
-        notify(error instanceof Error ? `素材读取失败：${error.message}` : "素材读取失败。", "error");
-      }
     }
-    event.target.value = "";
+    if (!isCurrentProjectOperation(requestedProjectId, getCurrentProjectId())) return;
+    if (!created.length) {
+      notify(failures[0] ? `素材读取失败：${failures[0]}` : "没有可导入的素材。", "error");
+      return;
+    }
+    const label = mediaType === "image" ? "图片" : mediaType === "video" ? "视频及首尾帧" : mediaType === "audio" ? "音频及波形" : "Clay Render";
+    const summary = created.length === 1 ? `${label}已加入资产库` : `已批量导入 ${created.length} 个素材`;
+    const duplicateNote = duplicateCount ? `，其中 ${duplicateCount} 个与已有内容重复并复用文件` : "";
+    const failureNote = failures.length ? `，${failures.length} 个读取失败` : "";
+    notify(`${summary}${duplicateNote}${failureNote}。`, failures.length ? "error" : "normal");
   };
   const checkManagedAssets = async () => {
     if (!desktopBridge()?.assetStatus) return;
@@ -22111,9 +22127,10 @@ function AssetsView(ctx: AppContext) {
         eyebrow="ASSET LIBRARY"
         title={assetLibrarySection === "image" ? "图片资产库" : assetLibrarySection === "video" ? "视频资产库" : "音频参考"}
         description={assetLibrarySection === "image" ? "图片可选绑定人物、场景或物品，方便后续选图使用；不绑定也能使用，原分镜和提示词保持不变。" : assetLibrarySection === "video" ? "播放已生成或导入的视频，查看关联提示词、来源图片和生成参数。" : "保留已有音频、波形和声音参考职责。"}
-        action={
+      />
+      <Card className="soft assets-toolbar">
           <div className="row asset-upload-controls">
-            <small style={{ color: "var(--muted)" }}>上传设置</small>
+            <small>上传设置</small>
             <select
               value={uploadKind}
               onChange={(event) => {
@@ -22175,20 +22192,18 @@ function AssetsView(ctx: AppContext) {
                 style={{ width: 92 }}
               />
             )}
-            <label className="btn primary">
+            <label className="btn primary" title="可一次选择多个文件">
               <Upload size={15} />
-              上传参考素材
+              批量导入素材
               <input
                 className="file-input"
                 type="file"
+                multiple
                 accept={uploadKind === "video" ? "video/mp4,video/webm,video/quicktime" : uploadKind === "audio" ? "audio/mpeg,audio/wav,audio/mp4,audio/ogg,audio/flac,audio/x-flac,.flac" : "image/png,image/jpeg,image/webp"}
                 onChange={upload}
               />
             </label>
           </div>
-        }
-      />
-      <Card className="soft assets-toolbar">
         {assetLibrarySection === "video" && ctx.videoAssetStoryboardFilter && <div className="row-between video-assets-filter" role="status">
           <span>仅显示关联成片：{state.project.storyboards.find((board) => board.id === ctx.videoAssetStoryboardFilter)?.sourceStoryTitle || "所选提示词"}</span>
           <Button small variant="ghost" onClick={() => ctx.setVideoAssetStoryboardFilter("")}>显示全部视频</Button>

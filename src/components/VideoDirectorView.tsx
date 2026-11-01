@@ -1074,10 +1074,12 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
       const decorate = (candidate?: VideoBatchChoiceCandidate): VideoBatchChoiceCandidate | undefined => {
         if (!candidate) return undefined;
         const prepared = mode ? characterDrafts.get(candidate.key) : undefined;
+        const tailAlreadySelected = Boolean(mode?.kind === 'static' && mode.tailAssetId && prepared && !prepared.issue
+          && prepared.draft.references.some((reference) => reference.assetId === mode.tailAssetId));
         let draft = prepared && !prepared.issue ? { ...prepared.draft,
-          references: mode?.kind === 'static' && mode.tailAssetId && mode.tailRole
+          references: mode?.kind === 'static' && mode.tailAssetId && mode.tailRole && !tailAlreadySelected
             ? videoBatchTailReferences(prepared.draft.references, { mode: 'prepend', index: 0, role: mode.tailRole }, mode.tailAssetId) : prepared.draft.references,
-          referenceSlotRoles: mode?.kind === 'static' && mode.tailRole
+          referenceSlotRoles: mode?.kind === 'static' && mode.tailRole && !tailAlreadySelected
             ? [mode.tailRole, ...videoReferenceSelection(prepared.draft.references, prepared.draft.referenceSlotRoles).referenceSlotRoles!]
             : prepared.draft.referenceSlotRoles,
         } : candidate.draft;

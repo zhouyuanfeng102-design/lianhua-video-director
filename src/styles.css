@@ -2735,9 +2735,21 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
 
 /* Asset pages */
 .assets-view { min-width: 0; width: 100%; grid-template-rows: auto auto minmax(0, 1fr); gap: 6px !important; }
-.assets-view > .section-heading { min-width: 0; flex-wrap: wrap; }
-.asset-upload-controls { min-width: 0; max-width: 100%; flex: 1 1 540px; flex-wrap: wrap; justify-content: flex-end; }
-.asset-upload-controls > select { flex: 0 1 140px; width: auto; min-width: 0; max-width: 100%; }
+.assets-view > .section-heading { min-width: 0; flex-wrap: wrap; align-items: center; gap: 8px; }
+.assets-toolbar { display: flex; flex-direction: column; gap: 4px; }
+.asset-upload-controls { min-width: 0; max-width: none; flex: 0 0 auto; flex-wrap: nowrap; align-items: center; justify-content: flex-start; gap: 4px; }
+.asset-upload-controls > small { flex: 0 0 auto; font-size: calc(11px * var(--ui-font-scale, 1)); white-space: nowrap; }
+.asset-upload-controls > select,
+.asset-upload-controls > input[type="number"] {
+  flex: 0 1 128px; width: auto; min-width: 0; max-width: 150px;
+  height: 26px; min-height: 26px; padding: 2px 6px;
+  font-size: calc(11px * var(--ui-font-scale, 1)); text-overflow: ellipsis;
+}
+.asset-upload-controls > .btn {
+  flex: 0 0 auto; height: 26px; min-height: 26px; padding: 2px 8px;
+  font-size: calc(11px * var(--ui-font-scale, 1)); white-space: nowrap; gap: 4px;
+}
+.asset-upload-controls > .btn svg { width: 13px; height: 13px; }
 .assets-toolbar { padding: 4px 6px; }
 .assets-toolbar input { width: min(168px, 22vw); }
 .assets-toolbar-row { min-width: 0; flex-wrap: nowrap; align-items: center; gap: 6px; }
@@ -2998,7 +3010,8 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
   body:has(.video-director-view, .assets-view, .video-generation-settings) { min-width:760px; }
   body:has(.video-director-view, .assets-view, .video-generation-settings) .topbar { flex-wrap:wrap; height:auto; min-height:64px; gap:6px; }
   body:has(.video-director-view, .assets-view, .video-generation-settings) .topbar .row { flex-wrap:wrap; }
-  .assets-view .row-between, .assets-view .section-heading { flex-wrap:wrap; gap:8px; }
+  .assets-view .row-between { flex-wrap:wrap; gap:8px; }
+  .assets-view .section-heading { flex-wrap: nowrap; }
   .assets-view .assets-toolbar .assets-toolbar-row,
   .assets-view .assets-toolbar .assets-toolbar-filters { flex-wrap: nowrap; }
   .assets-view .asset-page-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
