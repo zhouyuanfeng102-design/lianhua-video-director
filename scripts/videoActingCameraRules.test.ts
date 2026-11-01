@@ -113,6 +113,34 @@ assert.match(VIDEO_CAMERA_SELECTION_RULE, /His arms remain around her back, outs
 assert.match(VIDEO_CAMERA_SELECTION_RULE, /The scar remains on her right cheek, below the outer corner of that eye/u);
 assert.match(VIDEO_CAMERA_SELECTION_RULE, /That hand stays beside her waist, palm toward the path\. Five fingers remain separated on that palm/u);
 assert.match(VIDEO_CAMERA_SELECTION_RULE, /One shot carries the change from the first frame to the last frame/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /Her eyes meet his eyes/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /Her eyes look toward Tang San, off to her right\. Her face stays three-quarters toward him/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /Xiao Wu remains on screen-left, facing screen-right\. Tang San remains on screen-right, facing screen-left/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /In the reverse shot she faces the lens\. The table runs toward the lens\. The wall that was behind her stays behind her/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /The ring remains on his right hand\. His glasses remain on his face/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /The cup remains in her right hand at the start of this shot\. It stays in that hand until she sets it down/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /His hand turns the cover\. The wrist turns, the fingers lift, and the fingertips meet the cover\. The cover stays between his thumb and fingers/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /His elbow stays bent on the outside of that arm/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /This shot stays close on her hand and the cup/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /The blade travels from his shoulder to that named surface and stops against it/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /The hem follows her step and settles after the foot stops/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /Steam rises from the cup and stays above the cup/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /She finishes the reach in the middle of the shot\. The last moment holds that pose/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /Her knees stay closer to the lens than her face\. Her face stays farther back in the frame/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /His brows stay drawn together\. His eyes stay on Tang San/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /Exactly three people remain\. Xiao Wu remains on the platform\. The Grand Elder remains the one person leaning over her\. Tang San remains one body, standing away from the platform/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /Each person has two arms and two legs\. Xiao Wu's two legs stay on the platform, one on each side of her hips\. Her one hand stays on the stone\. Her other hand stays at her side\. The Grand Elder's one hand stays on the platform beside her hip\. His other hand stays on her waist/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /In this shot Xiao Wu lies on her back\. Her two feet stay on the platform/u);
+assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /Exactly three people remain/u);
+assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /Each person has two arms and two legs/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /The camera holds a medium view of her face, his torso, and Tang San\. The joined contact remains between their bodies inside that view/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /This shot follows one story beat: he lifts her waist, she arches, and she answers\. Her face stays in the frame/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /While this rock continues, her back stays arched, her toes stay curled, tears stay on her cheeks, and her chest rises with each breath/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /Her head turns from side to side\. Tears stay across her cheeks/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /This shot names her and this reaction\. Her face, hair, and clothes stay as in the reference/u);
+assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /The camera holds a medium view of her face, his torso, and Tang San/u);
+assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /Her eyes meet his eyes/u);
+assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /The cup remains in her right hand at the start of this shot/u);
 assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /His beard remains outside the collar, from his chin to his chest/u);
 assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /The action stays at real-time speed/u);
 assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /His palm meets the door\. The door swings open and stays open/u);
@@ -152,6 +180,14 @@ assert.ok(VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('让摄影�
   && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('Her shoulders turn with her head until her chin stays in front of her shoulder. Her chest stays with that turn')
   && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('The action stays at real-time speed')
   && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('One shot carries the change from the first frame to the last frame')
+  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('Her eyes meet his eyes')
+  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('The cup remains in her right hand at the start of this shot. It stays in that hand until she sets it down')
+  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('She finishes the reach in the middle of the shot. The last moment holds that pose')
+  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('Exactly three people remain. Xiao Wu remains on the platform. The Grand Elder remains the one person leaning over her. Tang San remains one body, standing away from the platform')
+  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes("Tang San says the name. The camera holds on Tang San's mouth for this line. His mouth opens. The Grand Elder's mouth stays closed. Xiao Wu's mouth stays closed")
+  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('The camera holds a medium view of her face, his torso, and Tang San. The joined contact remains between their bodies inside that view')
+  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('While this rock continues, her back stays arched, her toes stay curled, tears stay on her cheeks, and her chest rises with each breath')
+  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('Her mouth stays closed during his line. Her brows stay drawn, tears stay on her cheeks, and her chest keeps rising')
   && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('The sign reads "OPEN"')
   && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('不得把retreating')
   && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('除非源稿明确表示人物本人倒退或折返'));

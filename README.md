@@ -4,13 +4,13 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的 Windows 桌面工作台。
 
-当前版本：**3.6.3** · 2026-10-31 · Windows 64 位 · 便携运行
+当前版本：**3.6.5** · 2026-11-01 · Windows 64 位 · 便携运行
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows 便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-3.6.3.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-3.6.5.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
 1. 下载上面的 EXE，放在可写入的文件夹里，双击运行，无需安装 Node.js。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
@@ -42,7 +42,27 @@
 - **自定义生图+反推图片提示词**：输入要求生成图片，或复用上传/资产库参考图，通过视觉 API 反推可复制的提示词与人物、物品、场景、风格详情。反推同步显示在聊天和资料任务，支持后台执行、停止、重试及项目保存恢复；原有生图支持原文直发或规则转换，结果自动入库。
 - **项目与资产管理**：管理图片、视频和音频，保存项目包、备份资料并导出提示词。
 
-## 最新更新 · v3.6.3
+## 最新更新 · v3.6.5
+
+- 这一镜先写谁在做这一段剧情。相接处留在同一画面里，不为接触处、胸口或外阴另切一镜。
+- 原文写出的弓背、蜷脚趾、眼泪和呼吸贯穿这一镜。听别人说话时嘴可以闭合，脸继续动。
+- 外阴的位置仍是身体位置。只有原文写了从两腿之间看，机位才放到那里。已保存的提示词和成片不改。
+
+更新程序不改写项目存档。
+
+[查看本版完整说明](docs/releases/发布说明-3.6.5.md) · [历史版本归档](docs/releases/README.md)
+
+## 上一版更新 · v3.6.4
+
+- 这一镜有几个人，每个人只留在一个位置。俯在身上的人只有一个，远处的人只站在远处。
+- 每个人两条手臂、两条腿。手只放在原文已经写下的那一处。这一镜已经改成仰卧时，只保留仰卧。
+- 喊出的人名属于说话人。说话人不在近景里时，这一句单独落在他的嘴上。已保存的提示词和成片不改。
+
+更新程序不改写项目存档。
+
+[查看上一版完整说明](docs/releases/发布说明-3.6.4.md) · [历史版本归档](docs/releases/README.md)
+
+## 上一版更新 · v3.6.3
 
 - 一镜只留一个主运镜。绕拍时脚、髋和肩留在路线朝向。固定镜头保持这一格。已有首尾帧时默认用一镜走到尾帧。
 - 要举起的东西从开头就在手里。手先碰到门或器物，物体再停住。跌倒写成短路径。全身走路时镜头按步速拉出。
@@ -50,7 +70,7 @@
 
 更新程序不改写项目存档。
 
-[查看本版完整说明](docs/releases/发布说明-3.6.3.md) · [历史版本归档](docs/releases/README.md)
+[查看上一版完整说明](docs/releases/发布说明-3.6.3.md) · [历史版本归档](docs/releases/README.md)
 
 ## 上一版更新 · v3.6.2
 

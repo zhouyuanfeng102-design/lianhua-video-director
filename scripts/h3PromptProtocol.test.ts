@@ -24,6 +24,12 @@ assert.match(H3_DIALOGUE_FORMAT_RULE, /While he says these lines, his weight sta
   'a spoken stretch keeps one body motion until the last line ends');
 assert.match(H3_DIALOGUE_FORMAT_RULE, /The sign reads "OPEN"/u,
   'quotation marks stay on sign text');
+assert.match(H3_DIALOGUE_FORMAT_RULE, /Audio 1 supplies only the voice\. She says the line already written in <d>/u,
+  'a timbre reference keeps the written line');
+assert.match(H3_DIALOGUE_FORMAT_RULE, /Tang San says the name\. The camera holds on Tang San's mouth for this line\. His mouth opens\. The Grand Elder's mouth stays closed\. Xiao Wu's mouth stays closed/u,
+  'a shouted name stays with the speaker and that speaker mouth');
+assert.match(H3_DIALOGUE_FORMAT_RULE, /Her mouth stays closed during his line\. Her brows stay drawn, tears stay on her cheeks, and her chest keeps rising/u,
+  'a closed mouth during another line keeps the written face reaction');
 assert.match(H3_FINAL_BODY_FORMAT_RULE, /全部\[Shot N\]写在同一个integrated_multimodal_description或detailed_description里/u,
   'every shot stays inside one description before the single soundscape');
 
