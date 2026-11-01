@@ -24,6 +24,8 @@ assert.match(H3_DIALOGUE_FORMAT_RULE, /While he says these lines, his weight sta
   'a spoken stretch keeps one body motion until the last line ends');
 assert.match(H3_DIALOGUE_FORMAT_RULE, /The sign reads "OPEN"/u,
   'quotation marks stay on sign text');
+assert.match(H3_DIALOGUE_FORMAT_RULE, /From 22\.500s to 24\.000s, he says: <d>\[Chinese\] 小舞……<\/d> His lips close\. His hand stays on her head/u,
+  'the time stays before the line and the next sentence is a visible action');
 assert.match(H3_DIALOGUE_FORMAT_RULE, /Audio 1 supplies only the voice\. She says the line already written in <d>/u,
   'a timbre reference keeps the written line');
 assert.match(H3_DIALOGUE_FORMAT_RULE, /Tang San says the name\. The camera holds on Tang San's mouth for this line\. His mouth opens\. The Grand Elder's mouth stays closed\. Xiao Wu's mouth stays closed/u,

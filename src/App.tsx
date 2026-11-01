@@ -21590,6 +21590,9 @@ function AssetsView(ctx: AppContext) {
   const [uploadRole, setUploadRole] = useState<ReferenceAsset["referenceRole"]>("subject");
   const [uploadDurationSec, setUploadDurationSec] = useState(0);
   const [mediaFilter, setMediaFilter] = useState<"all" | NonNullable<ReferenceAsset["mediaType"]>>(state.settings.assetFilter || "all");
+  const [assetTypeFilter, setAssetTypeFilter] = useState<"all" | AssetType>("all");
+  const [assetEntityFilter, setAssetEntityFilter] = useState("all");
+  const [assetRoleFilter, setAssetRoleFilter] = useState("all");
   const [checkingAssets, setCheckingAssets] = useState(false);
   const [uploadEntityId, setUploadEntityId] = useState("");
   const [editingAssetTarget, setEditingAssetTarget] = useState<{ projectId: string; assetId: string } | null>(null);
@@ -21646,6 +21649,9 @@ function AssetsView(ctx: AppContext) {
     setVideoImageSelection([]);
     setAssetPage(1);
     setMediaFilter("all");
+    setAssetTypeFilter("all");
+    setAssetEntityFilter("all");
+    setAssetRoleFilter("all");
     setUploadKind(assetLibrarySection === "video" ? "video" : assetLibrarySection === "audio" ? "audio" : "character");
   }, [assetLibrarySection, state.project.id]);
   const [assetDraft, setAssetDraft] = useState({
@@ -21674,6 +21680,18 @@ function AssetsView(ctx: AppContext) {
         : uploadKind === "prop"
           ? state.project.props
           : [];
+  const assetFilterEntities = [
+    ...state.project.characters
+      .filter((character) => !character.dossier?.archivedIntoCharacterId)
+      .map((entity) => ({ kind: "character" as const, id: entity.id, label: characterVariantDisplayName(entity) || entity.name })),
+    ...state.project.locations.map((entity) => ({ kind: "location" as const, id: entity.id, label: entity.name })),
+    ...state.project.props.map((entity) => ({ kind: "prop" as const, id: entity.id, label: entity.name })),
+  ];
+  const legacyEntityAssetIds = new Set([
+    ...state.project.characters.flatMap((entity) => entity.assetIds),
+    ...state.project.locations.flatMap((entity) => entity.assetIds),
+    ...state.project.props.flatMap((entity) => entity.assetIds),
+  ]);
   useEffect(() => {
     const defaultRole: NonNullable<ReferenceAsset["referenceRole"]> =
       uploadKind === "character" ? "character"
@@ -21698,6 +21716,23 @@ function AssetsView(ctx: AppContext) {
         : assetLibraryMediaType(asset) === assetLibrarySection) &&
       (assetLibrarySection !== "video" || !relatedVideoIds || relatedVideoIds.has(asset.id)) &&
       (mediaFilter === "all" || assetLibraryMediaType(asset) === mediaFilter) &&
+      (assetTypeFilter === "all" || asset.type === assetTypeFilter || (asset.type === "reference" && (
+        asset.role === assetTypeFilter || assetTypeFilter === "location" && asset.role === "scene"
+      ))) &&
+      (assetEntityFilter === "all" || (() => {
+        const owners = assetReferenceEntityOwners(state.project, asset);
+        const hasLegacyBindingMetadata = asset.characterReferenceId !== undefined
+          || asset.sourceEntityId !== undefined
+          || asset.sourceEntityKind !== undefined
+          || Boolean(asset.storyReferenceSubjects?.length)
+          || legacyEntityAssetIds.has(asset.id);
+        return assetEntityFilter === "unbound"
+          ? asset.referenceEntityBinding === null
+            || asset.referenceEntityBinding === undefined && asset.characterReferenceId === null && owners.length === 0
+            || asset.referenceEntityBinding === undefined && !hasLegacyBindingMetadata && owners.length === 0
+          : owners.some((owner) => JSON.stringify([owner.kind, owner.entity.id]) === assetEntityFilter);
+      })()) &&
+      (assetRoleFilter === "all" || (asset.referenceRole || asset.role) === assetRoleFilter) &&
       `${asset.name} ${asset.tags.join(" ")} ${asset.prompt || ""}`
         .toLowerCase()
         .includes(assetSearch.toLowerCase()),
@@ -21717,7 +21752,7 @@ function AssetsView(ctx: AppContext) {
   );
   const playingVideoAsset = assetLibrarySection === "video" && videoPreviewSelection
     ? visibleAssetPage.find((asset) => matchesVideoSelection(videoPreviewSelection, state.project.id, asset)) : undefined;
-  useEffect(() => { setVideoPreviewSelection(null); }, [assetLibrarySection, state.project.id, safeAssetPage, assetSearch, mediaFilter, chapterFilter]);
+  useEffect(() => { setVideoPreviewSelection(null); }, [assetLibrarySection, state.project.id, safeAssetPage, assetSearch, mediaFilter, assetTypeFilter, assetEntityFilter, assetRoleFilter, chapterFilter]);
   useEffect(() => {
     if (assetLibrarySection !== "video") return;
     const projectId = state.project.id;
@@ -22078,6 +22113,7 @@ function AssetsView(ctx: AppContext) {
         description={assetLibrarySection === "image" ? "图片可选绑定人物、场景或物品，方便后续选图使用；不绑定也能使用，原分镜和提示词保持不变。" : assetLibrarySection === "video" ? "播放已生成或导入的视频，查看关联提示词、来源图片和生成参数。" : "保留已有音频、波形和声音参考职责。"}
         action={
           <div className="row asset-upload-controls">
+            <small style={{ color: "var(--muted)" }}>上传设置</small>
             <select
               value={uploadKind}
               onChange={(event) => {
@@ -22183,6 +22219,60 @@ function AssetsView(ctx: AppContext) {
               {assetLibrarySection === "video" && <option value="video">视频</option>}
               {assetLibrarySection === "audio" && <option value="audio">音频</option>}
             </select>
+            {assetLibrarySection === "image" && <>
+              <select
+                value={assetTypeFilter}
+                onChange={(event) => { setAssetTypeFilter(event.target.value as typeof assetTypeFilter); setAssetPage(1); }}
+                aria-label="资产类型筛选"
+              >
+                <option value="all">全部图片类型</option>
+                <option value="character">角色图</option>
+                <option value="location">场景图</option>
+                <option value="prop">物品图</option>
+                <option value="grid">九宫格</option>
+                <option value="reference">其他参考图</option>
+                <option value="first-frame">首帧图</option>
+                <option value="last-frame">尾帧图</option>
+                <option value="clay-render">Clay Render</option>
+              </select>
+              <select
+                value={assetEntityFilter}
+                onChange={(event) => { setAssetEntityFilter(event.target.value); setAssetPage(1); }}
+                aria-label="绑定实体筛选"
+              >
+                <option value="all">全部实体状态</option>
+                <option value="unbound">未绑定实体</option>
+                {assetFilterEntities.map((entity) => (
+                  <option key={`${entity.kind}:${entity.id}`} value={JSON.stringify([entity.kind, entity.id])}>
+                    {entity.kind === "character" ? "人物 · " : entity.kind === "location" ? "场景 · " : "物品 · "}{entity.label}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={assetRoleFilter}
+                onChange={(event) => { setAssetRoleFilter(event.target.value); setAssetPage(1); }}
+                aria-label="参考职责筛选"
+              >
+                <option value="all">全部参考职责</option>
+                <option value="subject">主体身份</option>
+                <option value="character">角色图（旧职责）</option>
+                <option value="scene">场景空间</option>
+                <option value="prop">道具状态</option>
+                <option value="style">视觉风格</option>
+                <option value="motion">动作运动</option>
+                <option value="composition">构图镜位</option>
+                <option value="camera">摄影机</option>
+                <option value="first-frame">首帧</option>
+                <option value="middle-frame">中间帧</option>
+                <option value="last-frame">尾帧</option>
+                <option value="audio">声音参考</option>
+                <option value="dialogue">对白参考</option>
+                <option value="clay-render">Clay Render</option>
+                <option value="creative">创意参考</option>
+                <option value="general">通用参考</option>
+                <option value="unknown">未分类</option>
+              </select>
+            </>}
             <select
               value={chapterFilter}
               onChange={(event) => { setChapterFilter(event.target.value); setAssetPage(1); }}

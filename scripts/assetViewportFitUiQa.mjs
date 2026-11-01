@@ -44,6 +44,11 @@ const next = () => page.locator('.assets-toolbar .compact-pager').getByRole('but
 const previous = () => page.locator('.assets-toolbar .compact-pager').getByRole('button', { name: '上一页', exact: true });
 const search = () => page.getByPlaceholder('搜索资产名称、标签或提示词', { exact: true });
 const chapters = () => page.getByRole('combobox', { name: '资产章节筛选', exact: true });
+const assetType = () => page.getByRole('combobox', { name: '资产类型筛选', exact: true });
+const assetEntity = () => page.getByRole('combobox', { name: '绑定实体筛选', exact: true });
+const assetRole = () => page.getByRole('combobox', { name: '参考职责筛选', exact: true });
+const uploadKind = () => page.getByRole('combobox', { name: '上传资产类型', exact: true });
+const uploadRole = () => page.getByRole('combobox', { name: '参考素材职责', exact: true });
 const visibleIds = () => cards().evaluateAll((elements) => elements.map((element) => element.id.replace(/^asset-card-/u, '')));
 const pager = () => page.locator('.assets-toolbar .compact-pager').evaluateAll((elements) => {
   if (!elements.length) return { page: 1, total: 1 };
@@ -156,6 +161,9 @@ async function assertFit(label, { imageCount, openDetails = false, media = 'imag
 
 async function resetFilters() {
   await search().fill(''); await chapters().selectOption('all');
+  if (await assetType().count()) await assetType().selectOption('all');
+  if (await assetEntity().count()) await assetEntity().selectOption('all');
+  if (await assetRole().count()) await assetRole().selectOption('all');
   while (await previous().count() && await previous().isEnabled()) { await previous().click(); await stabilize(); }
 }
 
@@ -200,14 +208,28 @@ async function newFixture() {
         relativePath: `assets/image/qa-fit-${index + 1}.png`,
         chapterId: index % 3 === 0 ? 'qa-fit-chapter-1' : index % 3 === 1 ? 'qa-fit-chapter-2' : undefined,
         width, height, sizeBytes: 1234567 + index, checksum: 'b'.repeat(64), source: 'upload',
+        referenceEntityBinding: null,
         tags: ['纯合成中性图片', index % 2 ? '奇数检索标签' : '偶数检索标签', '资产库视口验证'],
         visualAnchor: '中性几何方块。此处为较长的资产说明，用于确认详细信息展开以后只在限定区域显示，不会扩大整个资产库页面。',
         createdAt: now + index, updatedAt: now + index,
       };
     });
+    Object.assign(assets[0], { type: 'character', role: 'character', referenceRole: 'subject', referenceEntityBinding: { kind: 'character', entityId: 'qa-fit-character-1' } });
+    Object.assign(assets[1], { type: 'location', role: 'scene', referenceRole: 'scene', referenceEntityBinding: { kind: 'location', entityId: 'qa-fit-location-1' } });
+    Object.assign(assets[2], { type: 'prop', role: 'prop', referenceRole: 'prop', referenceEntityBinding: { kind: 'prop', entityId: 'qa-fit-prop-1' } });
+    Object.assign(assets[3], { type: 'reference', role: 'style', referenceRole: 'style' });
+    Object.assign(assets[4], { type: 'reference', role: 'composition', referenceRole: 'composition', referenceEntityBinding: null });
+    Object.assign(assets[5], { type: 'reference', role: 'subject', referenceRole: 'subject', referenceEntityBinding: { kind: 'character', entityId: 'qa-fit-missing-character' } });
+    Object.assign(assets[6], { type: 'reference', role: 'subject', referenceRole: 'subject', referenceEntityBinding: undefined, characterReferenceId: 'qa-fit-character-1' });
+    Object.assign(assets[7], { type: 'reference', role: 'scene', referenceRole: 'scene', referenceEntityBinding: undefined, sourceEntityId: 'qa-fit-location-1', sourceEntityKind: 'location' });
+    Object.assign(assets[8], { type: 'reference', role: 'unknown', referenceRole: 'unknown' });
+    Object.assign(assets[9], { type: 'reference', role: 'style', referenceRole: undefined });
+    const characters = [{ id: 'qa-fit-character-1', name: '合成人物一', gender: '', apparentAge: '', race: '', appearance: '', outfit: '', signatureProps: '', personality: '', motionHabits: '', anchor: '', negativeContinuity: '', assetIds: [], voiceProfile: undefined }];
+    const locations = [{ id: 'qa-fit-location-1', name: '合成场景一', description: '', timeWeather: '', lighting: '', palette: '', fixedProps: '', anchor: '', assetIds: [] }];
+    const props = [{ id: 'qa-fit-prop-1', name: '合成物品一', category: '', material: '', appearance: '', effect: '', stateRules: '', assetIds: [] }];
     const sourceDocuments = [1, 2].map((n) => ({ id: `qa-fit-chapter-${n}`, name: `合成第 ${n} 章`, content: '本地合成资产容量检查，无生成请求。', createdAt: now, updatedAt: now }));
     const project = { ...state.project, id: projectId, name: '资产视口隔离检查', description: '纯合成中性资产', assets,
-      sourceDocuments, activeChapterId: sourceDocuments[0].id, chapterWorkspaces: {}, scenes: [], storyboards: [], sequencePlans: [], characters: [], locations: [], props: [], generationTasks: [], createdAt: now, updatedAt: now };
+      sourceDocuments, activeChapterId: sourceDocuments[0].id, chapterWorkspaces: {}, scenes: [], storyboards: [], sequencePlans: [], characters, locations, props, generationTasks: [], createdAt: now, updatedAt: now };
     state.project = project; state.projects = [project]; state.activeProjectId = project.id;
     for (const kind of ['textApi', 'visionApi', 'imageApi', 'videoTaskApi', 'comfyuiVideo', 'runningHubVideo']) state.settings[kind] = { ...state.settings[kind], enabled: false, apiKey: '' };
     for (const kind of ['Text', 'Vision', 'Image', 'Video']) { state.settings[`${kind.toLowerCase()}ApiProfiles`] = []; state.settings[`active${kind}ApiProfileId`] = null; }
@@ -332,6 +354,37 @@ async function run() {
   }
   if (selectedCases.has('filters')) {
     currentScope = 'filters'; await updateFixture({ count: 41 }); await resetFilters(); await page.setViewportSize(viewports[1]); await stabilize();
+    await uploadKind().selectOption('location'); await uploadRole().selectOption('scene');
+    while (await next().count() && await next().isEnabled()) { await next().click(); await stabilize(); }
+    assert.ok((await pager()).page > 1, 'Filter fixture starts on a later page');
+    await assetType().selectOption('character'); await assertFit('asset-type-filter-character', { imageCount: 1 });
+    assert.equal((await pager()).page, 1, 'Changing a filter returns to page one');
+    assert.deepEqual(await visibleIds(), ['qa-fit-01']);
+    assert.equal(await uploadKind().inputValue(), 'location'); assert.equal(await uploadRole().inputValue(), 'scene');
+    await resetFilters();
+    await assetEntity().selectOption(JSON.stringify(['character', 'qa-fit-character-1'])); await assertFit('asset-entity-filter-character', { imageCount: 2 });
+    assert.deepEqual(await visibleIds(), ['qa-fit-01', 'qa-fit-07']);
+    await resetFilters(); await assetEntity().selectOption(JSON.stringify(['location', 'qa-fit-location-1']));
+    await assertFit('asset-entity-filter-location', { imageCount: 2 }); assert.deepEqual(await visibleIds(), ['qa-fit-02', 'qa-fit-08']);
+    await resetFilters(); await assetEntity().selectOption(JSON.stringify(['prop', 'qa-fit-prop-1']));
+    await assertFit('asset-entity-filter-prop', { imageCount: 1 }); assert.deepEqual(await visibleIds(), ['qa-fit-03']);
+    await resetFilters();
+    await assetType().selectOption('character'); await assertFit('asset-filter-combination', { imageCount: 1 });
+    assert.deepEqual(await visibleIds(), ['qa-fit-01']);
+    await resetFilters(); await assetRole().selectOption('style'); await assertFit('asset-role-filter-legacy-fallback', { imageCount: 2 });
+    assert.deepEqual(await visibleIds(), ['qa-fit-04', 'qa-fit-10']);
+    await resetFilters(); await assetRole().selectOption('unknown'); await assertFit('asset-role-filter-unknown', { imageCount: 1 });
+    assert.deepEqual(await visibleIds(), ['qa-fit-09']);
+    await resetFilters(); await assetEntity().selectOption('unbound'); await assertFit('asset-entity-filter-unbound', { imageCount: 35 });
+    const unboundIds = [];
+    for (let index = 0; index < 50; index++) {
+      unboundIds.push(...await visibleIds());
+      if (!await next().count() || !await next().isEnabled()) break;
+      await next().click(); await stabilize();
+    }
+    assert.equal(new Set(unboundIds).size, 35, 'Unbound filter returns only explicitly unbound assets');
+    assert.ok(!unboundIds.includes('qa-fit-06'), 'Invalid binding is not treated as unbound');
+    await resetFilters();
     while (await next().count() && await next().isEnabled()) { await next().click(); await stabilize(); }
     await search().fill('中性合成图 41'); await assertFit('search-single-from-final-page', { imageCount: 1 });
     assert.deepEqual(await visibleIds(), ['qa-fit-41']); assert.deepEqual(await pager(), { page: 1, total: 1 });
