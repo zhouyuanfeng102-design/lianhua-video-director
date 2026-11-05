@@ -130,6 +130,17 @@ const collected = collectAuthoritativeStoryEntityNames({
   }],
 }, { characters: [], locations: [], props: [] });
 assert.deepEqual(collected.characters, ['泰罗·原始形态', '泰罗·女性形态'], 'analysis keeps both forms as separate names');
+const bareIdentityBesideForms = collectAuthoritativeStoryEntityNames({
+  characters: [
+    { name: '露娜弗蕾亚·原始形态', baseName: '露娜弗蕾亚', formLabel: '原始形态', appearance: '成年女性，浅金色长发' },
+    { name: '露娜弗蕾亚·小体型状态', baseName: '露娜弗蕾亚', formLabel: '小体型状态', appearance: '浅金色长发，体型变小' },
+    { name: '露娜弗蕾亚' },
+    { name: '诺克提斯', appearance: '深蓝色短发' },
+  ],
+  scenes: [{ characters: ['露娜弗蕾亚', '诺克提斯'] }],
+}, { characters: [], locations: [], props: [] });
+assert.deepEqual(bareIdentityBesideForms.characters, ['露娜弗蕾亚·原始形态', '露娜弗蕾亚·小体型状态', '诺克提斯'],
+  'a manuscript name with no appearance is not a third card beside its forms');
 
 const enriched = mergeCharacterEnrichmentDetails([
   { name: '泰罗', baseName: '泰罗', formLabel: '原始形态', gender: '男', appearance: '原始外貌' },

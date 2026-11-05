@@ -7154,7 +7154,11 @@ export default function App() {
           const found = sourceStory.indexOf(block.content, sourceCursor);
           if (found >= 0) { sourceStart = found; sourceEnd = found + block.content.length; sourceCursor = sourceEnd; }
         }
-        const characterIds = block.entities.characters.map((name) => shared.characters.find((item) => item.name === name)?.id).filter((id): id is string => Boolean(id));
+        const characterIds = [...new Set(block.entities.characters.flatMap((name) => {
+          const exact = shared.characters.find((item) => item.name === name);
+          if (exact) return [exact.id];
+          return shared.characters.filter((item) => item.formLabel && (item.baseName === name || item.variantOf === name)).map((item) => item.id);
+        }))];
         const locationIds = block.entities.locations.map((name) => shared.locations.find((item) => item.name === name)?.id).filter((id): id is string => Boolean(id));
         const propIds = block.entities.props.map((name) => shared.props.find((item) => item.name === name)?.id).filter((id): id is string => Boolean(id));
         return { id: previous?.id || createId("scene"), chapterId, title: block.title, content: block.content, summary: block.summary,

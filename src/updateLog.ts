@@ -15,6 +15,16 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "3.7.5",
+    releasedAt: "2026-11-05",
+    title: "人物原名不再多出一张空卡",
+    highlights: [
+      "已经有同一人的两份形态时，不再另存一条只有原名、没有外观的人物。",
+      "场景里的原名仍指这个人，挂到已有形态上。",
+      "已解析的章节不自动改。再点一次解析并补全后，空卡才消失。",
+    ],
+  },
+  {
     version: "3.7.4",
     releasedAt: "2026-11-05",
     title: "笔记本上整页一起缩小",

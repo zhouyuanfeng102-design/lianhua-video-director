@@ -81,7 +81,7 @@ import {
   type OfficialH3ProjectContext,
 } from './officialPrompt';
 import { hasNonHumanAgeTemplateConflict } from './imageGeneration';
-import { canonicalCharacterVariantName, normalizeCharacterVariantRecord } from './characterVariants';
+import { canonicalCharacterVariantName, characterVariantBaseName, characterVariantFormLabel, normalizeCharacterVariantRecord } from './characterVariants';
 import { isSemanticSequencePlan, semanticSegmentStoryContent } from './semanticSequencePlan';
 import { assertVideoPromptHasNoInstructionLeak } from './videoPromptInstructionLeak';
 import { hasCurrentSeedancePrompt } from './seedanceSource';
@@ -2494,6 +2494,29 @@ export interface CollectedStoryEntityNames {
   aiSucceeded: boolean;
 }
 
+const characterRecordHasOwnAppearance = (value: unknown, name: string): boolean => {
+  if (storyCharacterEntityName(value) !== name || !value || typeof value !== 'object') return false;
+  const appearance = (value as Record<string, unknown>).appearance;
+  return typeof appearance === 'string' && appearance.trim().length > 0;
+};
+
+/** A manuscript name is the identity behind existing form cards. An empty
+ * copy of that name is not another person. */
+const omitBareIdentityAlreadyCoveredByForms = (
+  values: readonly unknown[],
+  names: readonly string[],
+): string[] => {
+  const formBases = new Set<string>();
+  values.forEach((value) => {
+    if (!value || typeof value !== 'object') return;
+    const record = value as Record<string, unknown>;
+    const base = characterVariantBaseName(record);
+    const form = characterVariantFormLabel(record);
+    if (base && form) formBases.add(base);
+  });
+  return names.filter((name) => !formBases.has(name) || values.some((value) => characterRecordHasOwnAppearance(value, name)));
+};
+
 const uniqueStoryEntityNames = (
   values: readonly unknown[],
   kind: StoryEntityKind,
@@ -2509,7 +2532,7 @@ const uniqueStoryEntityNames = (
     seen.add(name);
     names.push(name);
   });
-  return names;
+  return kind === 'character' ? omitBareIdentityAlreadyCoveredByForms(values, names) : names;
 };
 
 /** Use model-returned root and scene entities as one authoritative name set.
