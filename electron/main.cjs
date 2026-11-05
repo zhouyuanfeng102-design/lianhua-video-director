@@ -1,4 +1,4 @@
-const { app, BrowserWindow, dialog, ipcMain, nativeImage, net, protocol, safeStorage, shell, session } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, nativeImage, net, protocol, safeStorage, screen, shell, session } = require('electron');
 const fs = require('fs');
 const path = require('path');
 const { createHash, randomUUID } = require('crypto');
@@ -1845,13 +1845,15 @@ function createWindow() {
   if (isDev && !isTrustedRendererUrl(devServerUrl, { dev: true, devServerUrl, rendererEntryPath })) {
     throw new Error('ELECTRON_START_URL 只允许使用本机 127.0.0.1 或 localhost 的 HTTP 地址');
   }
+  const preferred = { width: 1280, height: 800 };
+  const work = screen.getPrimaryDisplay().workAreaSize;
   const win = new BrowserWindow({
-    // Keep the first launch comfortable on 1080p/125% Windows desktops.
-    // Users can still resize the window freely after opening it.
-    width: 1280,
-    height: 800,
-    minWidth: 1120,
-    minHeight: 720,
+    // Prefer a 1280×800 desktop window. A smaller laptop work area opens
+    // inside that area, and the window can still shrink to 880×560.
+    width: Math.min(preferred.width, work.width),
+    height: Math.min(preferred.height, work.height),
+    minWidth: Math.min(880, work.width),
+    minHeight: Math.min(560, work.height),
     center: true,
     backgroundColor: '#f2f4f7',
     title: '莲华视频导演台',

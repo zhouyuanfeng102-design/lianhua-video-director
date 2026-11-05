@@ -121,7 +121,7 @@ export const VIDEO_PROMPT_ENGLISH_AI_REVIEW_SYSTEM_PROMPT = [
 const H3_IDENTITY_TRANSLATION_DELIVERY_RULE = [
   H3_IDENTITY_BINDINGS_RULE,
   '本次只翻译sourcePrompt，不重新导演、不调整时间、不补新身份句。保留sourceIdentityBindings中characterId、name、subjectToken与speakerToken的逐项对应；仅把每项referenceAnchor更新为英文h3Prompt里对应的已翻译纯身份句的精确完整文本。英文原名和(Sn)不改，锚点仍唯一且不含动作、对白、Picture或时间。不能从stagingContext旧镜头重新分配人物或S编号。',
-  '本次外层交付仅返回JSON对象{"h3Prompt":"完整英文H3正文","identityBindings":{"version":1,"characters":[]}}，不是新增H3 section；正文结构、At切点、时间、原对白和所有参考标签保持sourcePrompt。不要canonicalPrompt、说明、代码围栏或局部补丁。',
+  '本次外层交付仅返回JSON对象{"h3Prompt":"完整英文H3正文，以non_diegetic_music结束","identityBindings":{"version":1,"characters":[]}}，不是新增H3 section。英文h3Prompt写到non_diegetic_music为止，identityBindings只作为外层字段，不接在N/A后面。正文结构、At切点、时间、原对白和所有参考标签保持sourcePrompt。不要canonicalPrompt、说明、代码围栏或局部补丁。',
 ].join('\n');
 
 const SOURCE_TIME_PATTERN = /【\s*\d+(?:\.\d+)?s\s*[-–—~～至]\s*\d+(?:\.\d+)?s\s*】/gu;

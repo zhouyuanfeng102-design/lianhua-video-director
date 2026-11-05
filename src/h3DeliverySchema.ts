@@ -65,7 +65,7 @@ export const H3_METADATA_SCHEMA = {
 export const H3_IDENTITY_SCHEMA_RULE = [
   `identityBindings的读取规格：${JSON.stringify(H3_IDENTITY_SCHEMA)}。version输出数字1；characters必须为数组。requiredText每个字段都必须是非空字符串，其数值为最大字符数。`,
   'optionalTokens只在正文确实声明对应编号时填写，不使用时省略该字段。可选编号的null、空字符串仅等价于未声明，不能用它清除已有编号；必填ID、姓名、身份句不得为空。无实际绑定时才用{"version":1,"characters":[]}，已有绑定不能清空。',
-  '结构示例：{"version":1,"characters":[{"characterId":"输入资料中的实际ID","name":"实际原名","referenceAnchor":"逐字复制当前H3中的唯一身份句"}]}。示例是字段形状，不是可直接使用的绑定或身份句。',
+  'identityBindings字段形状：{"version":1,"characters":[{"characterId":"输入资料中的实际ID","name":"实际原名","referenceAnchor":"逐字复制当前H3中的唯一身份句"}]}。这是外层JSON里的identityBindings，不是H3正文，也不接在non_diegetic_music后面。示例不是可直接使用的绑定或身份句。',
 ].join('\n');
 
 export const H3_METADATA_SCHEMA_RULE = [

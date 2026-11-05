@@ -18,6 +18,7 @@ export function RunningHubVideoSettings({ config, getCurrentConfig, onChange }: 
   const [managerOpen, setManagerOpen] = useState(false);
   const [error, setError] = useState('');
   const [customRegion, setCustomRegion] = useState(false);
+  const [keyName, setKeyName] = useState(() => (config.savedApiKeys || []).find((item) => item.id === config.activeApiKeyId)?.name || '');
   const latest = useRef({ config, getCurrentConfig, onChange });
   latest.current = { config, getCurrentConfig, onChange };
   const currentConfig = () => latest.current.getCurrentConfig?.() || latest.current.config;
@@ -53,7 +54,38 @@ export function RunningHubVideoSettings({ config, getCurrentConfig, onChange }: 
           else if (event.target.value === 'global') patch({ baseUrl: 'https://www.runninghub.ai' });
         }}><option value="global">国际站 · runninghub.ai</option><option value="cn">国内站 · runninghub.cn</option><option value="custom">自定义地址</option></select></label>
         <label className="field"><span>API 根地址</span><input aria-label="RunningHub API 根地址" type="url" value={config.baseUrl} placeholder="https://www.runninghub.ai" onChange={(event) => patch({ baseUrl: event.target.value })} /></label>
-        <label className="field"><span>RunningHub API Key</span><input aria-label="RunningHub API Key" type="password" autoComplete="off" spellCheck={false} value={config.apiKey} placeholder="仅在这里填写，不要粘贴到工作流 JSON" onChange={(event) => patch({ apiKey: event.target.value })} /></label>
+        <label className="field rhv-key-field"><span>RunningHub API Key</span>
+          <div className="rhv-key-tools">
+            <select aria-label="已保存的 RunningHub 密钥" value={config.activeApiKeyId || ''} onChange={(event) => {
+              const id = event.target.value;
+              const entry = (currentConfig().savedApiKeys || []).find((item) => item.id === id);
+              if (!entry) { setKeyName(''); patch({ activeApiKeyId: null }); return; }
+              setKeyName(entry.name);
+              patch({ activeApiKeyId: entry.id, apiKey: entry.apiKey });
+            }}>
+              <option value="">当前输入</option>
+              {(config.savedApiKeys || []).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select>
+            <input aria-label="RunningHub 密钥名称" value={keyName} placeholder="名称" onChange={(event) => setKeyName(event.target.value)} />
+            <button type="button" className="btn small" onClick={() => {
+              const current = currentConfig();
+              const apiKey = current.apiKey.trim();
+              if (!apiKey) { setError('请先填写 API Key，再保存。'); return; }
+              const now = Date.now();
+              const saved = current.savedApiKeys || [];
+              const active = saved.find((item) => item.id === current.activeApiKeyId);
+              const name = keyName.trim() || active?.name || `密钥 ${saved.length + 1}`;
+              const entry = active
+                ? { ...active, name, apiKey, updatedAt: now }
+                : { id: `rh-key-${globalThis.crypto?.randomUUID?.() || `${now}-${Math.random().toString(36).slice(2)}`}`, name, apiKey, updatedAt: now };
+              const savedApiKeys = active ? saved.map((item) => item.id === active.id ? entry : item) : [...saved, entry];
+              setKeyName(name);
+              patch({ savedApiKeys, activeApiKeyId: entry.id, apiKey });
+            }}>保存</button>
+            <button type="button" className="btn small" onClick={() => { setKeyName(''); patch({ activeApiKeyId: null, apiKey: '' }); }}>新建</button>
+          </div>
+          <input aria-label="RunningHub API Key" type="password" autoComplete="off" spellCheck={false} value={config.apiKey} placeholder="填写或粘贴密钥，保存后可在上面切换" onChange={(event) => patch({ apiKey: event.target.value })} />
+        </label>
       </div>
       <p className="vgs-workflow-help">地区请与账号及 API Key 对应。这里仅保存配置；生成时才上传参考图、提交任务并下载视频，不调用本地 ComfyUI。</p>
     </section>

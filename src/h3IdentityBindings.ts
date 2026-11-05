@@ -153,11 +153,60 @@ const readAiAuthoredEnvelope = (value: Record<string, unknown>): H3DeliveryEnvel
   return delivery;
 };
 
+const bindingFieldKeys = new Set(['version', 'characters', 'events', 'performance']);
+
+/** A prose H3 body can be followed by the sidecar the delivery already asked
+ * for. That object belongs in the existing metadata fields. */
+const splitTrailingH3Sidecar = (text: string): { h3Prompt: string; identityBindings?: unknown; characterParticipation?: unknown } | undefined => {
+  const heading = /(?:^|\n)[ \t]*non_diegetic_music[ \t]*[:：]/u.exec(text);
+  if (!heading || heading.index === undefined) return undefined;
+  const after = heading.index + heading[0].length;
+  const brace = text.indexOf('{', after);
+  if (brace < 0) return undefined;
+  let value: unknown;
+  try { value = JSON.parse(text.slice(brace).trim()); } catch { return undefined; }
+  if (!record(value)) return undefined;
+  const keys = Object.keys(value);
+  let identityBindings: unknown;
+  let characterParticipation: unknown;
+  if (keys.some((key) => key === 'identityBindings' || key === 'characterParticipation')
+    && keys.every((key) => key === 'identityBindings' || key === 'characterParticipation' || key === 'h3Prompt' || key === 'canonicalPrompt')) {
+    identityBindings = value.identityBindings;
+    characterParticipation = value.characterParticipation;
+  } else if (keys.includes('version') && Array.isArray(value.characters) && keys.every((key) => bindingFieldKeys.has(key))) {
+    const looksLikeIdentity = value.characters.some((item) => record(item) && (
+      Object.prototype.hasOwnProperty.call(item, 'referenceAnchor')
+      || Object.prototype.hasOwnProperty.call(item, 'speakerToken')
+      || Object.prototype.hasOwnProperty.call(item, 'subjectToken')
+    )) || Array.isArray(value.events) || value.performance !== undefined || value.characters.length === 0;
+    const looksLikeParticipation = value.characters.some((item) => record(item) && (
+      Object.prototype.hasOwnProperty.call(item, 'presence')
+      || Object.prototype.hasOwnProperty.call(item, 'shotIndex')
+      || Object.prototype.hasOwnProperty.call(item, 'evidence')
+    ));
+    if (looksLikeIdentity) identityBindings = value;
+    else if (looksLikeParticipation) characterParticipation = value;
+  }
+  if (identityBindings === undefined && characterParticipation === undefined) return undefined;
+  const h3Prompt = text.slice(0, brace).trim();
+  if (!h3Prompt) return undefined;
+  return { h3Prompt, ...(identityBindings !== undefined ? { identityBindings } : {}),
+    ...(characterParticipation !== undefined ? { characterParticipation } : {}) };
+};
+
 /** One response may carry structured delivery metadata without putting JSON in H3. */
 export const readH3DeliveryEnvelope = (response: string, options: H3DeliveryReadOptions = {}): H3DeliveryEnvelope => {
   const text = response.trim();
   if (options.acceptAiAuthoredContent && !text) throw new Error('AI返回空提示词正文，原有结果保持不变。');
-  if (!text.startsWith('{') && !text.startsWith('```')) return { h3Prompt: text, envelope: false };
+  if (!text.startsWith('{') && !text.startsWith('```')) {
+    if (options.acceptAiAuthoredContent) {
+      const split = splitTrailingH3Sidecar(text);
+      if (split) return readAiAuthoredEnvelope({ h3Prompt: split.h3Prompt,
+        ...(split.identityBindings !== undefined ? { identityBindings: split.identityBindings } : {}),
+        ...(split.characterParticipation !== undefined ? { characterParticipation: split.characterParticipation } : {}) });
+    }
+    return { h3Prompt: text, envelope: false };
+  }
   const json = text.replace(/^```(?:json)?\s*/iu, '').replace(/\s*```$/u, '');
   let value: unknown;
   try { value = JSON.parse(json); } catch {
@@ -282,6 +331,7 @@ export const createH3IdentityDeliveryReader = (
 
 export const H3_IDENTITY_BINDINGS_RULE = [
   H3_IDENTITY_SCHEMA_RULE,
+  'h3Prompt写到non_diegetic_music为止。人物、事件和performance只放外层JSON的identityBindings。外层是{"h3Prompt":"完整正文，以non_diegetic_music结束","identityBindings":{"version":1,"characters":[]}}。不要在N/A后面再写一份{"version":1,"characters":[]}。',
   'identityBindings是交付元数据，不是H3正文中的新section。返回version:1和characters数组；每项为characterId、原名name、可选subjectToken（只复用正文已有<Subject N>）、可选speakerToken（本段实际发声者的稳定(Sn)）、可选relationship、referenceAnchor。characterId必须来自提供的characterIdentityFacts，不按姓名猜测ID；无绑定资料的临时人物不虚构资产ID。relationship仅简记输入已有明确人物关系与称呼对象，未知时省略，不从称谓或近邻句推断关系。',
   '人物原名是稳定身份锚点：name及中文原名在中文稿、英文稿和各镜正文中保持原字，不翻译、音译或以“师父/师姐”等关系称谓替代不同人物。依据已给出的明确关系区分谁说话、谁听话和台词中谁被称呼；称呼对象不是说话人，同一人物换镜、换语言或被不同人称呼仍沿用同一characterId及已声明Subject/声源。',
   '在本次已有生成中同时给出可选identityBindings.events，逐项沿用已知源事件或对白的eventId；每项可有kind（action/dialogue）、dialogueId、referenceAnchor、actorCharacterId、targetCharacterIds、speakerCharacterId、listenerCharacterIds、addressedCharacterIds。referenceAnchor逐字引用本次H3中唯一对应的动作或发话正文片段，可包含已有动作区间和<d>，不包含section、[Shot]或At切点。动作的actor/target与对白的speaker/listener/addressed分别关联输入已有characterId，动作实施者不得从说话人、称呼对象或邻近人物反推；未知字段省略。元数据只记录本次已有动作与对白，不新增事件、镜头、时间或发话。',

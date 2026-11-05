@@ -28,6 +28,21 @@ await test('AI text and typed metadata survive evidence/anchor differences and c
   assert.throws(() => readH3DeliveryEnvelope(JSON.stringify({ h3Prompt: body, identityBindings: bindings })), /anchor-missing/u);
 });
 
+await test('a bindings object after non_diegetic_music is metadata, and the H3 body stops there', () => {
+  const trailing = `${body}\n${JSON.stringify({ ...bindings, events: [{ eventId: 'e1', kind: 'action', referenceAnchor: '甲走近乙' }] })}`;
+  const delivery = readH3DeliveryEnvelope(trailing, options);
+  assert.equal(delivery.h3Prompt, body);
+  assert.equal(delivery.identityBindings?.characters[0].characterId, 'a');
+  assert.equal(delivery.identityBindings?.events?.[0].eventId, 'e1');
+  assert.equal(delivery.deliveryWarnings, undefined);
+  const wrapped = `${body}\n${JSON.stringify({ identityBindings: bindings, characterParticipation: participation })}`;
+  const both = readH3DeliveryEnvelope(wrapped, options);
+  assert.equal(both.h3Prompt, body);
+  assert.deepEqual(both.identityBindings, bindings);
+  assert.deepEqual(both.characterParticipation, participation);
+  assert.equal(readH3DeliveryEnvelope(trailing).h3Prompt, trailing);
+});
+
 await test('missing auxiliary data is a warning and does not retain stale anchors', () => {
   const read = createH3IdentityDeliveryReader(bindings, undefined, { ...options, requireParticipation: true });
   const delivery = read(body);

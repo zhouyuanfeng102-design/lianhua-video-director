@@ -1121,8 +1121,8 @@ assert.match(confirmMasterSource, /hasAiAuthoredMasterTimeline\(liveBoard\)\s*\?
 assert.match(appSource, /reviewWithAi:\s*true,[\s\S]*?onReview:[\s\S]*?AI 正在通过同一 API 校验并修复完整分镜/u,
   'the director must explicitly request the real AI self-review round and report its progress');
 assert.match(appSource,
-  /usesSemanticPlanning\s*\?\s*activeSequencePlan\s*\?\s*semanticPlanDurationSummary\s*:\s*"AI 理解原剧情的动作、对白与因果，在所选时长方式下编排边界；每段固定时长。"\s*:\s*"历史总稿和已有分段保持可用；也可按原剧情另建 AI 分段计划。"/u,
-  'new planning explains semantic fixed-duration segments and saved plan duration while preserving the historical master route');
+  /usesSemanticPlanning\s*\?\s*activeSequencePlan\s*\?\s*semanticPlanDurationSummary\s*:\s*"AI 先按剧情和总时长排成连续演出，再按每段秒数切开。"\s*:\s*"历史总稿和已有分段保持可用；也可按原剧情另建 AI 分段计划。"/u,
+  'new planning explains story-and-total-duration segments and saved plan duration while preserving the historical master route');
 assert.match(appSource,
   /全片 \$\{target\} 秒 = \$\{count\} 段 × \$\{resolvedPlanningSegmentDuration\} 秒；每段足额，无短尾段。/u,
   'the historical master help must retain the selected full-duration grid without a short tail');

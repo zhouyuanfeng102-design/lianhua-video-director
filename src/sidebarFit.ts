@@ -13,21 +13,26 @@ export interface SidebarFitLayout {
 }
 
 const finitePositive = (value: number): boolean => Number.isFinite(value) && value > 0;
+const minimumReadableScale = 0.82;
 
 export function calculateSidebarFit(metrics: SidebarFitMetrics): SidebarFitLayout | null {
   const { availableWidth, availableHeight, naturalWidth, naturalHeight } = metrics;
   if (![availableWidth, availableHeight, naturalWidth, naturalHeight].every(finitePositive)) return null;
   // Leave a little room for fractional device-pixel/font rounding. Round down
   // only once, against the same natural coordinate system on every pass.
-  const scale = Math.max(0.001, Math.floor(Math.min(
+  const unconstrained = Math.floor(Math.min(
     1,
     Math.max(1, availableHeight - 2) / naturalHeight,
     Math.max(1, availableWidth - 2) / naturalWidth,
-  ) * 1000) / 1000);
+  ) * 1000) / 1000;
+  const scale = Math.max(minimumReadableScale, unconstrained);
   return {
     scale,
-    // Keep the utility links at the bottom without exceeding the viewport
-    // when Chromium rounds CSS lengths to 1/64 px.
-    contentHeight: Math.floor(availableHeight / scale * 64) / 64,
+    // A fit that still reaches 0.82 keeps the utility links at the bottom.
+    // Below that, keep the natural height so the nav can scroll instead of
+    // shrinking the labels further.
+    contentHeight: unconstrained >= minimumReadableScale
+      ? Math.floor(availableHeight / scale * 64) / 64
+      : naturalHeight,
   };
 }

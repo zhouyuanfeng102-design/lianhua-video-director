@@ -1,7 +1,7 @@
 import type { AppSettings, ReferenceRole, VideoTaskApiConfig } from './types';
 import type { VideoGenerationDraft } from './videoGenerationTypes';
 import type {
-  RunningHubVideoConfig, RunningHubVideoImportResult, RunningHubVideoInputBinding,
+  RunningHubSavedApiKey, RunningHubVideoConfig, RunningHubVideoImportResult, RunningHubVideoInputBinding,
   RunningHubVideoMapping, RunningHubVideoNodeInfo, RunningHubVideoRequest, RunningHubVideoWorkflow,
 } from './runningHubVideoTypes';
 import { normalizeRunningHubVideoFieldControls, normalizeRunningHubVideoNodeCatalog, resolveRunningHubVideoFieldControl } from './runningHubVideoNodes';
@@ -20,7 +20,7 @@ const roles = new Set<ReferenceRole>(['subject', 'character', 'scene', 'prop', '
 const emptyRequest = '{\n  "nodeInfoList": [],\n  "instanceType": "default",\n  "usePersonalQueue": false\n}';
 
 export const defaultRunningHubVideoConfig: RunningHubVideoConfig = {
-  enabled: false, baseUrl: 'https://www.runninghub.ai', apiKey: '', workflows: [], activeWorkflowId: null,
+  enabled: false, baseUrl: 'https://www.runninghub.ai', apiKey: '', savedApiKeys: [], activeApiKeyId: null, workflows: [], activeWorkflowId: null,
 };
 
 type JsonPath = Array<string | number>;
@@ -196,9 +196,23 @@ export const normalizeRunningHubVideoConfig = (raw: unknown): RunningHubVideoCon
     if (seen.has(workflow.id)) workflow.id = makeId(); seen.add(workflow.id); return [workflow];
   }) : [];
   const activeWorkflowId = typeof raw.activeWorkflowId === 'string' && workflows.some((item) => item.id === raw.activeWorkflowId) ? raw.activeWorkflowId : null;
+  const seenKeys = new Set<string>();
+  const savedApiKeys: RunningHubSavedApiKey[] = Array.isArray(raw.savedApiKeys) ? raw.savedApiKeys.flatMap((item) => {
+    if (!isRecord(item) || typeof item.apiKey !== 'string' || !item.apiKey.trim()) return [];
+    const id = typeof item.id === 'string' && item.id.trim() ? item.id.trim() : makeId();
+    if (seenKeys.has(id)) return [];
+    seenKeys.add(id);
+    return [{
+      id,
+      name: typeof item.name === 'string' && item.name.trim() ? item.name.trim() : '未命名密钥',
+      apiKey: item.apiKey,
+      updatedAt: typeof item.updatedAt === 'number' && Number.isFinite(item.updatedAt) ? item.updatedAt : Date.now(),
+    }];
+  }) : [];
+  const activeApiKeyId = typeof raw.activeApiKeyId === 'string' && savedApiKeys.some((item) => item.id === raw.activeApiKeyId) ? raw.activeApiKeyId : null;
   return {
     enabled: raw.enabled === true, baseUrl: typeof raw.baseUrl === 'string' ? raw.baseUrl : defaultRunningHubVideoConfig.baseUrl,
-    apiKey: typeof raw.apiKey === 'string' ? raw.apiKey : '', workflows, activeWorkflowId,
+    apiKey: typeof raw.apiKey === 'string' ? raw.apiKey : '', savedApiKeys, activeApiKeyId, workflows, activeWorkflowId,
   };
 };
 

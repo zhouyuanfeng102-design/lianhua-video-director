@@ -9,6 +9,7 @@ import { ImagePromptReverseReferencePreview, ImagePromptReverseResultView } from
 import { retryImagePromptReverse, stopImagePromptReverse, imagePromptReverseStatusLabel } from "./imagePromptReverse";
 import { retryCustomImageTask, retryCustomImageSave, type CustomImageGenerationContext } from "./customImageGeneration";
 import { useAssetViewportLayout } from "./useAssetViewportLayout";
+import { calculateAppViewportFit } from "./appViewportFit";
 import { appColorModes, appColorThemes, normalizeAppColorMode, normalizeAppColorTheme, resolveAppColorMode } from "./appTheme";
 ﻿import { activeChapter, chapterScenes, chapterBoards, chapterPlans, chapterScopeProject, chapterWorkspace, withChapterWorkspace, withChapterSelection, migrateProjectChapters, appendChapters, addChapter, archiveChapter, reorderChapters, chapterIdForTask, chapterIdForAsset } from "./chapters";
 import { ChapterManager } from "./components/ChapterManager";
@@ -1937,6 +1938,23 @@ export default function App() {
         === initialSequencePlanReviewFingerprint
     ),
   );
+  const [appViewportFit, setAppViewportFit] = useState(() => calculateAppViewportFit(
+    typeof window === "undefined" ? 1280 : window.innerWidth,
+    typeof window === "undefined" ? 800 : window.innerHeight,
+  ) ?? { scale: 1, layoutWidth: 1280, layoutHeight: 800 });
+  useLayoutEffect(() => {
+    const apply = () => {
+      const next = calculateAppViewportFit(window.innerWidth, window.innerHeight);
+      if (!next) return;
+      setAppViewportFit((current) => (
+        current.scale === next.scale && current.layoutWidth === next.layoutWidth && current.layoutHeight === next.layoutHeight
+          ? current : next
+      ));
+    };
+    apply();
+    window.addEventListener("resize", apply);
+    return () => window.removeEventListener("resize", apply);
+  }, []);
   const undoStack = useRef<AppState[]>([]);
   const redoStack = useRef<AppState[]>([]);
   const workspaceEpochRef = useRef(0);
@@ -10376,12 +10394,19 @@ export default function App() {
 
   return (
     <div
-      className="app-shell"
+      className={appViewportFit.scale < 1 ? "app-shell app-fit" : "app-shell"}
       data-ui-font-scale={uiFontScalePercent}
       data-ui-font-size={uiFontSizeMode}
       aria-busy={savingBeforeClose || restoringSnapshot || Boolean(projectLoadingId) || (!desktopStateReady && !desktopLoadError) || undefined}
       onKeyDownCapture={savingBeforeClose || restoringSnapshot || projectLoadingId || (!desktopStateReady && !desktopLoadError) ? (event) => { event.preventDefault(); event.stopPropagation(); } : undefined}
-      style={{ "--ui-font-scale": uiFontScalePercent / 100 } as CSSProperties}
+      style={{
+        "--ui-font-scale": uiFontScalePercent / 100,
+        ...(appViewportFit.scale < 1 ? {
+          zoom: appViewportFit.scale,
+          width: appViewportFit.layoutWidth,
+          height: appViewportFit.layoutHeight,
+        } : {}),
+      } as CSSProperties}
     >
       {(savingBeforeClose || restoringSnapshot) && <div className="save-close-overlay" role="status" aria-live="polite"><div><strong>{restoringSnapshot ? "正在恢复项目…" : "正在保存并关闭…"}</strong><p>{restoringSnapshot ? "正在保存恢复前的状态并读取恢复点，请稍候。" : "正在保存最新修改，请稍候。不会取消服务器上的生成任务。"}</p></div></div>}
       {!savingBeforeClose && !restoringSnapshot && (projectLoadingId || (!desktopStateReady && !desktopLoadError)) && <div className="save-close-overlay project-loading-overlay" role="status" aria-live="polite"><div><strong>{projectLoadingId ? "正在打开项目…" : "正在打开项目库…"}</strong><p>请稍候，项目内容准备好后即可继续编辑。</p></div></div>}
@@ -12608,10 +12633,10 @@ function SequencePlannerPanel(ctx: AppContext) {
   const semanticRequestedTotalDuration = normalizeSemanticSequenceRequestedTotalDuration(totalDuration, resolvedPlanningSegmentDuration);
   const semanticFixedSegmentCount = Math.round(semanticRequestedTotalDuration / resolvedPlanningSegmentDuration);
   const semanticDurationSummary = durationMode === "fixed"
-    ? `自定义总时长 · ${semanticFixedSegmentCount} 段 × ${resolvedPlanningSegmentDuration} 秒 = ${semanticRequestedTotalDuration} 秒`
-    : `AI适配 · 每段完整 ${resolvedPlanningSegmentDuration} 秒 · AI 决定所需段数与总时长`;
+    ? `自定义总时长 · 按剧情把 ${semanticRequestedTotalDuration} 秒演开，再按每段 ${resolvedPlanningSegmentDuration} 秒切开`
+    : `AI适配 · 先按剧情自然时间排整片，再按每段 ${resolvedPlanningSegmentDuration} 秒切开`;
   const semanticPlanDurationSummary = activeSequencePlan
-    ? `${activeSequencePlan.durationMode === "fixed" ? "自定义总时长" : "AI适配"} · ${segmentCount} 段 × ${activeSequencePlan.segmentDurationSec} 秒 = ${activeSequencePlan.totalDurationSec} 秒`
+    ? `${activeSequencePlan.durationMode === "fixed" ? "自定义总时长" : "AI适配"} · 按剧情演开 ${activeSequencePlan.totalDurationSec} 秒，切成 ${segmentCount} 段 × ${activeSequencePlan.segmentDurationSec} 秒`
     : semanticDurationSummary;
   // Keep a readable summary for the compact alert, but retain a bounded,
   // presentation-safe diagnostic so protocol/AI failures such as a missing
@@ -12635,7 +12660,7 @@ function SequencePlannerPanel(ctx: AppContext) {
           <strong>{usesSemanticPlanning ? "① AI 剧情分段" : "① 历史总稿规划"}</strong>
           <span>{usesSemanticPlanning
             ? activeSequencePlan ? semanticPlanDurationSummary
-              : "AI 理解原剧情的动作、对白与因果，在所选时长方式下编排边界；每段固定时长。"
+              : "AI 先按剧情和总时长排成连续演出，再按每段秒数切开。"
             : "历史总稿和已有分段保持可用；也可按原剧情另建 AI 分段计划。"}</span>
         </div>
         {activeSequencePlan && (
@@ -12732,10 +12757,10 @@ function SequencePlannerPanel(ctx: AppContext) {
             >自定义总时长</button>
           </div>
           <small className="compact-note" title={durationMode === "fixed"
-            ? "AI 在指定总时长内安排原剧情。"
-            : "AI 按原剧情决定段数与总时长。"}>{durationMode === "fixed"
-            ? "按指定总时长编排"
-            : "AI 决定段数与总时长"}</small>
+            ? "按剧情把指定总时长演开，再按每段秒数切开。"
+            : "先按剧情自然时间排整片，再按每段秒数切开。"}>{durationMode === "fixed"
+            ? "按剧情和总时长编排"
+            : "按剧情决定总时长"}</small>
         </Field>
         {durationMode === "fixed" && <Field label="总秒数" className="sequence-control-card sequence-total-duration-card">
           <input
@@ -12752,8 +12777,8 @@ function SequencePlannerPanel(ctx: AppContext) {
             }}
             onBlur={() => setTotalDuration(normalizeSemanticSequenceRequestedTotalDuration(totalDuration, resolvedPlanningSegmentDuration))}
           />
-          <small className="compact-note" role="status" title={`${semanticFixedSegmentCount} 段 × ${resolvedPlanningSegmentDuration} 秒 = ${semanticRequestedTotalDuration} 秒；每段足额，无短尾段。`}>
-            {semanticFixedSegmentCount} 段 × {resolvedPlanningSegmentDuration} 秒 = {semanticRequestedTotalDuration} 秒
+          <small className="compact-note" role="status" title={`按剧情把 ${semanticRequestedTotalDuration} 秒演开，再按每段 ${resolvedPlanningSegmentDuration} 秒切开。`}>
+            按剧情把 {semanticRequestedTotalDuration} 秒演开，再按每段 {resolvedPlanningSegmentDuration} 秒切开
           </small>
         </Field>}
         </>}
@@ -12862,8 +12887,8 @@ function SequencePlannerPanel(ctx: AppContext) {
           </div>
           <small className="compact-note" title={usesSemanticPlanning
             ? durationMode === "fixed"
-              ? "由 AI 在指定段数和总时长内分配原剧情动作与对白；每段固定时长，不增加剧情事件，不用重复剧情填满片段。"
-              : "由 AI 按剧情语义分配动作与对白；总时长 = 段数 × 单段时长，不按字数硬切，不用重复剧情填满最后一段。"
+              ? "按剧情把指定总时长演开，再按每段秒数切开。每段仍是完整的一段，不增加剧情事件，不用重复剧情填满片段。"
+              : "先按剧情自然时间排整片，再按每段秒数切开。不按字数硬切，不用重复剧情填满最后一段。"
             : "每段必须等于所选秒数；AI 在固定分段窗口内安排完整镜头、动作和对白，并自行审核修复，不由本地拆镜。"}>{usesSemanticPlanning
             ? "按剧情语义分配动作与对白"
             : "每段必须等于所选秒数；AI 在固定分段窗口内安排完整镜头、动作和对白，并自行审核修复，不由本地拆镜。"}</small>

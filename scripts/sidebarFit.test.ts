@@ -11,7 +11,8 @@ const base = { availableWidth: 173, availableHeight: 640, naturalWidth: 167, nat
 
 assert.equal(fit({ ...base, availableHeight: 900 }).scale, 1, 'a tall window must release its previous shrink');
 assert.equal(fit(base).scale, 0.906, 'height fit rounds down with a 2 px safety margin');
-assert.equal(fit({ ...base, naturalWidth: 220, availableHeight: 900 }).scale, 0.777, 'large text must also fit horizontally');
+assert.equal(fit({ ...base, naturalWidth: 220, availableHeight: 900 }).scale, 0.82, 'text that would shrink below 0.82 keeps a readable scale and scrolls');
+assert.equal(fit({ ...base, naturalWidth: 220, availableHeight: 900 }).contentHeight, 704, 'an unreadable shrink keeps the natural nav height for scrolling');
 
 let combinations = 0;
 for (const availableWidth of [167, 173, 173 + 1 / 64]) {
@@ -23,11 +24,21 @@ for (const availableWidth of [167, 173, 173 + 1 / 64]) {
         const naturalWidth = 82 + 72 * fontScale;
         const metrics = { availableWidth, availableHeight, naturalHeight, naturalWidth };
         const result = fit(metrics);
-        assert.ok(result.scale > 0 && result.scale <= 1);
-        assert.ok(naturalHeight * result.scale <= availableHeight - 2 + 1e-9, 'every card and bottom utility must fit');
-        assert.ok(naturalWidth * result.scale <= availableWidth - 2 + 1e-9, 'every label must fit');
-        assert.ok(result.contentHeight * result.scale <= availableHeight + 1e-9, 'bottom alignment must not overflow the nav');
-        assert.ok(availableHeight - result.contentHeight * result.scale < 1 / 64 + 1e-9, 'only subpixel bottom slack is allowed');
+        const unconstrained = Math.floor(Math.min(
+          1,
+          Math.max(1, availableHeight - 2) / naturalHeight,
+          Math.max(1, availableWidth - 2) / naturalWidth,
+        ) * 1000) / 1000;
+        assert.ok(result.scale >= 0.82 && result.scale <= 1);
+        if (unconstrained >= 0.82) {
+          assert.ok(naturalHeight * result.scale <= availableHeight - 2 + 1e-9, 'every card and bottom utility must fit');
+          assert.ok(naturalWidth * result.scale <= availableWidth - 2 + 1e-9, 'every label must fit');
+          assert.ok(result.contentHeight * result.scale <= availableHeight + 1e-9, 'bottom alignment must not overflow the nav');
+          assert.ok(availableHeight - result.contentHeight * result.scale < 1 / 64 + 1e-9, 'only subpixel bottom slack is allowed');
+        } else {
+          assert.equal(result.scale, 0.82);
+          assert.equal(result.contentHeight, naturalHeight);
+        }
         // 60 consecutive frames at integer/fractional DPI must select the
         // exact same fit: rasterized previous card dimensions are not inputs.
         for (const deviceScale of [1, 1.25, 1.5, 2.25]) {

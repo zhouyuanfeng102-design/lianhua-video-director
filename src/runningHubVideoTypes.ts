@@ -74,10 +74,18 @@ export interface RunningHubVideoWorkflow {
   createdAt: number;
   updatedAt: number;
 }
+export interface RunningHubSavedApiKey {
+  id: string;
+  name: string;
+  apiKey: string;
+  updatedAt: number;
+}
 export interface RunningHubVideoConfig {
   enabled: boolean;
   baseUrl: string;
   apiKey: string;
+  savedApiKeys?: RunningHubSavedApiKey[];
+  activeApiKeyId?: string | null;
   workflows: RunningHubVideoWorkflow[];
   activeWorkflowId?: string | null;
 }

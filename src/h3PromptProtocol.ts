@@ -365,7 +365,7 @@ export const repairH3PromptProtocolWithAi = async ({
       '本次仅修复协议序列化与本次格式转换造成的遗漏。对白以sourceContext的当前段原稿/已确认sourcePrompt为准，不能把具体原话压成“催促声/交谈声”等声音概述，也不能将未定台词交给视频模型自由编词；不利用旧格式基准恢复已在AI复核中去掉的配乐。源稿的无对白区间、原有非语言声与非说话动作按原范围保留；明确要求的不可辨人声仅在不与无对白要求冲突的区间保留，不把视觉姓名/资料/参考职责变成发声内容，不新增剧情、声源或台词。',
       `不要返回【0s-6s】主体/空间/光影/镜头/台词/音效等普通六字段时间轴，不要返回审核说明、问题清单、代码围栏。${identityDelivery || participationDelivery ? '外层返回下述正文与元数据JSON对象。' : '只返回完整H3正文，不返回JSON。'}所有内容修复由你生成完整正文，程序不替你改人物、对白或动作。`,
       ...(identityDelivery ? [H3_IDENTITY_BINDINGS_RULE,
-        '本次外层交付仅返回完整JSON对象{"h3Prompt":"完整正文","identityBindings":{"version":1,"characters":[]}}，绑定记录与最终正文逐字对应。保留所有已有characterId、name与Subject/声源映射，不省略或清空旧记录，不复用未出现在本次正文中的旧referenceAnchor。仅修复结构及绑定一致性，不新增剧情或调整镜头时间。'] : []),
+        '本次外层交付仅返回完整JSON对象{"h3Prompt":"完整正文，以non_diegetic_music结束","identityBindings":{"version":1,"characters":[]}}。h3Prompt写到non_diegetic_music为止，不在正文后附加{"version":1,"characters":[]}。绑定记录与最终正文逐字对应。保留所有已有characterId、name与Subject/声源映射，不省略或清空旧记录，不复用未出现在本次正文中的旧referenceAnchor。仅修复结构及绑定一致性，不新增剧情或调整镜头时间。'] : []),
       ...(participationDelivery ? [CHARACTER_PARTICIPATION_RULE,
         '本次完整JSON同时包含characterParticipation；按最终修复后的正文同步逐字evidence，保持已有实际参与类型与镜头，不省略该字段或用旧正文的证据。身份和人物参与记录与正文在本次同一回答中交付，不另行调用。'] : []),
     ].join('\n\n');

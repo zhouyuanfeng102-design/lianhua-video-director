@@ -5,7 +5,15 @@
 .runninghub-video-settings .rhv-invite-link:hover { color: #a22e65; border-color: #dc8caf; background: #ffebf3; }
 .runninghub-video-settings .rhv-invite-link:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
 .rhv-connection-title > .rhv-enable { margin-left: auto; }
-.video-settings-redesign .runninghub-video-settings .rhv-connection-fields { grid-template-columns: minmax(140px,.75fr) minmax(0,1.2fr) minmax(0,1fr); }
+.video-settings-redesign .runninghub-video-settings .rhv-connection-fields { grid-template-columns: minmax(140px,.7fr) minmax(0,1.05fr) minmax(220px,1.35fr); align-items: start; }
+.rhv-key-tools { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
+.rhv-key-tools select,
+.rhv-key-tools input,
+.rhv-key-tools .btn { height: 26px; min-height: 26px; padding: 2px 6px; font-size: calc(11px * var(--ui-font-scale, 1)); }
+.rhv-key-tools select { flex: 1 1 0; width: auto; min-width: 0; text-overflow: ellipsis; }
+.rhv-key-tools input { flex: 0 0 72px; width: 72px; }
+.rhv-key-tools .btn { flex: 0 0 auto; white-space: nowrap; }
+.rhv-key-field > input[type="password"] { height: 26px; min-height: 26px; padding: 2px 8px; }
 .runninghub-video-settings .rhv-enable { display: flex; align-items: center; gap: 6px; white-space: nowrap; color: #466374; font-size: calc(11px * var(--ui-font-scale,1)); }
 .runninghub-video-settings .rhv-enable input { width: 16px; height: 16px; min-height: 0; margin: 0; }
 .runninghub-video-settings .rhv-main-note { margin: 0; color: #68768b; line-height: 1.5; font-size: calc(10px * var(--ui-font-scale,1)); }
