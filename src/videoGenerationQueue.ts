@@ -21,6 +21,7 @@ export const videoTaskExecutionScope = (task: VideoGenerationTask): VideoExecuti
   if (connection && !job?.legacyMetadataIncomplete) {
     const backend = connection.backend;
     if (backend === 'api' && connection.api?.provider === 'rhtv_web') return { key: 'api:rhtv-local-single-account', label: 'rhTV 本机网页账号', known: true };
+    if (backend === 'api' && connection.api?.provider === 'rh_web') return { key: `api:rh-web:${connection.api.rhWebAccountId || 'account'}`, label: 'RH 网页账号', known: true };
     try {
       // Use the same endpoint resolver as the POST itself, including the
       // supported RunningHub default when its optional template is empty.

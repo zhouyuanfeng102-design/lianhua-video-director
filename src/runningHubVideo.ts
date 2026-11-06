@@ -10,6 +10,7 @@ import { resolveRunningHubVideoImageProtocol } from './runningHubImageProtocol';
 import { assertRunningHubPromptPictureSlots, isRunningHubH3AutoPromptInput, runningHubH3AutoPromptInput } from './runningHubPromptPictures';
 import { normalizeRunningHubGenerationExtras } from './runningHubGenerationExtras';
 import { compileRunningHubH3ReferenceImages } from './runningHubH3ReferenceImages';
+import { compileRunningHubWebApi } from './runningHubWeb';
 
 const isRecord = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const own = (value: object, key: string): boolean => Object.prototype.hasOwnProperty.call(value, key);
@@ -688,7 +689,8 @@ export const bindRunningHubVideoRequest = (
 };
 
 /** Both independent libraries retain their identity; a deleted selection must never silently fall back. */
-export const resolveConfiguredVideoApi = (settings: AppSettings, draft: Pick<VideoGenerationDraft, 'runningHubWorkflowId' | 'apiProfileId' | 'parameters'>): VideoTaskApiConfig => {
+export const resolveConfiguredVideoApi = (settings: AppSettings, draft: Pick<VideoGenerationDraft, 'runningHubWorkflowId' | 'runningHubWebAppId' | 'apiProfileId' | 'parameters'>): VideoTaskApiConfig => {
+  if (draft.runningHubWebAppId !== undefined) return compileRunningHubWebApi(settings.runningHubWeb || { enabled: false, accounts: [], apps: [] }, draft.runningHubWebAppId);
   if (draft.runningHubWorkflowId !== undefined) return compileRunningHubVideoApi(settings.runningHubVideo || clone(defaultRunningHubVideoConfig), draft.runningHubWorkflowId, draft.parameters);
   if (draft.apiProfileId) {
     const profile = settings.videoApiProfiles?.find((item) => item.id === draft.apiProfileId);

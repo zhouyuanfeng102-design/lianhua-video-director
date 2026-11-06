@@ -5,6 +5,9 @@ interface Window {
     rhtvRequest: import('./videoGenerationTypes').VideoGenerationDesktop['videoRequest'];
     rhtvDownload: import('./videoGenerationTypes').VideoGenerationDesktop['downloadGeneratedMedia'];
     rhtvControl: (request: import('./rhtvBridge').RhTvControlRequest) => Promise<import('./rhtvBridge').RhTvBridgeStatus>;
+    rhWebRequest: import('./videoGenerationTypes').VideoGenerationDesktop['videoRequest'];
+    rhWebControl: (request: import('./runningHubWeb').RhWebControlRequest) => Promise<import('./runningHubWeb').RhWebControlResult>;
+    rhWebDownload: import('./videoGenerationTypes').VideoGenerationDesktop['downloadGeneratedMedia'];
     openFile: (filters?: unknown) => Promise<string | null>;
     readFile: (filePath: string) => Promise<string>;
     saveFile: (payload: unknown) => Promise<string | null>;

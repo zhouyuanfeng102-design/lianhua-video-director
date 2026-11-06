@@ -18,6 +18,7 @@ const { readVideoReferenceImage, storeVideoReferenceImage } = require(path.join(
 const { resolveSystemProxy, createProxyTunnelAgent, MODEL_CONNECT_TIMEOUT_MS } = require('./systemProxyTransport.cjs');
 const { createVideoTransport } = require(path.join(__dirname, 'videoTransport.cjs'));
 const { createRhTvManager } = require(path.join(__dirname, 'rhtvBridge/manager.cjs'));
+const { createRhWebManager } = require(path.join(__dirname, 'rhWebBridge/manager.cjs'));
 const { importVideoArchive, hasZipSignature, isZipContentType } = require(path.join(__dirname, 'videoArchive.cjs'));
 const { createVideoTaskCredentialVault } = require(path.join(__dirname, 'videoTaskCredentialVault.cjs'));
 const { createVideoTaskCheckpointJournal, collectVideoFrozenAssets } = require(path.join(__dirname, 'videoTaskCheckpoint.cjs'));
@@ -760,6 +761,7 @@ const fileSha256 = (filePath) => {
   }
   return hash.digest('hex');
 };
+const fileSha256Async = (filePath) => Promise.resolve().then(() => fileSha256(filePath));
 
 const mediaKindFromExtension = (extension) => {
   if (['.mp4', '.webm', '.mov'].includes(extension)) return 'video';
@@ -1117,7 +1119,7 @@ const allocateReadableMediaRelativePathAsync = async (directory, fileName, check
   const folder = path.join(assetRoot, ...String(directory).split(/[\\/]/u));
   await fs.promises.mkdir(folder, { recursive: true });
   const names = (await fs.promises.readdir(folder, { withFileTypes: true })).filter((entry) => entry.isFile()).map((entry) => entry.name);
-  return relativeMediaPath(directory, allocateReadableName(names, fileName, checksum, (name) => fileSha256Async(path.join(folder, name)), options));
+  return relativeMediaPath(directory, allocateReadableName(names, fileName, checksum, (name) => fileSha256(path.join(folder, name)), options));
 };
 const DOWNLOAD_MEDIA_EXTENSIONS = new Set(['.mp4', '.webm', '.mov', '.mp3', '.wav', '.m4a', '.aac', '.ogg', '.flac']);
 const DOWNLOAD_MIME_EXTENSIONS = new Map([
@@ -1513,6 +1515,11 @@ const downloadIntoAssetStore = async (rawUrl, headers = {}, timeoutOptions = MAX
 
 let videoTransport;
 let rhtvManager;
+let rhWebManager;
+const getRhWebManager = () => {
+  if (!rhWebManager) rhWebManager = createRhWebManager({ root: path.join(dataRoot, 'rh-web-bridge') });
+  return rhWebManager;
+};
 const getRhTvManager = () => {
   if (!rhtvManager) rhtvManager = createRhTvManager({ root: path.join(dataRoot, 'rhtv-bridge'), projectRoot, resourcesPath: process.resourcesPath,
     downloadResult: async ({ url, jobId, signal }) => {
@@ -2307,6 +2314,33 @@ app.whenReady().then(() => {
   });
   handleTrustedIpc('lianhua:video-request', (event, payload) => getVideoTransport().request(payload, event.sender));
   handleTrustedIpc('lianhua:rhtv-request', (_event, payload) => getRhTvManager().call('request', payload));
+  handleTrustedIpc('lianhua:rh-web-request', (_event, payload) => getRhWebManager().call('request', payload));
+  handleTrustedIpc('lianhua:rh-web-control', (_event, payload) => {
+    if (!payload || !['login', 'read', 'session', 'forget'].includes(payload.action)) throw new Error('RH 网页操作无效');
+    return getRhWebManager().call(payload.action, payload);
+  });
+  handleTrustedIpc('lianhua:rh-web-download', async (_event, payload) => {
+    const match = String(payload?.url || '').match(/^http:\/\/rhweb\.localhost\/v1\/videos\/([0-9a-f-]{36})\/content$/u);
+    if (!match) throw new Error('RH 网页成片地址无效');
+    const source = await getRhWebManager().call('result-file', { jobId: match[1] });
+    const expected = await fs.promises.realpath(path.join(dataRoot, 'rh-web-bridge', 'results'));
+    const real = await fs.promises.realpath(source);
+    if (path.dirname(real).toLowerCase() !== expected.toLowerCase()) throw new Error('RH 网页成片路径无效');
+    const extension = path.extname(real) || '.mp4';
+    const fileName = readableMediaFileName(payload?.fileName || path.basename(real), extension);
+    const temporary = path.join(tempRoot, `rh-web-${randomUUID()}.part`);
+    let managed;
+    try {
+      await fs.promises.copyFile(real, temporary, fs.constants.COPYFILE_EXCL);
+      const checksum = await fileSha256Async(temporary);
+      const sizeBytes = (await fs.promises.stat(temporary)).size;
+      const relativePath = (await commitDownloadedMedia(temporary, { kind: 'video', requestedFileName: fileName, checksum, extension, useReadablePath: true, projectId: payload?.projectId })).replace(/\\/gu, '/');
+      managed = { fileName, relativePath, checksum, sizeBytes, mediaType: 'video', managed: true, missing: false,
+        url: `lianhua-asset://local/${relativePath.split('/').map(encodeURIComponent).join('/')}` };
+    } finally { await fs.promises.rm(temporary, { force: true }); }
+    await getVideoWorkbench().probe({ assetId: managed.checksum, relativePath: managed.relativePath, expectedChecksum: managed.checksum });
+    return managed;
+  });
   handleTrustedIpc('lianhua:rhtv-control', async (_event, payload) => {
     if (!payload || !['status', 'start', 'stop', 'login', 'prepare', 'handoff', 'import-result', 'cancel', 'materials', 'confirm-not-submitted', 'confirm-ended', 'automation', 'retry'].includes(payload.action)) throw new Error('rhTV 操作无效');
     const manager = getRhTvManager();
@@ -2433,11 +2467,11 @@ app.on('before-quit', (event) => {
     for (const win of windows) win.close();
     return;
   }
-  if (!statePersistence && !rhtvManager) return;
+  if (!statePersistence && !rhtvManager && !rhWebManager) return;
   event.preventDefault();
   if (stateQuitInProgress) return;
   stateQuitInProgress = true;
-  void Promise.all([statePersistence?.close(), rhtvManager?.close()]).then(() => {
+  void Promise.all([statePersistence?.close(), rhtvManager?.close(), rhWebManager?.close()]).then(() => {
     stateQuitFlushed = true;
     app.quit();
   }, async (error) => {

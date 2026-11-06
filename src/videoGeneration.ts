@@ -12,6 +12,7 @@ import { formatVideoImageSize, videoImageDataSize } from './videoReferenceCompre
 import { hasObsoleteVideoFileMapping, videoApiFileQueryEndpoint } from './videoApiLegacyConfig';
 import { defaultComfyVideoConfig } from './videoGenerationTypes';
 import { defaultRhTvApi, RHTV_ORIGIN } from './rhtvBridge';
+import { RHWEB_ORIGIN } from './runningHubWeb';
 import { findProjectVideoTask, snapshotVideoAssetSourceTask } from './videoProvenance';
 import { createStoryboardImageNameAllocator } from './storyboardImageNames';
 import { cancelledVideoBatchTaskBeforePost, validVideoBatchPreviousTail, videoBatchConnectionIdentity, videoBatchDependencyFingerprint, videoBatchRequestFingerprint, videoBatchTailReferences, videoTaskMatchesRequestFingerprint, videoTaskRequestFingerprint } from './videoBatch';
@@ -567,7 +568,7 @@ export class VideoGenerationEngine {
     if (this.hasUnrestoredGenerationPreparation(tasks)) return false;
     const occupied = new Set(tasks.filter(videoTaskOccupiesGenerationSlot).map((candidate) => candidate.id));
     this.generationClaims.forEach((claimScope, taskId) => { if (videoExecutionScopesMayShareCapacity(claimScope, scope)) occupied.add(taskId); });
-    const remaining = (task.videoJob?.snapshot.connection.api?.provider === 'rhtv_web' ? 1 : resolveVideoExecutionLimit(this.options.getState().settings)) - occupied.size;
+    const remaining = (task.videoJob?.snapshot.connection.api?.provider === 'rhtv_web' || task.videoJob?.snapshot.connection.api?.provider === 'rh_web' ? 1 : resolveVideoExecutionLimit(this.options.getState().settings)) - occupied.size;
     if (remaining <= 0) return false;
     const admitted = this.generationQueueCandidates().filter((candidate) => videoTaskExecutionScope(candidate).key === scope.key
       && !occupied.has(candidate.id)).slice(0, remaining);
@@ -591,7 +592,7 @@ export class VideoGenerationEngine {
       || candidate.status === 'unknown' || candidate.videoJob?.stage === 'submission-unknown');
     const state = this.options.getState();
     const settings = state.settings;
-    const limit = task.videoJob?.snapshot.connection.api?.provider === 'rhtv_web' ? 1 : resolveVideoExecutionLimit(settings);
+    const limit = task.videoJob?.snapshot.connection.api?.provider === 'rhtv_web' || task.videoJob?.snapshot.connection.api?.provider === 'rh_web' ? 1 : resolveVideoExecutionLimit(settings);
     const waitingForJournal = this.hasUnrestoredGenerationPreparation(tasks);
     const unresolvedOrigins = unknownOrigins.length ? `另有 ${unknownOrigins.length} 个旧任务来源连接待核实，保守占位（不能认定远端已停止）；` : '';
     const summary = `本地排队中（同连接最多同时生成 ${limit} 个；${scope.label}）`;
@@ -627,7 +628,7 @@ export class VideoGenerationEngine {
     const occupied = tasks.filter(videoTaskOccupiesGenerationSlot);
     if (occupied.some((task) => task.id === taskId)) return true;
     if (this.hasUnrestoredGenerationPreparation(tasks)) return false;
-    const remaining = (target.videoJob?.snapshot.connection.api?.provider === 'rhtv_web' ? 1 : resolveVideoExecutionLimit(this.options.getState().settings)) - occupied.length;
+    const remaining = (target.videoJob?.snapshot.connection.api?.provider === 'rhtv_web' || target.videoJob?.snapshot.connection.api?.provider === 'rh_web' ? 1 : resolveVideoExecutionLimit(this.options.getState().settings)) - occupied.length;
     const orderedClaims = tasks.filter((task) => {
       const claimScope = this.generationClaims.get(task.id);
       return claimScope && videoExecutionScopesMayShareCapacity(claimScope, scope)
@@ -1237,6 +1238,9 @@ export class VideoGenerationEngine {
       if (task.videoJob?.snapshot.connection.api?.provider === 'rhtv_web') {
         if (!bridge?.rhtvRequest) throw new Error('rhTV 网页桥接仅在新版桌面程序中可用');
         response = await bridge.rhtvRequest({ ...payload, method: payload.method || 'GET', requestId });
+      } else if (task.videoJob?.snapshot.connection.api?.provider === 'rh_web') {
+        if (!bridge?.rhWebRequest) throw new Error('RH 网页窗口只在桌面程序里可用');
+        response = await bridge.rhWebRequest({ ...payload, method: payload.method || 'GET', requestId });
       } else if (bridge?.videoRequest) response = await bridge.videoRequest({ ...payload, method: payload.method || 'GET', requestId });
       else {
         let body: BodyInit | undefined = payload.bodyEncoding === 'base64' && payload.body !== undefined ? decodeVideoBinaryBody(payload.body) : payload.body;
@@ -1374,8 +1378,8 @@ export class VideoGenerationEngine {
   }
 
   private assertAudioConnection(draft: VideoGenerationDraft, config?: Omit<VideoTaskApiConfig, 'apiKey'>): void {
-    if (draft.audioReferences?.length && (draft.backend !== 'api' || config?.provider !== 'runninghub')) {
-      throw new Error('当前连接不支持参考音频，请选择 RunningHub 音频工作流。');
+    if (draft.audioReferences?.length && (draft.backend !== 'api' || (config?.provider !== 'runninghub' && config?.provider !== 'rh_web'))) {
+      throw new Error('当前连接不支持参考音频，请选择带音频槽的 RunningHub 工作流或 RH 网页应用。');
     }
   }
 
@@ -2240,12 +2244,14 @@ export class VideoGenerationEngine {
           } });
           if (!record(result) || !result.name) throw new Error('ComfyUI 图片上传未返回文件名。');
           uploadedValue = `${result.subfolder ? `${result.subfolder}/` : ''}${result.name}`;
-        } else if (config!.provider === 'rhtv_web') {
-          const result = await this.request(task, { url: `${RHTV_ORIGIN}/v1/assets`, method: 'POST', multipart: {
+        } else if (config!.provider === 'rhtv_web' || config!.provider === 'rh_web') {
+          const result = await this.request(task, { url: `${config!.provider === 'rh_web' ? RHWEB_ORIGIN : RHTV_ORIGIN}/v1/assets`, method: 'POST', multipart: {
             files: [{ fieldName: 'file', fileName: image.fileName || 'reference.png', dataUrl }],
           } });
           const remote = nestedValue(result, 'upload_id');
-          if (typeof remote !== 'string' || !/^[a-f0-9]{64}_(?:png|jpeg|webp)$/u.test(remote)) throw new Error('rhTV 原图暂存未返回有效标识');
+          if (config!.provider === 'rh_web') {
+            if (typeof remote !== 'string' || !remote) throw new Error('RH 网页没有接住这张参考图，尚未提交。');
+          } else if (typeof remote !== 'string' || !/^[a-f0-9]{64}_(?:png|jpeg|webp)$/u.test(remote)) throw new Error('rhTV 原图暂存未返回有效标识');
           uploadedValue = remote;
         } else if (isLaoliVideoBuiltinProtocol(config!) && !laoliVideoUsesInlineImages(config!)) {
           uploadedValue = await uploadLaoliVideoImage(config!, dataUrl, headers, (payload) => this.request(task, payload));
@@ -2285,6 +2291,17 @@ export class VideoGenerationEngine {
         const audios = [...task.videoJob!.snapshot.audios!]; audios[index] = frozen.audio;
         task = await this.checkpoint({ ...task, videoJob: { ...task.videoJob!, snapshot: { ...task.videoJob!.snapshot, audios },
           message: `已保存音频快照，正在传入音频 ${index + 1}/${audios.length}` } });
+        if (config?.provider === 'rh_web') {
+          const result = await this.request(task, { url: `${RHWEB_ORIGIN}/v1/assets`, method: 'POST', multipart: {
+            files: [{ fieldName: 'file', fileName: frozen.audio.fileName || 'reference.wav', dataUrl: frozen.dataUrl }],
+          } });
+          const remote = nestedValue(result, 'upload_id');
+          if (typeof remote !== 'string' || !remote) throw new Error('RH 网页没有接住这段参考音频，尚未提交。');
+          audioValues.push(remote);
+          const uploadedAudios = [...(task.videoJob!.preparation!.uploadedAudios || [])]; uploadedAudios[index] = remote;
+          task = await this.checkpoint({ ...task, videoJob: { ...task.videoJob!, preparation: { ...task.videoJob!.preparation!, uploadedAudios } } });
+          continue;
+        }
         const uploadEndpoint = config!.imageUploadEndpoint && /\/openapi\/v2\/media\/upload\/binary\/?$/u.test(config!.imageUploadEndpoint)
           ? config!.imageUploadEndpoint : new URL('/openapi/v2/media/upload/binary', videoApiSubmitEndpoint(config!)).toString();
         const result = await this.request(task, { url: uploadEndpoint, method: 'POST', headers, multipart: {
@@ -2330,7 +2347,7 @@ export class VideoGenerationEngine {
       const body = draft.backend === 'api' ? buildVideoApiBody(config!, draft, imageValues, audioValues, videoValues) : {
         prompt: bindComfyVideoWorkflow(workflow!, draft.prompt, imageValues, draft.parameters, draft.references, videoValues, draft.videoReferences), client_id: task.videoJob!.snapshot.clientId,
       };
-      if (config?.provider === 'rhtv_web') body.client_id = task.videoJob!.snapshot.clientId;
+      if (config?.provider === 'rhtv_web' || config?.provider === 'rh_web') body.client_id = task.videoJob!.snapshot.clientId;
       if (draft.backend === 'api') {
         const ownerProject = allProjects(this.options.getState()).find((project) => project.id === task.videoJob!.snapshot.projectId);
         // Re-check immediately before the POST.  A queued/retried task may
@@ -3398,7 +3415,7 @@ export class VideoGenerationEngine {
             generatedAt: task.videoJob!.generatedAt || Date.now(),
           }); return;
         }
-        const statusEndpoint = config.provider === 'rhtv_web' ? defaultRhTvApi.statusEndpointTemplate : config.statusEndpointTemplate || (config.provider === 'minimax'
+        const statusEndpoint = config.provider === 'rhtv_web' ? defaultRhTvApi.statusEndpointTemplate : config.provider === 'rh_web' ? `${RHWEB_ORIGIN}/v1/videos/{id}` : config.statusEndpointTemplate || (config.provider === 'minimax'
           ? defaultMiniMaxVideoApi.statusEndpointTemplate
           : config.provider === 'runninghub' ? defaultRunningHubVideoApi.statusEndpointTemplate : genericVideoStatusEndpoint(config));
         if (!statusEndpoint) { this.patch(task, { error: '此任务的接口快照没有状态查询端点。' }, { stage: 'stopped', trackingStopped: true, message: '缺少状态查询端点；任务未重新提交' }); return; }
@@ -3408,7 +3425,7 @@ export class VideoGenerationEngine {
           : { url: queryUrl, headers });
         if (!currentPoll()) return;
         const mapped = parseVideoApiResult(response, config);
-        if (config.provider === 'rhtv_web' && mapped.remoteTaskId !== task.remoteTaskId) throw new Error('rhTV 返回的任务身份不符，未接收其他任务结果');
+        if ((config.provider === 'rhtv_web' || config.provider === 'rh_web') && mapped.remoteTaskId !== task.remoteTaskId) throw new Error('网页任务编号和原任务不一致，未接收其他结果');
         if ((config.baseUrl?.trim() || isLaoliVideoApi(config)) && mapped.remoteTaskId && mapped.remoteTaskId !== task.remoteTaskId) throw new Error('视频接口返回的任务编号与原任务不一致，未接收其他任务结果。');
         if (mapped.status === 'failed') {
           const remoteGenerationEnded = videoTaskRemoteGenerationEnded({ ...task, response });
@@ -3513,7 +3530,7 @@ export class VideoGenerationEngine {
           ensureDownloadActive();
           this.progress(task, { stage: 'downloading', receivedBytes: undefined, totalBytes: undefined,
             message: candidates.length > 1 ? `正在接收云端输出 ${candidateIndex + 1}/${candidates.length}；只获取原任务文件，不会重新生成` : '视频已生成，正在保存到视频资产库' });
-          const receive = source.api?.provider === 'rhtv_web' ? this.options.desktop.rhtvDownload : this.options.desktop.downloadGeneratedMedia;
+          const receive = source.api?.provider === 'rhtv_web' ? this.options.desktop.rhtvDownload : source.api?.provider === 'rh_web' ? this.options.desktop.rhWebDownload : this.options.desktop.downloadGeneratedMedia;
           if (!receive) throw new Error('rhTV 桌面结果接收接口不可用');
           const downloaded = await receive({
             url: candidate.resultUrl, headers, noTimeout: true, requestId,
@@ -3948,9 +3965,10 @@ export class VideoGenerationEngine {
     }
     if (!task.remoteTaskId && !completedFileResult(task)) {
       this.stopping.delete(taskId);
-      if (task.videoJob?.snapshot.connection.api?.provider === 'rhtv_web') {
-        const result = await this.request(task, { url: `${RHTV_ORIGIN}/v1/videos/by-client/${encodeURIComponent(task.videoJob.snapshot.clientId)}` });
-        if (!record(result) || result.client_id !== task.videoJob.snapshot.clientId) throw new Error('rhTV 恢复结果与原任务身份不符；没有重新提交');
+      if (task.videoJob?.snapshot.connection.api?.provider === 'rhtv_web' || task.videoJob?.snapshot.connection.api?.provider === 'rh_web') {
+        const origin = task.videoJob.snapshot.connection.api.provider === 'rh_web' ? RHWEB_ORIGIN : RHTV_ORIGIN;
+        const result = await this.request(task, { url: `${origin}/v1/videos/by-client/${encodeURIComponent(task.videoJob.snapshot.clientId)}` });
+        if (!record(result) || result.client_id !== task.videoJob.snapshot.clientId) throw new Error('网页任务恢复结果和原任务不一致，没有重新提交');
         const mapped = parseVideoApiResult(result, task.videoJob.snapshot.connection.api);
         if (mapped.remoteTaskId) {
           if (!this.controlIsCurrent(task, epoch)) return;

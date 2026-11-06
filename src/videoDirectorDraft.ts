@@ -49,6 +49,7 @@ export interface VideoDirectorBatchDraft {
   workflowId: string;
   apiProfileId: string;
   runningHubWorkflowId?: string;
+  runningHubWebAppId?: string;
   parameterText: string;
   parameterDrafts: Array<[string, string]>;
   selectedKeys: string[];
@@ -223,6 +224,7 @@ export const videoPromptReferencePreviews = (project: Project, chapterId?: strin
 export const emptyVideoDraft = (settings: AppSettings): VideoGenerationDraft => ({
   name: '', prompt: '', backend: settings.videoBackend || 'api', references: [], parameters: {},
   ...(settings.videoSource === 'runninghub' ? { backend: 'api' as const, runningHubWorkflowId: settings.runningHubVideo?.activeWorkflowId || '__runninghub_unselected__' } : {}),
+  ...(settings.videoSource === 'runninghub-web' ? { backend: 'api' as const, runningHubWebAppId: settings.runningHubWeb?.activeAppId || '__runninghub_web_unselected__' } : {}),
   apiProfileId: settings.activeVideoApiProfileId || undefined,
   workflowId: settings.comfyuiVideo?.activeWorkflowId || undefined,
 });

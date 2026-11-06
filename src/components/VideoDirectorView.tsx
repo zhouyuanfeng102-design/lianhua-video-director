@@ -10,6 +10,7 @@ import { canRecoverRunningHubResult, runningHubRemoteSucceeded } from '../videoR
 import { canRecoverComfyPreviewResult } from '../comfyuiVideo';
 import { videoConfiguredApiState, videoDraftSource, videoSourceDraftPatch, videoParameterConnectionKey } from '../videoGenerationSource';
 import { isRunningHubVideoWorkflowReady } from '../runningHubVideo';
+import { isRunningHubWebAppReady } from '../runningHubWeb';
 import { videoApiSubmitEndpoint } from '../videoGenerationApi';
 import { isRunningHubH3AutoPromptInput } from '../runningHubPromptPictures';
 import { availableVideoParameterKeys, changeVideoParameterText, isVideoOutputParameterKey, readVideoParameterText, videoOutputParameterSummary, videoParameterInputText, videoOutputParameterPresentation } from '../videoOutputParameters';
@@ -829,11 +830,12 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
     : initialBatch?.workflowId ?? initialDraft.workflowId ?? settings.comfyuiVideo?.activeWorkflowId ?? settings.comfyuiVideo?.workflows[0]?.id ?? '');
   const [apiProfileId, setApiProfileId] = useState(retryPrimary?.draft.apiProfileId ?? initialBatch?.apiProfileId ?? initialDraft.apiProfileId ?? '');
   const [runningHubWorkflowId, setRunningHubWorkflowId] = useState(retryPrimary ? retryPrimary.draft.runningHubWorkflowId : initialBatch ? initialBatch.runningHubWorkflowId : initialDraft.runningHubWorkflowId);
-  const sourceKind = videoDraftSource({ backend, runningHubWorkflowId });
+  const [runningHubWebAppId, setRunningHubWebAppId] = useState(retryPrimary ? retryPrimary.draft.runningHubWebAppId : initialBatch ? initialBatch.runningHubWebAppId : initialDraft.runningHubWebAppId);
+  const sourceKind = videoDraftSource({ backend, runningHubWorkflowId, runningHubWebAppId });
   const [parameterText, setParameterText] = useState(() => retryPrimary ? retryParameterBaselineText : initialBatch?.parameterText ?? initialParameterText);
   const parameterDrafts = useRef(new Map<string, string>(initialBatch?.parameterDrafts));
-  const switchParameterConnection = (patch: Partial<Pick<VideoGenerationDraft, 'backend' | 'workflowId' | 'apiProfileId' | 'runningHubWorkflowId'>>) => {
-    const current = { backend, workflowId, apiProfileId, runningHubWorkflowId };
+  const switchParameterConnection = (patch: Partial<Pick<VideoGenerationDraft, 'backend' | 'workflowId' | 'apiProfileId' | 'runningHubWorkflowId' | 'runningHubWebAppId'>>) => {
+    const current = { backend, workflowId, apiProfileId, runningHubWorkflowId, runningHubWebAppId };
     const next = { ...current, ...patch };
     const currentKey = videoParameterConnectionKey(current);
     const nextKey = videoParameterConnectionKey(next);
@@ -841,7 +843,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
       parameterDrafts.current.set(currentKey, parameterText);
       setParameterText(parameterDrafts.current.get(nextKey) ?? '{}');
     }
-    setBackend(next.backend); setWorkflowId(next.workflowId); setApiProfileId(next.apiProfileId); setRunningHubWorkflowId(next.runningHubWorkflowId);
+    setBackend(next.backend); setWorkflowId(next.workflowId); setApiProfileId(next.apiProfileId); setRunningHubWorkflowId(next.runningHubWorkflowId); setRunningHubWebAppId(next.runningHubWebAppId);
   };
   const [settingsCollapsed, setSettingsCollapsed] = useState(initialBatch?.settingsCollapsed || false);
   const [query, setQuery] = useState(initialBatch?.query || '');
@@ -878,12 +880,12 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
   const batchDraftChangeRef = useRef(onBatchDraftChange);
   batchDraftChangeRef.current = onBatchDraftChange;
   useEffect(() => {
-    batchDraftChangeRef.current({ planId, backend, workflowId, apiProfileId, runningHubWorkflowId, parameterText,
+    batchDraftChangeRef.current({ planId, backend, workflowId, apiProfileId, runningHubWorkflowId, runningHubWebAppId, parameterText,
       parameterDrafts: [...parameterDrafts.current], selectedKeys: [...selectedKeys], languages,
       promptFormat: reviewLegacyDraft ? undefined : promptFormat, promptFormats: reviewLegacyDraft ? undefined : promptFormats,
       referenceOverrides, referenceRoleOverrides, audioOverrides, videoOverrides, h3ReferenceUpdates, automaticTails, tailCharacterModes,
       previewSegmentId, previewPane, settingsCollapsed, query });
-  }, [planId, backend, workflowId, apiProfileId, runningHubWorkflowId, parameterText, selectedKeys, languages, promptFormat, promptFormats,
+  }, [planId, backend, workflowId, apiProfileId, runningHubWorkflowId, runningHubWebAppId, parameterText, selectedKeys, languages, promptFormat, promptFormats,
     referenceOverrides, referenceRoleOverrides, audioOverrides, videoOverrides, h3ReferenceUpdates, automaticTails, tailCharacterModes, previewSegmentId, previewPane, settingsCollapsed, query, reviewLegacyDraft]);
   const submittingRef = useRef(false);
   const mountedRef = useRef(true);
@@ -903,6 +905,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
   const retryConnectionActive = Boolean(retryPrimary
     && retryPrimary.draft.backend === backend
     && retryPrimary.draft.runningHubWorkflowId === runningHubWorkflowId
+    && retryPrimary.draft.runningHubWebAppId === runningHubWebAppId
     && (backend === 'comfyui'
       ? (retryPrimary.draft.workflowId || '') === workflowId
       : (retryPrimary.draft.apiProfileId || '') === apiProfileId));
@@ -910,7 +913,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
   const workflow = retryConnection?.backend === 'comfyui' && retryConnection.workflow
     ? retryConnection.workflow
     : settings.comfyuiVideo?.workflows.find((item) => item.id === workflowId);
-  const apiState = useMemo(() => videoConfiguredApiState(settings, { backend, apiProfileId, runningHubWorkflowId, parameters: {} }, retryConnection?.backend === 'api' ? retryConnection.api : undefined), [settings, backend, apiProfileId, runningHubWorkflowId, retryConnection]);
+  const apiState = useMemo(() => videoConfiguredApiState(settings, { backend, apiProfileId, runningHubWorkflowId, runningHubWebAppId, parameters: {} }, retryConnection?.backend === 'api' ? retryConnection.api : undefined), [settings, backend, apiProfileId, runningHubWorkflowId, runningHubWebAppId, retryConnection]);
   const api = apiState.api;
   const referenceUsageContext = useMemo(() => ({ backend, workflow, api, slotRoles: undefined }), [backend, workflow, api]);
   const usageContextForDraft = (draft: VideoGenerationDraft) => {
@@ -918,7 +921,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
     return { ...base, slotRoles: draft.referenceSlotRoles };
   };
   const parameterKeys = availableVideoParameterKeys(sourceKind, api, workflow);
-  const connectionScope = JSON.stringify({ backend, workflowId, apiProfileId, runningHubWorkflowId, workflow,
+  const connectionScope = JSON.stringify({ backend, workflowId, apiProfileId, runningHubWorkflowId, runningHubWebAppId, workflow,
     comfyBaseUrl: retryConnection?.comfyui?.baseUrl || settings.comfyuiVideo?.baseUrl,
     api: api ? { provider: api.provider, baseUrl: api.baseUrl, endpoint: api.endpoint, model: api.model, requestTemplate: api.requestTemplate,
       runningHubImageRoles: api.runningHubImageRoles, runningHubMappedFields: api.runningHubMappedFields } : undefined });
@@ -934,9 +937,9 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
     setConfirmation(undefined);
   }, [connectionScope]);
   const parameters = useMemo(() => readVideoParameterText(parameterText), [parameterText]);
-  const presentationApi = useMemo(() => videoConfiguredApiState(settings, { backend, apiProfileId, runningHubWorkflowId, parameters: parameters.value },
+  const presentationApi = useMemo(() => videoConfiguredApiState(settings, { backend, apiProfileId, runningHubWorkflowId, runningHubWebAppId, parameters: parameters.value },
     retryConnection?.backend === 'api' ? retryConnection.api : undefined).api || api,
-  [settings, backend, apiProfileId, runningHubWorkflowId, parameters.value, retryConnection, api]);
+  [settings, backend, apiProfileId, runningHubWorkflowId, runningHubWebAppId, parameters.value, retryConnection, api]);
   const updateParameter = (key: string, text: string) => {
     const next = changeVideoParameterText(parameterText, key, text);
     if (next.issue) { setError(next.issue); return; }
@@ -956,7 +959,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
   const baseRows = useMemo(() => {
     if (!plan) return [];
     const built = buildVideoBatchRows(project, plan, settings, {
-      backend, workflowId: workflowId || undefined, apiProfileId, runningHubWorkflowId, parameters: parameters.value, referenceOverrides: overridesByChoice,
+      backend, workflowId: workflowId || undefined, apiProfileId, runningHubWorkflowId, runningHubWebAppId, parameters: parameters.value, referenceOverrides: overridesByChoice,
       promptFormat: reviewLegacyDraft ? undefined : promptFormat, promptFormats: reviewLegacyDraft ? undefined : promptFormats,
     });
     return built.map((row): VideoBatchRow => {
@@ -969,6 +972,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
       if (!retry) return row;
       const useFrozenSnapshot = retry.draft.backend === backend
         && retry.draft.runningHubWorkflowId === runningHubWorkflowId
+        && retry.draft.runningHubWebAppId === runningHubWebAppId
         && (backend === 'comfyui'
           ? (retry.draft.workflowId || '') === workflowId
           : (retry.draft.apiProfileId || '') === apiProfileId)
@@ -984,6 +988,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
         workflowId: backend === 'comfyui' ? workflowId || undefined : retry.draft.workflowId,
         apiProfileId: backend === 'api' ? apiProfileId || undefined : retry.draft.apiProfileId,
         runningHubWorkflowId: backend === 'api' ? runningHubWorkflowId : undefined,
+        runningHubWebAppId: backend === 'api' ? runningHubWebAppId : undefined,
         reuseTaskId: useFrozenSnapshot ? retry.task.id : undefined,
         references,
         referenceSlotRoles: roles || retry.draft.referenceSlotRoles,
@@ -1036,7 +1041,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
         ? { ...row, durationSec: choice.durationSec, zh: candidate }
         : { ...row, durationSec: choice.durationSec, en: candidate };
     });
-  }, [plan, project, settings, backend, workflowId, apiProfileId, runningHubWorkflowId, parameters.value, parameterText, retryParameterBaselineText, overridesByChoice, referenceOverrides, referenceRoleOverrides, retryEntriesBySegment, promptFormat, promptFormats, reviewFrozenFormats, reviewLegacyDraft]);
+  }, [plan, project, settings, backend, workflowId, apiProfileId, runningHubWorkflowId, runningHubWebAppId, parameters.value, parameterText, retryParameterBaselineText, overridesByChoice, referenceOverrides, referenceRoleOverrides, retryEntriesBySegment, promptFormat, promptFormats, reviewFrozenFormats, reviewLegacyDraft]);
   // Automatic defaults are only for untouched rows. An explicitly empty
   // selection is intentional too; never restore deselected identity images.
   const hasEditedTailReferences = (segmentId: string): boolean => Boolean(tailCharacterModes[segmentId]?.editedReferences)
@@ -1061,7 +1066,8 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
     const snapshot = draft.reuseTaskId ? findReusableVideoTask(project, draft.reuseTaskId)?.videoJob?.snapshot : undefined;
     return snapshot?.projectId === project.id && snapshot.connection.backend === draft.backend
       && snapshot.draft.workflowId === draft.workflowId && snapshot.draft.apiProfileId === draft.apiProfileId
-      && snapshot.draft.runningHubWorkflowId === draft.runningHubWorkflowId ? snapshot.connection : undefined;
+      && snapshot.draft.runningHubWorkflowId === draft.runningHubWorkflowId
+      && snapshot.draft.runningHubWebAppId === draft.runningHubWebAppId ? snapshot.connection : undefined;
   };
   const outputSummaryForDraft = (draft: VideoGenerationDraft) => {
     const frozen = frozenConnectionForDraft(draft);
@@ -1177,7 +1183,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
   const savedReferencePreview = previewRow && !previewChoice ? rowReferencePreview(previewRow, rowLanguage(previewRow)) : undefined;
   const imageRow = baseRows.find((row) => row.segmentId === imageSegmentId);
   const imageChoice = imageRow && rowChoice(imageRow);
-  const connectionLabel = backend === 'comfyui' ? `ComfyUI · ${workflow?.name || '未选择工作流'}` : `${sourceKind === 'runninghub' ? 'RunningHub 云端' : '视频 API'} · ${api?.model || '未配置'}`;
+  const connectionLabel = backend === 'comfyui' ? `ComfyUI · ${workflow?.name || '未选择工作流'}` : `${sourceKind === 'runninghub-web' ? 'RH 网页' : sourceKind === 'runninghub' ? 'RunningHub 云端' : '视频 API'} · ${api?.model || '未配置'}`;
   const referenceAssets = (candidate: VideoBatchChoiceCandidate): ReferenceAsset[] => {
     const snapshot = candidate.draft.reuseTaskId
       ? findReusableVideoTask(project, candidate.draft.reuseTaskId)?.videoJob?.snapshot
@@ -1512,8 +1518,8 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
       </div>
       <div className="vd-batch-configuration">
         <label className="field"><span>全片计划</span><select aria-label="批量全片计划" value={planId} disabled={submitting} onChange={(event) => changePlan(event.target.value)}>{!plans.length && <option value="">当前章节尚无已分段计划</option>}{plans.map((item) => <option key={item.id} value={item.id}>{item.title || item.sourceStoryTitle} · {item.segments.length} 段{item.sourceStale ? ' · 原文已变化，需更新' : ''}</option>)}</select></label>
-        <label className="field"><span>生成方式</span><select aria-label="批量生成方式" value={sourceKind} disabled={submitting} onChange={(event) => { const source = event.target.value as 'api' | 'comfyui' | 'runninghub'; switchParameterConnection({ backend: source === 'comfyui' ? 'comfyui' : 'api', runningHubWorkflowId: source === 'runninghub' ? settings.runningHubVideo?.activeWorkflowId || '__runninghub_unselected__' : undefined, apiProfileId: source === 'runninghub' ? '' : apiProfileId }); }}><option value="api">视频 API</option><option value="comfyui">ComfyUI</option><option value="runninghub">RunningHub 云端</option></select></label>
-        <label className="field"><span>{sourceKind === 'runninghub' ? '云端工作流' : backend === 'comfyui' ? '视频工作流' : '视频 API 配置'}</span>{sourceKind === 'runninghub' ? <select aria-label="批量 RunningHub 云端工作流" value={runningHubWorkflowId || '__runninghub_unselected__'} disabled={submitting} onChange={(event) => switchParameterConnection({ runningHubWorkflowId: event.target.value })}>{retryConnection?.api ? <option value={runningHubWorkflowId}>原失败批次云端快照 · {retryConnection.api.model}</option> : <option value="__runninghub_unselected__" disabled>请选择云端工作流</option>}{settings.runningHubVideo?.workflows.filter((item) => !(retryConnection?.api && item.id === runningHubWorkflowId)).map((item) => <option key={item.id} value={item.id} disabled={!isRunningHubVideoWorkflowReady(item)}>{item.name}</option>)}</select> : backend === 'comfyui' ? <select aria-label="批量视频工作流" value={workflowId} disabled={submitting} onChange={(event) => switchParameterConnection({ workflowId: event.target.value })}>{retryConnection?.backend === 'comfyui' && retryConnection.workflow ? <option value={workflowId}>原失败批次快照 · {retryConnection.workflow.name}</option> : <option value="" disabled>请选择工作流</option>}{settings.comfyuiVideo?.workflows.filter((item) => !(retryConnection?.backend === 'comfyui' && item.id === workflowId)).map((item) => <option key={item.id} value={item.id}>{item.name} · {item.mapping.images.length} 个图片槽</option>)}</select> : <select aria-label="批量视频 API 配置" value={apiProfileId} disabled={submitting} onChange={(event) => switchParameterConnection({ apiProfileId: event.target.value })}>{retryConnection?.backend === 'api' && retryConnection.api ? <option value={apiProfileId}>原失败批次 API 快照 · {retryConnection.api.model || '未记录模型'}</option> : <option value="">当前视频 API 配置</option>}{settings.videoApiProfiles?.filter((item) => !(retryConnection?.backend === 'api' && item.id === apiProfileId)).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>}</label>
+        <label className="field"><span>生成方式</span><select aria-label="批量生成方式" value={sourceKind} disabled={submitting} onChange={(event) => { const source = event.target.value as 'api' | 'comfyui' | 'runninghub' | 'runninghub-web'; switchParameterConnection({ backend: source === 'comfyui' ? 'comfyui' : 'api', runningHubWorkflowId: source === 'runninghub' ? settings.runningHubVideo?.activeWorkflowId || '__runninghub_unselected__' : undefined, runningHubWebAppId: source === 'runninghub-web' ? settings.runningHubWeb?.activeAppId || '__runninghub_web_unselected__' : undefined, apiProfileId: source === 'runninghub' || source === 'runninghub-web' ? '' : apiProfileId }); }}><option value="api">视频 API</option><option value="comfyui">ComfyUI</option><option value="runninghub">RunningHub 云端</option><option value="runninghub-web">RH 网页</option></select></label>
+        <label className="field"><span>{sourceKind === 'runninghub-web' ? '网页应用' : sourceKind === 'runninghub' ? '云端工作流' : backend === 'comfyui' ? '视频工作流' : '视频 API 配置'}</span>{sourceKind === 'runninghub-web' ? <select aria-label="批量 RH 网页应用" value={runningHubWebAppId || '__runninghub_web_unselected__'} disabled={submitting} onChange={(event) => switchParameterConnection({ runningHubWebAppId: event.target.value })}><option value="__runninghub_web_unselected__" disabled>请选择网页应用</option>{settings.runningHubWeb?.apps.map((item) => <option key={item.id} value={item.id} disabled={!isRunningHubWebAppReady(item)}>{item.name}</option>)}</select> : sourceKind === 'runninghub' ? <select aria-label="批量 RunningHub 云端工作流" value={runningHubWorkflowId || '__runninghub_unselected__'} disabled={submitting} onChange={(event) => switchParameterConnection({ runningHubWorkflowId: event.target.value })}>{retryConnection?.api ? <option value={runningHubWorkflowId}>原失败批次云端快照 · {retryConnection.api.model}</option> : <option value="__runninghub_unselected__" disabled>请选择云端工作流</option>}{settings.runningHubVideo?.workflows.filter((item) => !(retryConnection?.api && item.id === runningHubWorkflowId)).map((item) => <option key={item.id} value={item.id} disabled={!isRunningHubVideoWorkflowReady(item)}>{item.name}</option>)}</select> : backend === 'comfyui' ? <select aria-label="批量视频工作流" value={workflowId} disabled={submitting} onChange={(event) => switchParameterConnection({ workflowId: event.target.value })}>{retryConnection?.backend === 'comfyui' && retryConnection.workflow ? <option value={workflowId}>原失败批次快照 · {retryConnection.workflow.name}</option> : <option value="" disabled>请选择工作流</option>}{settings.comfyuiVideo?.workflows.filter((item) => !(retryConnection?.backend === 'comfyui' && item.id === workflowId)).map((item) => <option key={item.id} value={item.id}>{item.name} · {item.mapping.images.length} 个图片槽</option>)}</select> : <select aria-label="批量视频 API 配置" value={apiProfileId} disabled={submitting} onChange={(event) => switchParameterConnection({ apiProfileId: event.target.value })}>{retryConnection?.backend === 'api' && retryConnection.api ? <option value={apiProfileId}>原失败批次 API 快照 · {retryConnection.api.model || '未记录模型'}</option> : <option value="">当前视频 API 配置</option>}{settings.videoApiProfiles?.filter((item) => !(retryConnection?.backend === 'api' && item.id === apiProfileId)).map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select>}</label>
       </div>
       <RunningHubAutoPromptNotice api={api} />
       <H3ActionNotice prompts={selected.map((candidate) => candidate.draft.prompt)} />
@@ -1702,7 +1708,7 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
   [generationMode, project, chapterId, draft.source?.storyboardId, draft.source?.language, draft.source?.promptFormat, draft.reuseTaskId]);
   const images = useMemo(() => project.assets.filter(isVideoDirectorImage), [project.assets]);
   const reusedSnapshot = draft.reuseTaskId ? findReusableVideoTask(project, draft.reuseTaskId)?.videoJob?.snapshot : undefined;
-  const reusedConnection = reusedSnapshot?.connection.backend === draft.backend && reusedSnapshot.draft.runningHubWorkflowId === draft.runningHubWorkflowId ? reusedSnapshot.connection : undefined;
+  const reusedConnection = reusedSnapshot?.connection.backend === draft.backend && reusedSnapshot.draft.runningHubWorkflowId === draft.runningHubWorkflowId && reusedSnapshot.draft.runningHubWebAppId === draft.runningHubWebAppId ? reusedSnapshot.connection : undefined;
   const activeWorkflow = reusedConnection?.workflow || settings.comfyuiVideo?.workflows.find((workflow) => workflow.id === (draft.workflowId || settings.comfyuiVideo?.activeWorkflowId)) || (!draft.workflowId ? settings.comfyuiVideo?.workflows[0] : undefined);
   const sourceKind = videoDraftSource(draft);
   // Read capabilities independently of task overrides so invalid/unmapped values never hide their editing controls.
@@ -1956,14 +1962,14 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
         <VideoMotionReferenceEditor project={project} draft={draft} api={activeApi} workflow={activeWorkflow} scope="本段" disabled={submitting || batchSubmitting} frozenVideos={reusedSnapshot?.videos} onChange={patchDraft} />
       </section>
     </div><div className="vd-stack">
-      <section className="card vd-settings-card"><div className="card-title"><h2>3. 生成方式与参数</h2></div><div className="vd-backend-switch">{([['api', '视频 API'], ['comfyui', 'ComfyUI'], ['runninghub', 'RunningHub 云端']] as const).map(([value, label]) => <button type="button" key={value} className={`btn ${sourceKind === value ? 'primary' : ''}`} aria-pressed={sourceKind === value} onClick={() => { if (sourceKind !== value) switchParameterConnection(videoSourceDraftPatch(value, settings)); }}>{label}</button>)}</div>
-        {sourceKind === 'runninghub' ? <><label className="field"><span>RunningHub 云端工作流</span><select aria-label="RunningHub 云端工作流" value={draft.runningHubWorkflowId || '__runninghub_unselected__'} onChange={(event) => switchParameterConnection({ runningHubWorkflowId: event.target.value, reuseTaskId: undefined })}>{reusedConnection?.api ? <option value={draft.runningHubWorkflowId}>原任务云端快照 · {reusedConnection.api.model}</option> : <option value="__runninghub_unselected__" disabled>请选择已保存的云端工作流</option>}{settings.runningHubVideo?.workflows.filter((item) => !(reusedConnection?.api && item.id === draft.runningHubWorkflowId)).map((item) => <option key={item.id} value={item.id} disabled={!isRunningHubVideoWorkflowReady(item)}>{item.name}</option>)}</select></label><p className="field-hint">{activeApi?.model || '尚未选择工作流'} · {activeApi?.runningHubImageRoles?.length || 0} 个图片槽；仅替换已绑定的提示词、图片和明确参数。</p>{!activeApi?.enabled && <p className="vd-notice">请在独立 RunningHub 设置中启用连接并选择工作流。</p>}{apiState.issue && <p className="vd-error">{apiState.issue}</p>}</> : draft.backend === 'api' ? <><label className="field"><span>视频 API 配置</span><select aria-label="视频 API 配置" value={reusedConnection?.api ? '__saved' : draft.apiProfileId || ''} onChange={(event) => { if (event.target.value !== '__saved') switchParameterConnection({ apiProfileId: event.target.value || undefined, reuseTaskId: undefined }); }}>{reusedConnection?.api && <option value="__saved">原任务视频 API 快照</option>}<option value="">当前视频 API 配置</option>{settings.videoApiProfiles?.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label><p className="field-hint">模型：{activeApi?.model || '未填写'} · {activeApi?.provider === 'minimax' ? 'MiniMax 官方协议' : '通用视频 API'}</p>{!activeApi?.enabled && <p className="vd-notice">请在视频连接设置启用此接口。</p>}{activeApi?.provider === 'minimax' && <p className="vd-notice">官方模式仅接收首帧 / 尾帧用途，不能用它代替多人物参考图。参考图不会被偷偷丢弃或改为首帧。</p>}</> : <><label className="field"><span>ComfyUI 视频工作流</span><select aria-label="ComfyUI 视频工作流" value={reusedConnection?.workflow ? '__saved' : activeWorkflow?.id || ''} onChange={(event) => { if (event.target.value !== '__saved') switchParameterConnection({ workflowId: event.target.value, reuseTaskId: undefined }); }}>{reusedConnection?.workflow && <option value="__saved">{reusedConnection.workflow.name} · 原任务工作流快照</option>}<option value="" disabled>请选择已导入的视频工作流</option>{settings.comfyuiVideo?.workflows.map((workflow) => <option key={workflow.id} value={workflow.id}>{workflow.name}</option>)}</select></label><p className="field-hint">{reusedConnection?.comfyui?.baseUrl || settings.comfyuiVideo?.baseUrl || '尚未设置连接'}<br />已绑定 {activeWorkflow?.mapping.images.length || 0} 个图片输入 · 最终输出节点 {activeWorkflow?.mapping.outputNodeId || '未绑定'}</p>{slotMismatch && <p className="vd-error">已选 {draft.references.length} 张图，但工作流只有 {activeWorkflow.mapping.images.length} 个图片槽。请调整选图或映射；不会丢掉多选的图。</p>}</>}
+      <section className="card vd-settings-card"><div className="card-title"><h2>3. 生成方式与参数</h2></div><div className="vd-backend-switch">{([['api', '视频 API'], ['comfyui', 'ComfyUI'], ['runninghub', 'RunningHub 云端'], ['runninghub-web', 'RH 网页']] as const).map(([value, label]) => <button type="button" key={value} className={`btn ${sourceKind === value ? 'primary' : ''}`} aria-pressed={sourceKind === value} onClick={() => { if (sourceKind !== value) switchParameterConnection(videoSourceDraftPatch(value, settings)); }}>{label}</button>)}</div>
+        {sourceKind === 'runninghub-web' ? <><label className="field"><span>RH 网页应用</span><select aria-label="RH 网页应用" value={draft.runningHubWebAppId || '__runninghub_web_unselected__'} onChange={(event) => switchParameterConnection({ runningHubWebAppId: event.target.value, reuseTaskId: undefined })}><option value="__runninghub_web_unselected__" disabled>请选择已读取的网页应用</option>{settings.runningHubWeb?.apps.filter((item) => !(reusedConnection?.api && item.id === draft.runningHubWebAppId)).map((item) => <option key={item.id} value={item.id} disabled={!isRunningHubWebAppReady(item)}>{item.name}</option>)}</select></label><p className="field-hint">{activeApi?.model || '尚未选择网页应用'} · 图片槽 {(activeApi?.rhWebFields || []).filter((field) => field.bind === 'image').length} 个。只替换已绑定的提示词、图片、音频和参数。</p>{!settings.runningHubWeb?.enabled && <p className="vd-notice">请在 RH 网页里启用连接并读取应用。</p>}{apiState.issue && <p className="vd-error">{apiState.issue}</p>}</> : sourceKind === 'runninghub' ? <><label className="field"><span>RunningHub 云端工作流</span><select aria-label="RunningHub 云端工作流" value={draft.runningHubWorkflowId || '__runninghub_unselected__'} onChange={(event) => switchParameterConnection({ runningHubWorkflowId: event.target.value, reuseTaskId: undefined })}>{reusedConnection?.api ? <option value={draft.runningHubWorkflowId}>原任务云端快照 · {reusedConnection.api.model}</option> : <option value="__runninghub_unselected__" disabled>请选择已保存的云端工作流</option>}{settings.runningHubVideo?.workflows.filter((item) => !(reusedConnection?.api && item.id === draft.runningHubWorkflowId)).map((item) => <option key={item.id} value={item.id} disabled={!isRunningHubVideoWorkflowReady(item)}>{item.name}</option>)}</select></label><p className="field-hint">{activeApi?.model || '尚未选择工作流'} · {activeApi?.runningHubImageRoles?.length || 0} 个图片槽；仅替换已绑定的提示词、图片和明确参数。</p>{!activeApi?.enabled && <p className="vd-notice">请在独立 RunningHub 设置中启用连接并选择工作流。</p>}{apiState.issue && <p className="vd-error">{apiState.issue}</p>}</> : draft.backend === 'api' ? <><label className="field"><span>视频 API 配置</span><select aria-label="视频 API 配置" value={reusedConnection?.api ? '__saved' : draft.apiProfileId || ''} onChange={(event) => { if (event.target.value !== '__saved') switchParameterConnection({ apiProfileId: event.target.value || undefined, reuseTaskId: undefined }); }}>{reusedConnection?.api && <option value="__saved">原任务视频 API 快照</option>}<option value="">当前视频 API 配置</option>{settings.videoApiProfiles?.map((profile) => <option key={profile.id} value={profile.id}>{profile.name}</option>)}</select></label><p className="field-hint">模型：{activeApi?.model || '未填写'} · {activeApi?.provider === 'minimax' ? 'MiniMax 官方协议' : '通用视频 API'}</p>{!activeApi?.enabled && <p className="vd-notice">请在视频连接设置启用此接口。</p>}{activeApi?.provider === 'minimax' && <p className="vd-notice">官方模式仅接收首帧 / 尾帧用途，不能用它代替多人物参考图。参考图不会被偷偷丢弃或改为首帧。</p>}</> : <><label className="field"><span>ComfyUI 视频工作流</span><select aria-label="ComfyUI 视频工作流" value={reusedConnection?.workflow ? '__saved' : activeWorkflow?.id || ''} onChange={(event) => { if (event.target.value !== '__saved') switchParameterConnection({ workflowId: event.target.value, reuseTaskId: undefined }); }}>{reusedConnection?.workflow && <option value="__saved">{reusedConnection.workflow.name} · 原任务工作流快照</option>}<option value="" disabled>请选择已导入的视频工作流</option>{settings.comfyuiVideo?.workflows.map((workflow) => <option key={workflow.id} value={workflow.id}>{workflow.name}</option>)}</select></label><p className="field-hint">{reusedConnection?.comfyui?.baseUrl || settings.comfyuiVideo?.baseUrl || '尚未设置连接'}<br />已绑定 {activeWorkflow?.mapping.images.length || 0} 个图片输入 · 最终输出节点 {activeWorkflow?.mapping.outputNodeId || '未绑定'}</p>{slotMismatch && <p className="vd-error">已选 {draft.references.length} 张图，但工作流只有 {activeWorkflow.mapping.images.length} 个图片槽。请调整选图或映射；不会丢掉多选的图。</p>}</>}
         {reusedConnection && <p className="vd-notice">使用原任务保存的连接与工作流快照，当前设置的修改不会影响它。主动切换上方配置后才使用新设置。</p>}
         <RunningHubAutoPromptNotice api={activeApi} />
         <H3ActionNotice prompts={[draft.prompt]} />
         {sourceKind === 'api' && (!activeApi?.provider || activeApi.provider === 'generic') && <VideoApiParameterReader settings={settings} profileId={draft.apiProfileId} frozen={Boolean(reusedConnection?.api)} onChange={onVideoApiParametersChange} />}
         <VideoOutputParameters scope="single" source={sourceKind} parameterText={parameterText} availableKeys={parameterKeys} {...videoOutputParameterPresentation(presentationApi, parsedParameters.value)} requiresMapping={sourceKind !== 'api' || activeApi?.provider === 'runninghub'} disabled={submitting || batchSubmitting} onChange={updateParameter} onOpenSettings={onOpenSettings} />
-        <details className="vd-details"><summary>可选参数覆盖（不填保持原值）</summary><div className="vd-stack"><p className="field-hint">高级参数：默认不覆盖种子、采样、尺寸和音频连接。只填写你要改变的值；留空恢复工作流 / 接口默认值。</p><div className="vd-parameter-grid">{parameterKeys.filter((key) => !isVideoOutputParameterKey(key)).map((key) => <label className="field" key={key}><span>{{ seed: '种子', steps: '采样步数', cfg: 'CFG', fps: '帧率' }[key] || key}</span><input value={videoParameterInputText(parsedParameters.value[key])} disabled={Boolean(parsedParameters.issue)} placeholder="保留原值" onChange={(event) => updateParameter(key, event.target.value)} /></label>)}</div><label className="field"><span>额外参数 JSON（仅显式覆盖字段）</span><textarea aria-label="本次额外参数 JSON" className="vd-code" rows={5} value={parameterText} onChange={(event) => setParameterText(event.target.value)} onBlur={() => { const parsed = readVideoParameterText(parameterText); if (!parsed.issue) patchDraft({ parameters: parsed.value }); }} /></label><button type="button" className="btn small" onClick={() => { patchDraft({ parameters: {} }); setParameterText('{}'); }}>清除本次参数覆盖</button></div></details>
+        <details className="vd-details"><summary>可选参数覆盖（不填保持原值）</summary><div className="vd-stack"><p className="field-hint">高级参数：默认不覆盖种子、采样、尺寸和音频连接。只填写你要改变的值；留空恢复工作流 / 接口默认值。</p><div className="vd-parameter-grid">{parameterKeys.filter((key) => !isVideoOutputParameterKey(key)).map((key) => <label className="field" key={key}><span>{{ seed: '种子', steps: '采样步数', cfg: 'CFG', fps: '帧率', idea: '短想法', megapixels: '百万像素' }[key] || key}</span><input value={videoParameterInputText(parsedParameters.value[key])} disabled={Boolean(parsedParameters.issue)} placeholder="保留原值" onChange={(event) => updateParameter(key, event.target.value)} /></label>)}</div><label className="field"><span>额外参数 JSON（仅显式覆盖字段）</span><textarea aria-label="本次额外参数 JSON" className="vd-code" rows={5} value={parameterText} onChange={(event) => setParameterText(event.target.value)} onBlur={() => { const parsed = readVideoParameterText(parameterText); if (!parsed.issue) patchDraft({ parameters: parsed.value }); }} /></label><button type="button" className="btn small" onClick={() => { patchDraft({ parameters: {} }); setParameterText('{}'); }}>清除本次参数覆盖</button></div></details>
         <details className="vd-tracking-note"><summary>任务追踪说明</summary><p>不设置等待超时。界面只显示后端提供的真实进度和已耗时，切换页面仍继续追踪。</p></details>
         <button className="btn primary vd-generate-button" type="button" disabled={submitting || batchSubmitting || identityRepairing || singleTail.busy || tailFrameTools?.busy || sourceStale || Boolean(draftReferencePreview) || !draft.prompt.trim() || Boolean(slotMismatch || audioIssue || delivery.issue)} onClick={() => { void generate(); }}>{submitting ? '正在建立任务…' : '生成视频'}</button><p className="field-hint">点击才会提交生成，API 可能产生费用；不会自动重复提交结果不明的任务。</p>
         {audioIssue && <p className="vd-error" role="alert">{audioIssue}</p>}

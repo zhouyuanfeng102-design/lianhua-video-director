@@ -42,6 +42,9 @@ export interface VideoGenerationDesktop {
   rhtvRequest?: VideoGenerationDesktop['videoRequest'];
   rhtvDownload?: VideoGenerationDesktop['downloadGeneratedMedia'];
   rhtvControl?: (request: import('./rhtvBridge').RhTvControlRequest) => Promise<import('./rhtvBridge').RhTvBridgeStatus>;
+  rhWebRequest?: VideoGenerationDesktop['videoRequest'];
+  rhWebDownload?: VideoGenerationDesktop['downloadGeneratedMedia'];
+  rhWebControl?: (request: import('./runningHubWeb').RhWebControlRequest) => Promise<import('./runningHubWeb').RhWebControlResult>;
   videoRequest: (payload: VideoDesktopRequest) => Promise<{ status: number; body: string; bodyEncoding?: 'text' | 'base64'; contentType?: string; requestBytes?: number; requestContentType?: string }>;
   cancelVideoRequest: (requestId: string) => Promise<boolean>;
   watchVideoProgress: (payload: { watchId: string; url: string; headers?: Record<string, string> }) => Promise<void>;
@@ -70,7 +73,7 @@ export interface VideoGenerationDesktop {
 
 export type VideoGenerationBackend = 'api' | 'comfyui';
 /** UI source; cloud workflows reuse the authenticated API task transport. */
-export type VideoGenerationSource = VideoGenerationBackend | 'runninghub';
+export type VideoGenerationSource = VideoGenerationBackend | 'runninghub' | 'runninghub-web';
 /** Authored delivery format, independent of the configured video connection. */
 export type VideoPromptFormat = 'h3' | 'seedance' | 'ordinary';
 export interface VideoPromptSource {
@@ -152,6 +155,8 @@ export interface VideoGenerationDraft {
   apiProfileId?: string;
   /** Selects the independent RunningHub cloud library, not videoApiProfiles. */
   runningHubWorkflowId?: string;
+  /** Selects a saved RunningHub web-page app. Absent means this draft is not the web bridge. */
+  runningHubWebAppId?: string;
   workflowId?: string;
   /** Reuse this task's frozen connection/workflow and credential, not newly edited settings. */
   reuseTaskId?: string;

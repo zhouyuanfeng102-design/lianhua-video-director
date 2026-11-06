@@ -6,6 +6,9 @@
 .runninghub-video-settings .rhv-invite-link:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
 .rhv-connection-title > .rhv-enable { margin-left: auto; }
 .video-settings-redesign .runninghub-video-settings .rhv-connection-fields { grid-template-columns: minmax(140px,.7fr) minmax(0,1.05fr) minmax(220px,1.35fr); align-items: start; }
+.video-settings-redesign .runninghub-video-settings .rh-web-account-add { display: grid; grid-template-columns: minmax(0,1fr) minmax(120px,168px) auto; gap: 10px 12px; align-items: end; }
+.runninghub-video-settings .rh-web-login-actions { flex-wrap: nowrap; }
+.runninghub-video-settings .rh-web-login-actions .btn { white-space: nowrap; }
 .rhv-key-tools { display: flex; align-items: center; gap: 4px; margin-bottom: 4px; }
 .rhv-key-tools select,
 .rhv-key-tools input,
@@ -18,6 +21,8 @@
 .runninghub-video-settings .rhv-enable input { width: 16px; height: 16px; min-height: 0; margin: 0; }
 .runninghub-video-settings .rhv-main-note { margin: 0; color: #68768b; line-height: 1.5; font-size: calc(10px * var(--ui-font-scale,1)); }
 .runninghub-video-settings .rhv-main-note.error { color: #ad3157; }
+.rh-web-manager { max-height: calc(100dvh - 32px); }
+.rh-web-manager .vwm-editor { overflow: auto; }
 .rhv-manager .rhv-tabs { grid-template-columns: repeat(6,minmax(0,1fr)); }
 .rhv-manager .rhv-tabs button { padding: 7px 3px; font-size: .9em; }
 .rhv-manager .rhv-two-fields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 9px; }
@@ -109,6 +114,8 @@
 @media (max-width: 1050px) {
   .video-settings-redesign .runninghub-video-settings .rhv-connection-fields { grid-template-columns: minmax(0,1fr) minmax(0,1fr); }
   .runninghub-video-settings .rhv-connection-fields .field:last-child { grid-column: 1 / -1; }
+  .video-settings-redesign .runninghub-video-settings .rh-web-account-add { grid-template-columns: minmax(0,1fr) minmax(0,1fr); }
+  .video-settings-redesign .runninghub-video-settings .rh-web-account-add .btn { grid-column: 1 / -1; justify-self: start; }
 }
 
 /* Generation sections keep their fields on a page; additional positions paginate. */

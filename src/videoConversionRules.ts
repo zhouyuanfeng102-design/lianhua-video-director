@@ -48,7 +48,7 @@ export const VIDEO_SCENE_STYLE_RULE = '每镜描述一个清楚的主事件，�
 export const VIDEO_CONTINUOUS_SCENE_STYLE_RULE = '每镜依据既定观看任务组织完整连续场面，一个镜头可以承载相互因果的多个动作、对白与回应；事件条目不等于镜头条目，主事件不意味着每镜只许一次动作。保持真实行动顺序、强度、接触与反馈，不规定机械的1/2/3阶段、每秒字数或动作配额。空间只表达必要的人物、物体与通路关系，光影和摄影忠实转写既定画面；不要求每镜凑齐前中后景、色温K数字或完整身体力学清单。转换、H3转写与翻译保留给定镜数、顺序、时间标题、机位、运镜与观察对象，不在这些阶段拆镜、合镜或重选摄影；摄影选择只属于明确的源头导演任务。';
 
 /** User-selected picture style and directing manner, written once into the delivered body. */
-export const VIDEO_SELECTED_STYLE_DELIVERY_RULE = 'selectedPictureStyle 是用户已选的画面风格，selectedDirectorStyle 是用户已选的导演调度。两项都有原文时各用原文写一次；只有一项时只写那一项。没有这两项时不另编画风。不改写成另一套媒介或年代，不逐镜重复，不把「视觉风格锚点」「风格预设视觉」和〔〕标签写进正文。六字段把这两句接在首镜光影的场景光之后，写成「画面风格：…。导演调度：…。」场景光仍写该镜的时间、天气和光源。full-reference 的 H3 在 detailed_description 的 [Shot 1] 之前写这一到两句。三字段 H3 把同一句写在 [Shot 1] 正文开头。Seedance 写在视频规格一次。参考图职责保持身份、场景或通用参考，不改标为视觉风格参考。若正文还没有这两句，补在上述位置一次，不改写其余镜头。';
+export const VIDEO_SELECTED_STYLE_DELIVERY_RULE = 'selectedPictureStyle 是用户已选的画面风格，selectedDirectorStyle 是用户已选的导演调度。H3 正文只写画面风格一次。没有画面风格时不另编画风。不把导演调度写进 H3 正文，不在开头补机位、景别、跟随、固定、推近或前景遮挡。镜头里已经写好的运镜保持原句。不改写成另一套媒介或年代，不逐镜重复，不把「视觉风格锚点」「风格预设视觉」和〔〕标签写进正文。六字段把画面风格接在首镜光影的场景光之后，写成「画面风格：…。」场景光仍写该镜的时间、天气和光源。full-reference 的 H3 在 detailed_description 的 [Shot 1] 之前写这一句。三字段 H3 把同一句写在 [Shot 1] 正文开头。Seedance 仍把画面风格和导演调度各写一次在视频规格里。参考图职责保持身份、场景或通用参考，不改标为视觉风格参考。若 H3 正文还没有画面风格，只补这一句，不改写其余镜头。正常速度不写速度词。身体动作里已经写成的缓慢起伏保持原句。已保存的成片和提示词不因此自动改写。';
 
 export const selectedVideoStyleFields = (input: {
   visualStyle?: string;

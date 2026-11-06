@@ -433,7 +433,7 @@ await test('default generation source distinguishes cloud from underlying API tr
   const settings = fixture('comfyui'); settings.runningHubVideo = { ...structuredClone(defaultRunningHubVideoConfig), apiKey: 'separate-cloud-key' };
   const h = harness(settings); const before = structuredClone(h.state());
   const options = nodesOf(h.required('select', '默认视频生成方式').props.children).filter((node) => node.type === 'option').map((node) => node.props.value);
-  assert.deepEqual(options, ['api', 'comfyui', 'runninghub']);
+  assert.deepEqual(options, ['api', 'comfyui', 'runninghub', 'runninghub-web']);
   h.change('select', '默认视频生成方式', 'runninghub'); assert.equal(h.state().videoSource, 'runninghub'); assert.equal(h.state().videoBackend, 'api');
   assert.deepEqual(h.state().videoTaskApi, before.videoTaskApi); assert.deepEqual(h.state().comfyuiVideo, before.comfyuiVideo); assert.deepEqual(h.state().runningHubVideo, before.runningHubVideo);
   assert.deepEqual(Object.keys(h.patches.at(-1)!).sort(), ['videoBackend', 'videoSource']);

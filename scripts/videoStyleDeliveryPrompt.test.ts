@@ -15,7 +15,8 @@ assert.deepEqual(selectedVideoStyleFields({
 });
 assert.match(VIDEO_SELECTED_STYLE_DELIVERY_RULE, /首镜光影/);
 assert.match(VIDEO_SELECTED_STYLE_DELIVERY_RULE, /不改标为视觉风格参考/);
-assert.match(H3_FINAL_BODY_FORMAT_RULE, /\[Shot 1\] 之前写用户已选画面风格和导演调度/);
+assert.match(H3_FINAL_BODY_FORMAT_RULE, /\[Shot 1\] 之前只写用户已选画面风格/);
+assert.match(VIDEO_SELECTED_STYLE_DELIVERY_RULE, /不把导演调度写进 H3 正文/);
 assert.match(seedanceChineseWriterRule(), /selectedPictureStyle 与 selectedDirectorStyle/);
 assert.match(seedanceChineseWriterRule(), /不改镜数、机位和运镜/);
 
@@ -104,6 +105,6 @@ await convertStoryboardDraftToFinal({
   },
 }).catch(() => undefined);
 assert.equal(captured.includes('"selectedPictureStyle"'), false);
-assert.match(captured, /没有这两项时不另编画风/);
+assert.match(captured, /没有画面风格时不另编画风/);
 
 console.log('video style delivery prompt checks passed');

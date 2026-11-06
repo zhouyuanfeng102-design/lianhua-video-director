@@ -38,10 +38,14 @@ export const isVideoOutputParameterKey = (key: string): key is VideoOutputParame
 /** Capabilities come from explicit mappings, never node names or current override values. */
 export const availableVideoParameterKeys = (
   source: VideoGenerationSource,
-  api?: Pick<VideoTaskApiConfig, 'provider' | 'runningHubMappedFields' | 'requestTemplate'> & Partial<Pick<VideoTaskApiConfig, 'baseUrl' | 'endpoint'>>,
+  api?: Pick<VideoTaskApiConfig, 'provider' | 'runningHubMappedFields' | 'requestTemplate'> & Partial<Pick<VideoTaskApiConfig, 'baseUrl' | 'endpoint' | 'rhWebFields'>>,
   workflow?: Pick<ComfyVideoWorkflowPreset, 'mapping'>,
 ): string[] => {
   if (source === 'comfyui') return Object.keys(workflow?.mapping.parameters || {});
+  if (source === 'runninghub-web' || api?.provider === 'rh_web') {
+    const fields = api?.rhWebFields || [];
+    return [...new Set(fields.flatMap((field) => field.bind === 'duration' || field.bind === 'aspect_ratio' || field.bind === 'megapixels' || field.bind === 'idea' ? [field.bind] : []))];
+  }
   if (source === 'api' && api?.provider === 'rhtv_web') return ['duration', 'resolution'];
   if (source === 'api' && api && isLaoliVideoBuiltinProtocol({ ...api, endpoint: api.endpoint || '' })) return ['duration', 'aspect_ratio', 'resolution'];
   if (source === 'runninghub' || api?.provider === 'runninghub' && Array.isArray(api.runningHubMappedFields)) return [...new Set(

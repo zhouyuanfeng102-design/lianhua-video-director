@@ -80,6 +80,7 @@ export interface VideoBatchBuildOptions {
   backend?: VideoGenerationDraft['backend'];
   apiProfileId?: string;
   runningHubWorkflowId?: string;
+  runningHubWebAppId?: string;
   workflowId?: string;
   parameters?: Record<string, unknown>;
   /** Exact per-language, ordered bindings selected in the batch UI. An empty
@@ -420,7 +421,7 @@ export const videoBatchH3ReferenceContext = (
 
 export const videoBatchConnectionIdentity = (
   settings: AppSettings,
-  draft: Pick<VideoGenerationDraft, 'backend' | 'apiProfileId' | 'workflowId' | 'runningHubWorkflowId'> & Partial<Pick<VideoGenerationDraft, 'parameters'>>,
+  draft: Pick<VideoGenerationDraft, 'backend' | 'apiProfileId' | 'workflowId' | 'runningHubWorkflowId' | 'runningHubWebAppId'> & Partial<Pick<VideoGenerationDraft, 'parameters'>>,
 ): unknown => {
   if (draft.backend === 'comfyui') {
     const comfyui = settings.comfyuiVideo;
@@ -434,6 +435,10 @@ export const videoBatchConnectionIdentity = (
       } : undefined,
       workflow,
     });
+  }
+  if (draft.runningHubWebAppId !== undefined) {
+    try { return semanticConnection({ backend: 'api', api: resolveConfiguredVideoApi(settings, { ...draft, parameters: draft.parameters || {} }) }); }
+    catch { return semanticConnection({ backend: 'api', api: { provider: 'rh_web', missingApp: draft.runningHubWebAppId } }); }
   }
   if (draft.runningHubWorkflowId !== undefined) {
     try { return semanticConnection({ backend: 'api', api: resolveConfiguredVideoApi(settings, { ...draft, parameters: draft.parameters || {} }) }); }
@@ -672,6 +677,9 @@ const isolatedDraft = (
     runningHubWorkflowId: options.runningHubWorkflowId === undefined
       ? options.backend === undefined ? empty.runningHubWorkflowId : undefined
       : options.runningHubWorkflowId || undefined,
+    runningHubWebAppId: options.runningHubWebAppId === undefined
+      ? options.backend === undefined ? empty.runningHubWebAppId : undefined
+      : options.runningHubWebAppId || undefined,
     workflowId: options.workflowId === undefined
       ? empty.workflowId
       : options.workflowId || undefined,

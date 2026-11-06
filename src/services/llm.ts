@@ -4599,8 +4599,8 @@ export const requestDirectorLookAutofill = async (
       '不要只返回给定选项的 ID，也不要被选项限制；可以参考选项命名，但要优先写出贴合当前剧情的中文自定义表达。',
       nsfwLookRule,
       'directorCategory 是 2-12 个汉字或短词，概括题材/导演调性，例如“海岛动漫”“东方奇幻”“悬疑文艺”。',
-      'directorStyle 是 6-40 个汉字的导演调度风格名称或短句，说明镜头组织和叙事气质。',
-      'directorStyleSummary 是 10-120 个汉字，说明节奏、调度、镜头关系和适用场面。',
+      'directorStyle 是 6-40 个汉字的导演调度风格名称或短句，说明叙事气质。不写机位、景别、跟随、固定、推近、前景遮挡，也不写缓慢、慢慢、慢动作或 slow motion。',
+      'directorStyleSummary 是 10-120 个汉字，说明叙事气质和适用场面。不写机位、景别、跟随、固定、推近或前景遮挡。不写缓慢、慢慢、慢动作或 slow motion。',
       hasReferenceImage
         ? 'visualStyle 是 10-160 个汉字的具体画面风格描述，保留参考图的媒介、写实程度、渲染、材质、调色及光影特征，并体现 customRequirement 指定的调整；不能只用泛化的内置风格名称代替识别细节。baseVisualStyle 只从 referenceOnlyOptions.visualStyles 的已有 name 中选最接近的风格基底；没有准确合适的基底时返回空字符串。基底不能替代或删减 visualStyle 的具体描述。'
         : 'visualStyle 是 4-60 个汉字的画面媒介/美术风格，可使用已有视觉风格，也可以自定义更贴合剧情的风格。',

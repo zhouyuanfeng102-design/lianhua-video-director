@@ -3,6 +3,7 @@ import { buildRhTvBody, defaultRhTvApi, RHTV_ORIGIN } from './rhtvBridge';
 import type { VideoGenerationDraft, VideoGenerationStage } from './videoGenerationTypes';
 import { mapVideoTaskResponse, nestedValue } from './videoTasks';
 import { bindRunningHubVideoRequest } from './runningHubVideo';
+import { buildRhWebBody, RHWEB_ORIGIN } from './runningHubWeb';
 import { videoReferenceUsage } from './videoReferenceUsage';
 import { assertVideoReferenceSlots, videoReferenceSlotIndex, videoReferenceSlotSpan } from './videoReferenceSlots';
 import { buildLaoliVideoApiBody, genericVideoSubmitEndpoint, isLaoliVideoBuiltinProtocol, parseGenericVideoApiResult } from './genericVideoApi';
@@ -110,6 +111,7 @@ const clearUnusedRunningHubTemplateImages = (value: unknown, occupiedSlots: Read
 };
 
 export const buildVideoApiBody = (config: Omit<VideoTaskApiConfig, 'apiKey'>, draft: VideoGenerationDraft, images: string[], audios: string[] = [], videos: string[] = []): Record<string, unknown> => {
+  if (config.provider === 'rh_web') return buildRhWebBody(config, draft, images, audios);
   const imageCapacity = getVideoApiImageCapacity(config);
   if (imageCapacity && images.length > imageCapacity.maxCount) throw new Error(`当前接口返回的模型图片容量为 ${imageCapacity.maxCount} 张，本次选了 ${images.length} 张；不会丢弃图片，尚未提交视频。`);
   if ((draft.audioReferences?.length || audios.length) && config.provider !== 'runninghub') {
@@ -264,6 +266,18 @@ export const runningHubVideoResult = (body: unknown, outputNodeIds: readonly str
 export const parseVideoApiResult = (body: unknown, config: Omit<VideoTaskApiConfig, 'apiKey'>): {
   remoteTaskId: string; stage: VideoGenerationStage; status: 'submitted' | 'running' | 'succeeded' | 'failed' | 'unknown'; resultUrl?: string; archiveHint?: boolean; downloadError?: string; fileId?: string; progress?: number; message?: string;
 } => {
+  if (config.provider === 'rh_web') {
+    const remoteTaskId = String(nestedValue(body, 'id') || '');
+    const raw = String(nestedValue(body, 'status') || '');
+    const message = String(nestedValue(body, 'message') || '等待 RH 网页状态');
+    const url = nestedValue(body, 'result_url');
+    if (raw === 'succeeded' && url === `${RHWEB_ORIGIN}/v1/videos/${remoteTaskId}/content`) return { remoteTaskId, stage: 'downloading', status: 'succeeded', resultUrl: String(url), message };
+    if (raw === 'succeeded') return { remoteTaskId, stage: 'succeeded', status: 'succeeded', message, downloadError: '网页任务已结束，但成片地址无效；不会重新生成。' };
+    if (raw === 'failed') return { remoteTaskId, stage: 'failed', status: 'failed', message };
+    if (raw === 'submission_unknown') return { remoteTaskId, stage: 'submission-unknown', status: 'unknown', message };
+    if (raw === 'running' || raw === 'preparing') return { remoteTaskId, stage: raw === 'running' ? 'running' : 'queued', status: raw === 'running' ? 'running' : 'submitted', message };
+    return { remoteTaskId, stage: 'reconnecting', status: 'unknown', message };
+  }
   if (config.provider === 'rhtv_web') {
     const remoteTaskId = String(nestedValue(body, 'id') || '');
     const raw = String(nestedValue(body, 'status') || '');

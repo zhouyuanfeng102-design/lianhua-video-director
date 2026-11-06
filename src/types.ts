@@ -6,6 +6,7 @@ import type {
 import type { ComfyVideoConfig, VideoApiProfile, VideoGenerationJob, VideoGenerationBackend } from './videoGenerationTypes';
 import type { VideoGenerationSource } from './videoGenerationTypes';
 import type { RunningHubVideoConfig, RunningHubVideoFieldControl, RunningHubVideoWorkflow } from './runningHubVideoTypes';
+import type { RunningHubWebConfig, RunningHubWebField } from './runningHubWeb';
 import type {
   ImagePromptAssetKind,
   ImagePromptFormat,
@@ -1642,11 +1643,16 @@ export interface VideoTaskApiConfig {
   taskIdPath: string;
   statusPath: string;
   resultUrlPath: string;
-  provider?: 'generic' | 'minimax' | 'runninghub' | 'rhtv_web';
+  provider?: 'generic' | 'minimax' | 'runninghub' | 'rhtv_web' | 'rh_web';
   rhtvMode?: 'text' | 'first' | 'first_last' | 'reference';
   rhtvDuration?: number;
   rhtvResolution?: string;
   rhtvAspectRatio?: string;
+  /** Frozen RH web-page form. The browser window uses this; it is not an API key request. */
+  rhWebAccountId?: string;
+  rhWebPageUrl?: string;
+  rhWebInstance?: string;
+  rhWebFields?: RunningHubWebField[];
   model?: string;
   /** Read-only upstream UI metadata; excluded from execution and credential identities. */
   parameterCapabilities?: import('./videoApiCapabilityTypes').VideoApiParameterCapabilities;
@@ -1711,6 +1717,7 @@ export interface AppSettings {
   videoExecutionMode?: 'queue' | 'concurrent';
   videoExecutionConcurrency?: number;
   runningHubVideo?: RunningHubVideoConfig;
+  runningHubWeb?: RunningHubWebConfig;
   comfyuiVideo?: ComfyVideoConfig;
   videoApiProfiles?: VideoApiProfile[];
   activeVideoApiProfileId?: string | null;

@@ -46,6 +46,7 @@ import { normalizeImageReferenceAssetSnapshots, normalizeStoryboardImageToImageS
 import { normalizeAssetReferenceEntityBinding } from './assetCharacterBinding';
 import { defaultComfyVideoConfig } from './videoGenerationTypes';
 import { defaultRunningHubVideoConfig, normalizeRunningHubVideoConfig } from './runningHubVideo';
+import { defaultRunningHubWebConfig, normalizeRunningHubWebConfig } from './runningHubWeb';
 import { AUDIO_PROMPT_RULE, DIALOGUE_DELIVERY_RULE } from './audioPromptPolicy';
 import { normalizeVideoWorkbenchState } from './videoWorkbench';
 import { MOSE_JIANGHU_NSFW_DETAIL_RULES } from './nsfwPromptRules';
@@ -992,6 +993,7 @@ export const defaultSettings: AppSettings = {
   videoExecutionConcurrency: 1,
   comfyuiVideo: { ...defaultComfyVideoConfig, workflows: [] },
   runningHubVideo: { ...defaultRunningHubVideoConfig, workflows: [] },
+  runningHubWeb: defaultRunningHubWebConfig(),
   videoApiProfiles: [],
   activeVideoApiProfileId: null,
   apiCredentialBook: [],
@@ -1043,6 +1045,7 @@ export const createInitialState = (): AppState => {
       videoTaskApi: { ...defaultSettings.videoTaskApi },
       comfyuiVideo: { ...defaultComfyVideoConfig, workflows: [] },
       runningHubVideo: { ...defaultRunningHubVideoConfig, workflows: [] },
+      runningHubWeb: defaultRunningHubWebConfig(),
       videoApiProfiles: [],
       apiCredentialBook: [],
       textApiProfiles: defaultSettings.textApiProfiles.map((item) => ({ ...item })),
@@ -3334,7 +3337,8 @@ export const normalizeState = (raw: unknown): AppState => {
     videoTaskApi,
     comfyuiVideo,
     runningHubVideo: normalizeRunningHubVideoConfig(incomingSettings.runningHubVideo),
-    videoSource: ['api', 'comfyui', 'runninghub'].includes(incomingSettings.videoSource) ? incomingSettings.videoSource : undefined,
+    runningHubWeb: normalizeRunningHubWebConfig(incomingSettings.runningHubWeb),
+    videoSource: ['api', 'comfyui', 'runninghub', 'runninghub-web'].includes(incomingSettings.videoSource) ? incomingSettings.videoSource : undefined,
     videoBackend: incomingSettings.videoBackend === 'comfyui' ? 'comfyui' : 'api',
     videoExecutionMode: incomingSettings.videoExecutionMode === 'concurrent' ? 'concurrent' : 'queue',
     videoExecutionConcurrency: typeof incomingSettings.videoExecutionConcurrency === 'number'
