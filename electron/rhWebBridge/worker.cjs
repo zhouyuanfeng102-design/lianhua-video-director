@@ -150,7 +150,8 @@ async function readForm(page) {
       } else if (numeric && !/aspect|比例/iu.test(name)) {
         number += 1;
         const key = /时长/u.test(name) ? 'number:duration' : /像素|megapixel/iu.test(name) ? 'number:megapixels' : `number:${number}`;
-        fields.push({ key, label: name, kind: 'number', value: numeric.value });
+        const numericValue = Number(numeric.value);
+        fields.push({ key, label: name, kind: 'number', value: Number.isFinite(numericValue) ? numericValue : numeric.value });
       } else if (selected || /aspect|比例/iu.test(name)) {
         fields.push({ key: 'select:aspect', label: name, kind: 'select', value: (selected?.textContent || '').trim(), options: [] });
       }
@@ -158,7 +159,9 @@ async function readForm(page) {
     const instance = (document.querySelector('.run-mode-current')?.textContent || '').trim();
     const estimate = (document.body.innerText.match(/≈\s*[\d.]+\s*RH币/u) || [])[0] || '';
     const heading = document.querySelector('h1.ai-title');
-    const name = (heading?.getAttribute('title') || heading?.textContent || '').replace(/\s+/gu, ' ').trim();
+    let name = (heading?.getAttribute('title') || heading?.textContent || '').replace(/\s+/g, ' ').trim();
+    if (!name) name = document.title.replace(/\s*[-|–—]\s*RunningHub\b.*/i, '').trim();
+    if (!name || /^RunningHub$/i.test(name)) name = '';
     return { fields, instance, estimate, ...(name ? { name } : {}) };
   });
 }
@@ -469,22 +472,106 @@ async function downloadMarkedResult(page, taskId, jobId) {
   return file;
 }
 
+async function finishedOutput(page, webappId, taskId) {
+  return page.evaluate(async ({ webappId, taskId }) => {
+    const token = localStorage.getItem('Rh-Accesstoken') || '';
+    const headers = { 'Content-Type': 'application/json' };
+    if (token) headers.Authorization = `Bearer ${token}`;
+    const records = [];
+    let fromId = '';
+    for (let pageIndex = 0; pageIndex < 3; pageIndex += 1) {
+      const response = await fetch('/api/output/v2/history', {
+        method: 'POST',
+        credentials: 'include',
+        headers,
+        body: JSON.stringify({ size: 20, current: 1, taskType: ['WORKFLOW', 'WEBAPP'], webappId, fromId }),
+      });
+      if (!response.ok) return null;
+      const body = await response.json();
+      const data = body?.data ?? body;
+      const list = Array.isArray(data) ? data : (data?.records || data?.list || []);
+      if (!Array.isArray(list) || !list.length) break;
+      records.push(...list);
+      const found = list.find((item) => String(item?.taskId) === String(taskId));
+      if (found) {
+        const status = String(found.taskStatus || '').toUpperCase();
+        return {
+          seen: true,
+          done: status === 'SUCCESS' || status === 'SUCCEED' || status === 'FINISHED',
+          failed: status === 'FAILED' || status === 'ERROR',
+          fileUrl: found.fileUrl || found.url || found.filePreviewUrl || '',
+        };
+      }
+      if (list.length < 20) break;
+      fromId = String(list[list.length - 1]?.taskId || '');
+      if (!fromId) break;
+    }
+    return { seen: records.length > 0, done: false, failed: false, fileUrl: '' };
+  }, { webappId, taskId }).catch(() => null);
+}
+
+async function saveOutputFile(page, fileUrl, jobId) {
+  const token = await page.evaluate(() => localStorage.getItem('Rh-Accesstoken') || '');
+  const absolute = new URL(fileUrl, page.url()).href;
+  const response = await page.context().request.get(absolute, {
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    timeout: 120000,
+  });
+  if (!response.ok()) throw new Error(`网页成片下载失败：${response.status()}`);
+  const type = String(response.headers()['content-type'] || '');
+  if (type.includes('text/html') || type.includes('application/json')) throw new Error('网页完成记录里的地址还不是视频文件。');
+  const extension = type.includes('webm') ? '.webm' : type.includes('quicktime') || absolute.includes('.mov') ? '.mov' : '.mp4';
+  const file = path.join(resultsDir, `${jobId}${extension}`);
+  await fs.promises.writeFile(file, await response.body());
+  return file;
+}
+
 async function refreshJob(job) {
   if (job.file || job.status === 'failed' || job.status === 'cancelled' || !job.upstream_task_id) return publicJob(job);
-  const entry = contexts.get(job.account_id);
-  if (!entry) return publicJob({ ...job, message: '网页窗口已关闭。打开同一账号的窗口后可以继续查看原任务。' });
-  if (entry.busy) return publicJob(job);
+  if (job.next_download_at && Date.now() < job.next_download_at) return publicJob(job);
+  const site = String(job.page_url || '').includes('runninghub.cn') ? 'cn' : 'ai';
+  let entry = contexts.get(job.account_id);
+  const alive = entry && entry.context.pages().some((page) => !page.isClosed());
+  if (entry?.busy) return publicJob(job);
+  if (!alive) entry = await openContext(job.account_id, site, true);
   entry.busy = true;
   try {
     const page = await pageFor(entry, job.page_url);
-    if (job.next_download_at && Date.now() < job.next_download_at) return publicJob(job);
+    const webappId = (String(job.page_url || '').match(/ai-detail\/(\d+)/u) || [])[1] || '';
+    const output = webappId ? await finishedOutput(page, webappId, job.upstream_task_id) : null;
+    if (output?.failed) {
+      job.status = 'failed';
+      job.message = `网页任务 ${job.upstream_task_id} 已失败，没有再点运行。`;
+      saveJobs();
+      return publicJob(job);
+    }
+    if (output?.fileUrl) {
+      try {
+        job.file = await saveOutputFile(page, output.fileUrl, job.id);
+        job.status = 'succeeded';
+        job.message = `已从网页完成记录下载任务 ${job.upstream_task_id}`;
+        saveJobs();
+        return publicJob(job);
+      } catch { /* The page download button is the fallback. */ }
+    }
+    if (output?.seen && !output.done && !output.failed && !output.fileUrl) {
+      job.status = 'running';
+      job.message = `网页任务 ${job.upstream_task_id} 还在生成，完成后会自动保存。`;
+      saveJobs();
+      return publicJob(job);
+    }
     let file = '';
     try {
       file = await downloadMarkedResult(page, job.upstream_task_id, job.id);
+      if (!file) {
+        await page.reload({ waitUntil: 'domcontentloaded', timeout: 45000 });
+        await page.locator('h1.ai-title, .tab-pill').first().waitFor({ state: 'attached', timeout: 20000 }).catch(() => {});
+        file = await downloadMarkedResult(page, job.upstream_task_id, job.id);
+      }
     } catch (error) {
       job.next_download_at = Date.now() + 20000;
       job.status = 'running';
-      job.message = `${error.message} 播放器里的预览没有当作成片。`;
+      job.message = `${error.message} 完成后会自动再取成片。`;
       saveJobs();
       return publicJob(job);
     }
@@ -561,24 +648,25 @@ parentPort.on('message', async ({ id, action, payload }) => {
       return;
     }
     if (action === 'session') {
-      const entry = contexts.get(payload.accountId);
-      const pages = entry ? entry.context.pages().filter((page) => !page.isClosed()) : [];
-      if (!pages.length) {
-        parentPort.postMessage({ id, result: { open: false, loggedIn: false, displayName: '', coins: '', wallet: '' } });
-        return;
-      }
-      let session = { loggedIn: false, displayName: '', coins: '', wallet: '' };
-      for (const page of pages) {
-        const read = await readSession(page);
-        session = read;
-        if (read.loggedIn) break;
-      }
+      const existing = contexts.get(payload.accountId);
+      const openPages = existing ? existing.context.pages().filter((page) => !page.isClosed()) : [];
+      const entry = openPages.length ? existing : await openContext(payload.accountId, payload.site, true);
+      const page = entry.context.pages().find((item) => !item.isClosed()) || await entry.context.newPage();
+      if (!page.url().includes('runninghub.')) await page.goto(`${hostFor(payload.site)}/zh-cn`, { waitUntil: 'domcontentloaded', timeout: 45000 });
+      await page.waitForFunction(() => {
+        try {
+          const raw = localStorage.getItem('rh-login-user-info') || '';
+          return /"nickName"\s*:\s*"[^"]*\S[^"]*"/u.test(raw);
+        } catch { return false; }
+      }, { timeout: 8000 }).catch(() => {});
+      const session = await readSession(page).catch(() => ({ loggedIn: false, displayName: '', coins: '', wallet: '' }));
       parentPort.postMessage({ id, result: { open: true, ...session } });
       return;
     }
     if (action === 'read') {
       const entry = await openContext(payload.accountId, payload.site, true);
       const page = await pageFor(entry, payload.url);
+      await page.locator('h1.ai-title').first().waitFor({ state: 'attached', timeout: 8000 }).catch(() => {});
       const form = await readForm(page);
       const aspect = form.fields.find((item) => item.key === 'select:aspect');
       if (aspect) aspect.options = await readAspectOptions(page);

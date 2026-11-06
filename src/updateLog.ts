@@ -15,6 +15,34 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "3.9.4",
+    releasedAt: "2026-11-07",
+    title: "RH 网页时长沿用页面上的数字",
+    highlights: [
+      "导演台时长留空时，使用网页应用里已经读到的时长，例如 30 秒。",
+      "页面上的数字即使是文本也会按数字提交。",
+    ],
+  },
+  {
+    version: "3.9.3",
+    releasedAt: "2026-11-07",
+    title: "RH 网页开着也会收回已完成成片",
+    highlights: [
+      "网页任务已经成功时，软件开着会按任务号核对完成记录并下载。",
+      "不用退出重开。不会再点一次运行。",
+    ],
+  },
+  {
+    version: "3.9.2",
+    releasedAt: "2026-11-07",
+    title: "RH 网页补上应用名和账号昵称",
+    highlights: [
+      "应用名仍是编号时，打开管理页会读取页面标题并写上。",
+      "已登录但登录位还是临时名字时，后台读取网页昵称并替换。",
+      "网页任务已经成功时，软件开着也会自动下载成片，不用退出重开。",
+    ],
+  },
+  {
     version: "3.9.1",
     releasedAt: "2026-11-07",
     title: "RH 网页成片可以保存",

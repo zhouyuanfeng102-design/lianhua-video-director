@@ -43,8 +43,10 @@ export function RunningHubWebSettings({ config, getCurrentConfig, onChange }: Ru
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [watching, setWatching] = useState('');
-  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [managerOpen, setManagerOpen] = useState(false);
+  const autoNamed = useRef('');
+  const autoAccount = useRef('');
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [managerTab, setManagerTab] = useState<'prompt' | 'image' | 'audio' | 'parameter'>('prompt');
   const apply = (next: RunningHubWebConfig) => { onChange(next); setError(''); };
   const account = config.accounts.find((item) => item.id === config.activeAccountId) || config.accounts[0];
@@ -77,6 +79,12 @@ export function RunningHubWebSettings({ config, getCurrentConfig, onChange }: Ru
       if (result.loggedIn) setWatching('');
     } catch { /* The window can close between checks. The last shown identity stays. */ }
   };
+  useEffect(() => {
+    if (busy || !account?.session?.loggedIn || account.session.displayName) return;
+    if (autoAccount.current === account.id) return;
+    autoAccount.current = account.id;
+    void refreshSession(account.id);
+  }, [account?.id, account?.session?.loggedIn, account?.session?.displayName, busy]);
   const login = async () => {
     if (!account) return;
     if (!desktop?.rhWebControl) { setError('登录窗口只在桌面程序里打开。'); return; }
@@ -126,11 +134,19 @@ export function RunningHubWebSettings({ config, getCurrentConfig, onChange }: Ru
     try {
       const result = await desktop.rhWebControl({ action: 'read', accountId: selectedAccount.id, site: selected.site, url: selected.url });
       const fields = (result.fields || []).map((item) => ({ ...item, bind: item.bind || 'fixed' }));
-      apply({ ...live, apps: live.apps.map((item) => item.id === selected.id ? mergeRunningHubWebRead(item, { fields, instance: result.instance, estimate: result.estimate, name: result.name }) : item) });
+      const latest = current();
+      const target = latest.apps.find((item) => item.id === selected.id) || selected;
+      apply({ ...latest, apps: latest.apps.map((item) => item.id === selected.id ? mergeRunningHubWebRead(target, { fields, instance: result.instance, estimate: result.estimate, name: result.name }) : item) });
       setMessage(result.fields?.length ? `已在后台读到 ${result.fields.length} 个字段${result.name ? `，应用名是「${result.name}」` : ''}。没有打开网页窗口。原有绑定按字段名保留。` : '网页没有返回字段。');
     } catch (cause) { setError(formatUserFacingError(cause)); }
     finally { setBusy(false); }
   };
+  useEffect(() => {
+    if (!managerOpen || busy || !app || !/^网页应用 \d+$/u.test(app.name)) return;
+    if (autoNamed.current === app.id) return;
+    autoNamed.current = app.id;
+    void readPage();
+  }, [managerOpen, app?.id, app?.name, busy]);
 
   return <div className="vgs-main runninghub-video-settings" data-runninghub-web-settings="true">
     <section className="vgs-card">
@@ -187,7 +203,7 @@ export function RunningHubWebSettings({ config, getCurrentConfig, onChange }: Ru
             {config.apps.map((item) => <option key={item.id} value={item.id}>{item.name}{isRunningHubWebAppReady(item) ? '' : ' · 待读取'}</option>)}
           </select>
         </label>
-        <button type="button" className="btn" onClick={() => setManagerOpen(true)}><FolderOpen size={16} />管理网页应用</button>
+        <button type="button" className="btn" onClick={() => { setAddress(app?.url || address); setManagerOpen(true); }}><FolderOpen size={16} />管理网页应用</button>
       </div>
       <div className="vgs-workflow-summary"><strong>当前实际生效：</strong><span>{app?.name || '尚未选择'}</span>{app && <span className="vgs-summary-tags">提示词 {app.fields.filter((field) => field.kind === 'text').length} 个 · 图片槽 {app.fields.filter((field) => field.kind === 'image').length} 个 · 音频槽 {app.fields.filter((field) => field.kind === 'audio').length} 个</span>}</div>
     </section>
@@ -198,7 +214,7 @@ export function RunningHubWebSettings({ config, getCurrentConfig, onChange }: Ru
         <div className="vwm-body">
           <aside className="vwm-library">
             <div className="vwm-library-heading"><h3>应用库</h3><span>{config.apps.length} 个</span></div>
-            <div className="vwm-library-list">{config.apps.map((item) => <button type="button" key={item.id} className={`vwm-library-item${item.id === app?.id ? ' selected' : ''}`} onClick={() => apply({ ...current(), activeAppId: item.id })}><strong>{item.name}</strong><span>{item.id === app?.id ? '当前使用' : isRunningHubWebAppReady(item) ? '可用' : '待读取'}</span></button>)}{!config.apps.length && <p className="vwm-empty">还没有应用。在右侧粘贴应用页链接。</p>}</div>
+            <div className="vwm-library-list">{config.apps.map((item) => <button type="button" key={item.id} className={`vwm-library-item${item.id === app?.id ? ' selected' : ''}`} onClick={() => { setAddress(item.url); apply({ ...current(), activeAppId: item.id }); }}><strong>{item.name}</strong><span>{item.id === app?.id ? '当前使用' : isRunningHubWebAppReady(item) ? '可用' : '待读取'}</span></button>)}{!config.apps.length && <p className="vwm-empty">还没有应用。在右侧粘贴应用页链接。</p>}</div>
           </aside>
           <main className="vwm-editor">
             <label className="field"><span>应用页链接或应用号</span><input aria-label="RH 网页应用地址" value={address} onChange={(event) => setAddress(event.target.value)} /></label>

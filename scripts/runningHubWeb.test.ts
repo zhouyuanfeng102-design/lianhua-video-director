@@ -37,6 +37,8 @@ const fields = body.fields as Array<{ key: string; value: unknown }>;
 assert.equal(fields.find((field) => field.key === 'text:prompt')?.value, '她转身看向镜头');
 assert.equal(body.prompt, draft.prompt);
 assert.equal(fields.find((field) => field.key === 'number:duration')?.value, 12);
+const keptDuration = buildRhWebBody({ ...api, rhWebFields: (api.rhWebFields || []).map((field) => field.key === 'number:duration' ? { ...field, value: '30' } : field) }, { ...draft, parameters: { idea: '她转身看向镜头' } }, []);
+assert.equal((keptDuration.fields as Array<{ key: string; value: unknown }>).find((field) => field.key === 'number:duration')?.value, 30);
 assert.equal(fields.find((field) => field.key === 'select:aspect')?.value, '9:16 (Portrait Widescreen)');
 const withoutIdea = buildRhWebBody(api, { ...draft, parameters: {} }, []);
 assert.equal((withoutIdea.fields as Array<{ key: string; value: unknown }>).find((field) => field.key === 'text:prompt')?.value, draft.prompt);

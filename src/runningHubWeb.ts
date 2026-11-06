@@ -316,8 +316,10 @@ export const buildRhWebBody = (
     }
     if (item.bind === 'duration' || item.bind === 'megapixels') {
       const raw = parameterValue(draft.parameters, item.bind);
-      const value = raw === undefined ? item.value : typeof raw === 'number' ? raw : Number(raw);
-      if (typeof value !== 'number' || !Number.isFinite(value)) throw new Error(`${item.label} 需要数字。`);
+      const source = raw === undefined ? item.value : raw;
+      const text = typeof source === 'number' ? String(source) : String(source ?? '').trim();
+      const value = typeof source === 'number' ? source : Number(text);
+      if (!text || !Number.isFinite(value)) throw new Error(`${item.label} 需要数字。`);
       if (item.bind === 'megapixels' && value >= 0.8) instance = 'Ultra';
       return { key: item.key, label: item.label, kind: item.kind, value };
     }
