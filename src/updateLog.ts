@@ -15,6 +15,16 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "4.0.8",
+    releasedAt: "2026-11-08",
+    title: "新版积分和老版 RH 币都能提交",
+    highlights: [
+      "登录状态按网页显示：新版写积分、过渡 RH 币和钱包，老版仍写 RH 币和钱包。",
+      "新版运行区写「费用以实际用量结算」时会继续点击运行。",
+      "老版页面仍要看到 ≈ RH币 才点击运行。",
+    ],
+  },
+  {
     version: "4.0.7",
     releasedAt: "2026-11-07",
     title: "镜头正文只写画面和原话",

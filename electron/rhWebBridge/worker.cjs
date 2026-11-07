@@ -63,9 +63,32 @@ async function readSession(page) {
     const ownText = (element) => [...element.childNodes].filter((node) => node.nodeType === 3).map((node) => node.textContent || '').join('').replace(/\s+/gu, ' ').trim();
     const header = document.querySelector('.header-right') || document.querySelector('.common-header') || document.body;
     const login = [...header.querySelectorAll('button, a, span, div')].some((element) => ownText(element) === '登录/注册' || (element.textContent || '').trim() === '登录/注册');
-    const titles = [...header.querySelectorAll('[title]')].map((element) => element.getAttribute('title') || '');
-    const coins = titles.find((title) => title.startsWith('RH币')) || '';
-    const wallet = titles.find((title) => /\$|美元|钱包/u.test(title) && title !== coins) || '';
+    const snippets = [];
+    const push = (value) => {
+      const text = String(value || '').replace(/\s+/gu, ' ').trim();
+      if (text && text.length <= 48 && !snippets.includes(text)) snippets.push(text);
+    };
+    for (const element of header.querySelectorAll('[title], [aria-label]')) {
+      push(element.getAttribute('title'));
+      push(element.getAttribute('aria-label'));
+    }
+    for (const element of header.querySelectorAll('span, div, button, a, p')) push(ownText(element));
+    const kindOf = (value) => {
+      if (/过渡/u.test(value) && /RH/iu.test(value)) return 'transition';
+      if (/积分|credits/iu.test(value)) return 'points';
+      if (/^RH\s*币|^RH\s*coins/iu.test(value)) return 'legacy';
+      if (/钱包|\$|美元|USD/iu.test(value)) return 'wallet';
+      return '';
+    };
+    const first = (kind) => {
+      const matches = snippets.filter((value) => kindOf(value) === kind);
+      return matches.find((value) => /\d/u.test(value)) || matches[0] || '';
+    };
+    const points = first('points');
+    const transition = first('transition');
+    const legacy = first('legacy');
+    const wallet = first('wallet');
+    const coins = points || transition ? [points, transition].filter(Boolean).join(' · ') : legacy;
     const nickFrom = (value, depth = 0) => {
       if (!value || typeof value !== 'object' || depth > 5) return '';
       if (typeof value.nickName === 'string' && value.nickName.trim()) return value.nickName.trim();
@@ -158,7 +181,8 @@ async function readForm(page) {
       }
     }
     const instance = (document.querySelector('.run-mode-current')?.textContent || '').trim();
-    const estimate = (document.body.innerText.match(/≈\s*[\d.]+\s*RH币/u) || [])[0] || '';
+    const pageText = document.body.innerText;
+    const estimate = (pageText.match(/≈\s*[\d,.]+\s*RH币/u) || pageText.match(/≈\s*[\d,.]+\s*积分/u) || pageText.match(/≈\s*[\d,.]+\s*过渡\s*RH\s*币/u) || [])[0] || '';
     const heading = document.querySelector('h1.ai-title');
     let name = (heading?.getAttribute('title') || heading?.textContent || '').replace(/\s+/g, ' ').trim();
     if (!name) name = document.title.replace(/\s*[-|–—]\s*RunningHub\b.*/i, '').trim();
@@ -402,6 +426,40 @@ function rememberTask(page) {
   return { found, stop: () => page.off('response', onResponse) };
 }
 
+function chargeOnPage(text) {
+  const source = String(text || '').replace(/\s+/gu, ' ');
+  const legacy = source.match(/≈\s*[\d,.]+\s*RH币/u);
+  if (legacy) return { quote: legacy[0], ready: true };
+  const points = source.match(/≈\s*[\d,.]+\s*积分/u);
+  if (points) return { quote: points[0], ready: true };
+  const transition = source.match(/≈\s*[\d,.]+\s*过渡\s*RH\s*币/u);
+  if (transition) return { quote: transition[0], ready: true };
+  return { quote: '', ready: /费用以实际用量结算/u.test(source) };
+}
+
+/** Old app pages still show ≈ N RH币 beside Run. New pages settle by points,
+ * transitional RH coins and the wallet, and say 费用以实际用量结算 instead. */
+async function readRunQuote(page) {
+  const nearRun = await page.locator('.run-cell-main').filter({ hasText: '立即运行' }).first().evaluate((node) => {
+    let current = node;
+    for (let depth = 0; current && depth < 8; depth += 1) {
+      const text = (current.innerText || '').replace(/\s+/gu, ' ');
+      if (/≈\s*[\d,.]+\s*RH币|≈\s*[\d,.]+\s*积分|≈\s*[\d,.]+\s*过渡\s*RH\s*币|费用以实际用量结算/u.test(text)) return text;
+      current = current.parentElement;
+    }
+    return node.parentElement?.innerText || '';
+  }).catch(() => '');
+  let charge = chargeOnPage(nearRun);
+  if (!charge.ready) {
+    const body = await page.locator('body').innerText();
+    const legacy = body.match(/≈\s*[\d,.]+\s*RH币/u);
+    if (legacy) charge = { quote: legacy[0], ready: true };
+    else if (/费用以实际用量结算/u.test(body)) charge = { quote: '', ready: true };
+  }
+  if (!charge.ready) throw new Error('网页上没有读到预估 RH 币，没有点击运行。');
+  return charge.quote;
+}
+
 async function runJob(entry, body) {
   const existing = jobs.find((job) => job.client_id === body.client_id);
   if (existing) return publicJob(existing);
@@ -436,9 +494,8 @@ async function runJob(entry, body) {
       await fillControl(page, assignment);
     }
     await chooseInstance(page, body.instance);
-    const quote = ((await page.locator('body').innerText()).match(/≈\s*[\d.]+\s*RH币/u) || [])[0];
-    if (!quote) throw new Error('网页上没有读到预估 RH 币，没有点击运行。');
-    job.message = `网页预估 ${quote}，正在点击运行`;
+    const quote = await readRunQuote(page);
+    job.message = quote ? `网页预估 ${quote}，正在点击运行` : '正在点击运行';
     job.handed_off = true;
     job.status = 'submission_unknown';
     saveJobs();
@@ -454,7 +511,7 @@ async function runJob(entry, body) {
     }
     job.upstream_task_id = watch.found[0];
     job.status = 'running';
-    job.message = `网页任务 ${job.upstream_task_id} 已提交，预估 ${quote}`;
+    job.message = quote ? `网页任务 ${job.upstream_task_id} 已提交，预估 ${quote}` : `网页任务 ${job.upstream_task_id} 已提交`;
     saveJobs();
     return publicJob(job);
   } catch (error) {
@@ -675,7 +732,7 @@ parentPort.on('message', async ({ id, action, payload }) => {
       await page.goto(`${hostFor(payload.site)}/zh-cn`, { waitUntil: 'domcontentloaded', timeout: 45000 });
       await page.bringToFront().catch(() => {});
       const session = await readSession(page).catch(() => ({ loggedIn: false, displayName: '', coins: '', wallet: '' }));
-      parentPort.postMessage({ id, result: { running: true, open: true, ...session, message: '登录窗口已打开。在窗口里登录后，软件会显示这个窗口里的昵称和 RH 币。' } });
+      parentPort.postMessage({ id, result: { running: true, open: true, ...session, message: '登录窗口已打开。在窗口里登录后，软件会显示这个窗口里的昵称，以及积分、过渡 RH 币和钱包，或老版的 RH 币和钱包。' } });
       return;
     }
     if (action === 'session') {

@@ -7,7 +7,7 @@ const script=fs.readFileSync(new URL('../android/app/src/main/assets/rh-web.js',
 const selectOptionsOnly=process.argv.includes('--select-options-only');
 let submissions=0;
 const html=`<!doctype html><html><head><title>手机适配测试 - RunningHub</title></head><body>
-<header class="header-right"><span class="user-name">测试用户</span></header><h1 class="ai-title">H3 测试应用</h1>
+<header class="header-right"><span class="user-name">测试用户</span><a title="积分">积分</a><span title="积分 1037"></span><span title="过渡 RH 币 208691"></span><span title="RH币 9"></span><span title="钱包: 0"></span></header><h1 class="ai-title">H3 测试应用</h1>
 <div class="ai-side"><div class="item-plane"><div class="plane-top"><span class="title">提示词</span></div><textarea>网页示例</textarea></div>
 <div class="item-plane"><div class="plane-top"><span class="title">时长</span></div><input type="number" value="30"></div>
 <div class="item-plane"><div class="plane-top"><span class="title">自动提示词</span></div><button role="switch" aria-checked="true" onclick="this.setAttribute('aria-checked',this.getAttribute('aria-checked')==='true'?'false':'true')">开关</button></div></div>
@@ -36,10 +36,14 @@ const inner=document.createElement('div');inner.style.cssText='height:'+(lists[f
 function render(){const start=Math.floor(holder.scrollTop/20);inner.innerHTML='';for(let i=start;i<Math.min(start+3,lists[field].length);i++){const option=document.createElement('div');option.className='ant-select-item-option-content';option.textContent=lists[field][i];option.style.cssText='position:absolute;height:20px;top:'+(i*20)+'px';option.onclick=()=>{window.selectWrites++;trigger.querySelector('span').textContent=option.textContent;closeDropdown();};inner.append(option);}}
 holder.onscroll=()=>requestAnimationFrame(render);render();};
 </script>`;
+const pointsHtml=html.replace('≈ 0.6 RH币','费用以实际用量结算').replace('H3 测试应用','积分测试应用');
+const emptyHtml=html.replace('<div>≈ 0.6 RH币</div>','<div>每秒消耗0.2个RH币</div>');
 const server=http.createServer((req,res)=>{
   if(req.url==='/task'){submissions++;res.setHeader('content-type','application/json');res.end(JSON.stringify({data:{taskId:'native-test-task-123'}}));return;}
   if(req.url==='/api/output/v2/history'){res.setHeader('content-type','application/json');res.end(JSON.stringify({data:{records:[{taskId:'native-test-task-123',taskStatus:'SUCCESS',fileUrl:'https://example.invalid/test.mp4'}]}}));return;}
-  res.setHeader('content-type','text/html;charset=utf-8');res.end(req.url==='/selects'?selectsHtml:html);
+  res.setHeader('content-type','text/html;charset=utf-8');
+  const path=req.url.split('?')[0];
+  res.end(path==='/selects'?selectsHtml:path==='/points'?pointsHtml:path==='/empty'?emptyHtml:html);
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const browser=await chromium.launch({channel:'msedge',headless:true});
@@ -65,6 +69,13 @@ try {
   }else{
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   await page.evaluate(script);
+  const session=await page.evaluate(()=>window.__lianhuaRh.operations.session());
+  assert.equal(session.coins,'积分 1037 · 过渡 RH 币 208691');
+  assert.equal(session.wallet,'钱包: 0');
+  await page.evaluate(()=>{document.querySelector('.header-right').innerHTML='<span class="user-name">测试用户</span><span title="RH币 88"></span><span title="钱包: $1.5"></span>';});
+  const legacy=await page.evaluate(()=>window.__lianhuaRh.operations.session());
+  assert.equal(legacy.coins,'RH币 88');
+  assert.equal(legacy.wallet,'钱包: $1.5');
   const form=await page.evaluate(()=>window.__lianhuaRh.operations.read());
   assert.equal(form.name,'H3 测试应用');
   assert.equal(form.fields.find(f=>f.key==='number:duration').value,30);
@@ -87,6 +98,15 @@ try {
   assert.equal(submissions,1,'reload/recovery must not submit');
   const output=await page.evaluate(()=>window.__lianhuaRh.operations.output({webappId:'test-app',taskId:'native-test-task-123'}));
   assert.equal(output.done,true);assert.equal(output.fileUrl,'https://example.invalid/test.mp4');
+  await page.goto(`http://127.0.0.1:${server.address().port}/points`);
+  await page.evaluate(script);
+  const pointsQuote=await page.evaluate(body=>window.__lianhuaRh.operations.prepare(body),{...body,client_id:'points-page'});
+  assert.equal(pointsQuote.quote,'');
+  assert.equal(submissions,1,'a new points page can be prepared without clicking run');
+  await page.goto(`http://127.0.0.1:${server.address().port}/empty`);
+  await page.evaluate(script);
+  await assert.rejects(page.evaluate(body=>window.__lianhuaRh.operations.prepare(body),body),/没有读到预估 RH 币/);
+  assert.equal(submissions,1,'an old page without the RH coin quote still does not run');
   console.log('Android RH page adapter: read, prepare, one submission, reload recovery and existing-task output passed (mock website only).');
   }
 } finally {await browser.close();await new Promise(resolve=>server.close(resolve));}

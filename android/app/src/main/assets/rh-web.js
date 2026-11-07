@@ -4,9 +4,32 @@ const readSession = () => {
     const ownText = (element) => [...element.childNodes].filter((node) => node.nodeType === 3).map((node) => node.textContent || '').join('').replace(/\s+/gu, ' ').trim();
     const header = document.querySelector('.header-right') || document.querySelector('.common-header') || document.body;
     const login = [...header.querySelectorAll('button, a, span, div')].some((element) => ownText(element) === '登录/注册' || (element.textContent || '').trim() === '登录/注册');
-    const titles = [...header.querySelectorAll('[title]')].map((element) => element.getAttribute('title') || '');
-    const coins = titles.find((title) => title.startsWith('RH币')) || '';
-    const wallet = titles.find((title) => /\$|美元|钱包/u.test(title) && title !== coins) || '';
+    const snippets = [];
+    const push = (value) => {
+      const text = String(value || '').replace(/\s+/gu, ' ').trim();
+      if (text && text.length <= 48 && !snippets.includes(text)) snippets.push(text);
+    };
+    for (const element of header.querySelectorAll('[title], [aria-label]')) {
+      push(element.getAttribute('title'));
+      push(element.getAttribute('aria-label'));
+    }
+    for (const element of header.querySelectorAll('span, div, button, a, p')) push(ownText(element));
+    const kindOf = (value) => {
+      if (/过渡/u.test(value) && /RH/iu.test(value)) return 'transition';
+      if (/积分|credits/iu.test(value)) return 'points';
+      if (/^RH\s*币|^RH\s*coins/iu.test(value)) return 'legacy';
+      if (/钱包|\$|美元|USD/iu.test(value)) return 'wallet';
+      return '';
+    };
+    const first = (kind) => {
+      const matches = snippets.filter((value) => kindOf(value) === kind);
+      return matches.find((value) => /\d/u.test(value)) || matches[0] || '';
+    };
+    const points = first('points');
+    const transition = first('transition');
+    const legacy = first('legacy');
+    const wallet = first('wallet');
+    const coins = points || transition ? [points, transition].filter(Boolean).join(' · ') : legacy;
     const nickFrom = (value, depth = 0) => {
       if (!value || typeof value !== 'object' || depth > 5) return '';
       if (typeof value.nickName === 'string' && value.nickName.trim()) return value.nickName.trim();
@@ -84,7 +107,8 @@ const readForm = () => {
       }
     }
     const instance = (document.querySelector('.run-mode-current')?.textContent || '').trim();
-    const estimate = (document.body.innerText.match(/≈\s*[\d.]+\s*RH币/u) || [])[0] || '';
+    const pageText = document.body.innerText;
+    const estimate = (pageText.match(/≈\s*[\d,.]+\s*RH币/u) || pageText.match(/≈\s*[\d,.]+\s*积分/u) || pageText.match(/≈\s*[\d,.]+\s*过渡\s*RH\s*币/u) || [])[0] || '';
     const heading = document.querySelector('h1.ai-title');
     let name = (heading?.getAttribute('title') || heading?.textContent || '').replace(/\s+/g, ' ').trim();
     if (!name) name = document.title.replace(/\s*[-|–—]\s*RunningHub\b.*/i, '').trim();
@@ -306,8 +330,20 @@ const operations = {
     for (const field of fields.filter(item => ['image', 'audio'].includes(item.kind))) await fillControl(field);
     const current = document.querySelector('.run-mode-current');
     if (body.instance && text(current) !== body.instance) await choose(current, body.instance);
-    const quote = (document.body.innerText.match(/≈\s*[\d.]+\s*RH币/) || [])[0];
-    if (!quote) throw new Error('网页上没有读到预估 RH 币，没有点击运行。');
+    const run = [...document.querySelectorAll('.run-cell-main')].find(node => text(node).includes('立即运行'));
+    let region = '';
+    let regionNode = run;
+    for (let depth = 0; regionNode && depth < 8; depth += 1) {
+      const sample = (regionNode.innerText || '').replace(/\s+/g, ' ');
+      if (/≈\s*[\d,.]+\s*RH币|≈\s*[\d,.]+\s*积分|≈\s*[\d,.]+\s*过渡\s*RH\s*币|费用以实际用量结算/.test(sample)) { region = sample; break; }
+      regionNode = regionNode.parentElement;
+    }
+    const source = `${region} ${document.body.innerText}`;
+    const legacy = source.match(/≈\s*[\d,.]+\s*RH币/);
+    const points = source.match(/≈\s*[\d,.]+\s*积分/);
+    const transition = source.match(/≈\s*[\d,.]+\s*过渡\s*RH\s*币/);
+    const quote = (legacy || points || transition || [])[0] || '';
+    if (!quote && !/费用以实际用量结算/.test(source)) throw new Error('网页上没有读到预估 RH 币，没有点击运行。');
     return { quote };
   },
   submit: async body => {

@@ -97,7 +97,7 @@ export function RunningHubWebSettings({ config, getCurrentConfig, onChange }: Ru
       setWatching(account.id);
       setMessage(result.loggedIn
         ? `「${account.name}」已登录${result.displayName ? `：${result.displayName}` : ''}${result.coins ? `，${result.coins}` : ''}。`
-        : `登录窗口已打开，当前是「${account.name} · ${account.site === 'cn' ? '国内站' : '国际站'}」。在窗口里登录后，这里会显示网页上的昵称和 RH 币。`);
+        : `登录窗口已打开，当前是「${account.name} · ${account.site === 'cn' ? '国内站' : '国际站'}」。在窗口里登录后，这里会显示网页上的昵称，以及积分、过渡 RH 币和钱包，或老版的 RH 币和钱包。`);
     } catch (cause) { setError(formatUserFacingError(cause)); }
     finally { setBusy(false); }
   };
