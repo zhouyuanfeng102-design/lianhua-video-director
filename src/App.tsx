@@ -137,7 +137,7 @@ import type {
 import { chapterIdForVideoLaunch } from "./videoDirectorDraft";
 import { videoPromptExecutionForStoryboard } from "./videoPromptExecutionSelection";
 import { buildSelectedSequencePromptText } from "./sequencePromptExport";
-import { VideoDirectorView, VideoTaskCard, type VideoDirectorLaunchRequest } from "./components/VideoDirectorView";
+import { VideoDirectorView, VideoTaskCard, videoTaskReuseAvailable, type VideoDirectorLaunchRequest } from "./components/VideoDirectorView";
 import type { ProjectVoicePresets } from "./videoAudioTypes";
 import { StoryPreparationReviewDialog } from "./components/StoryPreparationReviewDialog";
 import { ImageOutputSizeControls } from "./components/ImageOutputSizeControls";
@@ -174,6 +174,13 @@ import { AutoFitSidebarNav } from "./components/AutoFitSidebarNav";
 import { AssetVideoThumbnail } from "./components/AssetVideoThumbnail";
 import { AssetVideoPlayerDialog } from "./components/AssetVideoPlayerDialog";
 import { H3PromptDisplay } from "./components/H3PromptDisplay";
+import { PhoneProjectHome } from "./components/mobile/PhoneProjectHome";
+import { PhoneStoryStep } from "./components/mobile/PhoneStoryStep";
+import { PhoneDirectorStage } from "./components/mobile/PhoneDirectorStage";
+import { PhoneStoryboardStage } from "./components/mobile/PhoneStoryboardStage";
+import { PhoneAssetLibrary } from "./components/mobile/PhoneAssetLibrary";
+import { PhoneJobList } from "./components/mobile/PhoneJobList";
+
 import { matchesVideoSelection, selectVideoAsset, type VideoAssetSelection } from "./videoAssetPreview";
 import { findVideoAssetSourceTask, frozenVideoReferenceAsset, relatedVideoAssets, removeVideoTaskKeepingProvenance } from "./videoProvenance";
 import { inspectVideoBatchDeletion, inspectVideoTaskDeletion, removeVideoBatchKeepingProvenance, removeVideoTaskFromListKeepingProvenance } from "./videoBatchDeletion";
@@ -10251,6 +10258,7 @@ export default function App() {
     allowPrivateNetwork,
     privateNetworkSaving,
     updatePrivateNetworkAccess,
+    phoneLayout: mobileLayout,
   } satisfies AppContext;
   const stateDiagnostic = useMemo(() => recoveryOpen ? diagnoseState(state) : undefined, [state, recoveryOpen]);
 
@@ -10354,7 +10362,7 @@ export default function App() {
           onCharacterVoiceProfileChange={handleCharacterVoiceProfileChange}
           onImportAudioFiles={handleVideoAudioFilesImport}
           onOpenVideoAssets={() => { setVideoAssetStoryboardFilter(""); setAssetLibrarySection("video"); setView("assets"); }}
-          onOpenJobs={() => setView("jobs")} />;
+          onOpenJobs={() => setView("jobs")} phoneLayout={mobileLayout} />;
       case "storyboard":
         return <StoryboardView {...chapterContext} />;
       case "image":
@@ -10372,7 +10380,7 @@ export default function App() {
       case "settings":
         return <SettingsView {...appContext} />;
       default:
-        return <DashboardView {...appContext} />;
+        return mobileLayout ? <PhoneProjectHome projectName={state.project.name} project={state.project} onOpenProjects={() => setProjectLibraryOpen(true)} onNewProject={() => setNewProjectOpen(true)} onScene={(sceneId) => { chooseScene(sceneId); setView("director"); }} onOpen={(action) => { if (action.view === "video") navigateToView("video"); else setView(action.view); }} /> : <DashboardView {...appContext} />;
     }
   };
 
@@ -11562,6 +11570,7 @@ interface AppContext {
   allowPrivateNetwork: boolean;
   privateNetworkSaving: boolean;
   updatePrivateNetworkAccess: (allowed: boolean) => Promise<void>;
+  phoneLayout: boolean;
 }
 
 function DashboardView(ctx: AppContext) {
@@ -11848,6 +11857,9 @@ function StoryView(ctx: AppContext) {
     setEditingSceneId("");
     notify("场景内容已更新。");
   };
+  if (ctx.phoneLayout && storyPane === "input") {
+    return <PhoneStoryStep storyInput={storyInput} setStoryInput={setStoryInput} busy={busy} storyExpansionBusy={storyExpansionBusy} onAnalyze={() => { void handleAnalyzeStory(); }} onSave={() => { void handleSaveStory(); }} onOptimize={() => { void handleExpandStory("optimize"); }} canRestore={canRestoreStoryPreparation} onRestore={handleRestoreStoryPreparation} onClear={() => { setStoryInput(""); invalidateSequenceEstimate(); }} onEntities={() => setStoryPane("entities")} onScenes={() => setStoryPane("scenes")} />;
+  }
   return (
     <div className="grid story-view one-screen-view">
       <SectionHeading
@@ -15267,6 +15279,52 @@ function DirectorView(ctx: AppContext) {
                   </div>
                 </section>
   );
+  if (ctx.phoneLayout) {
+    const board = directorResultStoryboard;
+    const promptText = directorPromptFormat === "h3"
+      ? <H3PromptDisplay language={promptLanguage === "en" && validEnglishPrompt ? "en" : "zh"} prompt={promptLanguage === "en" && validEnglishPrompt ? validEnglishPrompt : validOfficialPrompt} />
+      : directorPromptFormat === "ordinary"
+        ? <pre>{promptLanguage === "en" && validOrdinaryEnglishPrompt ? validOrdinaryEnglishPrompt : board?.finalPrompt || ""}</pre>
+        : seedanceOutputFresh && seedanceOutput
+          ? <pre>{promptLanguage === "en" && seedanceEnglishPromptValid && seedanceOutput.promptEn ? seedanceOutput.promptEn : seedanceOutput.promptZh}</pre>
+          : <p>{seedanceOutput ? "Seedance 官方稿已过期" : "Seedance 2.5 官方稿尚未生成"}</p>;
+    const generateDisabled = busy || sequenceBatchRunning || sequenceSettingsOpen || (productionMode === "sequence" && (!activeSequenceSegment || !activeSequencePlanReadyForGeneration));
+    const generateLabel = busy ? `${generationPromptFormatLabel}中英文生成中…`
+      : productionMode === "sequence" && sequenceSettingsOpen ? "请先确认全片导演参数"
+      : productionMode === "sequence"
+        ? activeSequencePromptAction?.action === "refresh-official" ? `刷新当前段${generationPromptFormatLabel}提示词`
+          : activeSequencePromptAction?.action === "translate-english" ? `仅重试${generationPromptFormatLabel}英文`
+          : activeSequencePromptAction?.action === "complete" ? `当前段${generationPromptFormatLabel}已生成`
+          : `生成当前段${generationPromptFormatLabel}提示词`
+        : shotMode === "auto" ? `AI 分镜并生成${generationPromptFormatLabel}提示词`
+        : `AI 按 ${shotCount} 镜分镜并生成${generationPromptFormatLabel}提示词`;
+    return <PhoneDirectorStage
+      shots={board?.shots || []}
+      prompt={promptText}
+      format={<div className="phone-chip-row">
+        <button type="button" aria-pressed={directorPromptFormat === "h3"} onClick={() => setDirectorPromptFormat("h3")}>MiniMax H3</button>
+        <button type="button" aria-pressed={directorPromptFormat === "seedance"} onClick={() => setDirectorPromptFormat("seedance")}>Seedance 2.5</button>
+        <button type="button" aria-pressed={directorPromptFormat === "ordinary"} onClick={() => setDirectorPromptFormat("ordinary")}>普通原稿</button>
+        <button type="button" aria-pressed={promptLanguage === "zh"} onClick={() => setPromptLanguage("zh")}>中文</button>
+        <button type="button" aria-pressed={promptLanguage === "en"} onClick={() => setPromptLanguage("en")}>English</button>
+      </div>}
+      onCamera={(shotId, camera) => { if (!board) return; ctx.updateStoryboard(board.id, (current) => ({ ...current, shots: current.shots.map((shot) => shot.id === shotId ? { ...shot, camera } : shot) })); }}
+      moreSettings={<div className="phone-more-panel">
+        <label>时长<select value={durationPreset} onChange={(event) => setDurationPreset(event.target.value as DurationPreset)}><option value="5s">5秒</option><option value="10s">10秒</option><option value="15s">15秒</option><option value="custom">自定义</option></select></label>
+        <label>镜数<button type="button" onClick={() => setShotMode(shotMode === "auto" ? "exact" : "auto")}>{shotMode === "auto" ? "AI 决定镜数" : `精确 ${shotCount} 镜`}</button></label>
+        <label>额外要求<textarea value={extraRequirement} onChange={(event) => setExtraRequirement(event.target.value)} /></label>
+        {productionMode === "sequence" && sequenceSettingsOpen && <button type="button" onClick={confirmDirectorSettings}>确认全片导演参数，进入①全片规划</button>}
+        {productionMode === "sequence" && activeSequenceHasRealResult && <button type="button" disabled={busy || sequenceBatchRunning || sequenceSettingsOpen || !activeSequencePlanReadyForGeneration || activeSequenceSegment?.locked} onClick={() => void ctx.regenerateCurrentSequenceSegmentPrompt()}>重新生成本段{generationPromptFormatLabel}提示词</button>}
+        {productionMode === "sequence" && activeSequencePlan && (sequenceBatchRunning
+          ? <button type="button" onClick={() => cancelSequenceGeneration()}>取消顺序生成</button>
+          : <button type="button" disabled={busy || sequenceSettingsOpen || !activeSequencePlanReadyForGeneration || ctx.promptDirectorReads.pendingSegmentIds(activeSequencePlan, generationPromptFormat).length === 0} onClick={() => void generateAllSequenceSegments(activeSequencePlan)}>顺序生成未完成的{generationPromptFormatLabel}</button>)}
+        {productionMode === "sequence" && activeSequencePlan && <button type="button" disabled={busy || sequenceBatchRunning || sequenceSettingsOpen || !activeSequencePlanReadyForGeneration || activeSequencePlan.segments.length < 2} onClick={() => void ctx.repairSequencePromptContinuity(activeSequencePlan)}>仅修复{generationPromptFormatLabel}上下段衔接</button>}
+        {board && directorPromptFormat === "h3" && validOfficialPrompt && <button type="button" disabled={busy || sequenceBatchRunning} onClick={() => void regenerateStoryboardEnglish(board.id)}>仅重新生成英文</button>}
+        {board && <button type="button" disabled={busy || sequenceBatchRunning} onClick={() => void ctx.repairStoryboardDialogue(board.id)}>修复对白与排时</button>}
+      </div>}
+      generate={<button type="button" className="phone-primary" disabled={generateDisabled} onClick={() => { if (productionMode === "sequence" && activeSequencePlan && activeSequenceSegment) { void generateCurrentSequenceSegment(); return; } void buildStoryboard(); }}>{generateLabel}</button>}
+    />;
+  }
   return (
     <div className="grid director-view director-top-compact" style={{ gap: 10 }}>
       <Card className="director-generation-format-card">
@@ -17347,6 +17405,9 @@ function StoryboardView(ctx: AppContext) {
     downloadText(`${safeFileName(scene?.title || "分镜")}-项目包清单.json`, JSON.stringify(manifest, null, 2), "application/json;charset=utf-8");
     notify("项目包清单已导出，包含目标稿、连续性、试跑、首尾帧、声音台账与资产元数据。 ");
   };
+  if (ctx.phoneLayout) {
+    return <PhoneStoryboardStage shots={board?.shots || []} selectedId={selectedShotId || board?.shots[0]?.id || ""} onSelect={setSelectedShotId} onPatch={(shotId, patch) => patchShot(shotId, patch)} onBoundary={updateBoundary} onLock={toggleLock} onRewrite={regenerateShot} />;
+  }
   return (
     <div className="grid storyboard-view" style={{ gap: 10 }}>
       <SectionHeading
@@ -22175,6 +22236,9 @@ function AssetsView(ctx: AppContext) {
       setSavingAssetId("");
     }
   };
+  if (ctx.phoneLayout) {
+    return <PhoneAssetLibrary section={assetLibrarySection} assets={filtered} uploadKind={uploadKind} search={assetSearch} onSearch={setAssetSearch} onSection={setAssetLibrarySection} onUploadKind={(kind) => setUploadKind(kind as typeof uploadKind)} onUpload={(event) => { void upload(event); }} onUseImage={(assetId) => openVideoDirector({ assetIds: [assetId] })} onReuseVideo={(taskId) => openVideoDirector({ taskId })} onBind={openEntityBinding} />;
+  }
   return (
     <div className={`grid assets-view${fitAssetViewport ? " assets-fit-view" : ""}`} style={{ gap: 10 }}>
       <div className="row asset-library-tabs">
@@ -25809,6 +25873,18 @@ function GenerationTasksView(ctx: AppContext) {
       </Card>
     );
   };
+  if (ctx.phoneLayout) {
+    const rows = activeTaskCategory === "video"
+      ? videoTasks.map((task) => ({ id: task.id, title: task.videoJob?.snapshot?.draft.name || "视频任务", status: task.status, time: new Date(task.createdAt).toLocaleString("zh-CN"), reuse: videoTaskReuseAvailable(task, runtimeById[task.id]) ? () => ctx.openVideoDirector({ taskId: task.id }) : undefined, detail: renderVideoTask(task) }))
+      : activeTaskCategory === "image"
+        ? imageTasks.map((task) => ({ id: task.id, title: task.name, status: task.status, time: new Date(task.createdAt).toLocaleString("zh-CN"), detail: renderImageTaskCard(task) }))
+        : autofillTasks.map((task) => ({ id: task.id, title: task.name, status: task.status, time: new Date(task.createdAt).toLocaleString("zh-CN"), detail: isImagePromptReverseTask(task) ? renderImagePromptReverseTaskCard(task) : renderAutofillTaskCard(task) }));
+    return <PhoneJobList tabs={[
+      { key: "image", label: `图片 ${imageTasks.length}`, current: activeTaskCategory === "image", onClick: () => setActiveTaskCategory("image") },
+      { key: "video", label: `视频 ${videoTasks.length}`, current: activeTaskCategory === "video", onClick: () => setActiveTaskCategory("video") },
+      { key: "autofill", label: `资料 ${autofillTasks.length}`, current: activeTaskCategory === "autofill", onClick: () => setActiveTaskCategory("autofill") },
+    ]} rows={rows} />;
+  }
   return (
     <div className="grid jobs-view">
       <div className="section-heading generation-jobs-heading">

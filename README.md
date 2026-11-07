@@ -4,15 +4,15 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的工作台，提供 Windows 便携版和 Android 手机 APK。
 
-当前版本：**3.9.7** · 2026-11-07 · Windows x64 / Android
+当前版本：**3.9.8** · 2026-11-07 · Windows x64 / Android
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows EXE / Android APK](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-3.9.7.md) · [安卓安装说明](docs/android-install.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-3.9.8.md) · [安卓安装说明](docs/android-install.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
-1. 电脑下载 [Windows 便携版 EXE](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/download/v3.9.7/lianhua-video-director-3.9.7-windows-x64-portable.exe)，放在可写入的文件夹里双击运行；安卓手机下载 [Android APK](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/download/v3.9.7/lianhua-video-director-3.9.7-android.apk) 后安装。普通使用者无需安装开发环境。
+1. 电脑下载 [Windows 便携版 EXE](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/download/v3.9.8/lianhua-video-director-3.9.8-windows-x64-portable.exe)，放在可写入的文件夹里双击运行；安卓手机下载 [Android APK](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/download/v3.9.8/lianhua-video-director-3.9.8-android.apk) 后安装。普通使用者无需安装开发环境。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
 3. 导入 TXT / Markdown 分章原文或手动新建章节，选择章节后解析剧情，再进入导演台生成、编辑和导出提示词。导入不会自动调用 API 批量解析全书。
 
@@ -20,7 +20,7 @@
 
 更新前请先保存项目并退出旧版，保留 EXE 旁的“莲华视频导演台数据”文件夹。 自 1.5.2 起项目与素材分文件保存，移动或备份时请保留整个数据文件夹；不要单独把新存档索引交给旧版打开。详见[保存与恢复说明](docs/releases/发布说明-1.5.2.md)。
 
-安卓更新直接覆盖安装同签名新版 APK，保留应用数据；卸载或清除数据前先导出带素材的 `.lhvd` 项目包。电脑和手机通过项目包互相转移，API 密钥在各设备重新配置。安卓实际能力与已执行检查见[同版能力与验证记录](docs/releases/能力与验证记录-3.9.7.md)。当前 APK 已完成构建与签名验证，尚未执行 Android 设备安装及原生功能测试。
+安卓更新直接覆盖安装同签名新版 APK，保留应用数据；卸载或清除数据前先导出带素材的 `.lhvd` 项目包。电脑和手机通过项目包互相转移，API 密钥在各设备重新配置。安卓基础能力与既有测试边界见 [3.9.7 能力与验证记录](docs/releases/能力与验证记录-3.9.7.md)。本版 APK 已完成正式签名核对，尚无本版 Android 设备安装与原生功能实测记录。
 
 ## 使用与引用说明
 
@@ -44,16 +44,15 @@
 - **自定义生图+反推图片提示词**：输入要求生成图片，或复用上传/资产库参考图，通过视觉 API 反推可复制的提示词与人物、物品、场景、风格详情。反推同步显示在聊天和资料任务，支持后台执行、停止、重试及项目保存恢复；原有生图支持原文直发或规则转换，结果自动入库。
 - **项目与资产管理**：管理图片、视频和音频，保存项目包、备份资料并导出提示词。
 
-## 最新更新 · v3.9.7
+## 最新更新 · v3.9.8
 
-- 同版本交付 Windows EXE 与正式签名 Android APK，恢复源码保留两端工程。
-- 手机使用单列页面、四项底部导航、可滚动编辑和触控弹层；受管图片、音频和视频采用 Android 原生本地访问路径。
-- 安卓接入本地存档、密钥加密、素材、完整项目包、原生网络和视频处理。具体设备及网页能力见同版“能力与验证记录”。
-- 保留 3.9.6 的 RH 网页下拉选项读取与按所选项目填写修复。
+- 下次生成提示词时，门、窗、柜门、抽屉和盖子留在原来的铰链或轨道上，只转动或滑动。
+- 杯子、信、武器等可拿起的物件仍按取放写。原文写明拆下时，部件才离开安装位。
+- 已保存的提示词和已经生成的视频保持原样，重新生成该段后才会用新写法。
 
 后续常规版本持续双端交付；仅某一端独立 UI 调整使用明确单端参数。已有提示词和成片保持原样。
 
-[查看本版完整说明](docs/releases/发布说明-3.9.7.md) · [历史版本归档](docs/releases/README.md)
+[查看本版完整说明](docs/releases/发布说明-3.9.8.md) · [历史版本归档](docs/releases/README.md)
 
 ## 从源码运行
 

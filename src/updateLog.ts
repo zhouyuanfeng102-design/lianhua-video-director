@@ -15,6 +15,16 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "3.9.8",
+    releasedAt: "2026-11-07",
+    title: "门窗抽屉留在原来的安装位置",
+    highlights: [
+      "下次写提示词时，门、窗、柜门、抽屉和盖子留在原来的铰链或轨道上，只转动或滑动。",
+      "杯子、信、武器等可拿起的物件仍按取放写。原文写明拆下时，部件才离开安装位。",
+      "已保存的提示词和已经生成的视频保持原样，重新生成该段后才会用新写法。",
+    ],
+  },
+  {
     version: "3.9.7",
     releasedAt: "2026-11-07",
     title: "EXE 与 APK 双端交付",

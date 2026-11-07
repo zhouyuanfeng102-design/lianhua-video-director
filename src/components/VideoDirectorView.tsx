@@ -1,5 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { assetPreviewUrl } from '../media';
+import { PhoneVideoComposer } from './mobile/PhoneVideoComposer';
+import { isVideoGenerationTask } from '../generationTasks';
 import { formatUserFacingError } from '../userFacingError';
 import { getSafeErrorDiagnostics } from '../errorDiagnostics';
 import { videoTaskDiagnosticEntries, videoTaskErrorOptions } from '../videoTaskErrorDiagnostics';
@@ -81,6 +83,7 @@ export interface VideoDirectorViewProps {
   onImportAudioFiles?: (files: File[]) => Promise<void>;
   onRepairIdentityBindings?: (storyboardId: string, language: 'zh' | 'en', characterIds?: string[]) => Promise<void>;
   onRefreshH3References?: (draft: VideoGenerationDraft) => Promise<VideoGenerationDraft>;
+  phoneLayout?: boolean;
 }
 
 function RunningHubAutoPromptNotice({ api }: { api?: AppSettings['videoTaskApi'] | Omit<AppSettings['videoTaskApi'], 'apiKey'> }) {
@@ -283,6 +286,22 @@ export interface VideoTaskCardProps {
   onOpenPrompt?: (storyboardId: string, source?: VideoPromptSource) => void;
 }
 
+export function videoTaskReuseAvailable(task: VideoGenerationTask, runtime?: { stage?: string; trackingStopped?: boolean; downloadError?: unknown; message?: string; progress?: number } | null): boolean {
+  const explicitlyStopped = task.videoJob?.batchQueueState === 'cancelled'
+    || task.videoJob?.tailPreparation?.phase === 'cancelled'
+    || (task.videoJob?.trackingStopped === true && task.videoJob.stage === 'stopped');
+  const state = explicitlyStopped ? task.videoJob : runtime ? { ...task.videoJob, ...runtime } : task.videoJob;
+  const stage = explicitlyStopped ? 'stopped' : state?.stage || (task.status === 'succeeded' ? 'succeeded' : task.status === 'failed' ? 'failed' : 'queued');
+  const snapshot = task.videoJob?.snapshot;
+  const cloudSucceeded = runningHubRemoteSucceeded(task);
+  const resultSelectionRequired = Boolean(task.videoJob?.resultSelectionRequired);
+  const legacyComfyPreviewFailure = stage === 'failed' && canRecoverComfyPreviewResult(task);
+  const chainMember = Boolean(snapshot?.batchCompletionOrder || snapshot?.previousTail || snapshot?.batchPredecessorTaskId);
+  const remoteUnconfirmed = Boolean(state?.trackingStopped && task.remoteTaskId && !cloudSucceeded && task.status !== 'failed' && task.status !== 'succeeded' && !task.resultAssetId);
+  const downloadError = state?.downloadError;
+  return Boolean(snapshot && !remoteUnconfirmed && task.status !== 'unknown' && !resultSelectionRequired && !legacyComfyPreviewFailure && !task.videoJob?.legacyMetadataIncomplete && (!chainMember || stage === 'succeeded' && !downloadError) && (!snapshot?.previousTail || task.videoJob?.tailPreparation?.phase === 'ready'));
+}
+
 export function VideoTaskCard({ task, assets, runtime: fallbackRuntime, runtimeStore, knownSecrets, onRetryDownload, onRecoverResult, onSelectResultVideo, onResume, onCancel, onReuse, onOpenPrompt }: VideoTaskCardProps) {
   const runtime = useVideoTaskRuntime(task.id, runtimeStore, fallbackRuntime);
   const [now, setNow] = useState(Date.now());
@@ -393,7 +412,7 @@ export function VideoTaskCard({ task, assets, runtime: fallbackRuntime, runtimeS
     </div>}
     <div className="vd-toolbar">
       {canRecoverResult && <button type="button" className="btn small primary" disabled={Boolean(busy) || stage === 'downloading'} onClick={() => { void act('recover-result', onRecoverResult); }}>{busy === 'recover-result' ? '正在获取原任务结果…' : '重新获取成片（不重新生成）'}</button>}
-      {onReuse && snapshot && !remoteUnconfirmed && task.status !== 'unknown' && !resultSelectionRequired && !legacyComfyPreviewFailure && !task.videoJob?.legacyMetadataIncomplete && (!chainMember || stage === 'succeeded' && !downloadError) && (!snapshot.previousTail || task.videoJob?.tailPreparation?.phase === 'ready') && <button type="button" className="btn small" title={canRecoverResult ? '这会准备一个新的生成任务，可能再次收费；取回云端成片请使用左侧重新获取按钮。' : undefined} onClick={() => onReuse(task)}>载入相同设置再次生成</button>}
+      {onReuse && videoTaskReuseAvailable(task, runtime) && <button type="button" className="btn small" title={canRecoverResult ? '这会准备一个新的生成任务，可能再次收费；取回云端成片请使用左侧重新获取按钮。' : undefined} onClick={() => onReuse(task)}>载入相同设置再次生成</button>}
       {onOpenPrompt && snapshot?.draft.source?.storyboardId && <button type="button" className="btn small" onClick={() => onOpenPrompt(snapshot.draft.source!.storyboardId!, snapshot.draft.source)}>查看来源提示词</button>}
       {!canRecoverResult && !resultSelectionRequired && onRetryDownload && (downloadError || !task.resultAssetId && task.resultUrl) && <button type="button" className="btn small" disabled={Boolean(busy) || stage === 'downloading'} onClick={() => { void act('download', onRetryDownload); }}>{busy === 'download' ? '保存中…' : '仅重试保存'}</button>}
       {onResume && !cancelledBeforePost && !failedChainSubmission && (legacyComfyPreviewFailure || tailPresentation.canRetry || continuePreparation || task.status === 'unknown' || state?.trackingStopped || ['reconnecting', 'submission-unknown', 'stopped'].includes(stage)) && <button type="button" className="btn small" disabled={Boolean(busy)} onClick={() => { void act('resume', onResume); }}>{busy === 'resume' ? '恢复中…' : tailPresentation.canRetry ? snapshot?.previousTail?.requireAiSelection ? '重试 AI 选帧（可能收费）' : '重试尾帧衔接' : continuePreparation ? '继续准备原任务' : '恢复查询原任务'}</button>}
@@ -1662,6 +1681,11 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
   </section>;
 }
 
+function MaybeDetails({ enabled, children }: { enabled?: boolean; children: ReactNode }) {
+  if (!enabled) return <>{children}</>;
+  return <details className="phone-more"><summary>更多设置</summary>{children}</details>;
+}
+
 export function VideoDirectorView(props: VideoDirectorViewProps) {
   const chapterId = props.chapterId || activeChapter(props.project)?.id;
   // The controller remains outside this keyed view. Leaving a chapter unmounts
@@ -1669,7 +1693,7 @@ export function VideoDirectorView(props: VideoDirectorViewProps) {
   return <ChapterVideoDirectorView key={videoDirectorChapterKey(props.project.id, chapterId)} {...props} chapterId={chapterId} />;
 }
 
-function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterDraftChange, settings, controller, tailFrameTools, launchRequest, onOpenSettings, onOpenPrompt, onOpenVideoAssets, onOpenJobs, onChangeExecution, onVideoApiParametersChange, onRepairIdentityBindings, onRefreshH3References, onVoicePresetsChange, onCharacterVoiceProfileChange, onImportAudioFiles }: VideoDirectorViewProps) {
+function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterDraftChange, settings, controller, tailFrameTools, launchRequest, onOpenSettings, onOpenPrompt, onOpenVideoAssets, onOpenJobs, onChangeExecution, onVideoApiParametersChange, onRepairIdentityBindings, onRefreshH3References, onVoicePresetsChange, onCharacterVoiceProfileChange, onImportAudioFiles, phoneLayout }: VideoDirectorViewProps) {
   const draftScope = videoDirectorChapterKey(project.id, chapterId);
   const [initial] = useState(() => readVideoDirectorChapterDraft(chapterDraft || (chapterId ? chapterWorkspace(project, chapterId)?.videoDirector : undefined)) || draftCache.get(draftScope));
   const [generationMode, setGenerationMode] = useState<'single' | 'batch'>(initial?.generationMode || 'single');
@@ -1921,17 +1945,45 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
       <button type="button" role="tab" aria-selected={generationMode === 'batch'} aria-controls="vd-batch-generation-panel" className={`btn ${generationMode === 'batch' ? 'primary' : ''}`} disabled={submitting || batchSubmitting || identityRepairing || singleTail.busy || tailFrameTools?.busy} onClick={() => setGenerationMode('batch')}>长剧情批量</button>
     </div>;
 
+  const phoneSingle = Boolean(phoneLayout && generationMode === 'single');
   return <div className="video-director-view" data-mode={generationMode}>
-    <div className="section-heading"><div><h1>视频导演台</h1><p>直接选择已有提示词和图片资产，生成后自动存入视频资产库。这里的编辑不会改动原分镜或原提示词。</p></div>{generationMode === 'batch' && generationModeTabs}<div className="vd-toolbar">{onOpenSettings && <button className="btn" type="button" onClick={onOpenSettings}>视频连接设置</button>}{onOpenVideoAssets && <button className="btn" type="button" onClick={onOpenVideoAssets}>视频资产库</button>}{onOpenJobs && <button className="btn" type="button" onClick={onOpenJobs}>查看生成任务</button>}</div></div>
-    {chapterId && <p className="field-hint vd-chapter-context">当前章节：{project.sourceDocuments.find((chapter) => chapter.id === chapterId)?.name || '未命名章节'} · 提示词和分段按本章显示，参考图片全项目共用。</p>}
+    {!phoneSingle && <div className="section-heading"><div><h1>视频导演台</h1><p>直接选择已有提示词和图片资产，生成后自动存入视频资产库。这里的编辑不会改动原分镜或原提示词。</p></div>{generationMode === 'batch' && generationModeTabs}<div className="vd-toolbar">{onOpenSettings && <button className="btn" type="button" onClick={onOpenSettings}>视频连接设置</button>}{onOpenVideoAssets && <button className="btn" type="button" onClick={onOpenVideoAssets}>视频资产库</button>}{onOpenJobs && <button className="btn" type="button" onClick={onOpenJobs}>查看生成任务</button>}</div></div>}
+    {!phoneSingle && chapterId && <p className="field-hint vd-chapter-context">当前章节：{project.sourceDocuments.find((chapter) => chapter.id === chapterId)?.name || '未命名章节'} · 提示词和分段按本章显示，参考图片全项目共用。</p>}
     {sourceStale && <p className="vd-notice">本章原文已更新，当前历史提示词需要重新生成后才能提交；已提交的视频任务继续运行。</p>}
     {generationMode === 'single' && draftReferencePreview && <div className="vd-notice">{draftReferencePreview.referenceNotice}{onOpenPrompt && <button type="button" className="btn small" onClick={() => onOpenPrompt(draftReferencePreview.storyboardId, draft.source)}>回提示词导演台更新参考图</button>}</div>}
-    {generationMode === 'single' && generationModeTabs}
-    {onChangeExecution && <VideoExecutionControls settings={settings} onChange={onChangeExecution} />}
+    {!phoneSingle && generationMode === 'single' && generationModeTabs}
+    {!phoneSingle && onChangeExecution && <VideoExecutionControls settings={settings} onChange={onChangeExecution} />}
     {onImportAudioFiles && <input hidden ref={audioFileInput} type="file" accept=".mp3,.wav,.flac" multiple aria-label="导入参考音频文件" onChange={(event) => { const files = Array.from(event.target.files || []); event.target.value = ''; if (files.length) void onImportAudioFiles(files).then(() => setNotice('参考音频已加入资产库，请在声音预设或本段音频槽中选择。'), (cause) => setError(formatUserFacingError(cause))); }} />}
-    {onVoicePresetsChange && <ProjectVoicePresetEditor project={project} disabled={submitting || batchSubmitting} onChange={onVoicePresetsChange} onCharacterVoiceProfileChange={onCharacterVoiceProfileChange} onImportAudio={importAudio} />}
+    {!phoneSingle && onVoicePresetsChange && <ProjectVoicePresetEditor project={project} disabled={submitting || batchSubmitting} onChange={onVoicePresetsChange} onCharacterVoiceProfileChange={onCharacterVoiceProfileChange} onImportAudio={importAudio} />}
     {generationMode === 'batch' && <div id="vd-batch-generation-panel" role="tabpanel" className="vd-batch-host"><VideoBatchPanel key={`${draftScope}:${launchRequest?.batchTaskIds?.length ? launchRequest.id : 'standard-batch'}`} project={project} chapterId={chapterId} savedBatch={batchDraft} onBatchDraftChange={setBatchDraft} settings={settings} controller={controller} tailFrameTools={tailFrameTools} initialDraft={draft} initialParameterText={parameterText} retryTaskIds={launchRequest?.batchTaskIds} onOpenSettings={onOpenSettings} onOpenJobs={onOpenJobs} onOpenPrompt={onOpenPrompt} onSubmittingChange={setBatchSubmitting} onRepairIdentityBindings={onRepairIdentityBindings} onRefreshH3References={onRefreshH3References} onImportAudio={importAudio} onVideoApiParametersChange={onVideoApiParametersChange} /></div>}
-    {generationMode === 'single' && <div id="vd-single-generation-panel" role="tabpanel" className="vd-layout"><div className="vd-stack">
+    {generationMode === 'single' && phoneLayout && <PhoneVideoComposer
+      taskLabel={(() => { const tasks = project.generationTasks.filter(isVideoGenerationTask); const active = tasks.find((task) => !['succeeded', 'failed', 'stopped'].includes(task.status)); const latest = active || tasks[0]; return latest ? `任务：${latest.status} · ${new Date(latest.createdAt).toLocaleString('zh-CN')}` : undefined; })()}
+      onOpenJobs={onOpenJobs}
+      onChoosePrompt={() => { const format = defaultVideoPromptFormat(project); setPromptFormat(format); setPicker('prompt'); setPickedPromptId(draft.source?.storyboardId && draft.source.promptFormat === format ? videoPromptChoiceKey(draft.source.storyboardId, draft.source.language || 'zh', format) : ''); }}
+      sourceLabel={draft.source ? `来源：${draft.source.label || '提示词导演台'} · ${videoPromptFormatLabel(draft.source.promptFormat)}` : undefined}
+      onOpenSource={onOpenPrompt && draft.source?.storyboardId ? () => onOpenPrompt(draft.source!.storyboardId!, draft.source) : undefined}
+      onClearSource={draft.source ? () => patchDraft({ source: undefined, h3ReferenceBinding: undefined, seedanceReferenceBinding: undefined }) : undefined}
+      formatValue={draft.source?.promptFormat || 'legacy'}
+      languageValue={draft.source?.language || 'zh'}
+      formatDisabled={submitting || batchSubmitting || !draft.source}
+      languageDisabled={submitting || batchSubmitting || !draft.source?.promptFormat}
+      onFormat={(value) => selectDraftSource(value as VideoPromptFormat, draft.source?.language || 'zh')}
+      onLanguage={(value) => selectDraftSource(draft.source?.promptFormat || defaultVideoPromptFormat(project, draft.source?.storyboardId), value as 'zh' | 'en')}
+      references={draft.references}
+      assets={project.assets}
+      onRemoveReference={(reference, index) => patchDraft({ ...removeVideoReference(draft, reference.assetId, effectiveReferences[index]?.role), reuseTaskId: undefined })}
+      onPickImages={() => { setPickedSelection(useCurrentVideoDraftImages(draft, draft.references.map((reference) => reference.assetId), images)); setPicker('images'); }}
+      summary={videoOutputParameterSummary(draft.parameters, activeApi) || activeApi?.model || '时长 / 模型 / 分辨率沿用当前连接'}
+      prompt={delivery.draft.prompt}
+      onPrompt={(value) => patchDraft({ prompt: value, audioReferenceBinding: delivery.draft.audioReferenceBinding, videoReferenceBinding: delivery.draft.videoReferenceBinding, reuseTaskId: undefined, h3ReferenceBinding: undefined, seedanceReferenceBinding: undefined })}
+      more={<>{generationModeTabs}{onChangeExecution && <VideoExecutionControls settings={settings} onChange={onChangeExecution} />}{onOpenSettings && <button type="button" className="btn" onClick={onOpenSettings}>视频连接设置</button>}</>}
+      generateDisabled={submitting || batchSubmitting || identityRepairing || singleTail.busy || tailFrameTools?.busy || sourceStale || Boolean(draftReferencePreview) || !draft.prompt.trim() || Boolean(slotMismatch || audioIssue || delivery.issue)}
+      submitting={submitting}
+      onGenerate={() => { void generate(); }}
+      notice={notice}
+      error={error ? formatUserFacingError(error) : ''}
+    />}
+    {generationMode === 'single' && <MaybeDetails enabled={phoneLayout}><div id="vd-single-generation-panel" role="tabpanel" className="vd-layout"><div className="vd-stack">
       <section className="card vd-prompt-card"><div className="card-title"><h2>1. 本次视频提示词</h2><button className="btn small" type="button" onClick={() => { const format = defaultVideoPromptFormat(project); setPromptFormat(format); setPicker('prompt'); setPickedPromptId(draft.source?.storyboardId && draft.source.promptFormat === format ? videoPromptChoiceKey(draft.source.storyboardId, draft.source.language || 'zh', format) : ''); }}>从提示词导演台选择</button></div>
         <label className="field"><span>视频名称</span><input value={draft.name} onChange={(event) => patchDraft({ name: event.target.value })} placeholder="为本次生成的视频命名" /></label>
         {draft.source ? <div className="vd-source"><span>来源：{draft.source.label || '提示词导演台'} · {videoPromptFormatLabel(draft.source.promptFormat)} · {draft.source.language === 'en' ? '已有英文描述' : '中文提示词'}</span>{onOpenPrompt && draft.source.storyboardId && <button className="btn small ghost" type="button" onClick={() => onOpenPrompt(draft.source!.storyboardId!, draft.source)}>查看原稿</button>}<button className="btn small ghost" type="button" onClick={() => patchDraft({ source: undefined, h3ReferenceBinding: undefined, seedanceReferenceBinding: undefined })}>解除来源关联</button></div> : <p className="field-hint">也可以直接粘贴或手动输入提示词，无需先创建分镜。</p>}
@@ -1975,7 +2027,7 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
         {audioIssue && <p className="vd-error" role="alert">{audioIssue}</p>}
         {error && <p className="vd-error" role="alert">{formatUserFacingError(error)}</p>}{notice && <p className="vd-success" role="status">{notice}</p>}
       </section>
-    </div></div>}
+    </div></div></MaybeDetails>}
     {picker === 'prompt' && <VideoPickerDialog title="从提示词导演台选择提示词" className="vd-prompt-selection-dialog" onClose={() => setPicker(undefined)}>
       <div className="vd-prompt-selection-toolbar">
         <label className="field"><span>提示词格式</span><select aria-label="选择提示词格式" value={promptFormat} onChange={(event) => { setPromptFormat(event.target.value as VideoPromptFormat); setPickedPromptId(''); }}><option value="h3">H3</option><option value="seedance">Seedance</option><option value="ordinary">普通稿</option></select></label>

@@ -1,8 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { ArrowLeft, ArrowRight, Clapperboard, FolderOpen, Images, ListVideo, Menu, Settings, X } from 'lucide-react';
+import { Clapperboard, FolderOpen, Images, ListVideo, Menu, MoreHorizontal } from 'lucide-react';
 import type { ViewKey } from '../types';
 import { isMobileAppViewport } from '../appViewportFit';
 import { isAndroidRuntime } from '../platform/runtime';
+import { phoneCreationNext } from './mobile/phoneFlow';
+import { PhoneMoreSheet } from './mobile/PhoneMoreSheet';
 
 /** Mobile uses its own flow layout. Desktop window fitting must never shrink
  * a phone-sized viewport or a native Android landscape window. */
@@ -54,8 +56,9 @@ export function useMobileAppLayout() {
 
 const creationViews: ViewKey[] = ['story', 'storyboard', 'director', 'video'];
 const creationSteps: { view: ViewKey; label: string }[] = [
-  { view: 'story', label: '剧情' }, { view: 'storyboard', label: '分镜' }, { view: 'director', label: '提示词' },
+  { view: 'story', label: '剧情' }, { view: 'director', label: '提示词' }, { view: 'storyboard', label: '分镜' }, { view: 'video', label: '视频' },
 ];
+const creationStepName: Partial<Record<ViewKey, string>> = { story: '剧情', director: '提示词', storyboard: '分镜', video: '视频' };
 
 interface MobileAppNavigationProps {
   view: ViewKey;
@@ -76,7 +79,6 @@ export function MobileAppNavigation({ view, title, projectName, navigation, onNa
   const lastView = useRef(view);
   const lastCreation = useRef<ViewKey>('story');
   const menuButton = useRef<HTMLButtonElement>(null);
-  const menuDialog = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     document.querySelector('.mobile-shell .workspace')?.scrollTo({ top: 0, left: 0 });
   }, [view]);
@@ -91,12 +93,13 @@ export function MobileAppNavigation({ view, title, projectName, navigation, onNa
   }, [view]);
   useEffect(() => {
     if (!menuOpen) return;
-    const first = menuDialog.current?.querySelector<HTMLButtonElement>('button');
+    const panel = document.getElementById('mobile-app-menu');
+    const first = panel?.querySelector<HTMLButtonElement>('button');
     first?.focus();
     const keydown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') { event.preventDefault(); setMenuOpen(false); menuButton.current?.focus(); }
       if (event.key !== 'Tab') return;
-      const items = [...(menuDialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), a[href]') || [])].filter(item => item.getClientRects().length > 0);
+      const items = [...(panel?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), a[href]') || [])].filter(item => item.getClientRects().length > 0);
       const firstItem = items[0]; const lastItem = items[items.length - 1];
       if (event.shiftKey && document.activeElement === firstItem) { event.preventDefault(); lastItem?.focus(); }
       else if (!event.shiftKey && document.activeElement === lastItem) { event.preventDefault(); firstItem?.focus(); }
@@ -133,35 +136,31 @@ export function MobileAppNavigation({ view, title, projectName, navigation, onNa
   }, [menuOpen, onNavigate, view]);
 
   const navigate = (next: ViewKey) => { setMenuOpen(false); onNavigate(next); };
-  const next = view === 'story' ? { view: 'director' as ViewKey, label: '进入提示词导演台' }
-    : view === 'storyboard' ? { view: 'director' as ViewKey, label: '打开提示词' }
-    : view === 'director' ? { view: 'video' as ViewKey, label: '打开视频导演台' } : undefined;
+  const next = phoneCreationNext(view);
+  const moreEntries = [
+    { key: 'rules' as ViewKey, label: '规则中心' },
+    { key: 'settings' as ViewKey, label: 'API 设置' },
+    { key: 'image' as ViewKey, label: '图像工作台' },
+    { key: 'video-workbench' as ViewKey, label: '视频工作台' },
+  ];
 
   return <>
     <header className="mobile-header">
-      <button ref={menuButton} type="button" className="mobile-icon-button" aria-label="全部功能" aria-expanded={menuOpen} aria-controls="mobile-app-menu" onClick={() => setMenuOpen(true)}><Menu size={22} /></button>
+      <button ref={menuButton} type="button" className="mobile-icon-button" aria-label="更多" aria-expanded={menuOpen} aria-controls="mobile-app-menu" onClick={() => setMenuOpen(true)}><Menu size={22} /></button>
       <div className="mobile-header-copy"><strong>{title}</strong><button type="button" className="mobile-project-picker" onClick={onProjects} aria-label={`当前项目：${projectName}，打开项目库`}>{projectName}</button></div>
-      <button type="button" className="mobile-icon-button" aria-label="打开 API 设置" onClick={() => navigate('settings')}><Settings size={22} /></button>
+      <button type="button" className="mobile-icon-button" aria-label="更多" aria-expanded={menuOpen} onClick={() => setMenuOpen(true)}><MoreHorizontal size={22} /></button>
     </header>
     {creationViews.includes(view) && <nav className="mobile-creation-steps" aria-label="创作步骤">{creationSteps.map((step, index) => <button key={step.view} type="button" aria-current={view === step.view ? 'step' : undefined} onClick={() => navigate(step.view)}><span>{index + 1}</span>{step.label}</button>)}</nav>}
     {notice && <div className="mobile-notice" role="status">{notice}</div>}
     {view === 'video-workbench' && isAndroidRuntime() && <p className="mobile-native-media-note" role="note">Android 支持裁剪、拼接与声音输出。当前不支持交叉淡化；含交叉淡化的方案请在桌面版导出。</p>}
     {children}
-    {next && <div className="mobile-action-dock"><span>继续创作</span><button type="button" className="btn primary" onClick={() => navigate(next.view)}>{next.label}<ArrowRight size={18} /></button></div>}
+    {next && <div className="mobile-action-dock"><span>{creationStepName[view]}</span><button type="button" className="btn primary" onClick={() => navigate(next.view)}>{next.label}</button></div>}
     <nav className="mobile-bottom-nav" aria-label="手机主导航">
       <button type="button" aria-current={view === 'dashboard' ? 'page' : undefined} onClick={() => navigate('dashboard')}><FolderOpen size={21} /><span>项目</span></button>
       <button type="button" aria-current={creationViews.includes(view) ? 'page' : undefined} onClick={() => navigate(lastCreation.current)}><Clapperboard size={21} /><span>创作</span></button>
       <button type="button" aria-current={view === 'assets' || view === 'image' ? 'page' : undefined} onClick={() => navigate('assets')}><Images size={21} /><span>素材</span></button>
       <button type="button" aria-current={view === 'jobs' ? 'page' : undefined} onClick={() => navigate('jobs')}><ListVideo size={21} /><span>任务</span></button>
     </nav>
-    {menuOpen && <div className="mobile-menu-backdrop" onMouseDown={event => { if (event.target === event.currentTarget) setMenuOpen(false); }}>
-      <div id="mobile-app-menu" className="mobile-menu-panel" role="dialog" aria-modal="true" aria-labelledby="mobile-menu-title" ref={menuDialog}>
-        <header><h2 id="mobile-menu-title">全部功能</h2><button type="button" className="mobile-icon-button" aria-label="关闭全部功能" onClick={() => { setMenuOpen(false); menuButton.current?.focus(); }}><X size={22} /></button></header>
-        <nav aria-label="全部工作区">{navigation.map(item => <button type="button" key={item.key} aria-current={view === item.key ? 'page' : undefined} onClick={() => navigate(item.key)}>{item.icon}<span>{item.label}</span><ArrowRight size={17} /></button>)}</nav>
-        <div className="mobile-menu-actions" onClick={event => { if ((event.target as HTMLElement).closest('button, label.btn')) setMenuOpen(false); }}>{actions}</div>
-        <button type="button" className="btn" onClick={() => { setMenuOpen(false); onProjects(); }}><FolderOpen size={18} />打开项目库</button>
-        <button type="button" className="btn" onClick={() => setMenuOpen(false)}><ArrowLeft size={18} />返回当前页面</button>
-      </div>
-    </div>}
+    {menuOpen && <PhoneMoreSheet onClose={() => { setMenuOpen(false); menuButton.current?.focus(); }} onProjects={() => { setMenuOpen(false); onProjects(); }} actions={actions} entries={moreEntries.map((entry) => ({ ...entry, current: view === entry.key, onClick: () => navigate(entry.key) }))} />}
   </>;
 }

@@ -13,6 +13,7 @@ import java.util.*;
 public final class MainActivity extends BridgeActivity {
   @Override public void onCreate(Bundle state){
     registerPlugin(LianhuaNativePlugin.class);super.onCreate(state);
+    bridge.getWebView().getSettings().setTextZoom(100);
     WindowCompat.setDecorFitsSystemWindows(getWindow(),false);
     ViewCompat.setOnApplyWindowInsetsListener(bridge.getWebView(),(view,insets)->{
       Insets bars=insets.getInsets(WindowInsetsCompat.Type.systemBars()|WindowInsetsCompat.Type.displayCutout());

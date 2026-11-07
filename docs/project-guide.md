@@ -8,7 +8,7 @@
 
 **[下载最新便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)**
 
-打开下载页，在 Assets（附件）中选择对应客户端：Windows x64 使用 `lianhua-video-director-3.9.7-windows-x64-portable.exe`；Android 使用 `lianhua-video-director-3.9.7-android.apk`。普通使用者无需安装开发环境。外部 AI 服务需在软件内填写自己的账号和 API 配置。更新前请保存项目并保留原有数据。安卓覆盖安装、备份与跨设备项目包导入见 [安卓安装说明](android-install.md)，开发与签名见 [安卓构建说明](android-build.md)。
+打开下载页，在 Assets（附件）中选择对应客户端：Windows x64 使用 `莲华视频导演台-3.9.7-便携版.exe`；Android 使用 `莲华视频导演台-3.9.7-安卓版.apk`。普通使用者无需安装开发环境。外部 AI 服务需在软件内填写自己的账号和 API 配置。更新前请保存项目并保留原有数据。安卓覆盖安装、备份与跨设备项目包导入见 [安卓安装说明](android-install.md)，开发与签名见 [安卓构建说明](android-build.md)。
 
 页面自动生成的 Source code ZIP/TAR 是开发源码；使用软件请下载 EXE 或 APK。手机使用底部导航与纵向内容，不再将整套桌面界面缩小显示；具体平台能力和已执行检查以同版能力与验证记录为准。
 
@@ -1436,7 +1436,7 @@ npm run desktop
 - 0.1.13 补齐九宫格实际图片状态映射、图像构图模式、SD WebUI 图生图、提示词校验、分镜拆分/合并/边界编辑、资产编辑、规则预设与墨色江湖兼容导入，并新增 E 盘自动项目快照
 - 交付版可以直接运行便携 EXE；首次使用建议在“恢复与备份”中选择另一个健康磁盘作为备份目录。
 
-当前版本对应便携包为 `lianhua-video-director-3.9.7-windows-x64-portable.exe`，安卓包为 `lianhua-video-director-3.9.7-android.apk`。请先保存项目再更新；保存失败时先导出备份。常规交付构建双端，再执行版本对应的交付命令：
+当前版本对应便携包为 `莲华视频导演台-3.9.7-便携版.exe`，安卓包为 `莲华视频导演台-3.9.7-安卓版.apk`。请先保存项目再更新；保存失败时先导出备份。常规交付构建双端，再执行版本对应的交付命令：
 
 ```powershell
 npm run pack:all
