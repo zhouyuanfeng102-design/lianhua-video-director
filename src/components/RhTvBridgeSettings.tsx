@@ -3,8 +3,10 @@ import { ExternalLink, FolderOpen, LogIn, Play, RefreshCw, Square, Upload, X } f
 import type { VideoTaskApiConfig } from '../types';
 import { rhtvModes, type RhTvBridgeStatus, type RhTvControlRequest, type RhTvMode } from '../rhtvBridge';
 import { formatUserFacingError } from '../userFacingError';
+import { isAndroidRuntime } from '../platform/runtime';
 
 export function RhTvBridgeSettings({ config, onChange }: { config: VideoTaskApiConfig; onChange: (patch: Partial<VideoTaskApiConfig>) => void }) {
+  const android = isAndroidRuntime();
   const [status, setStatus] = useState<RhTvBridgeStatus>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -39,16 +41,16 @@ export function RhTvBridgeSettings({ config, onChange }: { config: VideoTaskApiC
       <label className="field"><span>rhTV 默认画面比例</span><select aria-label="rhTV 默认画面比例" value={config.rhtvAspectRatio || '自适应'} onChange={(event) => onChange({ rhtvAspectRatio: event.target.value })}>{['自适应','1:1','2:3','3:2','3:4','4:3','9:16','16:9','21:9'].map((item) => <option key={item}>{item}</option>)}</select></label>
       <div className="field"><span>费用策略</span><output className="rhtv-readonly">仅免费；费用未验证时不自动提交</output></div>
       <div className="field"><span>并发</span><output className="rhtv-readonly">单账号串行</output></div>
-      <div className="field"><span>浏览器</span><output className="rhtv-readonly">Microsoft Edge · 独立登录目录</output></div>
+      <div className="field"><span>浏览器</span><output className="rhtv-readonly">{android ? 'Android System WebView · 隔离网页登录' : 'Microsoft Edge · 独立登录目录'}</output></div>
       <label className="field"><span>自动执行</span><span className="rhtv-automation-toggle"><input type="checkbox" role="switch" aria-label="rhTV 零费用自动执行" checked={status?.automatic_submission === true} disabled={!desktop || busy} onChange={(event) => void run({ action: 'automation', enabled: event.target.checked })} />仅零费用自动提交</span></label>
     </div>
     <div className="vgs-actions">
       <button type="button" className="btn small" disabled={!desktop || busy || status?.running} onClick={() => void run({ action: 'start' })}><Play size={14} />启动桥接</button>
-      <button type="button" className="btn small" disabled={!desktop || busy} onClick={() => void run({ action: 'login' })}><LogIn size={14} />Edge 登录 rhTV</button>
+      <button type="button" className="btn small" disabled={!desktop || busy} onClick={() => void run({ action: 'login' })}><LogIn size={14} />{android ? '网页登录 rhTV' : 'Edge 登录 rhTV'}</button>
       <button type="button" className="btn small" disabled={!desktop || busy} onClick={() => void run({ action: 'status' })}><RefreshCw size={14} />检查连接</button>
       <button type="button" className="btn small" disabled={!status?.running || busy} onClick={() => void run({ action: 'stop' })}><Square size={14} />停止桥接</button>
     </div>
-    <p role="status">{!desktop ? '仅桌面程序支持 rhTV 网页桥接' : status ? `${status.running ? '桥接运行中' : '桥接未启动'} · ${status.browser}` : '正在读取连接状态'}</p>
+    <p role="status">{!desktop ? (android ? 'rhTV 网页桥接尚未连接，请重新打开应用。' : '仅桌面程序支持 rhTV 网页桥接') : status ? `${status.running ? '桥接运行中' : '桥接未启动'} · ${status.browser}` : '正在读取连接状态'}</p>
     <p className="vgs-provider-note">{status?.message || '自动执行未启用'}{status?.live_site_verified === false ? ' · 实站联调待验收' : ''}</p>
     {status?.endpoint && <p>本机服务：{status.endpoint}</p>}
     {error && <p className="vd-error" role="alert">{error}</p>}

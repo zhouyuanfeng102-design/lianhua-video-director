@@ -6,13 +6,14 @@ import { audioRetainModes, isVideoDirectorAudio, resolveVideoAudioReferences, va
 import { videoAudioCapability, videoAudioTextConstraintState } from '../videoAudioCapabilities';
 import type { CharacterVoiceProfile } from '../characterVoiceProfile';
 import { CharacterVoiceProfileEditor } from './CharacterVoiceProfileEditor';
+import { mapManagedAssetDisplayUrl } from '../platform/assetUrl';
 import '../videoAudioReferences.css';
 
 type AudioApi = VideoTaskApiConfig | Omit<VideoTaskApiConfig, 'apiKey'>;
 type AudioMedia = Pick<ReferenceAsset, 'dataUrl' | 'url' | 'relativePath' | 'durationSec'>;
 
-const audioUrl = (media: AudioMedia | undefined): string => media?.dataUrl || media?.url
-  || (media?.relativePath ? `lianhua-asset://local/${media.relativePath.replace(/\\/gu, '/').split('/').map(encodeURIComponent).join('/')}` : '');
+const audioUrl = (media: AudioMedia | undefined): string => mapManagedAssetDisplayUrl(media?.dataUrl || media?.url
+  || (media?.relativePath ? `lianhua-asset://local/${media.relativePath.replace(/\\/gu, '/').split('/').map(encodeURIComponent).join('/')}` : ''));
 const targetValue = (target: VideoAudioTarget): string => target.kind === 'character' ? `char:${target.characterId}` : target.kind;
 const readTarget = (value: string): VideoAudioTarget => value.startsWith('char:')
   ? { kind: 'character', characterId: value.slice(5) } : { kind: value === 'ambience' ? 'ambience' : 'voiceover' };

@@ -10,6 +10,7 @@ import { retryImagePromptReverse, stopImagePromptReverse, imagePromptReverseStat
 import { retryCustomImageTask, retryCustomImageSave, type CustomImageGenerationContext } from "./customImageGeneration";
 import { useAssetViewportLayout } from "./useAssetViewportLayout";
 import { calculateAppViewportFit } from "./appViewportFit";
+import { MobileAppNavigation, useMobileAppLayout } from "./components/MobileAppNavigation";
 import { appColorModes, appColorThemes, normalizeAppColorMode, normalizeAppColorTheme, resolveAppColorMode } from "./appTheme";
 ﻿import { activeChapter, chapterScenes, chapterBoards, chapterPlans, chapterScopeProject, chapterWorkspace, withChapterWorkspace, withChapterSelection, migrateProjectChapters, appendChapters, addChapter, archiveChapter, reorderChapters, chapterIdForTask, chapterIdForAsset } from "./chapters";
 import { ChapterManager } from "./components/ChapterManager";
@@ -1895,6 +1896,7 @@ const withProjectLibrary = (next: AppState, previous?: AppState): AppState => {
 };
 
 export default function App() {
+  const mobileLayout = useMobileAppLayout();
   const [state, setStateInternal] = useState<AppState>(() => loadState());
   const editorProject = useMemo(() => chapterScopeProject(state.project), [state.project]);
   const currentChapter = activeChapter(state.project);
@@ -10383,6 +10385,30 @@ export default function App() {
       ? "large"
       : "default";
 
+  const navigateToView = (next: ViewKey) => {
+    if (next === "video") {
+      const displayed = directorPromptSelection?.storyboardId === directorStoryboard?.id ? directorPromptSelection : undefined;
+      openVideoDirector({ chapterId: currentChapterId, storyboardId: directorStoryboard?.id,
+        language: displayed?.language || "zh", promptFormat: displayed?.promptFormat || generationPromptFormat, onlyIfEmpty: true });
+      return;
+    }
+    if (next === "assets") { setAssetLibrarySection("image"); setVideoAssetStoryboardFilter(""); }
+    if (next === "settings") setOpenVideoSettings(false);
+    setView(next);
+  };
+
+  const mobileMenuActions = <>
+    <Button icon={<Plus size={18} />} onClick={() => setNewProjectOpen(true)}>新建项目</Button>
+    <label className="btn" aria-label="导入莲华项目"><Upload size={18} />导入项目<input className="file-input" type="file" accept=".json,.lhvd" onChange={handleImportProject} /></label>
+    <Button icon={<Download size={18} />} onClick={handleExportProject}>导出项目</Button>
+    <Button icon={<Settings size={18} />} onClick={() => setUiSettingsOpen(true)}>界面与字体设置</Button>
+    <Button icon={<BookOpen size={18} />} onClick={() => setUpdateLogOpen(true)}>更新日志及项目地址</Button>
+    <Button icon={<AlertTriangle size={18} />} onClick={() => setRuntimeErrorLogOpen(true)}>报错日志（{runtimeErrorLog.length}）</Button>
+    <Button disabled={!undoStack.current.length} icon={<RotateCcw size={18} />} onClick={undo}>撤销</Button>
+    <Button disabled={!redoStack.current.length} icon={<RefreshCw size={18} />} onClick={redo}>重做</Button>
+    {desktopBridge()?.recoveryStatus && <Button icon={<RotateCcw size={18} />} onClick={() => { void refreshRecoveryStatus(); setRecoveryOpen(true); }}>本地恢复</Button>}
+  </>;
+
   if (desktopLoadError) return (
     <div className="modal-backdrop">
       <div className="modal" role="alertdialog" aria-modal="true" aria-labelledby="storage-load-error-title">
@@ -10398,14 +10424,14 @@ export default function App() {
 
   return (
     <div
-      className={appViewportFit.scale < 1 ? "app-shell app-fit" : "app-shell"}
+      className={mobileLayout ? "app-shell mobile-shell" : appViewportFit.scale < 1 ? "app-shell app-fit" : "app-shell"}
       data-ui-font-scale={uiFontScalePercent}
       data-ui-font-size={uiFontSizeMode}
       aria-busy={savingBeforeClose || restoringSnapshot || Boolean(projectLoadingId) || (!desktopStateReady && !desktopLoadError) || undefined}
       onKeyDownCapture={savingBeforeClose || restoringSnapshot || projectLoadingId || (!desktopStateReady && !desktopLoadError) ? (event) => { event.preventDefault(); event.stopPropagation(); } : undefined}
       style={{
         "--ui-font-scale": uiFontScalePercent / 100,
-        ...(appViewportFit.scale < 1 ? {
+        ...(!mobileLayout && appViewportFit.scale < 1 ? {
           zoom: appViewportFit.scale,
           width: appViewportFit.layoutWidth,
           height: appViewportFit.layoutHeight,
@@ -10624,7 +10650,7 @@ export default function App() {
             </Button>
           </div>
         </header>
-        {['story', 'director', 'video', 'storyboard'].includes(view) && <ChapterManager project={state.project}
+        {['story', 'director', 'video', 'storyboard'].includes(view) && <ChapterManager project={state.project} compact={mobileLayout}
           onSelect={selectChapter}
           onCreate={() => changeChapterProject((project) => addChapter(project))}
           onImport={(pieces) => { changeChapterProject((project) => appendChapters(project, pieces)); notify(`已导入 ${pieces.length} 个章节，请选择章节解析。`); }}
@@ -10642,7 +10668,11 @@ export default function App() {
             }
           }}
           onReorder={(ids) => changeChapterProject((project) => reorderChapters(project, ids))} />}
-        <div className={`workspace view-${view}`}>{renderView()}</div>
+        {mobileLayout ? <MobileAppNavigation view={view} title={viewTitles[view].title} projectName={state.project.name}
+          navigation={navItems} onNavigate={navigateToView} onProjects={() => { setSelectedProjectIds([]); setProjectLibraryOpen(true); }}
+          actions={mobileMenuActions} notice={notice ? (notice.tone === "error" ? formatUserFacingError(notice.text) : notice.text) : undefined}>
+          <div className={`workspace view-${view}`}>{renderView()}</div>
+        </MobileAppNavigation> : <div className={`workspace view-${view}`}>{renderView()}</div>}
       </main>
       {updateLogOpen && (
         <div className="modal-backdrop update-log-backdrop" onMouseDown={() => setUpdateLogOpen(false)}>
@@ -22113,7 +22143,7 @@ function AssetsView(ctx: AppContext) {
       if (bridge?.saveMedia) {
         const savedPath = await bridge.saveMedia({
           relativePath: asset.relativePath,
-          sourceUrl: previewUrl,
+          sourceUrl: asset.dataUrl || asset.url || previewUrl,
           fileName: asset.fileName || asset.name,
           mimeType: asset.mimeType,
           mediaType: asset.mediaType,

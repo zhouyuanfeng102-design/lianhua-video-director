@@ -2,6 +2,7 @@ import type { Project, VideoTaskApiConfig } from '../types';
 import type { ComfyVideoWorkflowPreset, VideoGenerationDraft } from '../videoGenerationTypes';
 import type { FrozenVideoMotionReference } from '../videoMotionTypes';
 import { isVideoDirectorMotionVideo, videoMotionCapability } from '../videoMotionReferences';
+import { mapManagedAssetDisplayUrl } from '../platform/assetUrl';
 
 export function VideoMotionReferenceEditor({ project, draft, api, workflow, scope, disabled, frozenVideos, onChange }: {
   project: Project; draft: VideoGenerationDraft; api?: Omit<VideoTaskApiConfig, 'apiKey'>;
@@ -21,7 +22,7 @@ export function VideoMotionReferenceEditor({ project, draft, api, workflow, scop
       const asset = assets.find((entry) => entry.id === reference?.assetId);
       const frozen = draft.reuseTaskId && frozenVideos?.find((entry) => entry.assetId === reference?.assetId && entry.slotIndex === slotIndex);
       const media = frozen || asset;
-      const url = media?.dataUrl || media?.url || (media?.relativePath ? `lianhua-asset://local/${media.relativePath.replace(/\\/gu, '/').split('/').map(encodeURIComponent).join('/')}` : '');
+      const url = mapManagedAssetDisplayUrl(media?.dataUrl || media?.url || (media?.relativePath ? `lianhua-asset://local/${media.relativePath.replace(/\\/gu, '/').split('/').map(encodeURIComponent).join('/')}` : ''));
       const patch = (next: NonNullable<VideoGenerationDraft['videoReferences']>) => onChange({ videoReferences: next, reuseTaskId: undefined });
       return <div key={slotIndex} className="vd-motion-reference">
         <label className="field"><span>动作视频 {slotIndex + 1}</span><select aria-label={`${scope}动作视频 ${slotIndex + 1}`} value={reference?.assetId || ''} disabled={disabled}

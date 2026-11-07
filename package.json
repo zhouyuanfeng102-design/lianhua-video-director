@@ -1,6 +1,6 @@
 {
   "name": "lianhua-video-director",
-  "version": "3.9.4",
+  "version": "3.9.7",
   "productName": "莲华视频导演台",
   "private": true,
   "description": "莲华视频导演台：从小说到连续视频分镜与提示词",
@@ -13,6 +13,9 @@
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
+    "deliver:3.9.7": "node scripts/createDelivery.mjs",
+    "deliver:3.9.6": "node scripts/createDelivery.mjs",
+    "deliver:3.9.5": "node scripts/createDelivery.mjs",
     "deliver:3.9.4": "node scripts/createDelivery.mjs",
     "deliver:3.9.3": "node scripts/createDelivery.mjs",
     "deliver:3.9.2": "node scripts/createDelivery.mjs",
@@ -610,17 +613,24 @@
     "test:image-thumbnails": "node --test scripts/imageThumbnail.test.mjs",
     "test:reference-picker-performance": "node scripts/referenceImagePickerPerformanceUiQa.mjs",
     "test:generic-video-api": "tsx scripts/genericVideoApi.test.ts",
-    "test:large-library-startup": "node scripts/largeLibraryStartupUiQa.mjs"
+    "test:large-library-startup": "node scripts/largeLibraryStartupUiQa.mjs",
+    "pack": "node scripts/packRelease.mjs",
+    "pack:all": "node scripts/packRelease.mjs",
+    "pack:android": "node scripts/buildAndroid.mjs",
+    "deliver": "node scripts/createDelivery.mjs",
+    "test:android-bridge": "tsx scripts/androidBridge.test.ts && tsx scripts/androidFileTransfer.test.ts"
   },
   "dependencies": {
-    "playwright-core": "^1.62.1",
+    "@capacitor/core": "8.6.0",
     "lucide-react": "^0.468.0",
+    "playwright-core": "^1.62.1",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "ws": "^8.18.3",
     "yauzl": "3.4.0"
   },
   "devDependencies": {
+    "@capacitor/cli": "8.6.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",
@@ -631,7 +641,8 @@
     "tsx": "^4.20.3",
     "typescript": "^5.7.2",
     "vite": "^6.0.5",
-    "wait-on": "^8.0.1"
+    "wait-on": "^8.0.1",
+    "@capacitor/android": "8.6.0"
   },
   "build": {
     "appId": "com.lianhua.video-director",
@@ -654,7 +665,9 @@
       "dist/**/*",
       "electron/**/*",
       "build/icon.png",
-      "package.json"
+      "package.json",
+      "!node_modules/@capacitor/android/**/*",
+      "!node_modules/@capacitor/cli/**/*"
     ],
     "win": {
       "icon": "build/icon.ico",

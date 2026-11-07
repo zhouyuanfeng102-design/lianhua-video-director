@@ -14,6 +14,7 @@ const portableLauncherSource = path.join(repositoryRoot, '启动莲华视频导�
 const packageInfo = JSON.parse(fs.readFileSync(path.join(repositoryRoot, 'package.json'), 'utf8'));
 const version = String(packageInfo.version || '').trim();
 const portableName = `莲华视频导演台-${version}-便携版.exe`;
+const apkName = `莲华视频导演台-${version}-安卓版.apk`;
 const sourceName = `莲华视频导演台-${version}-恢复源码.zip`;
 const deliveredNotesName = `莲华视频导演台-${version}-更新说明.md`;
 const checksumName = `莲华视频导演台-${version}-SHA256.txt`;
@@ -104,6 +105,7 @@ function createFixture() {
 
   writeFile(path.join(root, 'package.json'), JSON.stringify({ version }, null, 2));
   writeFile(path.join(root, 'release', portableName), 'fake-portable-exe');
+  writeFile(path.join(root, 'release', apkName), 'fake-signed-apk');
   writeFile(path.join(root, `发布说明-${version}.md`), '# Fixture release notes');
   writeFile(path.join(root, sourceLauncherName), 'NEW VERSIONED LAUNCHER');
   writeFile(path.join(root, 'public', 'fixture-public.txt'), 'public asset');
@@ -117,6 +119,7 @@ function createFixture() {
     path.join(repositoryRoot, 'scripts', 'releaseVersion.mjs'),
     path.join(root, 'scripts', 'releaseVersion.mjs'),
   );
+  fs.copyFileSync(path.join(repositoryRoot, 'scripts', 'deliveryTargets.mjs'), path.join(root, 'scripts', 'deliveryTargets.mjs'));
 
   for (const file of [
     'index.html', 'package-lock.json', 'README.md', 'AGENTS.md', 'tsconfig.json', 'tsconfig.tests.json', 'vite.config.ts',
@@ -128,13 +131,13 @@ function createFixture() {
   return { base, root };
 }
 
-function executeDelivery(root, outputDirectory, environment = {}) {
+function executeDelivery(root, outputDirectory, environment = {}, args = []) {
   const env = { ...process.env };
   delete env.DELIVERY_DIR;
   delete env.LIANHUA_REPLACE_CURRENT_DELIVERY;
   if (outputDirectory) env.DELIVERY_DIR = outputDirectory;
   Object.assign(env, environment);
-  return spawnSync(process.execPath, ['scripts/createDelivery.mjs'], {
+  return spawnSync(process.execPath, ['scripts/createDelivery.mjs', ...args], {
     cwd: root,
     encoding: 'utf8',
     env,
@@ -142,8 +145,8 @@ function executeDelivery(root, outputDirectory, environment = {}) {
   });
 }
 
-function runDelivery(root, outputDirectory, environment = {}) {
-  const result = executeDelivery(root, outputDirectory, environment);
+function runDelivery(root, outputDirectory, environment = {}, args = []) {
+  const result = executeDelivery(root, outputDirectory, environment, args);
   assert.equal(result.status, 0, result.stderr || result.stdout);
   return JSON.parse(result.stdout);
 }
@@ -220,9 +223,72 @@ test('createDelivery defaults to the project-local 交付 directory', () => {
     const expected = path.join(fixture.root, '交付');
     assert.equal(path.resolve(report.outputDirectory), expected);
     assert.equal(fs.existsSync(path.join(expected, portableName)), true);
+    assert.equal(fs.existsSync(path.join(expected, apkName)), true);
   } finally {
     fs.rmSync(fixture.base, { recursive: true, force: true });
   }
+});
+
+test('dual-client delivery copies and hashes EXE and APK while preserving historical Android packages', () => {
+  const fixture = createFixture();
+  try {
+    const output = path.join(fixture.base, 'delivery-output');
+    const oldName = '莲华视频导演台-0.6.0-安卓版.apk';
+    writeFile(path.join(output, oldName), 'historical-apk');
+    const report = runDelivery(fixture.root, output);
+    const sums = fs.readFileSync(path.join(output, checksumName), 'utf8');
+    for (const [name, bytes] of [[portableName, 'fake-portable-exe'], [apkName, 'fake-signed-apk']]) {
+      assert.equal(fs.readFileSync(path.join(output, name), 'utf8'), bytes);
+      assert.equal(report.files.some((file) => file.name === name), true);
+      const hash = createHash('sha256').update(bytes).digest('hex');
+      assert.equal(sums.split(/\r?\n/u).includes(`${hash}  ${name}`), true);
+    }
+    assert.equal(fs.readFileSync(path.join(output, oldName), 'utf8'), 'historical-apk');
+  } finally { fs.rmSync(fixture.base, { recursive: true, force: true }); }
+});
+
+test('dual-client delivery rejects either missing client before staging or writing output', () => {
+  for (const name of [portableName, apkName]) {
+    const fixture = createFixture();
+    try {
+      fs.unlinkSync(path.join(fixture.root, 'release', name));
+      const output = path.join(fixture.base, 'delivery-output');
+      const result = executeDelivery(fixture.root, output);
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /build is missing/u);
+      assert.equal(fs.existsSync(output), false);
+      assert.equal(fs.existsSync(path.join(fixture.root, `.delivery-source-${version}`)), false);
+    } finally { fs.rmSync(fixture.base, { recursive: true, force: true }); }
+  }
+});
+
+test('explicit UI-only delivery permits one client without accidentally including the other', () => {
+  for (const [target, included, excluded] of [['windows', portableName, apkName], ['android', apkName, portableName]]) {
+    const fixture = createFixture();
+    try {
+      fs.unlinkSync(path.join(fixture.root, 'release', excluded));
+      const output = path.join(fixture.base, 'delivery-output');
+      const report = runDelivery(fixture.root, output, {}, [`--ui-only=${target}`]);
+      assert.equal(fs.existsSync(path.join(output, included)), true);
+      assert.equal(fs.existsSync(path.join(output, excluded)), false);
+      assert.equal(report.files.some((file) => file.name === excluded), false);
+      assert.equal(fs.existsSync(path.join(output, deliveredLauncherName)), target === 'windows');
+    } finally { fs.rmSync(fixture.base, { recursive: true, force: true }); }
+  }
+});
+
+test('Android recovery source includes native code and public guides but excludes secrets and build caches', () => {
+  const fixture = createFixture();
+  try {
+    const output = path.join(fixture.base, 'delivery-output');
+    const included = ['android/app/src/main/java/MainActivity.java', 'android/app/src/main/AndroidManifest.xml', 'android/app/build.gradle', 'android/gradlew.bat', 'capacitor.config.ts', 'docs/android-install.md', 'docs/android-build.md'];
+    const excluded = ['android/app/release.jks', 'android/release.keystore', 'android/local.properties', 'android/signing.properties', 'android/keystore.properties', 'android/.gradle/cache.bin', 'android/app/build/generated/cache.bin', 'android/app/src/main/assets/public/index.html'];
+    for (const name of [...included, ...excluded]) writeFile(path.join(fixture.root, name));
+    runDelivery(fixture.root, output);
+    const entries = listZipEntries(path.join(output, sourceName));
+    for (const name of included) assert.equal(entries.includes(name), true, name);
+    for (const name of excluded) assert.equal(entries.includes(name), false, name);
+  } finally { fs.rmSync(fixture.base, { recursive: true, force: true }); }
 });
 
 test('createDelivery includes public assets in the recovery source archive', () => {
@@ -389,6 +455,7 @@ test('delivered launcher starts the portable executable from its own directory',
 
 for (const collisionName of [
   portableName,
+  apkName,
   sourceName,
   deliveredNotesName,
   checksumName,
@@ -476,6 +543,7 @@ test('createDelivery compares legacy versions numerically and rejects downgrade 
       const candidateName = `莲华视频导演台-${candidateVersion}-便携版.exe`;
       writeFile(path.join(fixture.root, 'package.json'), JSON.stringify({ version: candidateVersion }));
       writeFile(path.join(fixture.root, 'release', candidateName), 'fake-portable-exe');
+      writeFile(path.join(fixture.root, 'release', `莲华视频导演台-${candidateVersion}-安卓版.apk`), 'fake-signed-apk');
       const output = path.join(fixture.base, 'delivery-output');
       const newerName = `莲华视频导演台-${newerVersion}-便携版.exe`;
       const newer = path.join(output, newerName);

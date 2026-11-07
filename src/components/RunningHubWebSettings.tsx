@@ -5,6 +5,7 @@ import {
   type RunningHubWebBind, type RunningHubWebConfig, type RunningHubWebField,
 } from '../runningHubWeb';
 import { formatUserFacingError } from '../userFacingError';
+import { isAndroidRuntime } from '../platform/runtime';
 
 export interface RunningHubWebSettingsProps {
   config: RunningHubWebConfig;
@@ -87,7 +88,7 @@ export function RunningHubWebSettings({ config, getCurrentConfig, onChange }: Ru
   }, [account?.id, account?.session?.loggedIn, account?.session?.displayName, busy]);
   const login = async () => {
     if (!account) return;
-    if (!desktop?.rhWebControl) { setError('登录窗口只在桌面程序里打开。'); return; }
+    if (!desktop?.rhWebControl) { setError(isAndroidRuntime() ? '手机隔离网页登录尚未连接，请重新打开应用。' : '登录窗口只在桌面程序里打开。'); return; }
     setBusy(true); setError('');
     setMessage(`正在打开「${account.name} · ${account.site === 'cn' ? '国内站' : '国际站'}」的登录窗口。`);
     try {
@@ -129,7 +130,7 @@ export function RunningHubWebSettings({ config, getCurrentConfig, onChange }: Ru
     const selected = live.apps.find((item) => item.id === live.activeAppId);
     const selectedAccount = live.accounts.find((item) => item.id === (selected?.accountId || live.activeAccountId)) || live.accounts[0];
     if (!selected || !selectedAccount) { setError('请先添加应用页。'); return; }
-    if (!desktop?.rhWebControl) { setError('读取网页只在桌面程序里进行。'); return; }
+    if (!desktop?.rhWebControl) { setError(isAndroidRuntime() ? '手机隔离网页尚未连接，请重新打开应用。' : '读取网页只在桌面程序里进行。'); return; }
     setBusy(true); setError(''); setMessage('');
     try {
       const result = await desktop.rhWebControl({ action: 'read', accountId: selectedAccount.id, site: selected.site, url: selected.url });
@@ -173,7 +174,7 @@ export function RunningHubWebSettings({ config, getCurrentConfig, onChange }: Ru
             <button type="button" className="btn danger" disabled={busy || !account} onClick={() => void removeAccount()}>确认删除</button>
             <button type="button" className="btn" disabled={busy} onClick={() => { setConfirmingDelete(false); setMessage(''); }}>取消</button>
           </> : <>
-            <button type="button" className="btn" disabled={busy || !account} onClick={() => void login()}>登录</button>
+            <button type="button" className="btn" disabled={busy || !account} onClick={() => void login()}>{isAndroidRuntime() ? '隔离网页登录' : '登录'}</button>
             <button type="button" className="btn" disabled={busy || !account || !desktop?.rhWebControl} onClick={() => account && void refreshSession(account.id)}>刷新</button>
             <button type="button" className="btn danger" disabled={busy || !account} onClick={() => { if (!account) return; setConfirmingDelete(true); setError(''); setMessage(`将删除「${account.name}」。网站上的账号、网页应用和成片保留。`); }}>删除</button>
           </>}

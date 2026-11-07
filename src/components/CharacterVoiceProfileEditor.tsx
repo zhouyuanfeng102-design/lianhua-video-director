@@ -8,6 +8,7 @@ import {
   type CharacterVoiceProfileField,
 } from '../characterVoiceProfile';
 import { isVideoDirectorAudio } from '../videoAudioReferences';
+import { mapManagedAssetDisplayUrl } from '../platform/assetUrl';
 import '../videoAudioReferences.css';
 
 type VoiceDraft = Record<CharacterVoiceProfileField, string>;
@@ -15,8 +16,8 @@ const draftOf = (profile: CharacterVoiceProfile | undefined): VoiceDraft => Obje
   CHARACTER_VOICE_PROFILE_FIELDS.map((field) => [field, profile?.[field] || '']),
 ) as VoiceDraft;
 const audioSource = (asset: ReferenceAsset | undefined): string => !asset || asset.missing ? ''
-  : asset.dataUrl || asset.url || (asset.relativePath
-    ? `lianhua-asset://local/${asset.relativePath.replace(/\\/gu, '/').split('/').map(encodeURIComponent).join('/')}` : '');
+  : mapManagedAssetDisplayUrl(asset.dataUrl || asset.url || (asset.relativePath
+    ? `lianhua-asset://local/${asset.relativePath.replace(/\\/gu, '/').split('/').map(encodeURIComponent).join('/')}` : ''));
 
 export interface CharacterVoiceProfileEditorProps {
   character: Character;

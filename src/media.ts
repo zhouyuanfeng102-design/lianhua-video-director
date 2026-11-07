@@ -1,5 +1,6 @@
 import type { ReferenceAsset } from './types';
 import type { ManagedMediaResult } from './storage';
+import { mapManagedAssetDisplayUrl } from './platform/assetUrl';
 
 export interface MediaProbe {
   durationSec?: number;
@@ -194,4 +195,4 @@ export const createFrameAsset = (
   updatedAt: Date.now(),
 });
 
-export const assetPreviewUrl = (asset: ReferenceAsset): string => asset.dataUrl || asset.url || '';
+export const assetPreviewUrl = (asset: ReferenceAsset): string => mapManagedAssetDisplayUrl(asset.dataUrl || asset.url || '');

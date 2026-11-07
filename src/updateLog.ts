@@ -15,6 +15,36 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "3.9.7",
+    releasedAt: "2026-11-07",
+    title: "EXE 与 APK 双端交付",
+    highlights: [
+      "安卓手机使用单列页面、四项底部导航、可滚动编辑和触控弹层。",
+      "接入安卓存档、密钥加密、素材、项目包、原生网络及视频处理，手机可查看本地图片、音频和视频。",
+      "保留 3.9.6 的 RH 网页下拉选项读取与填写修复。",
+      "常规新版本同时交付 EXE 与正式签名 APK；已有提示词和成片保持原样。",
+    ],
+  },
+  {
+    version: "3.9.6",
+    releasedAt: "2026-11-07",
+    title: "RH 网页读出下拉选项",
+    highlights: [
+      "读取网页时带上每个下拉框的选项，例如 LLM 模型。",
+      "可以改选，生成时按选中的项填写。",
+    ],
+  },
+  {
+    version: "3.9.5",
+    releasedAt: "2026-11-07",
+    title: "安卓 APK 与手机布局",
+    highlights: [
+      "新增 Android APK，手机使用单列页面、底部导航和触控操作。",
+      "安卓接入本地存档、素材、文件选择和原生网络，项目可通过项目包转移。",
+      "后续常规版本同步交付 Windows EXE 与 Android APK，已有提示词和成片保持原样。",
+    ],
+  },
+  {
     version: "3.9.4",
     releasedAt: "2026-11-07",
     title: "RH 网页时长沿用页面上的数字",

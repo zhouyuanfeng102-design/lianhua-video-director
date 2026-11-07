@@ -153,7 +153,8 @@ async function readForm(page) {
         const numericValue = Number(numeric.value);
         fields.push({ key, label: name, kind: 'number', value: Number.isFinite(numericValue) ? numericValue : numeric.value });
       } else if (selected || /aspect|比例/iu.test(name)) {
-        fields.push({ key: 'select:aspect', label: name, kind: 'select', value: (selected?.textContent || '').trim(), options: [] });
+        const aspect = /aspect|比例/iu.test(name);
+        fields.push({ key: aspect ? 'select:aspect' : `select:${name}`, label: name, kind: 'select', value: (selected?.textContent || '').trim(), options: [] });
       }
     }
     const instance = (document.querySelector('.run-mode-current')?.textContent || '').trim();
@@ -166,14 +167,44 @@ async function readForm(page) {
   });
 }
 
-async function readAspectOptions(page) {
-  const select = page.locator('.ai-side').locator('.ant-select').first();
-  if (await select.count() !== 1) return [];
-  await select.click();
-  await page.waitForTimeout(400);
-  const options = await page.locator('.ant-select-item-option-content').allInnerTexts();
-  await page.keyboard.press('Escape');
-  return [...new Set(options.map((item) => item.trim()).filter(Boolean))];
+async function readOpenOptions(page) {
+  const dropdown = page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').last();
+  if (await dropdown.count() < 1) return [];
+  const seen = [];
+  for (let step = 0; step < 12; step += 1) {
+    const texts = await dropdown.locator('.ant-select-item-option-content').allInnerTexts();
+    for (const text of texts) {
+      const value = text.trim();
+      if (value && !seen.includes(value)) seen.push(value);
+    }
+    const holder = dropdown.locator('.rc-virtual-list-holder').first();
+    if (await holder.count() < 1) break;
+    const moved = await holder.evaluate((node) => {
+      const before = node.scrollTop;
+      node.scrollTop = before + node.clientHeight;
+      return node.scrollTop !== before;
+    });
+    if (!moved) break;
+  }
+  return seen;
+}
+
+async function readSelectOptions(page) {
+  const planes = page.locator('.ai-side .item-plane').filter({ has: page.locator('.ant-select') });
+  const count = await planes.count();
+  const found = [];
+  for (let index = 0; index < count; index += 1) {
+    const plane = planes.nth(index);
+    const title = plane.locator('.plane-top > .title').first();
+    const label = ((await title.getAttribute('title')) || (await title.textContent()) || '').trim();
+    if (!label || label === '上传图片' || label === '上传音频') continue;
+    await plane.locator('.ant-select').first().click();
+    await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option-content').first().waitFor({ state: 'visible', timeout: 2500 }).catch(() => {});
+    const options = await readOpenOptions(page);
+    await page.keyboard.press('Escape').catch(() => {});
+    found.push({ label, options });
+  }
+  return found;
 }
 
 const exactText = (label) => new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}$`, 'u');
@@ -668,8 +699,14 @@ parentPort.on('message', async ({ id, action, payload }) => {
       const page = await pageFor(entry, payload.url);
       await page.locator('h1.ai-title').first().waitFor({ state: 'attached', timeout: 8000 }).catch(() => {});
       const form = await readForm(page);
-      const aspect = form.fields.find((item) => item.key === 'select:aspect');
-      if (aspect) aspect.options = await readAspectOptions(page);
+      const lists = await readSelectOptions(page);
+      for (const field of form.fields) {
+        if (field.kind !== 'select') continue;
+        const match = lists.find((item) => item.label === field.label);
+        const options = match?.options?.length ? match.options : [];
+        const current = String(field.value || '').trim();
+        field.options = current && !options.includes(current) ? [current, ...options] : options;
+      }
       if (!form.fields.length) throw new Error('后台没有读到生成表单。请确认应用页地址，登录过的账号会沿用已保存的登录状态。');
       parentPort.postMessage({ id, result: form });
       return;

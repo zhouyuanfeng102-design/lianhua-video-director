@@ -1,6 +1,6 @@
 import React from 'react';
 import ReactDOM from 'react-dom/client';
-import App from './App';
+import { initializeAndroidBridge } from './platform/androidBridge';
 import './styles.css';
 import './appThemes.css';
 
@@ -29,8 +29,19 @@ class AppErrorBoundary extends React.Component<React.PropsWithChildren, { error:
   }
 }
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
-  <React.StrictMode>
-    <AppErrorBoundary><App /></AppErrorBoundary>
-  </React.StrictMode>
-);
+const root = ReactDOM.createRoot(document.getElementById('root')!);
+const start = async () => {
+  // Install native persistence before App's state initializer can read storage.
+  await initializeAndroidBridge();
+  const { default: App } = await import('./App');
+  await import('./mobile.css');
+  root.render(
+    <React.StrictMode>
+      <AppErrorBoundary><App /></AppErrorBoundary>
+    </React.StrictMode>
+  );
+};
+void start().catch((error: unknown) => {
+  const message = error instanceof Error ? error.message : String(error);
+  root.render(<main style={{ padding: 24, fontFamily: 'sans-serif' }}><h1>应用启动失败</h1><p>本地存档未被覆盖。请重新打开应用。</p><pre style={{ whiteSpace: 'pre-wrap' }}>{message}</pre></main>);
+});

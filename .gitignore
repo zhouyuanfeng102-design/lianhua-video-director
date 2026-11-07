@@ -55,6 +55,18 @@ release/
 *.key
 *.p12
 *.pfx
+*.jks
+*.keystore
+/android/.gradle/
+/android/.idea/
+/android/**/build/
+/android/local.properties
+/android/keystore.properties
+/android/signing.properties
+/android/app/src/main/assets/public/
+/android/app/src/main/assets/capacitor.config.json
+/android/app/src/main/assets/capacitor.plugins.json
+/.build-tools/
 
 # Local reference documents excluded from the public project.
 /多功能提示词模版10S.md

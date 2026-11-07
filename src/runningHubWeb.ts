@@ -241,6 +241,7 @@ export const mergeRunningHubWebRead = (
   const previous = new Map(app.fields.map((item) => [item.key, item.bind]));
   const fields = incoming.map((item) => ({ ...item, bind: previous.get(item.key) && allowedBind(item.kind, previous.get(item.key)!) ? previous.get(item.key)! : item.bind }));
   const sameShape = app.fields.length === fields.length && app.fields.every((item, index) => item.key === fields[index]?.key && item.label === fields[index]?.label);
+  const sameLabels = app.fields.map((item) => item.label).join('\n') === fields.map((item) => item.label).join('\n');
   const pageName = read.name?.trim();
   return {
     ...app,
@@ -248,7 +249,7 @@ export const mergeRunningHubWebRead = (
     fields,
     instance: read.instance?.trim() || app.instance,
     ...(read.estimate?.trim() ? { estimate: read.estimate.trim() } : {}),
-    ready: fields.length > 0 && (app.fields.length === 0 || sameShape),
+    ready: fields.length > 0 && (app.fields.length === 0 || sameShape || (app.ready && sameLabels)),
     updatedAt: Date.now(),
   };
 };

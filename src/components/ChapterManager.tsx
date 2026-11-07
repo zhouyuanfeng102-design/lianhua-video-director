@@ -6,6 +6,7 @@ import type { Project } from '../types';
 import './ChapterManager.css';
 
 export interface ChapterManagerProps {
+  compact?: boolean;
   project: Project;
   onSelect: (chapterId: string) => void;
   onCreate: () => void;
@@ -28,7 +29,7 @@ const originalCaretOffset = (text: string, caret: number): number => {
   return sourceOffset;
 };
 
-export function ChapterManager({ project, onSelect, onCreate, onImport, onArchive, onRename, onReorder }: ChapterManagerProps) {
+export function ChapterManager({ project, onSelect, onCreate, onImport, onArchive, onRename, onReorder, compact = false }: ChapterManagerProps) {
   const [mode, setMode] = useState<'manage' | 'import' | null>(null);
   const [search, setSearch] = useState('');
   const [includeArchived, setIncludeArchived] = useState(false);
@@ -135,10 +136,12 @@ export function ChapterManager({ project, onSelect, onCreate, onImport, onArchiv
     onImport(pieces); setMode(null); setPieces([]); setOriginalText('');
   };
 
+  const actions = <div className="chapter-toolbar-actions"><button type="button" className="btn small" onClick={() => { setMode('manage'); setSearch(''); setPage(0); }}>章节管理</button><button type="button" className="btn small" onClick={onCreate}><Plus size={15} />新建章节</button><button type="button" className="btn small" disabled={reading} onClick={() => fileRef.current?.click()}><Upload size={15} />{reading ? '读取中…' : '导入小说'}</button></div>;
+
   return <>
     <div className="chapter-toolbar" aria-label="章节选择与管理">
       <label><BookOpen size={17} /><span>当前章节</span><select aria-label="当前章节" value={selected?.id ?? ''} onChange={(event) => onSelect(event.target.value)}>{visibleChapters.length ? visibleChapters.map((chapter) => <option key={chapter.id} value={chapter.id}>{chapter.name}</option>) : <option value="">尚未新建章节</option>}</select></label>
-      <div className="chapter-toolbar-actions"><button type="button" className="btn small" onClick={() => { setMode('manage'); setSearch(''); setPage(0); }}>章节管理</button><button type="button" className="btn small" onClick={onCreate}><Plus size={15} />新建章节</button><button type="button" className="btn small" disabled={reading} onClick={() => fileRef.current?.click()}><Upload size={15} />{reading ? '读取中…' : '导入小说'}</button></div>
+      {compact ? <details className="mobile-chapter-actions" onClick={(event) => { if ((event.target as HTMLElement).closest('button')) event.currentTarget.open = false; }}><summary>章节操作</summary>{actions}</details> : actions}
       <input ref={fileRef} hidden type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" onChange={(event) => { void loadFile(event.target.files?.[0]); }} />
     </div>
     {error && <p className="chapter-notice" role="alert">{error}</p>}

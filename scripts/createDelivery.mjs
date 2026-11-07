@@ -3,13 +3,16 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { assertReleaseVersion, compareVersions } from './releaseVersion.mjs';
+import { deliveryTargets, includeRecoverySource } from './deliveryTargets.mjs';
 
 const root = process.cwd();
 const outputDirectory = process.env.DELIVERY_DIR || path.join(root, '交付');
 const packageInfo = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const version = String(packageInfo.version || '').trim();
 assertReleaseVersion(version);
+const targets = deliveryTargets(process.argv.slice(2));
 const portableName = `莲华视频导演台-${version}-便携版.exe`;
+const apkName = `莲华视频导演台-${version}-安卓版.apk`;
 const sourceName = `莲华视频导演台-${version}-恢复源码.zip`;
 const notesName = `莲华视频导演台-${version}-更新说明.md`;
 const checksumName = `莲华视频导演台-${version}-SHA256.txt`;
@@ -36,10 +39,15 @@ const deliveryLauncherContents = [
   '',
 ].join('\r\n');
 const portableSource = path.join(root, 'release', portableName);
-if (!fs.existsSync(portableSource)) throw new Error(`Portable build is missing: ${portableSource}`);
+const apkSource = path.join(root, 'release', apkName);
+for (const [target, file] of [['windows', portableSource], ['android', apkSource]]) {
+  if (targets.includes(target) && !fs.existsSync(file)) {
+    throw new Error(`${target === 'windows' ? 'Portable' : 'Android APK'} build is missing: ${file}`);
+  }
+}
 
 function deliveryVersionFromName(name) {
-  const applicationArtifact = /^莲华视频导演台-(\d+\.\d+\.\d+)-(?:便携版\.exe|恢复源码\.zip|更新说明\.md|SHA256\.txt)$/u.exec(name);
+  const applicationArtifact = /^莲华视频导演台-(\d+\.\d+\.\d+)-(?:便携版\.exe|安卓版\.apk|安卓安装说明\.md|能力与验证记录\.md|恢复源码\.zip|更新说明\.md|SHA256\.txt)$/u.exec(name);
   if (applicationArtifact) return applicationArtifact[1];
   const launcherArtifact = /^启动莲华视频导演台-(\d+\.\d+\.\d+)-便携版\.bat$/u.exec(name);
   return launcherArtifact?.[1] ?? null;
@@ -85,6 +93,7 @@ function copyDirectory(source, destination) {
   for (const entry of fs.readdirSync(source, { withFileTypes: true })) {
     const from = path.join(source, entry.name);
     const to = path.join(destination, entry.name);
+    if (!includeRecoverySource(path.relative(root, from))) continue;
     if (entry.isDirectory()) {
       copyDirectory(from, to);
     } else if (entry.isFile()) {
@@ -99,14 +108,18 @@ fs.rmSync(stage, { recursive: true, force: true });
 fs.mkdirSync(stage, { recursive: true });
 
 const folders = ['build', 'electron', 'public', 'scripts', 'src'];
+if (fs.existsSync(path.join(root, 'android'))) folders.push('android');
 const files = [
   'index.html', 'package.json', 'package-lock.json', 'README.md', 'AGENTS.md', 'tsconfig.json', 'tsconfig.tests.json', 'vite.config.ts',
   '启动开发模式.bat', '启动莲华视频导演台-EXE.bat', '启动莲华视频导演台.bat',
   releaseNotesRelativePath, launcherSourceName,
 ];
+for (const file of ['capacitor.config.ts', 'capacitor.config.json', '.gitignore', 'NOTICE.md']) {
+  if (fs.existsSync(path.join(root, file))) files.push(file);
+}
 // Include the linked public documentation without copying arbitrary local
 // documents, test reports, or user data into a recovery source archive.
-for (const document of ['project-guide.md', 'github-publishing.md']) {
+for (const document of ['project-guide.md', 'github-publishing.md', 'android-install.md', 'android-build.md', 'android-capabilities.md']) {
   const relativePath = path.join('docs', document);
   if (fs.existsSync(path.join(root, relativePath))) files.push(relativePath);
 }
@@ -142,13 +155,27 @@ const result = spawnSync('powershell.exe', [
 if (result.status !== 0) throw new Error((result.stderr || result.stdout || 'Unable to create source archive').trim());
 if (fs.existsSync(archive)) fs.unlinkSync(archive);
 fs.renameSync(temporaryArchive, archive);
-fs.copyFileSync(portableSource, path.join(outputDirectory, portableName));
+if (targets.includes('windows')) fs.copyFileSync(portableSource, path.join(outputDirectory, portableName));
+if (targets.includes('android')) fs.copyFileSync(apkSource, path.join(outputDirectory, apkName));
 fs.copyFileSync(releaseNotesSource, path.join(outputDirectory, notesName));
-fs.writeFileSync(path.join(outputDirectory, launcherName), deliveryLauncherContents, 'utf8');
-fs.writeFileSync(path.join(outputDirectory, launcherSourceName), deliveryLauncherContents, 'utf8');
+if (targets.includes('windows')) {
+  fs.writeFileSync(path.join(outputDirectory, launcherName), deliveryLauncherContents, 'utf8');
+  fs.writeFileSync(path.join(outputDirectory, launcherSourceName), deliveryLauncherContents, 'utf8');
+}
 
 const hash = (file) => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-const delivered = [portableName, sourceName, notesName, launcherName, launcherSourceName].map((name) => ({
+const artifactNames = [sourceName, notesName];
+if (targets.includes('windows')) artifactNames.unshift(portableName, launcherName, launcherSourceName);
+if (targets.includes('android')) {
+  artifactNames.unshift(apkName);
+  for (const [source, suffix] of [['docs/android-install.md', '安卓安装说明.md'], ['release/android-verification.md', '能力与验证记录.md']]) {
+    if (!fs.existsSync(path.join(root, source))) continue;
+    const name = `莲华视频导演台-${version}-${suffix}`;
+    fs.copyFileSync(path.join(root, source), path.join(outputDirectory, name));
+    artifactNames.push(name);
+  }
+}
+const delivered = artifactNames.map((name) => ({
   name,
   file: path.join(outputDirectory, name),
 }));

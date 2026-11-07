@@ -3,6 +3,13 @@
 export const APP_FIT_DESIGN_WIDTH = 1280;
 export const APP_FIT_DESIGN_HEIGHT = 800;
 
+export const MOBILE_APP_MAX_WIDTH = 600;
+
+export function isMobileAppViewport(width: number, height: number, nativeAndroid = false, coarsePointer = false): boolean {
+  return nativeAndroid || width <= MOBILE_APP_MAX_WIDTH
+    || (coarsePointer && width <= 960 && height <= MOBILE_APP_MAX_WIDTH);
+}
+
 export interface AppViewportFit {
   scale: number;
   layoutWidth: number;
