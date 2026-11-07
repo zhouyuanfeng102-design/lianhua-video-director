@@ -4,6 +4,10 @@ import { STORY_GROUP_PARTICIPATION_RULE, STORY_TIME_RELATION_RULE } from './stor
  * still be carried. This is prompt wording, not a checker or a rewrite of saved text. */
 export const MOUNTED_PART_MOTION_RULE = '已经装在墙上、门洞、窗洞或柜体上的活动部件保持原来的安装。门框、窗框、门轴、铰链、转轴和滑轨留在墙、门洞、窗洞或柜体里。门扇、窗扇、窗页、闸门、柜门、抽屉和盖子留在这副铰链、转轴或轨道上，手接触的是这个仍装着的部件，部件只绕它转动或沿它滑动，框和轨道仍嵌在原处。杯子、信、武器和其他本来就能拿起的物件仍按取放写。原文明确写了拆下、卸下或砸离安装位时，部件才离开原来的轴或轨道。英文写成 A mounted door, window, shutter, gate, cabinet door, drawer, or lid remains on its existing hinge, pivot, or track. The frame, jamb, and track remain set in the wall, opening, or cabinet. The hand works that attached part, and the part swings or slides while it remains attached. A loose object such as a cup, letter, or weapon may still be picked up and carried. The part leaves its hinge or track only when the source explicitly removes or breaks it off.';
 
+/** Hands, grip, clothing, and liquids stay where they are attached. Shot events
+ * stay inside that shot. Prompt wording only; saved text is left as written. */
+export const CONNECTED_PRESENCE_RULE = '手留在这条小臂上，手指留在这只手上。握住的物件留在这只手里，松开的那一拍才离开这只手。杯中、壶中的液体留在容器里，沿杯沿或壶嘴离开才算倒出。衣服留在身上，原文写了脱、解或破才离开。这一镜的动作、脚步和音效落在这一镜的起点和下一镜开始之前。下一镜从自己的起点接着写，不把上一镜后半段再演一遍。英文写成 The hand remains on that forearm, and the fingers remain on that hand. The gripped object remains in that hand until the release. Liquid remains in the cup or pot until it leaves over the rim. Clothing remains on the body until the source removes, unties, or tears it. This shot\'s action and sound stay between this shot\'s start and the next shot\'s start.';
+
 /** Shared directing instructions. These shape existing model requests; they do
  * not inspect generated content, introduce a stage, or authorize new events. */
 export const NOVEL_ACTION_SOURCE_RULE = [
@@ -18,21 +22,22 @@ export const NOVEL_ACTION_SOURCE_RULE = [
   '编排先安排全部连续行为、完整对白及先后/同时关系，再选择观看重点。两手配合、攻防回应、提脚同时按肩可处于同一节拍；来招接近时，对方已在闪避或格挡，接触后受力、重心改变与下一行动连续发生，不等进攻者摆完姿势才让对方回应。阶段数组的排列不代表逐项停住再做，在现有action/phases中写清同时或先后，不新增并行字段。可以边说边走、边听边收拾，一人等待可与另一人拍土、整理、再起势同时发生；吞咽后清晰发话、接稳后松手、受压下沉后脱开、听到后反应保留必要先后。按真实行动而非字数安排时间，身份、光照和同一状态的反复描述不额外计时。动作速度问题通过每段中哪些行动何时完成、哪些持续或并行来处理，不用删动作、减少回合、跳过真实整理或缩短固定视频代替；不为填时重复或新增攻击。',
   '编排示例仅说明方法，不添加到当前故事：“她把信交给他”可演成他接稳后她松手，不得补成他撕信离开；“她伸手想拉住他，最终放下”保留接触前停住并收回，不得补抓住拉回；“端起杯子，听到名字后停住，放回桌上”承接握持、信息打断、落桌和松手，不新增喝水。只将必要过程写入可读正文，不用规则说明代替实际演出。',
   MOUNTED_PART_MOTION_RULE,
+  CONNECTED_PRESENCE_RULE,
 ].join('\n');
 
 export const NOVEL_ACTION_CONTINUITY_RULE = [
   'NOVEL_ACTION_CONTINUITY_V1：沿同一 sceneId、参与者和已采用 phase 继续已有行为。用现有 participants、worldRelations、phases.startState/action/endState 与 entryState/exitState/continuityPack 记录当前需要的身体姿态、位置、注意、接触对象、持物归属、物品开合/放置状态，以及行为完成、进行、等待或中断；无需新增固定字段或为填表补事件。',
   STORY_TIME_RELATION_RULE,
-  '切镜、分段或参考帧更换不重置人和物：接过的信仍归接收者，放下的杯仍在桌上，未完成伸手不变成已抓住，已获知信息不重复惊讶。装在墙上或柜体上的门、窗、抽屉和盖仍留在原来的铰链或轨道上，开合进度从上一镜的角度或滑出位置继续。同一事件可跨段，以当前完整本段正文确定实际推进范围；旧事件/phase记录是辅助依据，不能因漏记或旧秒数占满时长而排除正文后续动作。已完成的起手、接触、结果或对白不重播，也不导入其他段的新事件。镜尾可以仍在运动中，exitState记录正在转身、滑移或操作的进度；不因切镜额外添加收手、站稳或摆架势，原文真实发生的这些动作仍完整保留。下一镜从当前进度直接继续。原文明确跳时/换场时保留揭示顺序与跳过后的实际状态，不自行跳过已叙明的连续动作。',
+  '切镜、分段或参考帧更换不重置人和物：接过的信仍归接收者，放下的杯仍在桌上，未完成伸手不变成已抓住，已获知信息不重复惊讶。装在墙上或柜体上的门、窗、抽屉和盖仍留在原来的铰链或轨道上，开合进度从上一镜的角度或滑出位置继续。手仍留在这条小臂上，上一镜还握着的物件仍在这只手里，杯中液体和身上的衣服从上一镜的状态继续。下一镜从自己的起点接着写。同一事件可跨段，以当前完整本段正文确定实际推进范围；旧事件/phase记录是辅助依据，不能因漏记或旧秒数占满时长而排除正文后续动作。已完成的起手、接触、结果或对白不重播，也不导入其他段的新事件。镜尾可以仍在运动中，exitState记录正在转身、滑移或操作的进度；不因切镜额外添加收手、站稳或摆架势，原文真实发生的这些动作仍完整保留。下一镜从当前进度直接继续。原文明确跳时/换场时保留揭示顺序与跳过后的实际状态，不自行跳过已叙明的连续动作。',
   '用户当前正文及 contentOverridden 优先；旧场面记录只沿用仍适用部分，不能恢复用户删除的事件或用旧状态撤销修改。旧稿缺少结构时按其已有正文理解关系，不以补字段为由追加剧情、动作、请求或重试。',
 ].join('\n');
 
 export const NOVEL_ACTION_DELIVERY_RULE = [
   'NOVEL_ACTION_DELIVERY_V1：下游格式转换、翻译与视频提示词忠实交付本次已采用演出，不重新导演。保留行动者、对象、先后/并行、意图与实际发生的区别、开始/中断/结束、接触与释放、持物归属和物体末态；不把递接/操作缩成静态姿势，不把尝试译成成功，不把同一次行动在身份介绍、动作和结果中重复执行。',
-  '面向当前片段保留全部实际动作、明确次数、连续多次性质、起始状态、速度变化、动作完成点、同时发生关系、接触至受力反应和脱离的因果，以及结束或运动中的接续状态。已安装的门、窗、抽屉和盖保持留在原铰链或轨道上，翻译不把它们写成被拿到身前的独立板。限力不译成慢动作，持续按压致下沉再脱开不译成碰到即停止；手扫与腿扫、支撑手与发力脚不混换。稳定外貌、风格、光照只简述一次，后镜只写变化；同一次发生不在多个字段重复下令，真实多次行动不能因此减为一次。空间和音效补充关系及声源，不复述整套动作。普通交付保持目标格式、既定时间与镜头，不新增动作、台词或请求；本次明确授权“重排动作节奏”时可重排既有动作的镜内时窗与完成点，保留固定总长、原动作及当前镜界权限，不把旧等分时间当成剧情事实。',
+  '面向当前片段保留全部实际动作、明确次数、连续多次性质、起始状态、速度变化、动作完成点、同时发生关系、接触至受力反应和脱离的因果，以及结束或运动中的接续状态。已安装的门、窗、抽屉和盖保持留在原铰链或轨道上，翻译不把它们写成被拿到身前的独立板。手、握持、杯中液体和衣服按停留句翻译，这一镜的动作停在下一镜开始之前。限力不译成慢动作，持续按压致下沉再脱开不译成碰到即停止；手扫与腿扫、支撑手与发力脚不混换。稳定外貌、风格、光照只简述一次，后镜只写变化；同一次发生不在多个字段重复下令，真实多次行动不能因此减为一次。空间和音效补充关系及声源，不复述整套动作。普通交付保持目标格式、既定时间与镜头，不新增动作、台词或请求；本次明确授权“重排动作节奏”时可重排既有动作的镜内时窗与完成点，保留固定总长、原动作及当前镜界权限，不把旧等分时间当成剧情事实。',
 ].join('\n');
 
 export const NOVEL_ACTION_FRAME_RULE = [
   'NOVEL_ACTION_FRAME_V1：人物参考负责身份，场景参考负责空间与现有物件，动作参考仅在接口支持且本次已选时使用。构图帧只表示已采用动作的一个短暂阶段，不是整镜要维持的姿势；按当前阶段保留可达距离、交互双方、同一物品、必要支撑及下一步运动空间。进攻前保留接近通路，接触帧保留之后受力、转身或脱身的空间；首帧不提前摆成结束姿势，不把按肩、扶持、摆架势静帧变成整个镜头的停留目标。',
-  '身份图的站姿、手势、持物和正脸展示不覆盖剧情姿态。摄影只决定怎样看清已有动作，按当前阶段需要选择景别和空间；不能用推近/环绕替代操作，也不为展示所有资料另排动作。继承上一帧的人物、接触、持物和环境状态；允许按已采用摄影自然重构图，不要求所有镜头都全身或所有人物始终入画。',
+  '身份图的站姿、手势、持物和正脸展示不覆盖剧情姿态。摄影只决定怎样看清已有动作，按当前阶段需要选择景别和空间；不能用推近/环绕替代操作，也不为展示所有资料另排动作。继承上一帧的人物、接触、持物和环境状态；允许按已采用摄影自然重构图，不要求所有镜头都全身或所有人物始终入画。有首帧图时，这一镜从这张图里已经在的人和物开始，只写之后的动作。有尾帧图时，最后一镜停在那张图的姿势和构图上。',
 ].join('\n');

@@ -15,6 +15,17 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "3.9.9",
+    releasedAt: "2026-11-07",
+    title: "镜头时间、握持和运镜写清楚",
+    highlights: [
+      "下一镜从自己的起点接着写，不再把上一镜后半段再演一遍。",
+      "手留在小臂上，握住的东西留在手里，杯中液体和衣服留在原处。",
+      "有参考图时从画面里已有的人和物开始。缺运镜的镜头补一句官方运镜。",
+      "已保存的提示词和成片保持原样，重新生成该段后才会用新写法。",
+    ],
+  },
+  {
     version: "3.9.8",
     releasedAt: "2026-11-07",
     title: "门窗抽屉留在原来的安装位置",
