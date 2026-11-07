@@ -210,7 +210,7 @@ const h3DialogueSource = [
   'non_diegetic_music: N/A',
 ].join('\n');
 assert.equal(getH3PromptProtocolIssue(h3DialogueSource), undefined, 'H3 dialogue tags do not alter the existing section/shot protocol');
-assert.ok(H3_DIALOGUE_FORMAT_RULE.includes('(S1)') && H3_DIALOGUE_FORMAT_RULE.includes('<d>[Chinese]'), 'the official H3 rule names stable speaker IDs and language-tagged dialogue');
+assert.ok(H3_DIALOGUE_FORMAT_RULE.includes('(S1)') && H3_DIALOGUE_FORMAT_RULE.includes('<d>[中文]'), 'the official H3 rule names stable speaker IDs and language-tagged dialogue');
 assert.ok(H3_DIALOGUE_FORMAT_RULE.includes('<scenetrans>'), 'the official H3 rule covers dialogue spanning an existing cut');
 let h3DialogueCalls = 0;
 const translatedH3Dialogue = await translateVideoPromptToEnglish({
@@ -219,7 +219,7 @@ const translatedH3Dialogue = await translateVideoPromptToEnglish({
   clean: () => { throw new Error('H3 source dialogue must not enter full-body cleanup'); },
   request: async (system, user) => {
     h3DialogueCalls += 1;
-    assert.match(system, /<d>\[Chinese\]/u);
+    assert.match(system, /<d>\[中文\]/u);
     assert.match(system, /<scenetrans>/u);
     const data = JSON.parse(user) as H3DescriptionRequest;
     assert.equal(data.sourcePrompt, h3DialogueSource);
@@ -247,7 +247,7 @@ const repairedH3Dialogue = await repairH3PromptProtocolWithAi({
   request: async (system, user) => {
     h3RepairCalls += 1;
     assert.match(system, /稳定\(S1\)、\(S2\)/u);
-    assert.match(system, /<d>\[Chinese\]/u);
+    assert.match(system, /<d>\[中文\]/u);
     const data = JSON.parse(user.match(/<h3_format_repair_data>\n([\s\S]+)\n<\/h3_format_repair_data>/u)![1]);
     assert.equal(data.requiredProtocol.shots.length, 2);
     return h3DialogueSource;

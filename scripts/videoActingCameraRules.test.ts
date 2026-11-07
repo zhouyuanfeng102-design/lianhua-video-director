@@ -189,7 +189,7 @@ assert.ok(VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('让摄影�
   && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('While this rock continues, her back stays arched, her toes stay curled, tears stay on her cheeks, and her chest rises with each breath')
   && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('Her mouth stays closed during his line. Her brows stay drawn, tears stay on her cheeks, and her chest keeps rising')
   && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('The sign reads "OPEN"')
-  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('From 22.500s to 24.000s, he says: <d>[Chinese] 小舞……</d> His lips close. His hand stays on her head')
+  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('From 22.500s to 24.000s, he says: <d>[中文] 小舞……</d> His lips close. His hand stays on her head')
   && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('不得把retreating')
   && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('除非源稿明确表示人物本人倒退或折返'));
 assert.ok(VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT

@@ -118,6 +118,24 @@ const cutTime = (value: number): string => {
   const minutes = Math.floor(milliseconds / 60000);
   return `${String(minutes).padStart(2, '0')}:${((milliseconds % 60000) / 1000).toFixed(3).padStart(6, '0')}`;
 };
+const dialogueLanguageTag = (value: string): string => {
+  const token = value.trim();
+  if (/^(chinese|zh|zh-cn|中文)$/iu.test(token)) return '中文';
+  if (/^(english|en)$/iu.test(token)) return 'English';
+  return token || '中文';
+};
+const lowPoseSentence = (text: string, en: boolean): string | undefined => (
+  /床底|桌下|柜内|柜里|门后|躲|钻进|藏在|趴在|伏在/u.test(text)
+    ? (en
+      ? 'The torso remains below the covering, knees and hips bent. The person does not stand or lie on top of it.'
+      : '躯干留在遮挡物下面，膝和髋是弯的，不在遮挡物上面站直或躺平。')
+    : undefined
+);
+const musicLine = (value: string | undefined): string => {
+  const text = (value || '').trim();
+  if (!text || /^(n\/a|none|无|无配乐|silence|no music)$/iu.test(text)) return 'N/A';
+  return text;
+};
 const sentence = (text: string, language: 'zh' | 'en'): string => {
   const body = text.trim();
   return !body || /[.!?。！？：:;；]$/u.test(body) ? body : `${body}${language === 'en' ? '.' : '。'}`;
@@ -248,23 +266,16 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
       voiceover: en ? 'says in an off-screen voiceover' : '以明确的画外旁白发话',
       'inner-voice': en ? 'is heard in an explicitly authored inner voice' : '以原定的内心声音发话',
     }[event.channel];
-    const voiceDescriptions = unique(event.speakerCharacterIds).flatMap((id) => {
-      const voice = descriptions.get(id)?.voiceDescription?.trim();
-      return voice ? [sentence(`${label(id)}${en ? ' retains the authored voice' : '沿用已确认声线'}: ${voice}`, language)] : [];
-    });
     if (event.kind === 'speech') {
-      const dialogue = `<d>[${event.language}] ${event.continuesFromPreviousShot ? '<scenetrans>' : ''}${event.text}${event.continuesInNextShot ? '<scenetrans>' : ''}</d>`;
+      const dialogue = `<d>[${dialogueLanguageTag(event.language)}] ${event.continuesFromPreviousShot ? '<scenetrans>' : ''}${event.text}${event.continuesInNextShot ? '<scenetrans>' : ''}</d>`;
       const simultaneous = unique(event.speakerCharacterIds).length > 1 ? (en ? ' in unison' : '共同同步') : '';
       output.push(`${time(event)}${speakers}${en ? ' ' : ''}${channel}${simultaneous}${target}: ${dialogue}`);
-      if (event.channel === 'on-screen') output.push(en
-        ? `${names(event.speakerCharacterIds)} produces the speaking lip movements for these words.`
-        : `${names(event.speakerCharacterIds)}产生本句对应的说话口型。`);
       if (event.channel === 'on-screen' && listenerIds.length) output.push(en
-        ? `${names(event.speakerCharacterIds)} keeps the body and head oriented toward ${names(listenerIds)}, with gaze on them; camera framing is described separately and does not replace the addressed eyeline.`
-        : `${names(event.speakerCharacterIds)}的身体与头部朝向${names(listenerIds)}，视线落在对方身上；摄影机取景方向单独表达，不以正脸或看镜头代替注视对象。`);
+        ? `${names(event.speakerCharacterIds)} keeps the chest and eyes toward ${names(listenerIds)}. The camera stays beside the line between them.`
+        : `${names(event.speakerCharacterIds)}的胸口和眼睛留在${names(listenerIds)}身上，摄影机在两人连线的侧面。`);
       else if (event.channel === 'voiceover' || event.channel === 'inner-voice') output.push(en
-        ? 'This voice does not assign speaking lip movements to an on-screen character.'
-        : '这段声音不安排画内人物张口代说。');
+        ? 'The on-screen mouths stay closed.'
+        : '画内的嘴保持闭合。');
       if (event.continuesFromPreviousShot || event.continuesInNextShot) output.push(en
         ? `${speakers} keeps the same continuous voice across the authored cut, without restarting or repeating words.`
         : `${speakers}跨越既有切镜时保持声音连续，不重起或重复原话。`);
@@ -272,9 +283,12 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
       const position = event.channel === 'on-screen' ? (en ? 'on-screen' : '画内') : (en ? 'off-screen' : '画外');
       output.push(sentence(`${time(event)}${speakers}${en ? ` makes the authored ${position} non-verbal vocal sound` : `发出原定${position}非语言人声`}: ${event.vocalDescription}`, language));
     }
-    output.push(...voiceDescriptions);
-    if (event.delivery?.trim()) output.push(sentence(`${names(event.speakerCharacterIds)}${en ? ' delivers this voice' : '本次发声表演'}: ${event.delivery}`, language));
-    if (event.speakerAction?.trim()) output.push(sentence(`${names(event.speakerCharacterIds)}${en ? ' performs the authored action' : '执行本次动作'}: ${event.speakerAction}`, language));
+    if (event.delivery?.trim()) output.push(sentence(event.delivery, language));
+    if (event.speakerAction?.trim()) {
+      output.push(sentence(event.speakerAction, language));
+      const pose = lowPoseSentence(event.speakerAction, en);
+      if (pose) output.push(pose);
+    }
     output.push(...reactions(event));
     const rendered = output.join(en ? ' ' : '');
     events.push({ eventId: event.eventId, kind: 'dialogue', ...(event.kind === 'speech' ? { dialogueId: event.dialogueId } : {}),
@@ -291,7 +305,8 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
   const integratedOpening = !fullReference ? [...renderedCharacters.map((entry) => entry.referenceAnchor), ...voiceOnlyDefinitions, plan.preamble?.trim()].filter(Boolean).join('\n') : '';
   const shots = plan.shots.map((shot, index) => {
     const marker = `[Shot ${shot.shotIndex}]${index ? ` At ${cutTime(shot.startSec)}` : ''}`;
-    return [marker, !index ? integratedOpening : '', sentence(shot.visualDescription, language), ...shot.events.map(renderEvent)].filter(Boolean).join('\n');
+    const pose = lowPoseSentence(shot.visualDescription, en);
+    return [marker, !index ? integratedOpening : '', sentence(shot.visualDescription, language), pose, ...shot.events.map(renderEvent)].filter(Boolean).join('\n');
   });
   const body = [fullReference ? plan.preamble?.trim() : '', ...shots]
     .filter(Boolean).join('\n\n');
@@ -320,7 +335,7 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
     ? 'Keep the referenced identities and the authored scene relationships.' : '保留参考身份与已确认的场景关系。');
   const prompt = deduplicateIdentityAnchors(renderH3DeliverySections({ body, subjectDefinitions: definitions.join('\n'),
     summary: /^\[reference generation[^\]]*\]/u.test(summary) ? summary : `[reference generation] ${summary}`,
-    retentionAnalysis: retention, overallSoundscape: plan.overallSoundscape, nonDiegeticMusic: plan.nonDiegeticMusic,
+    retentionAnalysis: retention, overallSoundscape: plan.overallSoundscape, nonDiegeticMusic: musicLine(plan.nonDiegeticMusic),
   }, { mode: fullReference ? 'full-reference' : 'integrated', language }), renderedCharacters.map((entry) => entry.referenceAnchor));
   return { prompt, body, plan, speakerTokens, characters: renderedCharacters, events };
 };

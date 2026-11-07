@@ -45,7 +45,7 @@ test('segment 4 converts the declared shot clock once and never voices the sourc
   assert.deepEqual(normalizeH3PerformancePlan(rendered.plan), rendered.plan);
   assert.equal(JSON.stringify(segment4), untouched);
   assert.match(rendered.prompt, /本段11\.50–13\.10秒，亚乌拉 \(S2\)在画内发话面向贝里尤洛与夏提雅/u);
-  assert.match(rendered.prompt, /亚乌拉的身体与头部朝向贝里尤洛与夏提雅，视线落在对方身上/u);
+  assert.match(rendered.prompt, /亚乌拉的胸口和眼睛留在贝里尤洛与夏提雅身上，摄影机在两人连线的侧面/u);
   assert.match(rendered.prompt, /沉默地环视王都方向/u);
   assert.doesNotMatch(rendered.prompt, /矮人|骷髅|与龙僵持/u);
   assert.match(rendered.prompt, /衣料的轻微摩擦声/u);
@@ -75,9 +75,8 @@ test('segment 5 renders the complete command with its owner, lip action and sile
   const rendered = renderH3PerformancePlan({ plan: segment5, characters, language: 'en' });
   const command = rendered.events.find((event) => event.dialogueId === 'b1-d12')!.referenceAnchor!;
   assert.match(command, /^From 10\.60 to 14\.40 seconds of this clip, 夏提雅 \(S2\) speaks on-screen to 贝里尤洛:/u);
-  assert.match(command, /<d>\[Chinese\] 没错，我们的君王是为了支配你们而来的，下跪低头吧。<\/d>/u);
-  assert.match(command, /夏提雅 produces the speaking lip movements/u);
-  assert.match(command, /夏提雅 keeps the body and head oriented toward 贝里尤洛, with gaze on them/u);
+  assert.match(command, /<d>\[中文\] 没错，我们的君王是为了支配你们而来的，下跪低头吧。<\/d>/u);
+  assert.match(command, /夏提雅 keeps the chest and eyes toward 贝里尤洛/u);
   assert.match(command, /贝里尤洛 listens without speaking, with no speaking lip movement/u);
   assert.match(command, /亚乌拉 remains silent: watches the exchange/u);
   assert.doesNotMatch(command, /贝里尤洛.*?speaks on-screen|夏提雅 remains silent|to 夏提雅 \(S2\) seconds/u);
@@ -139,8 +138,8 @@ test('authored cross-cut dialogue keeps one voice and only the authored word spl
     { shotIndex: 2, startSec: 2, visualDescription: 'The authored reverse angle.', events: [{ eventId: 'd-b', kind: 'speech', dialogueId: 'd', speakerCharacterIds: ['shalltear'], channel: 'off-screen', language: 'Chinese', text: '下跪低头吧。', startSec: 0, endSec: 1.5, continuesFromPreviousShot: true }] },
   ], overallSoundscape: 'N/A', nonDiegeticMusic: 'N/A' };
   const rendered = renderH3PerformancePlan({ plan, characters, language: 'en' });
-  assert.match(rendered.prompt, /<d>\[Chinese\] 没错，<scenetrans><\/d>/u);
-  assert.match(rendered.prompt, /<d>\[Chinese\] <scenetrans>下跪低头吧。<\/d>/u);
+  assert.match(rendered.prompt, /<d>\[中文\] 没错，<scenetrans><\/d>/u);
+  assert.match(rendered.prompt, /<d>\[中文\] <scenetrans>下跪低头吧。<\/d>/u);
   assert.equal(rendered.prompt.match(/<scenetrans>/gu)?.length, 2);
   assert.doesNotMatch(rendered.prompt, /<cutoff>/u);
   assert.equal(rendered.speakerTokens.get('shalltear'), '(S1)');
