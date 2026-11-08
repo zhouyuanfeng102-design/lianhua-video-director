@@ -49,10 +49,15 @@ assert.doesNotMatch(H3_FINAL_BODY_FORMAT_RULE, /最终英文正文|英文风格|
 for (const language of ['中文', '英文'] as const) {
   const rule = h3DescriptionLanguageRule(language);
   assert.match(rule, /描述语言与人物发话语言分开/u);
+  if (language === '中文') {
+    assert.match(rule, /candidatePrompt中的英文描述只作为剧情、动作、时间和身份证据/u);
+  } else {
+    assert.match(rule, /完整翻译其中所有可译描述，包括已有英文和中英混写的单元/u);
+  }
   assert.match(rule, /对白、歌词及其语言标注保持原稿指定的语言和原字/u);
   assert.match(rule, /人物姓名、代号及其身份映射保持原样/u);
   assert.match(rule, /实际出现在标牌、屏幕等画面中的文字保持原字/u);
-  assert.match(rule, /本次明确要求原文保留的已确认内容仍原样保留/u);
+  assert.match(rule, /本次明确要求原文保留的对白、姓名、画中文字和协议标记仍原样保留/u);
   assert.match(rule, /不借语言要求重译整份旧稿或扩大修改范围/u);
   assert.match(rule, /H3字段名、\[Shot N\]、At切点/u);
 }

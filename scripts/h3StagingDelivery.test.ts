@@ -148,7 +148,7 @@ await test('one-to-many splitting requires separate AI choices; one-to-one keeps
   assert.deepEqual(result.shots[2].sourceBeatIds, ['beat-1']);
 });
 
-await test('initial preserves source schedule through four existing stages while saving H3 and both identity maps', async () => {
+await test('initial preserves source schedule through three existing stages while saving H3 and both identity maps', async () => {
   const before = JSON.stringify(board); const stages: SingleSegmentPromptStage[] = []; let translations = 0;
   const initialZh = applyOfficialH3Prompt(board, context).officialPromptZh!.replace('[Shot 1]', `[Shot 1] ${anchors.join(' ')}`);
   const initialEn = enBindings.characters.reduce((text, item, index) => text.replace(anchors[index], item.referenceAnchor), initialZh);
@@ -172,7 +172,7 @@ await test('initial preserves source schedule through four existing stages while
       }
       return JSON.stringify({ h3Prompt: initialEn, identityBindings: enBindings });
     } });
-  assert.deepEqual(stages, ['convert', 'review', 'translate', 'translate']);
+  assert.deepEqual(stages, ['convert', 'review', 'translate']);
   assert.equal(result.finalPrompt, original); assert.equal(result.shots[1].startSec, 11.5);
   assert.equal(hasCurrentTextApiConversion(result), true);
   assert.equal(result.officialPromptZh, initialZh); assert.equal(result.officialPromptEn, initialEn);

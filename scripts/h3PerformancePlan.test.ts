@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { h3PerformanceSpeakerTokens, normalizeH3PerformancePlan, parseH3PerformancePlan, renderH3PerformancePlan } from '../src/h3PerformancePlan';
 import { H3_EXISTING_SOUND_SUMMARY_ZH } from '../src/h3DeliverySections';
+import { H3_PERFORMANCE_DELIVERY_RULE } from '../src/h3IdentityBindings';
 import { readH3PromptProtocol } from '../src/h3PromptProtocol';
 import type { H3IdentityBindings, H3PerformancePlan } from '../src/types';
 
@@ -35,6 +36,9 @@ const segment4: H3PerformancePlan = {
 
 let groups = 0;
 const test = (name: string, run: () => void): void => { run(); console.log(`PASS ${++groups} ${name}`); };
+
+assert.match(H3_PERFORMANCE_DELIVERY_RULE, /后出现于本段的事件继续写在后镜/u);
+assert.match(H3_PERFORMANCE_DELIVERY_RULE, /最后一镜在本段已确认的事件窗口内写出最后一个已分配事件的当前结果/u);
 
 test('segment 4 converts the declared shot clock once and never voices the source observation', () => {
   const untouched = JSON.stringify(segment4);

@@ -88,6 +88,7 @@ export const VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT = [
 export const VIDEO_PROMPT_ENGLISH_DOCUMENT_TRANSLATION_SYSTEM_PROMPT = [
   ...VIDEO_PROMPT_ENGLISH_TRANSLATION_RULES,
   '本次翻译采用来源文档。sourcePrompt、characters、utterances、groups和performanceContext是只读上下文；只翻译slots的sourceText，按id返回完整英文描述单元。每个单元是一整段连贯原句或一个有明确人物归属的表演字段，不是姓名、数字或对白之间的碎片。',
+  '每个slot都要把其中所有可译的画面、动作、身份说明、摄影、光影和声音描述完整写成英文；sourceText为中文或中英混写时，不能保留中文描述，也不能只翻译其中一部分。sourceText已有英文时按原意自然保留或润色。人物原名、原语言对白、画中文字、占位符及H3固定协议标记按既有规则保留。',
   '先理解完整原场面，再将每个sourceText作为完整句子或完整段落自然翻译。protectedText列出本单元中__H3_*__占位符的原字与类型；占位符在完整语法中保留原样，程序一次回填其姓名、原话、数字或协议标记。不得漏掉、复制、更名或互换占位符；不要把它们另写到返回内容的开头或结尾。before、after和groupSourceText是只读上下文，不复制进结果。',
   'performanceContext存在时，who/when/what的固定关系由已保存表演记录直接渲染，不由译文重新决定。slot.ownerCharacterIds和role明确该完整描述属于谁、是说话表演还是听者反应。speaker-delivery和speaker-action只描述所属发声者，listener-reaction只描述所属听者；输出该字段的自然描述，不另加新的主语、姓名、发话者、台词、时间或声音身份。静默观察只译已采用的可见行为，sourceFact只作来源资料，绝不变成旁白、内心配音、可朗读说明或新人物镜头。',
   'characters中的characterId/name/subjectToken/speakerToken对应同一人物；utterances中的speakerCharacterId是实际说话人，listenerCharacterIds是听者，addressedCharacterIds是被称呼者。对白中出现“师傅”“师姐”不表示这句由师傅或师姐说。既定人物关系保持，不推断或互换这些职责。',

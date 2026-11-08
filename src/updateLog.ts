@@ -15,6 +15,16 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "4.2.4",
+    releasedAt: "2026-11-09",
+    title: "中文英文分开写完，本段结尾演完整",
+    highlights: [
+      "中文H3改写完整使用中文，英文翻译覆盖混合语言描述。",
+      "本段后半事件写入后镜并呈现可见结果；顺序刷新切到正在处理的段落。",
+      "已保存的提示词和成片保持原样。RunningHub当前网页连接没有已确认的禁音参数。",
+    ],
+  },
+  {
     version: "4.2.3",
     releasedAt: "2026-11-08",
     title: "15秒里的情节加快演完",

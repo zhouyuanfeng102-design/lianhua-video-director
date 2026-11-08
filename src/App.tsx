@@ -9578,6 +9578,9 @@ export default function App() {
         }
         lastProcessedSegmentId = liveSegment.id;
         if (needsHandoffRepair || livePromptAction.action === "refresh-official" || livePromptAction.action === "translate-english") {
+          if (activeChapter(stateRef.current.project)?.id === plan.chapterId) {
+            setActiveStoryboardId(liveSegment.storyboardId || '');
+          }
           setSequenceBatchProgress({
             completed: processedCount,
             total: pendingIds.length,

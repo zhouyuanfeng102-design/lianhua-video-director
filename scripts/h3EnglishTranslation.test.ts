@@ -183,6 +183,7 @@ const documentH3 = await translateH3PromptWithinBudget({
     aiTranslationCalls += 1;
     assert.ok(system.includes(VIDEO_PROMPT_ENGLISH_DOCUMENT_TRANSLATION_SYSTEM_PROMPT.split('\n')
       .find((line) => line.startsWith('本次翻译采用来源文档'))!));
+    assert.match(system, /每个slot都要把其中所有可译的画面、动作、身份说明、摄影、光影和声音描述完整写成英文/u);
     const data = JSON.parse(user) as H3DescriptionRequest;
     assert.equal(data.sourcePrompt, omniSource);
     return JSON.stringify({ slots: data.slots.map((slot) => ({ id: slot.id, text: translateDescriptions(slot.sourceText) })) });

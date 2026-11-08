@@ -85,10 +85,10 @@ export const omitCopiedEnglishExamples = (instruction: string): string => {
  * technical retries. This is not a detector or a post-generation repair. */
 export const h3DescriptionLanguageRule = (language: '中文' | '英文'): string => [
   language === '中文'
-    ? 'H3_DESCRIPTION_LANGUAGE_ZH_V1：本次交付正式中文H3稿。h3Prompt及直接返回的H3正文中，画面、动作、人物身份说明、空间、摄影、光影、声音描述、摘要和视觉前言均使用中文；若本次同时交付canonicalPrompt，其描述也使用中文。输入资料、示例、候选稿或上段稿中的英文描述不改变本阶段的中文交付要求。'
-    : 'H3_DESCRIPTION_LANGUAGE_EN_V1：本次交付英文H3稿。h3Prompt及直接返回的H3正文中，画面、动作、人物身份说明、空间、摄影、光影、声音描述、摘要和视觉前言均使用英文；以已确认sourcePrompt为唯一翻译来源，保持原剧情、镜头、排程和参考关系。',
+    ? 'H3_DESCRIPTION_LANGUAGE_ZH_V1：本次交付正式中文H3稿。h3Prompt及直接返回的H3正文中，画面、动作、人物身份说明、空间、摄影、光影、声音描述、摘要和视觉前言均使用中文；若本次同时交付canonicalPrompt，其描述也使用中文。输入资料、示例、候选稿或上段稿中的英文描述不改变本阶段的中文交付要求。candidatePrompt中的英文描述只作为剧情、动作、时间和身份证据，不作为保留英文措辞的授权；在本次改写范围内将其完整写成中文。'
+    : 'H3_DESCRIPTION_LANGUAGE_EN_V1：本次交付英文H3稿。h3Prompt及直接返回的H3正文中，画面、动作、人物身份说明、空间、摄影、光影、声音描述、摘要和视觉前言均使用英文；以已确认sourcePrompt为唯一翻译来源，完整翻译其中所有可译描述，包括已有英文和中英混写的单元，保持原剧情、镜头、排程和参考关系。',
   '描述语言与人物发话语言分开：对白、歌词及其语言标注保持原稿指定的语言和原字，人物姓名、代号及其身份映射保持原样；原稿明确要求实际出现在标牌、屏幕等画面中的文字保持原字，仅外围描述使用本次描述语言。JSON键、H3字段名、[Shot N]、At切点、参考标签、声音标签、N/A及协议固定写法保持原样；这些英文标记不决定描述正文的语言。identityBindings.referenceAnchor仍须逐字对应本次h3Prompt中的身份句。',
-  '本规则只明确已有交付内容的描述语言，不增加输出字段、正文副本、镜头或调用步骤。仅衔接、仅参考及纯格式修复时，语言要求只约束本次获准生成或改写的描述；本次明确要求原文保留的已确认内容仍原样保留，不借语言要求重译整份旧稿或扩大修改范围。',
+  '本规则只明确已有交付内容的描述语言，不增加输出字段、正文副本、镜头或调用步骤。仅衔接、仅参考及纯格式修复时，语言要求只约束本次获准生成或改写的描述；本次明确要求原文保留的对白、姓名、画中文字和协议标记仍原样保留，不借语言要求重译整份旧稿或扩大修改范围。',
 ].join('\n');
 
 /** H3 transport structure only. None of these checks interpret characters,
