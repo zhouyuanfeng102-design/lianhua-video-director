@@ -15,6 +15,16 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "4.2.0",
+    releasedAt: "2026-11-08",
+    title: "台词只从能看清的那张嘴说出来",
+    highlights: [
+      "声源编号只写在 says: 那一句，身份句不再标 (S1)。",
+      "看不见嘴的机位在这句开始前结束，镜头切到说话人的嘴。",
+      "已保存的提示词和成片保持原样，重新生成该段后才会改。",
+    ],
+  },
+  {
     version: "4.1.9",
     releasedAt: "2026-11-08",
     title: "说话这几秒镜头改到嘴上",

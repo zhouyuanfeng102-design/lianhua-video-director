@@ -44,7 +44,8 @@ test('segment 4 converts the declared shot clock once and never voices the sourc
   assert.equal(rendered.plan.shots[1].events[1].endSec, 13.1);
   assert.deepEqual(normalizeH3PerformancePlan(rendered.plan), rendered.plan);
   assert.equal(JSON.stringify(segment4), untouched);
-  assert.match(rendered.prompt, /本段11\.50–13\.10秒，亚乌拉 \(S2\) says:/u);
+  assert.match(rendered.prompt, /本段11\.50–13\.10秒，亚乌拉 \(S2\)，已确认的女性声线，says:/u);
+  assert.doesNotMatch(rendered.prompt, /人物身份: 贝里尤洛 \(S1\)|人物身份: 亚乌拉 \(S2\)/u);
   assert.match(rendered.prompt, /亚乌拉的胸口和眼睛留在贝里尤洛与夏提雅身上，摄影机在两人连线的侧面/u);
   assert.match(rendered.prompt, /沉默地环视王都方向/u);
   assert.doesNotMatch(rendered.prompt, /矮人|骷髅|与龙僵持/u);
@@ -74,9 +75,10 @@ const segment5: H3PerformancePlan = {
 test('segment 5 renders the complete command with its owner, lip action and silent listeners', () => {
   const rendered = renderH3PerformancePlan({ plan: segment5, characters, language: 'en' });
   const command = rendered.events.find((event) => event.dialogueId === 'b1-d12')!.referenceAnchor!;
-  assert.match(command, /贝里尤洛 \(S1\) keeps their mouth closed/u);
-  assert.match(command, /At 10\.60 seconds of this clip, the camera pans with small amplitude at slow speed toward 夏提雅 \(S2\)'s mouth/u);
-  assert.match(command, /From 10\.60 to 14\.40 seconds of this clip, 夏提雅 \(S2\) says:/u);
+  assert.match(command, /贝里尤洛 keeps their mouth closed/u);
+  assert.match(command, /The camera cuts to a close view of 夏提雅's mouth/u);
+  assert.doesNotMatch(command, /贝里尤洛 \(S1\) keeps their mouth closed/u);
+  assert.match(command, /From 10\.60 to 14\.40 seconds of this clip, 夏提雅 \(S2\), the established voice, says:/u);
   assert.doesNotMatch(command, /lips move with the words|speaks on-screen/u);
   assert.match(command, /<d>\[中文\] 没错，我们的君王是为了支配你们而来的，下跪低头吧。<\/d>/u);
   assert.match(command, /夏提雅 keeps the chest and eyes toward 贝里尤洛/u);
@@ -92,9 +94,10 @@ test('reference image order changes pictures only; subjects, voices, exact dialo
   const first = renderH3PerformancePlan({ ...input, characterPictures: new Map([['wolf', [5]], ['shalltear', [3]], ['aura', [4]]]), pictureUses: [{ number: 1, role: 'first-frame' }] });
   const second = renderH3PerformancePlan({ ...input, characterPictures: new Map([['wolf', [3]], ['shalltear', [5]], ['aura', [4]]]) });
   assert.deepEqual(first.speakerTokens, second.speakerTokens);
-  assert.match(first.prompt, /<Subject 2> is 夏提雅 \(S2\), visually referenced from <Picture 3>/u);
-  assert.match(second.prompt, /<Subject 2> is 夏提雅 \(S2\), visually referenced from <Picture 5>/u);
-  assert.match(first.prompt, /<Subject 2> 夏提雅 \(S2\) says:/u);
+  assert.match(first.prompt, /<Subject 2> is 夏提雅, visually referenced from <Picture 3>/u);
+  assert.match(second.prompt, /<Subject 2> is 夏提雅, visually referenced from <Picture 5>/u);
+  assert.doesNotMatch(first.prompt, /<Subject 2> is 夏提雅 \(S2\)/u);
+  assert.match(first.prompt, /<Subject 2> 夏提雅 \(S2\), the established voice, says:/u);
   assert.deepEqual(readH3PromptProtocol(first.prompt)?.sections,
     ['subject_definitions', 'summary', 'retention_analysis', 'detailed_description', 'overall_soundscape', 'non_diegetic_music']);
   for (const entry of first.characters) assert.equal(first.prompt.split(entry.referenceAnchor).length - 1, 1);
@@ -104,7 +107,8 @@ test('reference image order changes pictures only; subjects, voices, exact dialo
     subjectDefinitions: '<Subject 1> is the authored castle.\n<Picture 8> is the opening composition reference.',
     pictureUses: [{ number: 8, role: 'first-frame' }] });
   assert.equal(withOtherSubject.characters.find((entry) => entry.characterId === 'shalltear')?.subjectToken, '<Subject 3>');
-  assert.match(withOtherSubject.prompt, /夏提雅 \(S2\), with the voice referenced from <Audio 7>/u);
+  assert.match(withOtherSubject.prompt, /夏提雅 \(S2\), the established voice, with the voice referenced from <Audio 7>, says:/u);
+  assert.doesNotMatch(withOtherSubject.prompt, /is 夏提雅 \(S2\), with the voice referenced from <Audio 7>/u);
   assert.equal(withOtherSubject.prompt.match(/<Picture 8> is the opening composition reference/gu)?.length, 1);
 
   const duplicateAnchor = first.characters[0].referenceAnchor;
@@ -125,9 +129,9 @@ test('explicit voiceover, internal voice, non-verbal voice and simultaneous spee
     ] }], overallSoundscape: 'N/A', nonDiegeticMusic: 'N/A' };
   const rendered = renderH3PerformancePlan({ plan, characters, language: 'en', mode: 'full-reference',
     characterAudio: new Map([['narrator', [4]]]) });
-  assert.match(rendered.prompt, /Voice identity: 叙述者 \(S1\)/u);
-  assert.match(rendered.prompt, /Voice identity: 叙述者 \(S1\), referenced from <Audio 4>/u);
-  assert.match(rendered.prompt, /叙述者 \(S1\) says in an off-screen voiceover/u);
+  assert.match(rendered.prompt, /Voice identity: 叙述者, referenced from <Audio 4>/u);
+  assert.doesNotMatch(rendered.prompt, /Voice identity: 叙述者 \(S1\)/u);
+  assert.match(rendered.prompt, /叙述者 \(S1\), the established narration voice, with the voice referenced from <Audio 4>, says in an off-screen voiceover/u);
   assert.equal(rendered.prompt.match(/says in an off-screen voiceover/gu)?.length, 1);
   assert.match(rendered.prompt, /亚乌拉 \(S3\) says: <d>\[中文\] 原来如此。<\/d>/u);
   assert.match(rendered.prompt, /The mouths already in the picture stay closed/u);
@@ -268,7 +272,34 @@ test('a hold through the line does not cover the spoken seconds', () => {
   const framingAt = rendered.prompt.indexOf('When this line starts, that framing ends.');
   const saysAt = rendered.prompt.indexOf('Qian Renxue (S1) says: <d>[中文] 唐三，你还要让我等多久？</d>');
   assert.ok(framingAt >= 0 && saysAt > framingAt);
-  assert.doesNotMatch(rendered.prompt, /through her line/u);
+  assert.doesNotMatch(rendered.prompt, /through her line|does not move|Identity: 千仞雪 \(S1\)/u);
+  const held: H3PerformancePlan = {
+    version: 1, timeBase: 'clip', descriptionLanguage: 'en',
+    characters: [
+      { characterId: 'qian', visualDescription: 'a woman in white' },
+      { characterId: 'yu', visualDescription: 'a man in black' },
+    ],
+    shots: [
+      { shotIndex: 1, startSec: 0, visualDescription: 'Identity: 千仞雪 (S1). The camera holds a medium-wide view from the side of her body. It stays at this distance and does not move. 台词：无', events: [
+        { eventId: 'line', kind: 'speech', dialogueId: 'q1', speakerCharacterIds: ['qian'], listenerCharacterIds: ['yu'], startSec: 10.7, endSec: 14.7, channel: 'on-screen', language: 'Chinese', text: '唐三，你还要让我等多久？' },
+      ] },
+      { shotIndex: 2, startSec: 5, visualDescription: 'The camera cuts to 玉小刚.', events: [] },
+    ],
+    overallSoundscape: '殿内安静。唐三，你还要让我等多久？', nonDiegeticMusic: 'N/A',
+  };
+  const again = renderH3PerformancePlan({
+    plan: held,
+    characters: [
+      { characterId: 'qian', name: '千仞雪', referenceAnchor: '千仞雪' },
+      { characterId: 'yu', name: '玉小刚', referenceAnchor: '玉小刚' },
+    ],
+    language: 'en',
+  });
+  assert.match(again.prompt, /Identity: 千仞雪:/u);
+  assert.doesNotMatch(again.prompt, /Identity: 千仞雪 \(S1\)|台词：无|does not move|唐三，你还要让我等多久？(?!<\/d>)/u);
+  assert.match(again.prompt, /千仞雪 \(S1\) says: <d>\[中文\] 唐三，你还要让我等多久？<\/d>/u);
+  assert.match(again.prompt, /\[Shot 2\] At 00:14\.700/u);
+  assert.match(again.prompt, /玉小刚 keeps their mouth closed/u);
 });
 
 test('a close view keeps the head on the neck and the ribbon on the back of the head', () => {
