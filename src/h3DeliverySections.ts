@@ -17,6 +17,8 @@ export interface H3SectionLayoutOptions {
   audioMode?: string;
   /** Only explicit sections from the saved draft; never mine narrative prose. */
   preservedAudioPrompt?: string;
+  /** This request's own wording asked for a score. Style and category do not. */
+  musicRequested?: boolean;
 }
 
 const integratedNames = ['integrated_multimodal_description', 'overall_soundscape', 'non_diegetic_music'];

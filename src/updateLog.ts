@@ -15,6 +15,16 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "4.2.2",
+    releasedAt: "2026-11-08",
+    title: "没要求配乐就不再配乐",
+    highlights: [
+      "没有明确要求配乐时，配乐栏只写 N/A。",
+      "镜头和声景里自行补上的乐器、旋律不再留下。",
+      "已保存的提示词和成片保持原样，重新生成该段后才会改。",
+    ],
+  },
+  {
     version: "4.2.1",
     releasedAt: "2026-11-08",
     title: "没有预估也继续运行",

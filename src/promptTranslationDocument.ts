@@ -1,6 +1,6 @@
 import type { H3IdentityBindings, H3IdentityEventBinding, H3PerformancePlan, SemanticSegmentSource } from './types';
 import { getPromptVisibleTextSpans } from './promptDialogueLanguage';
-import { renderH3PerformancePlan } from './h3PerformancePlan';
+import { h3KeepsScore, renderH3PerformancePlan } from './h3PerformancePlan';
 
 export interface PromptTranslationSourceCharacter {
   id: string;
@@ -552,6 +552,7 @@ export const renderPromptTranslationDocument = (
     const extraDefinitions = (document.performanceDefinitionAtoms || []).map(renderAtom).join('').trim();
     const fullReference = /^subject_definitions:/mu.test(document.sourcePrompt);
     const result = renderH3PerformancePlan({ plan, language: 'en', characters: document.identityBindings.characters,
+      keepScore: h3KeepsScore(document.performancePlan.nonDiegeticMusic),
       mode: fullReference ? 'full-reference' : 'integrated',
       subjectTokens: new Map(document.characters.filter((entry) => entry.subjectToken).map((entry) => [entry.characterId, entry.subjectToken!])),
       characterPictures: new Map(document.performanceCharacterPictures || []),

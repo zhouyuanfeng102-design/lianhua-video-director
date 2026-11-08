@@ -29,7 +29,7 @@ import {
   omitCopiedEnglishExamples,
 } from './h3PromptProtocol';
 import { createH3IdentityDeliveryReader, H3_IDENTITY_BINDINGS_RULE, H3_PERFORMANCE_DELIVERY_RULE, readH3DeliveryEnvelope } from './h3IdentityBindings';
-import { renderH3PerformancePlan } from './h3PerformancePlan';
+import { h3KeepsScore, h3MusicRequested, renderH3PerformancePlan } from './h3PerformancePlan';
 import { serializeAuthoredH3Prompt, type H3SectionLayoutOptions } from './h3DeliverySections';
 import { VIDEO_STORY_PERFORMANCE_SEPARATION_RULE } from './videoInteractionRules';
 import type { PromptTranslationSourceDialogue, PromptTranslationSourceEvent } from './promptTranslationDocument';
@@ -394,8 +394,12 @@ export const renderDeliveredH3Performance = (delivery: ReturnType<typeof readH3D
       if (audio.length) characterAudio.set(definitionOwner.characterId, audio);
     } else if (line.trim()) otherDefinitions.push(line);
   }
+  const preservedMusic = layout.preservedAudioPrompt
+    ? h3KeepsScore((layout.preservedAudioPrompt.match(/non_diegetic_music\s*[:：]\s*([\s\S]*)$/u)?.[1] || '').trim())
+    : false;
   const rendered = renderH3PerformancePlan({ plan: bindings.performance, characters: bindings.characters,
-    language: 'zh', audioMode: layout.audioMode, mode, subjectTokens, characterPictures, characterAudio,
+    language: 'zh', audioMode: layout.audioMode, mode, keepScore: preservedMusic || layout.musicRequested === true,
+    subjectTokens, characterPictures, characterAudio,
     ...(otherDefinitions.length ? { subjectDefinitions: otherDefinitions.join('\n') } : {}),
     summary: bindings.performance.summary ?? sections.get('summary'),
     retentionAnalysis: bindings.performance.retentionAnalysis ?? sections.get('retention_analysis'),
@@ -835,7 +839,8 @@ export async function generateSingleSegmentPrompt(
     delivery = renderDeliveredH3Performance(delivery,
       (chooseDeliveryFormat ? deliveryMediaMode === 'full-reference'
         : /^subject_definitions\s*[:：]/mu.test(delivery.h3Prompt) || /^subject_definitions\s*[:：]/mu.test(official.officialPromptZh || '')) ? 'full-reference' : 'integrated',
-      { audioMode: official.audioMode, ...(preserveExistingAudio ? { preservedAudioPrompt: official.officialPromptZh } : {}) }, synchronized.shots);
+      { audioMode: official.audioMode, musicRequested: h3MusicRequested(input.board.extraRequirement),
+        ...(preserveExistingAudio ? { preservedAudioPrompt: official.officialPromptZh } : {}) }, synchronized.shots);
     const prompt = delivery.h3Prompt;
     assertCurrent();
     // The AI owns the adopted performance. New sidecars serialize their roles

@@ -95,6 +95,9 @@ export interface RenderH3PerformancePlanInput {
   /** Only explicitly authored audio references, independent of picture slots. */
   characterAudio?: ReadonlyMap<string, readonly number[]>;
   pictureUses?: readonly { number: number; role: string }[];
+  /** Keep a score only when this request asked for one, or a repair must
+   * retain a score already confirmed in the source prompt. */
+  keepScore?: boolean;
   /** Extra non-character definitions only. Character definitions and their
    * anchors are emitted from the paired plan by this renderer. */
   subjectDefinitions?: string;
@@ -150,10 +153,40 @@ const lowPoseSentence = (text: string, en: boolean): string | undefined => (
       : '躯干留在遮挡物下面，膝和髋是弯的，不在遮挡物上面站直或躺平。')
     : undefined
 );
-const musicLine = (value: string | undefined): string => {
+const scoreMention = /配乐|背景音乐|非叙事音乐|BGM|underscore|soundtrack|non-diegetic|配器|旋律|节拍|弦乐|钢琴|\bpiano\b|\bviolin\b|\bstrings\b|\borchestra\b|\bscore\b|no music|no bgm|不要配乐|禁止配乐|不要背景音乐|without music|without a score|without bgm/iu;
+const denialMusic = (value: string): boolean => {
+  const compact = value.trim().replace(/[。.\s]/gu, '');
+  if (!compact) return true;
+  if (/^(?:n\/a|none|无|无配乐|无背景音乐|silence|nomusic|nobgm|不要配乐|禁止配乐|不要背景音乐)$/iu.test(compact)) return true;
+  return /不要配乐|禁止配乐|不要背景音乐|无配乐|no music|no bgm/iu.test(value) && !/钢琴|弦乐|piano|violin|配器|旋律/iu.test(value);
+};
+/** A saved line is a score only when it names music and is not a refusal. */
+export const h3KeepsScore = (value: string | undefined): boolean => {
   const text = (value || '').trim();
-  if (!text || /^(n\/a|none|无|无配乐|silence|no music)$/iu.test(text)) return 'N/A';
+  return Boolean(text) && !denialMusic(text) && scoreMention.test(text);
+};
+/** User wording in this request. Style, category and story mood do not count. */
+export const h3MusicRequested = (value: string | undefined): boolean => {
+  const text = value || '';
+  if (/不要配乐|禁止配乐|无配乐|不要背景音乐|no music|no bgm/iu.test(text)) return false;
+  return /配乐|背景音乐|\bBGM\b|配器/u.test(text);
+};
+const musicLine = (value: string | undefined, keep: boolean): string => {
+  const text = (value || '').trim();
+  if (!keep || denialMusic(text)) return 'N/A';
   return text;
+};
+const dropUnauthorizedScore = (text: string): string => {
+  const blocks: string[] = [];
+  const masked = text.replace(/<d>[\s\S]*?<\/d>/gu, (block) => {
+    blocks.push(block);
+    return `\u0000${blocks.length - 1}\u0000`;
+  });
+  const kept = masked.split(/(?<=[。！？.!?])\s*|\n+/u).filter((part) => {
+    const visible = part.replace(/\u0000\d+\u0000/gu, '').trim();
+    return Boolean(visible) && !scoreMention.test(visible);
+  });
+  return kept.join(' ').replace(/\u0000(\d+)\u0000/gu, (_, index) => blocks[Number(index)] ?? '').replace(/[ \t]{2,}/gu, ' ').trim();
 };
 /** Chinese shots stay in Chinese. English example sentences copied into a
  * Chinese plan are left for the English page. Dialogue tags stay intact. */
@@ -209,9 +242,14 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
   let soundscape = plan.overallSoundscape;
   for (const line of spokenLines) if (line.length >= 2) soundscape = soundscape.split(line).join('');
   soundscape = soundscape.replace(/<d>[\s\S]*?<\/d>/gu, '').replace(/台词\s*[:：]\s*无|Dialogue:\s*none/giu, '').replace(/[ \t]{2,}/gu, ' ').trim();
+  const keepScore = input.keepScore === true;
+  if (!keepScore) {
+    soundscape = dropUnauthorizedScore(soundscape);
+    for (const shot of plan.shots) shot.visualDescription = dropUnauthorizedScore(shot.visualDescription);
+  }
   plan.overallSoundscape = soundscape || (input.audioMode === 'none' ? 'N/A'
     : en ? H3_EXISTING_SOUND_SUMMARY_EN : H3_EXISTING_SOUND_SUMMARY_ZH);
-  plan.nonDiegeticMusic = plan.nonDiegeticMusic.trim() || 'N/A';
+  plan.nonDiegeticMusic = musicLine(plan.nonDiegeticMusic, keepScore);
   const fullReference = input.mode === 'full-reference';
   const speakerTokens = h3PerformanceSpeakerTokens(plan);
   const entries = new Map(input.characters.map((entry) => [entry.characterId, entry]));
@@ -520,7 +558,7 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
     ? 'Keep the referenced identities and the authored scene relationships.' : '保留参考身份与已确认的场景关系。');
   const prompt = deduplicateIdentityAnchors(renderH3DeliverySections({ body, subjectDefinitions: definitions.join('\n'),
     summary: /^\[reference generation[^\]]*\]/u.test(summary) ? summary : `[reference generation] ${summary}`,
-    retentionAnalysis: retention, overallSoundscape: plan.overallSoundscape, nonDiegeticMusic: musicLine(plan.nonDiegeticMusic),
+    retentionAnalysis: retention, overallSoundscape: plan.overallSoundscape, nonDiegeticMusic: plan.nonDiegeticMusic,
   }, { mode: fullReference ? 'full-reference' : 'integrated', language }), renderedCharacters.map((entry) => entry.referenceAnchor));
   return { prompt, body, plan, speakerTokens, characters: renderedCharacters, events };
 };

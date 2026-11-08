@@ -319,4 +319,22 @@ test('a close view keeps the head on the neck and the ribbon on the back of the 
   assert.doesNotMatch(rendered.prompt, /behind the brain/u);
 });
 
+test('an unrequested score becomes N/A and leaves the shot and soundscape', () => {
+  const plan: H3PerformancePlan = {
+    version: 1, timeBase: 'clip', descriptionLanguage: 'zh',
+    characters: [{ characterId: 'qian', visualDescription: '白发女子' }],
+    shots: [{ shotIndex: 1, startSec: 0, visualDescription: '她跪在白玉石台上。低沉弦乐铺满这一镜。', events: [] }],
+    overallSoundscape: '殿内安静。背景音乐使用钢琴。', nonDiegeticMusic: '无背景音乐，缓慢节拍的弦乐。',
+  };
+  const characters = [{ characterId: 'qian', name: '千仞雪', referenceAnchor: '千仞雪' }];
+  const rendered = renderH3PerformancePlan({ plan, characters, language: 'zh' });
+  assert.match(rendered.prompt, /non_diegetic_music:\nN\/A/u);
+  assert.match(rendered.prompt, /殿内安静/);
+  assert.match(rendered.prompt, /她跪在白玉石台上/);
+  assert.doesNotMatch(rendered.prompt, /弦乐|钢琴|背景音乐|节拍/u);
+  const kept = renderH3PerformancePlan({ plan, characters, language: 'en', keepScore: true });
+  assert.match(kept.prompt, /无背景音乐，缓慢节拍的弦乐/);
+  assert.match(kept.prompt, /低沉弦乐铺满这一镜/);
+});
+
 console.log(`h3PerformancePlan: ${groups} groups passed`);

@@ -1,7 +1,7 @@
 import type { H3IdentityBindings, ReferenceRole } from './types';
 import { buildPromptTranslationDocument } from './promptTranslationDocument';
 import { maskVideoPictureReferenceLiterals } from './videoPictureReferences';
-import { renderH3PerformancePlan } from './h3PerformancePlan';
+import { h3KeepsScore, renderH3PerformancePlan } from './h3PerformancePlan';
 import { H3_EXISTING_SOUND_SUMMARY_EN, H3_EXISTING_SOUND_SUMMARY_ZH } from './h3DeliverySections';
 
 type Identity = H3IdentityBindings['characters'][number];
@@ -276,6 +276,7 @@ export const renderH3ReferenceExecution = (input: H3ReferenceExecutionInput): H3
       return !picture || !uses.has(Number(picture[1]));
     }).join('\n').trim();
     const rendered = renderH3PerformancePlan({ plan: identities.performance, characters: identities.characters,
+      keepScore: h3KeepsScore(identities.performance.nonDiegeticMusic),
       language: input.language || identities.performance.descriptionLanguage || 'zh',
       mode: input.mode || 'full-reference', characterPictures: input.characterPictures, characterAudio, pictureUses: input.pictureUses,
       subjectDefinitions: extraDefinitions,
