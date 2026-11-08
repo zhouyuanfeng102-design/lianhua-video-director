@@ -161,6 +161,7 @@ export function RunningHubWebSettings({ config, getCurrentConfig, onChange }: Ru
           ? <span>已登录{account.session.coins ? ` · ${account.session.coins}` : ''}{account.session.wallet ? ` · ${account.session.wallet}` : ''}</span>
           : <span>尚未登录</span>}
         {watching === account.id && !account.session?.loggedIn && <span>登录窗口开着</span>}
+        {(error || message) && <span>{error || message}</span>}
       </div>}
       {!account && <div className="vgs-workflow-summary"><strong>还没有登录位</strong></div>}
       <div className="vgs-workflow-row">

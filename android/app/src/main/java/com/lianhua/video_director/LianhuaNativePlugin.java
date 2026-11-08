@@ -39,7 +39,7 @@ public final class LianhuaNativePlugin extends Plugin {
     String method=call.getString("method","");JSONObject p=payload(call);
     if(method.equals("rhtvControl")&&p.optString("action").equals("import-result")&&!p.has("path")){getActivity().runOnUiThread(()->choose(call,"rhtvControl"));return;}
     if(method.startsWith("rhtv")){delegateRhTv(call,method,p);return;}
-    if(method.startsWith("rhWeb")){getActivity().runOnUiThread(()->{try{rhWeb.dispatch(method,JSObject.fromJSONObject(p),new RhWebController.Callback(){public void resolve(Object value){LianhuaNativePlugin.this.resolve(call,value);}public void reject(String message){call.reject(message);}});}catch(Exception e){reject(call,e);}});return;}
+    if(method.startsWith("rhWeb")){io.execute(()->{try{rhWeb.dispatch(method,JSObject.fromJSONObject(p),new RhWebController.Callback(){public void resolve(Object value){LianhuaNativePlugin.this.resolve(call,value);}public void reject(String message){call.reject(message);}});}catch(Exception e){reject(call,e);}});return;}
     if(method.equals("openFile")||((method.equals("importMedia")||method.equals("relinkMedia")||method.equals("importProjectPackage"))&&!p.has("dataUrl")&&!p.has("uri"))){getActivity().runOnUiThread(()->choose(call,method));return;}
     if(method.equals("saveFile")||method.equals("saveMedia")||method.equals("exportProjectPackage")){io.execute(()->prepareExport(call,method,p));return;}
     ExecutorService executor=method.equals("saveState")||method.startsWith("load")||method.contains("Checkpoint")||method.contains("Credential")||method.contains("Restore")||method.contains("recovery")?state:io;

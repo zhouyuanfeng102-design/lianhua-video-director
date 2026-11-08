@@ -143,8 +143,18 @@ public final class RhWebController {
       }
       return current;
     });
-    if (page.loaded!=null) page.loaded.get(45,TimeUnit.SECONDS);
+    awaitPage(page);
     return page;
+  }
+  /** Page-finished and script callbacks run on the UI thread. Waiting for them
+   * on that same thread leaves the login window undrawn. */
+  private void awaitPage(Page page) throws Exception {
+    if (page.loaded==null) return;
+    CompletableFuture<Boolean> loaded=page.loaded;
+    if (Looper.myLooper()==Looper.getMainLooper()) {
+      throw new IOException("RH 网页登录不能停在界面线程上等待。");
+    }
+    loaded.get(45,TimeUnit.SECONDS);
   }
   private JSONObject execute(Page page, String operation, JSONObject arguments) throws Exception {
     String token=UUID.randomUUID().toString();

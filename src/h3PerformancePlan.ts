@@ -124,6 +124,25 @@ const dialogueLanguageTag = (value: string): string => {
   if (/^(english|en)$/iu.test(token)) return 'English';
   return token || '中文';
 };
+const bodyChainSentence = (text: string, en: boolean): string | undefined => {
+  if (!/头|脸|颈|脖子|近景|特写|close-?up|close view|\bhead\b|\bface\b|\bneck\b/iu.test(text)) return undefined;
+  const chain = en
+    ? 'The head remains on this neck, the neck remains on these shoulders, the torso remains on these hips, and the foot remains on this ankle.'
+    : '头留在这截脖子上，脖子留在这对肩膀上，躯干留在这截腰上，脚留在这截脚踝上。';
+  const surface = /发带|金带|金丝|蒙眼|ribbon|blindfold|头发|\bhair\b/iu.test(text)
+    ? (en
+      ? ' Hair, ribbon, and any cloth over the eyes remain on the surface of the head, across the back of the head.'
+      : '头发、发带和蒙眼布留在头的表面上，绕在后脑的表面上。')
+    : '';
+  return chain + surface;
+};
+const bracedHandsSentence = (text: string, en: boolean): string | undefined => {
+  if (!/跪伏|趴跪|俯撑|kneeling bent over|kneels bent over/iu.test(text)) return undefined;
+  if (/双手|手撑|撑在|掌心|手掌|双掌|背后|举高|举起|拿着|握住|palms|hands behind|hands raised|holding/iu.test(text)) return undefined;
+  return en
+    ? 'Both palms remain on the support in front of the shoulders, the forearms run from the shoulders to those palms, the elbows stay outside the ribs, and the fingers stay on the palms.'
+    : '双掌留在肩膀前方的支撑面上，前臂从肩膀连到这双掌，肘留在肋骨外侧，手指留在掌上。';
+};
 const lowPoseSentence = (text: string, en: boolean): string | undefined => (
   /床底|桌下|柜内|柜里|门后|躲|钻进|藏在|趴在|伏在/u.test(text)
     ? (en
@@ -135,6 +154,22 @@ const musicLine = (value: string | undefined): string => {
   const text = (value || '').trim();
   if (!text || /^(n\/a|none|无|无配乐|silence|no music)$/iu.test(text)) return 'N/A';
   return text;
+};
+/** Chinese shots stay in Chinese. English example sentences copied into a
+ * Chinese plan are left for the English page. Dialogue tags stay intact. */
+const keepChineseShotText = (text: string): string => {
+  const blocks: string[] = [];
+  const masked = text.replace(/<d>[\s\S]*?<\/d>/gu, (block) => {
+    blocks.push(block);
+    return `\u0000${blocks.length - 1}\u0000`;
+  });
+  const kept = masked.split(/(?<=[。！？.!?])\s+|\n+/u).filter((part) => {
+    const visible = part.replace(/\u0000\d+\u0000/gu, '');
+    if (!visible.trim()) return true;
+    if (/[\u3400-\u9fff]/u.test(visible)) return true;
+    return !/[A-Za-z]{3,}/u.test(visible);
+  });
+  return kept.join('').replace(/\u0000(\d+)\u0000/gu, (_, index) => blocks[Number(index)]).replace(/[ \t]{2,}/gu, ' ').trim();
 };
 const sentence = (text: string, language: 'zh' | 'en'): string => {
   const body = text.trim();
@@ -168,6 +203,8 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
   const language = input.language;
   plan.descriptionLanguage = language;
   const en = language === 'en';
+  const authored = (text: string): string => en ? text : keepChineseShotText(text);
+  if (!en) plan.overallSoundscape = keepChineseShotText(plan.overallSoundscape || '');
   plan.overallSoundscape = plan.overallSoundscape.trim() || (input.audioMode === 'none' ? 'N/A'
     : en ? H3_EXISTING_SOUND_SUMMARY_EN : H3_EXISTING_SOUND_SUMMARY_ZH);
   plan.nonDiegeticMusic = plan.nonDiegeticMusic.trim() || 'N/A';
@@ -218,7 +255,7 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
   const renderedCharacters = input.characters.map((entry) => {
     const { speakerToken: _oldVoice, subjectToken: _oldSubject, referenceAnchor: _oldAnchor, ...identity } = entry;
     const offscreenPresence = descriptions.get(entry.characterId)?.presence === 'offscreen';
-    const description = offscreenPresence ? '' : (descriptions.get(entry.characterId)?.visualDescription.trim() || '');
+    const description = offscreenPresence ? '' : authored(descriptions.get(entry.characterId)?.visualDescription.trim() || '');
     const speakerToken = speakerTokens.get(entry.characterId);
     const pictures = input.characterPictures?.get(entry.characterId) || [];
     const pictureText = pictures.map((number) => `<Picture ${number}>`).join(', ');
@@ -258,9 +295,6 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
   const mouthsClosed = (ids: readonly string[]): string => en
     ? `${voiceLabel(ids)} keeps their mouth closed.`
     : `${voiceLabel(ids)}的嘴保持闭合。`;
-  const mouthOpens = (ids: readonly string[]): string => en
-    ? `${voiceLabel(ids)}'s mouth opens, and the lips move with this line.`
-    : `${voiceLabel(ids)}的嘴张开，嘴唇随这句开合。`;
   const cameraToMouth = (ids: readonly string[], startSec: number | undefined, place: string): string => {
     const up = /半空|上方|高处|抬头/u.test(place);
     const when = startSec !== undefined
@@ -283,7 +317,8 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
       return rendered;
     }
 
-    const unseen = event.channel === 'off-screen' || event.channel === 'voiceover' || event.channel === 'inner-voice';
+    const narration = event.channel === 'voiceover';
+    const unseen = narration || event.channel === 'off-screen' || event.channel === 'inner-voice';
     const spokenNames = (ids: readonly string[]): string => {
       const tokens = unique(ids).map((id) => speakerTokens.get(id)).filter((token): token is string => Boolean(token));
       const who = unique(ids).map(name).join(en ? ' and ' : '与');
@@ -291,33 +326,31 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
     };
     const speakers = unseen ? spokenNames(event.speakerCharacterIds) : voiceLabel(event.speakerCharacterIds);
     const listenerIds = unique(event.listenerCharacterIds || []).filter((id) => !event.speakerCharacterIds.includes(id));
-    const target = !unseen && listenerIds.length ? (en ? ` to ${names(listenerIds)}` : `面向${names(listenerIds)}`) : '';
-    const channel = unseen
-      ? (en ? 'says in an off-screen voiceover' : '留在画面外发话')
-      : (en ? 'speaks on-screen' : '在画内发话');
+    const verb = narration ? 'says in an off-screen voiceover' : 'says';
     const closedMouths = listenerIds.length
       ? (en ? `${names(listenerIds)} keep their mouths closed.` : `${names(listenerIds)}的嘴保持闭合。`)
       : (en ? 'The mouths already in the picture stay closed.' : '画面里已有的嘴保持闭合。');
     if (event.kind === 'speech') {
       const dialogue = `<d>[${dialogueLanguageTag(event.language)}] ${event.continuesFromPreviousShot ? '<scenetrans>' : ''}${event.text}${event.continuesInNextShot ? '<scenetrans>' : ''}</d>`;
-      const simultaneous = unique(event.speakerCharacterIds).length > 1 ? (en ? ' in unison' : '共同同步') : '';
       const changedSpeaker = lastSpeechIds.length > 0 && speakerKey(lastSpeechIds) !== speakerKey(event.speakerCharacterIds);
+      const place = `${shot.visualDescription}\n${event.speakerAction || ''}`;
+      const hiddenMouth = !unseen && /背对|后脑|蒙眼|脸朝下|面朝下|侧后方|侧后|头发挡|看不见嘴|看不清嘴|跪趴|face down|back of the head|blindfold|from behind|side-rear|hair covers|through (?:her|his|their) line|stays at this distance|view of (?:her|his|their) back/iu.test(place);
+      if (!unseen && listenerIds.length) output.push(mouthsClosed(listenerIds));
       if (!unseen && changedSpeaker) {
-        output.push(mouthsClosed(lastSpeechIds));
-        if (lastSpeechShot === shot.shotIndex) output.push(cameraToMouth(event.speakerCharacterIds, event.startSec, `${shot.visualDescription}\n${event.speakerAction || ''}`));
+        const stillSpeaking = lastSpeechIds.filter((id) => !listenerIds.includes(id));
+        if (stillSpeaking.length) output.push(mouthsClosed(stillSpeaking));
+        if (lastSpeechShot === shot.shotIndex) output.push(cameraToMouth(event.speakerCharacterIds, event.startSec, place));
       }
-      output.push(`${time(event)}${speakers}${en ? ' ' : ''}${channel}${simultaneous}${target}: ${dialogue}`);
+      if (hiddenMouth && !(changedSpeaker && lastSpeechShot === shot.shotIndex)) output.push(en
+        ? `When this line starts, that framing ends. The camera cuts to a close view of ${voiceLabel(event.speakerCharacterIds)}'s mouth.`
+        : `这句开始时，刚才的机位结束。镜头切到${voiceLabel(event.speakerCharacterIds)}能看清的嘴。`);
+      output.push(`${time(event)}${speakers} ${verb}: ${dialogue}`);
       if (unseen) {
         output.push(en ? `${speakers} remains outside this shot.` : `${speakers}留在这一镜的画面外。`);
         output.push(closedMouths);
       } else if (listenerIds.length) output.push(en
         ? `${names(event.speakerCharacterIds)} keeps the chest and eyes toward ${names(listenerIds)}. The camera stays beside the line between them.`
         : `${names(event.speakerCharacterIds)}的胸口和眼睛留在${names(listenerIds)}身上，摄影机在两人连线的侧面。`);
-      if (!unseen) {
-        output.push(mouthOpens(event.speakerCharacterIds));
-        const stillOpen = listenerIds.filter((id) => !lastSpeechIds.includes(id));
-        if (stillOpen.length) output.push(mouthsClosed(stillOpen));
-      }
       if (!unseen) {
         lastSpeechIds = [...event.speakerCharacterIds];
         lastSpeechShot = shot.shotIndex;
@@ -327,15 +360,20 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
         : `${speakers}跨越既有切镜时保持声音连续，不重起或重复原话。`);
     } else {
       const position = event.channel === 'on-screen' ? (en ? 'on-screen' : '画内') : (en ? 'off-screen' : '画外');
-      output.push(sentence(`${time(event)}${speakers}${en ? ` makes the authored ${position} non-verbal vocal sound` : `发出原定${position}非语言人声`}: ${event.vocalDescription}`, language));
+      const vocal = authored(event.vocalDescription || '');
+      if (vocal) output.push(sentence(`${time(event)}${speakers}${en ? ` makes the authored ${position} non-verbal vocal sound` : `发出原定${position}非语言人声`}: ${vocal}`, language));
       if (unseen) {
         output.push(en ? `${speakers} remains outside this shot.` : `${speakers}留在这一镜的画面外。`);
         output.push(closedMouths);
       }
     }
-    if (event.delivery?.trim()) output.push(sentence(event.delivery, language));
+    if (event.delivery?.trim()) {
+      const delivery = authored(event.delivery);
+      if (delivery) output.push(sentence(delivery, language));
+    }
     if (!unseen && event.speakerAction?.trim()) {
-      output.push(sentence(event.speakerAction, language));
+      const action = authored(event.speakerAction);
+      if (action) output.push(sentence(action, language));
       const pose = lowPoseSentence(event.speakerAction, en);
       if (pose) output.push(pose);
     }
@@ -352,13 +390,65 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
       const audio = input.characterAudio?.get(entry.characterId) || [];
       return sentence(`${en ? 'Voice identity' : '声音身份'}: ${name(entry.characterId)} ${speakerTokens.get(entry.characterId)}${audio.length ? `${en ? ', referenced from ' : '，声音参考为'}${audio.map((number) => `<Audio ${number}>`).join(', ')}` : ''}`, language);
     });
-  const integratedOpening = !fullReference ? [...renderedCharacters.map((entry) => entry.referenceAnchor), ...voiceOnlyDefinitions, plan.preamble?.trim()].filter(Boolean).join('\n') : '';
+  const preamble = authored(plan.preamble?.trim() || '');
+  const integratedOpening = !fullReference ? [...renderedCharacters.map((entry) => entry.referenceAnchor), ...voiceOnlyDefinitions, preamble].filter(Boolean).join('\n') : '';
+  const spokenByEvents = (shot: H3PerformancePlan['shots'][number]): Set<string> => new Set(shot.events.flatMap((event) => event.kind === 'speech' ? [event.text.trim()] : []));
+  const dialogueText = (tag: string): string => tag.replace(/<\/?d>/gu, '').replace(/^\s*\[[^\]]+\]\s*/u, '').trim();
+  const liftBuriedDialogue = (visual: string, shot: H3PerformancePlan['shots'][number]): { before: string; after: string; lines: string[] } => {
+    const known = spokenByEvents(shot);
+    const hidden = /背对|后脑|蒙眼|脸朝下|面朝下|侧后方|侧后|头发挡|看不见嘴|看不清嘴|跪趴|blindfold|from behind|face down|back of the head|side-rear|through (?:her|his|their) line|stays at this distance|view of (?:her|his|their) back/iu.test(visual);
+    const lines: string[] = [];
+    for (const match of visual.matchAll(/<d>[\s\S]*?<\/d>/gu)) {
+      if (known.has(dialogueText(match[0]))) continue;
+      const beforeTag = visual.slice(Math.max(0, (match.index ?? 0) - 80), match.index ?? 0);
+      const namedMatches = [...beforeTag.matchAll(/((?:[\u3400-\u9fff]{1,8}|[A-Za-z]+)(?:[ ·](?:[\u3400-\u9fff]{1,8}|[A-Za-z]+)){0,3})\s*\(S(\d+)\)/gu)];
+      const named = namedMatches[namedMatches.length - 1];
+      const who = named?.[1] || (en ? 'The declared voice source' : '已声明声源');
+      const token = named ? ` (S${named[2]})` : '';
+      const says = `${who}${token} says: ${match[0]}`;
+      const closed = en ? 'The other mouths already in the picture stay closed.' : '画面里其他人的嘴保持闭合。';
+      const camera = en
+        ? `When this line starts, that framing ends. The camera cuts to a close view of ${who}'s mouth.`
+        : `这句开始时，刚才的机位结束。镜头切到${who}能看清的嘴。`;
+      lines.push([closed, ...(hidden ? [camera] : []), says].join(en ? ' ' : ''));
+    }
+    const firstTag = visual.search(/<d>/u);
+    const releaseSpeechFraming = (text: string): string => text
+      .replace(/It stays at this distance through (?:her|his|their|the) line\.?/giu, '')
+      .replace(/The camera holds this frame[^.]{0,80}\./giu, '')
+      .replace(/through (?:her|his|their) line/giu, 'before this line')
+      .replace(/镜头在[^。]{0,12}这句[^。]{0,24}(?:保持|停在)[^。]{0,40}。/gu, '')
+      .replace(/(?:说话期间|这句进行时|保持这个距离)[^。]{0,40}。/gu, '');
+    const strip = (text: string): string => releaseSpeechFraming(text)
+      .replace(/<d>[\s\S]*?<\/d>/gu, '')
+      .replace(/Her mouth opens and her lips move with the words\.?/giu, '')
+      .replace(/[\u3400-\u9fffA-Za-z·]{1,16}\s*\(S\d+\)[^。\n]{0,24}说[:：]\s*$/u, '')
+      .replace(/[\u3400-\u9fff]{1,16}说[:：]\s*$/u, '');
+    return {
+      before: strip(firstTag >= 0 ? visual.slice(0, firstTag) : visual),
+      after: strip(firstTag >= 0 ? visual.slice(firstTag) : ''),
+      lines,
+    };
+  };
   const shots = plan.shots.map((shot, index) => {
     const marker = `[Shot ${shot.shotIndex}]${index ? ` At ${cutTime(shot.startSec)}` : ''}`;
-    const pose = lowPoseSentence(shot.visualDescription, en);
-    return [marker, !index ? integratedOpening : '', sentence(shot.visualDescription, language), pose, ...shot.events.map((event) => renderEvent(event, shot))].filter(Boolean).join('\n');
+    const hasSpeech = shot.events.some((event) => event.kind === 'speech') || /<d>/u.test(shot.visualDescription);
+    const visual = (hasSpeech ? shot.visualDescription
+      .replace(/It stays at this distance through (?:her|his|their|the) line\.?/giu, '')
+      .replace(/The camera holds this frame[^.]{0,80}\./giu, '')
+      .replace(/through (?:her|his|their) line/giu, 'before this line')
+      .replace(/镜头在[^。]{0,12}这句[^。]{0,24}(?:保持|停在)[^。]{0,40}。/gu, '')
+      .replace(/(?:说话期间|这句进行时|保持这个距离)[^。]{0,40}。/gu, '')
+      : shot.visualDescription).replace(/behind the brain/giu, 'across the back of the head');
+    const lifted = liftBuriedDialogue(visual, shot);
+    const pose = lowPoseSentence(visual, en);
+    const chain = bodyChainSentence(visual, en);
+    const hands = bracedHandsSentence(visual, en);
+    const shownBefore = authored(lifted.before);
+    const shownAfter = authored(lifted.after);
+    return [marker, !index ? integratedOpening : '', shownBefore ? sentence(shownBefore, language) : '', pose, chain, hands, ...lifted.lines, ...shot.events.map((event) => renderEvent(event, shot)), shownAfter ? sentence(shownAfter, language) : ''].filter(Boolean).join('\n');
   });
-  const body = [fullReference ? plan.preamble?.trim() : '', ...shots]
+  const body = [fullReference ? preamble : '', ...shots]
     .filter(Boolean).join('\n\n');
   const definitions = [...renderedCharacters.map((entry) => entry.referenceAnchor), ...voiceOnlyDefinitions];
   if (input.subjectDefinitions?.trim()) definitions.push(input.subjectDefinitions.trim());

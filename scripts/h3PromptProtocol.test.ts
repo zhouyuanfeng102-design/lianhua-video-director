@@ -5,12 +5,21 @@ import {
   H3_DIALOGUE_FORMAT_RULE,
   H3_FINAL_BODY_FORMAT_RULE,
   h3DescriptionLanguageRule,
+  omitCopiedEnglishExamples,
   getH3PromptProtocolIssue,
   getExistingH3PromptProtocolIssue,
   readH3PromptProtocol,
   readExistingH3PromptProtocol,
   repairH3PromptProtocolWithAi,
 } from '../src/h3PromptProtocol';
+
+assert.equal(
+  omitCopiedEnglishExamples('双膝留在支撑面上。英文写成 She remains kneeling bent over. Both knees remain on the platform。特写或下移只改摄影机。英文写成 The torso remains below the bed board, knees bent. He does not stand upright in the gap.完整保留每项行动。英文写成 She says: <d>[中文] 三哥……</d>。下一个人换编号。'),
+  '双膝留在支撑面上。特写或下移只改摄影机。完整保留每项行动。下一个人换编号。',
+);
+assert.match(H3_DIALOGUE_FORMAT_RULE, /Her mouth opens and her lips move with the words/u);
+assert.doesNotMatch(omitCopiedEnglishExamples(H3_DIALOGUE_FORMAT_RULE), /Her mouth opens and her lips move with the words/u);
+assert.match(omitCopiedEnglishExamples(H3_DIALOGUE_FORMAT_RULE), /先说话的人写成：小舞/u);
 
 assert.match(H3_DIALOGUE_FORMAT_RULE, /有明确说话人和话题但只是转述时.*自然、完整、可念的一句.*不把话题摘要机械塞进/u,
   'H3 converts narrated speech topics into clear dialogue without misquoting the summary');
@@ -324,7 +333,12 @@ for (const language of ['中文', '英文'] as const) {
       assertH3DescriptionLanguage(system, language);
       assert.ok(system.includes(VISUAL_IDENTITY_SPEECH_SCOPE_RULE));
       assert.ok(system.includes(NO_DIALOGUE_PERFORMANCE_RULE));
-      assert.ok(system.includes(H3_DIALOGUE_FORMAT_RULE));
+      if (language === '中文') {
+        assert.match(system, /先说话的人写成：小舞/u);
+        assert.doesNotMatch(system, /Her mouth opens and her lips move with the words/u);
+      } else {
+        assert.ok(system.includes(H3_DIALOGUE_FORMAT_RULE));
+      }
       assert.match(system, /不能写成<d>None<\/d>/u,
         'no-dialogue states are not serialized into pronounceable dialogue');
       const data = JSON.parse(user.match(/<h3_format_repair_data>\n([\s\S]*?)\n<\/h3_format_repair_data>/u)![1]);

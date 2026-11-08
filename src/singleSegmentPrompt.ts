@@ -26,6 +26,7 @@ import {
   H3_CLIP_TIME_RULE,
   H3_FINAL_BODY_FORMAT_RULE,
   h3DescriptionLanguageRule,
+  omitCopiedEnglishExamples,
 } from './h3PromptProtocol';
 import { createH3IdentityDeliveryReader, H3_IDENTITY_BINDINGS_RULE, H3_PERFORMANCE_DELIVERY_RULE, readH3DeliveryEnvelope } from './h3IdentityBindings';
 import { renderH3PerformancePlan } from './h3PerformancePlan';
@@ -629,7 +630,8 @@ export async function generateSingleSegmentPrompt(
       for (;;) {
         const allowance = stage === 'convert' || seedance ? undefined : allowances[stage];
         try {
-          response = await input.request(scopedSystem, scopedUser, stage, allowance ? { maxTokens: allowance.maxTokens } : undefined);
+          const requestSystem = stage === 'translate' ? scopedSystem : omitCopiedEnglishExamples(scopedSystem);
+          response = await input.request(requestSystem, scopedUser, stage, allowance ? { maxTokens: allowance.maxTokens } : undefined);
           break;
         } catch (error) {
           assertCurrent();
@@ -998,7 +1000,7 @@ export async function generateSingleSegmentPrompt(
       sourceUser += `\n\n<seedance_existing_delivery_data>\n${untrustedJson({ promptZh: input.board.seedance25Output?.promptZh || '',
         revisionScope: input.purpose === 'continuity-repair' ? 'adjacent-segment-continuity-only' : 'current-segment-dialogue-repair-within-confirmed-schedule' })}\n</seedance_existing_delivery_data>\n这是修复前的已保存目标稿，缺少目标稿时仅按本次公共修复结果保真编写。`;
     }
-    const response = await input.request(sourceSystem, sourceUser, stage,
+    const response = await input.request(stage === 'translate' ? sourceSystem : omitCopiedEnglishExamples(sourceSystem), sourceUser, stage,
       sourceDocumentTranslation ? { jsonObject: true } : undefined);
     assertCurrent();
     return response;

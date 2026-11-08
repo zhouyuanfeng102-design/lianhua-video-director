@@ -46,12 +46,40 @@ export const H3_FINAL_BODY_FORMAT_RULE = [
   HEAD_ON_CHEST_RULE,
   MOUNTED_PART_MOTION_RULE,
   CONNECTED_PRESENCE_RULE,
-  'H3 运镜写在该镜正文里，前言仍然只写画面风格。这一镜还没有运镜句时，补一句官方运镜，一镜只一种。类型用变焦 Zoom、推拉 Push 或 Pull、摇 Pan、横移 Truck、俯仰 Tilt、升降 Pedestal、短弧 Arc、跟随 Tracking、固定 Static、轻晃或重晃、主观 POV、滚转 Roll。Pan 是机身不动、镜头左右转。Truck 才是整机横移。Zoom 是焦距变，Push 才是机身前进。Tilt 是机身不动、镜头上下转，Pedestal 才是整机升降。幅度只在偏小或偏大时写 with small amplitude 或 with large amplitude。速度只在偏慢或偏快时写 at slow speed 或 at fast speed。正常幅度和正常速度不写。弧移只写短的一段。已经写好的运镜句保持原句。后一镜切开写成 At 时间, the camera cuts to 新的景别或对象。回答画面里某个人时，不用「正面」表示看清嘴。胸口和眼睛留在听者身上，摄影机站在两人连线的侧面。英文写成 Her face remains toward him. The camera stays beside the line between them. 不写成 front view、faces forward、faces the camera 或 in front of her。只有原文写了看向镜头或主观镜头，脸才朝向镜头。只有原文明确要叠化、淡入或划变时才用 cross-dissolve、fade 或 wipe。有首帧图时，[Shot 1] 仍先写用户已选画面风格那一句，再从这张图里已经在的人和物接着写动作。有尾帧图时，最后一镜停在那张图的姿势和构图上。',
+  '中文稿的镜头、动作和声景只写中文。英文例句只留给英文稿，不抄进中文镜头。H3 运镜写在该镜正文里，前言仍然只写画面风格。这一镜还没有运镜句时，补一句官方运镜，一镜只一种。类型用变焦 Zoom、推拉 Push 或 Pull、摇 Pan、横移 Truck、俯仰 Tilt、升降 Pedestal、短弧 Arc、跟随 Tracking、固定 Static、轻晃或重晃、主观 POV、滚转 Roll。Pan 是机身不动、镜头左右转。Truck 才是整机横移。Zoom 是焦距变，Push 才是机身前进。Tilt 是机身不动、镜头上下转，Pedestal 才是整机升降。幅度只在偏小或偏大时写 with small amplitude 或 with large amplitude。速度只在偏慢或偏快时写 at slow speed 或 at fast speed。正常幅度和正常速度不写。弧移只写短的一段。已经写好的运镜句保持原句。后一镜切开写成 At 时间, the camera cuts to 新的景别或对象。回答画面里某个人时，不用「正面」表示看清嘴。胸口和眼睛留在听者身上，摄影机站在两人连线的侧面。英文写成 Her face remains toward him. The camera stays beside the line between them. 不写成 front view、faces forward、faces the camera 或 in front of her。只有原文写了看向镜头或主观镜头，脸才朝向镜头。只有原文明确要叠化、淡入或划变时才用 cross-dissolve、fade 或 wipe。有首帧图时，[Shot 1] 仍先写用户已选画面风格那一句，再从这张图里已经在的人和物接着写动作。有尾帧图时，最后一镜停在那张图的姿势和构图上。',
   'H3声音字段职责必须严格分开：新稿中每项局部拟音以当前动作或发声对象、实际接触双方的材质、力度与本段时刻为依据，写在对应[Shot N]的integrated_multimodal_description或full-reference的detailed_description内。武侠或剑客题材、人物视觉身份、静置或携带的兵器和人物持剑参考图都不能单独授权出鞘、碰刃或金属撞击；拿起、携带或查看一件兵器也不等于两件兵器相撞。真实发生的兵器出鞘、碰刃、金属部件互碰或兵器撞击硬物仍按实际接触保留，不能机械删除金属声。每一种声音只跟真正发出它的那一下写在一起。拂叶、拨衣、落叶离桌只写衣料和干叶摩擦，不配硬落地，不配铃。铜铃、风铃、门环、耳环、杯盏和金属饰只有原文写明它自己响的那一下才出声，写成远处、闷、短，单独成句，不跟扫、碰、走、坐绑在同一句，也不写进overall_soundscape。overall_soundscape只写整段简短的全局声学概括，包括有依据的持续声床、整体安静程度，以及局部同期声按镜头发生和结束的总体关系；它不是一次性事件清单或第二条音效轨。没有底噪但有局部声音时，只概括间隙安静、这些同期声随对应镜头发生与结束，不列具体动作、器物、材质或时刻，不添加新声源；只有用户明确要求全片完全静音才写N/A。non_diegetic_music无配乐时这一行只写N/A这两个字符，不写成None、无、silence、no music，也不写乐器、旋律、节拍或柔和、电影感、亲密的配器。overall_soundscape只写屋里已经发生的声音。用户已选的画面风格仍按原句写在 [Shot 1] 开头，只写一次。这句只写色彩、材质、光影和质感，不把这句写成配乐、乐器或旋律。导演分类同样只约束画面，不授权背景音乐。已确认音乐按本次操作权限保留；两字段是提示词结构，不是API硬性禁乐参数。只在某镜或本段后半程听到的风、水、瀑布、脚步、碰撞、拾取、出鞘等局部声音，连同出现、结束和听觉距离留在对应镜内，不提升成全程持续声景，也不在overall_soundscape中按镜头顺序复述、列举或换词转述；“远处、轻微、低响”不是持续时间授权。同一声源不在镜内与overall_soundscape重复铺设，有依据的跨镜摘要与镜内变化指向同一声音，不是额外叠加。具体对白原字、说话人/声源ID、某一镜无对白、逐镜声音时刻、口型/听者和逐镜禁止项必须留在对应镜内。不要把Shot编号、对白复述、声源分配、镜内时序、具体器物材质或长篇“不要……”清单堆进overall_soundscape；不得新增negative_prompt、negative、反向提示词或其它section。必要的全局禁止项最多用一句简短说明，不能替代逐镜约束。翻译、纯格式修复和参考更新保留已确认声音的动作因果、发声对象、材质、时间与字段作用域，不因参考图重新推导拟音，不借此重新设计旧稿的声音。',
   '每镜只交付一份按实际先后展开的事件序列：开头的身份、服饰和场景说明不提前演完整亲吻、发话、离开或结果，再在后面的时间描述重演。镜头观察目标应跟随当前正在发生的事件与具名说话人，不用未来动作抢占开场焦点；身份与参考映射简洁融入现有字段，不输出另一份动作摘要、旁白名单或重复时间轴。描述必要站位时先区分身体侧别与画面投影，不能把screen-left当作人物自身左侧，也不为说明说话人重复矛盾的左右定位。',
   '必须保留本次格式基准中的section名称与顺序、[Shot N]数量与连续编号、首镜无At、后续镜头严格递增的At MM:SS.mmm切点，以及Subject/Picture/Video/Audio参考标签及其职责；不要独立增加镜头、切点或参考标签。只有本次指令明确授权未确认新稿、对白排程修复或action-retiming动作节奏重排、并要求同时交付canonicalPrompt时，镜数与At基准才是这次同步修正后的canonicalPrompt，不是旧候选草稿。动作节奏重排始终保持当前镜数、全部动作与固定段长，只调整事件时窗及已有镜界；翻译、参考更新、衔接与纯格式修复没有这个授权。',
   'H3结构与描述语言相互独立：官方字段名和标签保持协议原样，字段内的描述使用本次阶段明确指定的语言。由AI负责语义与格式改写，程序不本地重写正文、不截断台词、不凭空补剧情。',
 ].join('\n');
+
+/** Drop copyable English example sentences from a Chinese writing instruction.
+ * The English page still receives those sentences through the translation rules.
+ * This does not edit a finished prompt. */
+export const omitCopiedEnglishExamples = (instruction: string): string => {
+  const marker = /英(?:文(?:运镜|都)?|译)写成/gu;
+  let result = '';
+  let cursor = 0;
+  for (const match of instruction.matchAll(marker)) {
+    const start = match.index ?? 0;
+    result += instruction.slice(cursor, start);
+    let index = start + match[0].length;
+    while (index < instruction.length && /\s/u.test(instruction[index] || '')) index += 1;
+    while (index < instruction.length) {
+      if (instruction.startsWith('<d>', index)) {
+        const end = instruction.indexOf('</d>', index);
+        if (end < 0) break;
+        index = end + 4;
+        continue;
+      }
+      if (/[\u3400-\u9fff]/u.test(instruction[index] || '')) break;
+      index += 1;
+    }
+    cursor = index;
+  }
+  result += instruction.slice(cursor);
+  return result.replace(/[ \t]{2,}/gu, ' ').replace(/\n{3,}/gu, '\n\n');
+};
 
 /** The caller chooses the delivery language before generation, including
  * technical retries. This is not a detector or a post-generation repair. */
@@ -373,6 +401,7 @@ export const repairH3PromptProtocolWithAi = async ({
       ...(participationDelivery ? [CHARACTER_PARTICIPATION_RULE,
         '本次完整JSON同时包含characterParticipation；按最终修复后的正文同步逐字evidence，保持已有实际参与类型与镜头，不省略该字段或用旧正文的证据。身份和人物参与记录与正文在本次同一回答中交付，不另行调用。'] : []),
     ].join('\n\n');
+    const requestSystem = language === '中文' ? omitCopiedEnglishExamples(system) : system;
     const payload = JSON.stringify({
       formatReferencePrompt,
       candidatePrompt: candidate,
@@ -384,7 +413,7 @@ export const repairH3PromptProtocolWithAi = async ({
         ...(participation ? { characterParticipation: participation } : {}),
       } } : {}),
     }).replace(/</gu, '\\u003c').replace(/>/gu, '\\u003e');
-    const response = (await request(system, `<h3_format_repair_data>\n${payload}\n</h3_format_repair_data>\n请由你完成格式修复，${participationDelivery ? '返回h3Prompt、characterParticipation及已有identityBindings同步的完整JSON交付。' : identityDelivery ? '返回h3Prompt与identityBindings同步的完整JSON交付。' : '只返回完整H3正文。'}`)).trim();
+    const response = (await request(requestSystem, `<h3_format_repair_data>\n${payload}\n</h3_format_repair_data>\n请由你完成格式修复，${participationDelivery ? '返回h3Prompt、characterParticipation及已有identityBindings同步的完整JSON交付。' : identityDelivery ? '返回h3Prompt与identityBindings同步的完整JSON交付。' : '只返回完整H3正文。'}`)).trim();
     try {
       // Parse even an unexpected envelope: a model-declared binding is never
       // silently discarded merely because the source was a legacy prompt.
