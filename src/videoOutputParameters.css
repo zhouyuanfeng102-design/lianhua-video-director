@@ -1,6 +1,11 @@
 .video-output-parameters { min-width: 0; margin: 7px 0; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
 .vop-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 3px 8px; margin-bottom: 6px; font-size: calc(11px * var(--ui-font-scale, 1)); }
 .vop-heading > span { color: var(--muted); font-size: calc(9px * var(--ui-font-scale, 1)); }
+.vop-page-values { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 10px; margin: 0 0 8px; padding: 0; list-style: none; }
+.vop-page-values li { min-width: 0; display: flex; justify-content: space-between; gap: 8px; padding: 3px 0; border-bottom: 1px solid var(--line); font-size: calc(11px * var(--ui-font-scale, 1)); }
+.vop-page-values span { color: var(--muted); overflow-wrap: anywhere; }
+.vop-page-values strong { font-weight: 600; text-align: right; overflow-wrap: anywhere; }
+.vop-batch .vop-page-values { flex: 1 0 100%; }
 .vop-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; min-width: 0; align-items: start; }
 .video-output-parameters .vop-fields .vop-field,
 .video-director-view .video-output-parameters .vop-fields .vop-field { min-width: 0; margin: 0; gap: 3px; }

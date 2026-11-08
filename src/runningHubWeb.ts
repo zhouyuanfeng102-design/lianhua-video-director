@@ -374,6 +374,24 @@ export const compileRunningHubWebApi = (config: RunningHubWebConfig, appId?: str
 
 export const isRunningHubWebAppReady = (app: RunningHubWebApp | undefined): boolean => Boolean(app?.ready && app.fields.length && app.fields.some((item) => item.bind === 'prompt' || item.bind === 'idea'));
 
+/** Values already on the app page. Prompt and media slots stay in their own controls. */
+export const runningHubWebPageParameters = (
+  fields: readonly RunningHubWebField[] | undefined,
+  instance?: string,
+  estimate?: string,
+): { label: string; value: string }[] => {
+  const lines: { label: string; value: string }[] = [];
+  if (instance?.trim()) lines.push({ label: '运行机型', value: instance.trim() });
+  if (estimate?.trim()) lines.push({ label: '页面预估', value: estimate.trim() });
+  for (const field of fields || []) {
+    if (field.bind === 'prompt' || field.bind === 'idea' || field.bind === 'image' || field.bind === 'audio') continue;
+    const value = field.value === true ? '开' : field.value === false ? '关' : String(field.value ?? '').trim();
+    if (!value) continue;
+    lines.push({ label: field.label, value });
+  }
+  return lines;
+};
+
 /** Drop one saved login slot. Web apps stay; a remaining slot takes over their login. */
 export const removeRunningHubWebAccount = (config: RunningHubWebConfig, accountId: string): RunningHubWebConfig => {
   const accounts = config.accounts.filter((item) => item.id !== accountId);

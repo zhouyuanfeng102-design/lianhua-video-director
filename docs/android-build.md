@@ -1,6 +1,6 @@
 # Android 构建与双端交付
 
-项目使用 React/Vite 共用前端、Electron Windows 客户端和 Capacitor 8 Android 客户端。Android 原生工程位于 `android/`，前端平台桥接位于 `src/platform/`。当前版本 **4.0.8**，应用包名 `com.lianhua.video_director`，最低 API 26，编译及目标 API 36。
+项目使用 React/Vite 共用前端、Electron Windows 客户端和 Capacitor 8 Android 客户端。Android 原生工程位于 `android/`，前端平台桥接位于 `src/platform/`。当前版本 **4.1.0**，应用包名 `com.lianhua.video_director`，最低 API 26，编译及目标 API 36。
 
 ## 构建环境
 
@@ -9,10 +9,10 @@
 ```powershell
 npm ci
 npm run pack:all
-npm run deliver:4.0.8
+npm run deliver:4.1.0
 ```
 
-`pack:all` 对共用前端执行一次类型检查和 Vite 构建，再生成 Windows x64 便携 EXE 与正式 Android APK。Android 步骤接收 `--skip-web-build` 复用同一次前端产物，避免重复检查。`deliver:4.0.8` 默认要求两种包同时存在，任一缺失即停止交付；产物在 `交付/` 中附更新说明、恢复源码和 SHA-256。
+`pack:all` 对共用前端执行一次类型检查和 Vite 构建，再生成 Windows x64 便携 EXE 与正式 Android APK。Android 步骤接收 `--skip-web-build` 复用同一次前端产物，避免重复检查。`deliver:4.1.0` 默认要求两种包同时存在，任一缺失即停止交付；产物在 `交付/` 中附更新说明、恢复源码和 SHA-256。
 
 ## 单端 UI 调整例外
 
@@ -20,7 +20,7 @@ npm run deliver:4.0.8
 
 ```powershell
 npm run pack:all -- --ui-only=windows
-npm run deliver:4.0.8 -- --ui-only=windows
+npm run deliver:4.1.0 -- --ui-only=windows
 ```
 
 安卓单端参数为 `--ui-only=android`。常规业务、存储、接口或共用逻辑更新仍默认双端；单端参数必须由本次改动范围支持，不能作为遗漏 APK 的替代方式。

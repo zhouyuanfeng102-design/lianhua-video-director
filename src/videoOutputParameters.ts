@@ -8,7 +8,7 @@ import type { VideoApiParameterControl } from './videoApiCapabilityTypes';
 export type VideoOutputParameterControl = VideoApiParameterControl;
 
 type ParameterPresentationApi = Pick<VideoTaskApiConfig, 'runningHubParameterControls' | 'runningHubMappedFields'>
-  & Partial<Pick<VideoTaskApiConfig, 'provider' | 'model' | 'baseUrl' | 'endpoint' | 'statusEndpointTemplate' | 'parameterCapabilities'>>;
+  & Partial<Pick<VideoTaskApiConfig, 'provider' | 'model' | 'baseUrl' | 'endpoint' | 'statusEndpointTemplate' | 'parameterCapabilities' | 'rhWebFields'>>;
 
 export const videoOutputParameterKeys = ['duration', 'aspect_ratio', 'resolution', 'steps', 'width', 'height'] as const;
 export type VideoOutputParameterKey = typeof videoOutputParameterKeys[number];
@@ -102,6 +102,13 @@ export const videoOutputParameterPresentation = (
     const capabilities = getVideoApiModelParameterCapabilities(api);
     Object.assign(controls, capabilities?.controls);
     Object.assign(defaultValues, capabilities?.defaults);
+  }
+  for (const field of api?.rhWebFields || []) {
+    if (field.bind !== 'duration' && field.bind !== 'aspect_ratio' && field.bind !== 'megapixels') continue;
+    const key = field.bind === 'megapixels' ? 'resolution' : field.bind;
+    if (defaultValues[key] === undefined && field.value !== '' && field.value !== undefined) defaultValues[key] = field.value;
+    if (!controls[key] && field.options?.length) controls[key] = { kind: 'select', options: [...field.options] };
+    else if (!controls[key] && field.kind === 'number') controls[key] = field.bind === 'megapixels' ? { kind: 'number', unit: 'MP' } : { kind: 'number' };
   }
   for (const field of api?.runningHubMappedFields || []) {
     if (field.kind !== 'parameter' || !field.parameter) continue;

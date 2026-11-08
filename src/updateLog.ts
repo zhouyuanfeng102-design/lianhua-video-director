@@ -15,6 +15,26 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "4.1.0",
+    releasedAt: "2026-11-08",
+    title: "画外的人不再由画面里的人代说",
+    highlights: [
+      "人不在这一镜时，台词留在画面外，画面里已有的嘴保持闭合。",
+      "画外、旁白和内心声音使用同一句，英文写成 says in an off-screen voiceover。",
+      "已保存的提示词和成片保持原样，重新生成该段后才会改。",
+    ],
+  },
+  {
+    version: "4.0.9",
+    releasedAt: "2026-11-08",
+    title: "生成时显示网页上的参数",
+    highlights: [
+      "RH 网页生成页列出网页上的机型、预估、时长、比例、分辨率、步数和调度器。",
+      "已绑成时长或比例的项，留空就用网页上的当前值。",
+      "固定为当前值的参数仍显示出来，不再写成请先绑定节点。",
+    ],
+  },
+  {
     version: "4.0.8",
     releasedAt: "2026-11-08",
     title: "新版积分和老版 RH 币都能提交",

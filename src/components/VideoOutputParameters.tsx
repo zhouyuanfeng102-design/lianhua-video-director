@@ -12,13 +12,15 @@ export interface VideoOutputParametersProps {
   /** Only generic API parameters use upstream schemas; cloud workflow values stay intact. */
   upstreamParameters?: boolean;
   requiresMapping?: boolean;
+  /** Current RH web page values. These are already on the page, not unbound workflow nodes. */
+  pageParameters?: readonly { label: string; value: string }[];
   disabled?: boolean;
   onChange: (key: VideoOutputParameterKey, value: string) => void;
   onOpenSettings?: () => void;
 }
 
 /** Explicit task overrides only; this component never writes defaults during rendering. */
-export function VideoOutputParameters({ scope, source, parameterText, availableKeys, controls = {}, defaultValues = {}, upstreamParameters: readUpstreamParameters = false, requiresMapping = source !== 'api', disabled = false, onChange, onOpenSettings }: VideoOutputParametersProps) {
+export function VideoOutputParameters({ scope, source, parameterText, availableKeys, controls = {}, defaultValues = {}, upstreamParameters: readUpstreamParameters = false, requiresMapping = source !== 'api', pageParameters = [], disabled = false, onChange, onOpenSettings }: VideoOutputParametersProps) {
   const parsed = readVideoParameterText(parameterText);
   const upstreamParameters = readUpstreamParameters && source === 'api' && !requiresMapping;
   const available = new Set(availableKeys);
@@ -27,10 +29,11 @@ export function VideoOutputParameters({ scope, source, parameterText, availableK
   const supported = (key: VideoOutputParameterKey) => available.has(key) || !requiresMapping && hasValue(key);
   const pixelKeys = (['width', 'height'] as const).filter((key) => controls[key]?.unit === 'MP' && (available.has(key) || hasValue(key)));
   const dimensions = (['width', 'height'] as const).some((key) => controls[key]?.unit !== 'MP' && (available.has(key) || hasValue(key)));
+  const pageValues = pageParameters.length > 0;
   const showAspectRatio = available.has('aspect_ratio') || hasValue('aspect_ratio');
-  const showResolution = available.has('resolution') || hasValue('resolution') || !dimensions && !pixelKeys.length;
-  const showSteps = requiresMapping || available.has('steps') || hasValue('steps');
-  const missing = [!available.has('duration') ? '视频时长' : '', !available.has('resolution') && !available.has('width') && !available.has('height') ? '分辨率' : '', showSteps && !available.has('steps') ? '采样步数' : ''].filter(Boolean);
+  const showResolution = available.has('resolution') || hasValue('resolution') || !pageValues && !dimensions && !pixelKeys.length;
+  const showSteps = pageValues ? available.has('steps') || hasValue('steps') : requiresMapping || available.has('steps') || hasValue('steps');
+  const missing = [!available.has('duration') ? '视频时长' : '', !pageValues && !available.has('resolution') && !available.has('width') && !available.has('height') ? '分辨率' : '', showSteps && !available.has('steps') ? '采样步数' : ''].filter(Boolean);
   const field = (key: VideoOutputParameterKey, label: string, ariaLabel: string) => {
     const control = controls[key];
     const unit = control?.unit === 'MP' ? ' MP' : '';
@@ -107,6 +110,7 @@ export function VideoOutputParameters({ scope, source, parameterText, availableK
   </>;
   return <section className={`video-output-parameters${scope === 'batch' ? ' vop-batch' : ''}`} aria-label={`${prefix}视频生成参数`}>
     <div className="vop-heading"><strong>{scope === 'batch' ? '批量视频生成参数' : '视频生成参数'}</strong><span>留空保持原值</span></div>
+    {pageParameters.length > 0 && <ul className="vop-page-values" aria-label="网页当前参数">{pageParameters.map((item) => <li key={`${item.label}:${item.value}`}><span>{item.label}</span><strong>{item.value}</strong></li>)}</ul>}
     <div className="vop-fields" data-count={1 + Number(showAspectRatio) + Number(showResolution) + Number(showSteps) + pixelKeys.length}>
       {field('duration', '视频时长（秒）', '视频时长（秒）')}
       {showAspectRatio && field('aspect_ratio', '画面比例', '视频画面比例')}

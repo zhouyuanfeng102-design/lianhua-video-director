@@ -125,9 +125,12 @@ test('explicit voiceover, internal voice, non-verbal voice and simultaneous spee
   assert.match(rendered.prompt, /Voice identity: 叙述者 \(S1\)/u);
   assert.match(rendered.prompt, /Voice identity: 叙述者 \(S1\), referenced from <Audio 4>/u);
   assert.match(rendered.prompt, /叙述者 \(S1\) says in an off-screen voiceover/u);
+  assert.equal(rendered.prompt.match(/says in an off-screen voiceover/gu)?.length, 2);
+  assert.match(rendered.prompt, /The mouths already in the picture stay closed/u);
+  assert.match(rendered.prompt, /remains outside this shot/u);
+  assert.doesNotMatch(rendered.prompt, /speaks from off-screen|is heard in an explicitly authored inner voice/u);
   assert.doesNotMatch(rendered.prompt, /<Subject \d+> (?:is )?叙述者/u);
   assert.match(rendered.prompt, /\(S2\) makes the authored off-screen non-verbal vocal sound: a short authored gasp/u);
-  assert.match(rendered.prompt, /\(S3\) is heard in an explicitly authored inner voice/u);
   assert.match(rendered.prompt, /\(S2,S3\) speaks on-screen in unison/u);
   assert.equal(rendered.prompt.match(/<d>/gu)?.length, 3);
 });

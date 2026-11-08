@@ -186,8 +186,12 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
   ]);
   if (fullReference) input.characters.forEach((entry) => {
     const explicit = input.subjectTokens?.get(entry.characterId) || entry.subjectToken;
-    if (descriptions.get(entry.characterId)?.presence !== 'offscreen' || explicit
-      || input.characterPictures?.get(entry.characterId)?.length) {
+    const offscreen = descriptions.get(entry.characterId)?.presence === 'offscreen';
+    if (offscreen) {
+      if (explicit) subjects.set(entry.characterId, explicit);
+      return;
+    }
+    {
       let number = 1;
       while (usedSubjects.has(number)) number += 1;
       const subject = explicit || `<Subject ${number}>`;
@@ -213,15 +217,19 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
   };
   const renderedCharacters = input.characters.map((entry) => {
     const { speakerToken: _oldVoice, subjectToken: _oldSubject, referenceAnchor: _oldAnchor, ...identity } = entry;
-    const description = descriptions.get(entry.characterId)?.visualDescription.trim() || '';
+    const offscreenPresence = descriptions.get(entry.characterId)?.presence === 'offscreen';
+    const description = offscreenPresence ? '' : (descriptions.get(entry.characterId)?.visualDescription.trim() || '');
     const speakerToken = speakerTokens.get(entry.characterId);
     const pictures = input.characterPictures?.get(entry.characterId) || [];
     const pictureText = pictures.map((number) => `<Picture ${number}>`).join(', ');
     const audio = speakerToken ? input.characterAudio?.get(entry.characterId) || [] : [];
     const audioText = audio.length ? `${en ? ', with the voice referenced from ' : '，声音参考为'}${audio.map((number) => `<Audio ${number}>`).join(', ')}` : '';
-    const referenceAnchor = fullReference && subjects.has(entry.characterId)
+    const voiceOnly = offscreenPresence
+      ? sentence(`${subjects.has(entry.characterId) ? `${subjects.get(entry.characterId)} ${en ? 'is the voice of' : '是'}` : (en ? 'Voice identity:' : '声音身份：')} ${entry.name}${speakerToken ? ` ${speakerToken}` : ''}${audioText}${en ? ', remaining outside the frame' : '，留在画面外'}`, language)
+      : '';
+    const referenceAnchor = voiceOnly || (fullReference && subjects.has(entry.characterId)
       ? sentence(`${subjects.get(entry.characterId)} ${en ? 'is' : '是'} ${entry.name}${speakerToken ? ` ${speakerToken}` : ''}${pictureText ? `${en ? ', visually referenced from ' : '，视觉参考为'}${pictureText}` : ''}${audioText}${description ? `${en ? ': ' : '：'}${description}` : ''}`, language)
-      : sentence(`${descriptions.get(entry.characterId)?.presence === 'offscreen' ? (en ? 'Voice identity' : '声音身份') : (en ? 'Identity' : '人物身份')}: ${entry.name}${speakerToken ? ` ${speakerToken}` : ''}${audioText}${description ? `${en ? ': ' : '：'}${description}` : ''}`, language);
+      : sentence(`${en ? 'Identity' : '人物身份'}: ${entry.name}${speakerToken ? ` ${speakerToken}` : ''}${audioText}${description ? `${en ? ': ' : '：'}${description}` : ''}`, language));
     return { ...identity, ...(subjects.has(entry.characterId) ? { subjectToken: subjects.get(entry.characterId)! } : {}),
       ...(speakerToken ? { speakerToken } : {}), referenceAnchor };
   });
@@ -257,34 +265,44 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
       return rendered;
     }
 
-    const speakers = voiceLabel(event.speakerCharacterIds);
+    const unseen = event.channel === 'off-screen' || event.channel === 'voiceover' || event.channel === 'inner-voice';
+    const spokenNames = (ids: readonly string[]): string => {
+      const tokens = unique(ids).map((id) => speakerTokens.get(id)).filter((token): token is string => Boolean(token));
+      const who = unique(ids).map(name).join(en ? ' and ' : '与');
+      return `${who}${tokens.length ? ` (${tokens.map((token) => token.slice(1, -1)).join(',')})` : ''}`;
+    };
+    const speakers = unseen ? spokenNames(event.speakerCharacterIds) : voiceLabel(event.speakerCharacterIds);
     const listenerIds = unique(event.listenerCharacterIds || []).filter((id) => !event.speakerCharacterIds.includes(id));
-    const target = listenerIds.length ? (en ? ` to ${names(listenerIds)}` : `面向${names(listenerIds)}`) : '';
-    const channel = {
-      'on-screen': en ? 'speaks on-screen' : '在画内发话',
-      'off-screen': en ? 'speaks from off-screen' : '从画外发话',
-      voiceover: en ? 'says in an off-screen voiceover' : '以明确的画外旁白发话',
-      'inner-voice': en ? 'is heard in an explicitly authored inner voice' : '以原定的内心声音发话',
-    }[event.channel];
+    const target = !unseen && listenerIds.length ? (en ? ` to ${names(listenerIds)}` : `面向${names(listenerIds)}`) : '';
+    const channel = unseen
+      ? (en ? 'says in an off-screen voiceover' : '留在画面外发话')
+      : (en ? 'speaks on-screen' : '在画内发话');
+    const closedMouths = listenerIds.length
+      ? (en ? `${names(listenerIds)} keep their mouths closed.` : `${names(listenerIds)}的嘴保持闭合。`)
+      : (en ? 'The mouths already in the picture stay closed.' : '画面里已有的嘴保持闭合。');
     if (event.kind === 'speech') {
       const dialogue = `<d>[${dialogueLanguageTag(event.language)}] ${event.continuesFromPreviousShot ? '<scenetrans>' : ''}${event.text}${event.continuesInNextShot ? '<scenetrans>' : ''}</d>`;
       const simultaneous = unique(event.speakerCharacterIds).length > 1 ? (en ? ' in unison' : '共同同步') : '';
       output.push(`${time(event)}${speakers}${en ? ' ' : ''}${channel}${simultaneous}${target}: ${dialogue}`);
-      if (event.channel === 'on-screen' && listenerIds.length) output.push(en
+      if (unseen) {
+        output.push(en ? `${speakers} remains outside this shot.` : `${speakers}留在这一镜的画面外。`);
+        output.push(closedMouths);
+      } else if (listenerIds.length) output.push(en
         ? `${names(event.speakerCharacterIds)} keeps the chest and eyes toward ${names(listenerIds)}. The camera stays beside the line between them.`
         : `${names(event.speakerCharacterIds)}的胸口和眼睛留在${names(listenerIds)}身上，摄影机在两人连线的侧面。`);
-      else if (event.channel === 'voiceover' || event.channel === 'inner-voice') output.push(en
-        ? 'The on-screen mouths stay closed.'
-        : '画内的嘴保持闭合。');
       if (event.continuesFromPreviousShot || event.continuesInNextShot) output.push(en
         ? `${speakers} keeps the same continuous voice across the authored cut, without restarting or repeating words.`
         : `${speakers}跨越既有切镜时保持声音连续，不重起或重复原话。`);
     } else {
       const position = event.channel === 'on-screen' ? (en ? 'on-screen' : '画内') : (en ? 'off-screen' : '画外');
       output.push(sentence(`${time(event)}${speakers}${en ? ` makes the authored ${position} non-verbal vocal sound` : `发出原定${position}非语言人声`}: ${event.vocalDescription}`, language));
+      if (unseen) {
+        output.push(en ? `${speakers} remains outside this shot.` : `${speakers}留在这一镜的画面外。`);
+        output.push(closedMouths);
+      }
     }
     if (event.delivery?.trim()) output.push(sentence(event.delivery, language));
-    if (event.speakerAction?.trim()) {
+    if (!unseen && event.speakerAction?.trim()) {
       output.push(sentence(event.speakerAction, language));
       const pose = lowPoseSentence(event.speakerAction, en);
       if (pose) output.push(pose);

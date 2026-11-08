@@ -126,10 +126,13 @@ await testAsync('邀请注册保留指定邀请码，桌面浏览器正确打开
     } });
     const h = harness('settings', { ...fixture(), baseUrl: 'https://www.runninghub.cn' });
     const before = structuredClone(h.state);
-    const link = h.required('a', '通过邀请链接注册 RunningHub');
+    const link = h.required('a', '打开 RunningHub 邀请页面查看好友注册福利');
     assert.equal(link.props.href, expected);
     assert.equal(link.props.target, '_blank');
     assert.equal(link.props.rel, 'noopener noreferrer');
+    assert.equal(textOf(link), '邀请好友 · 查看专属福利');
+    assert.equal(link.props.title, `${expected}\n好友注册可获得会员优惠券，具体金额、使用门槛和有效期以 RunningHub 邀请页为准。`);
+    assert.doesNotMatch(`${textOf(link)} ${link.props.title}`, /1000 RH 币|现金奖励|推广者|返现/u);
     let prevented = false;
     await link.props.onClick({ preventDefault: () => { prevented = true; } });
     assert.equal(prevented, true);

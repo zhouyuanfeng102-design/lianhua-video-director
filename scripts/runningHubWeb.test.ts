@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { buildRhWebBody, createRunningHubWebApp, defaultRunningHubWebConfig, knownMiniMaxH3WebFields, mergeRunningHubWebRead, normalizeRunningHubWebConfig, parseRunningHubWebAddress, removeRunningHubWebAccount } from '../src/runningHubWeb';
+import { buildRhWebBody, createRunningHubWebApp, defaultRunningHubWebConfig, knownMiniMaxH3WebFields, mergeRunningHubWebRead, normalizeRunningHubWebConfig, parseRunningHubWebAddress, removeRunningHubWebAccount, runningHubWebPageParameters } from '../src/runningHubWeb';
+import { videoOutputParameterPresentation } from '../src/videoOutputParameters';
 import type { VideoGenerationDraft } from '../src/videoGenerationTypes';
 import { compileRunningHubWebApi } from '../src/runningHubWeb';
 
@@ -26,6 +27,16 @@ assert.equal(changed.ready, true);
 assert.equal(mergeRunningHubWebRead({ ...app, name: `网页应用 ${app.remoteId}` }, { fields: app.fields, name: '页面上的应用名' }).name, '页面上的应用名');
 assert.equal(changed.fields.find((field) => field.key === 'text:prompt')?.bind, 'idea');
 assert.equal(changed.estimate, '≈ 100 RH币');
+const pageParameters = runningHubWebPageParameters(changed.fields, changed.instance, changed.estimate);
+assert.equal(pageParameters.find((item) => item.label === '运行机型')?.value, 'Plus');
+assert.equal(pageParameters.find((item) => item.label === '页面预估')?.value, '≈ 100 RH币');
+assert.equal(pageParameters.find((item) => item.label === '时长（5-30s）')?.value, '12');
+assert.equal(pageParameters.find((item) => item.label === 'lora_name 1')?.value, 'MysticXXX-ref2va-V4.safetensors');
+assert.equal(pageParameters.some((item) => item.label === 'image1' || item.label === '提示词'), false);
+const presented = videoOutputParameterPresentation({ runningHubParameterControls: {}, runningHubMappedFields: [], rhWebFields: changed.fields });
+assert.equal(presented.defaultValues.duration, 12);
+assert.equal(presented.defaultValues.aspect_ratio, '9:16 (Portrait Widescreen)');
+assert.equal(presented.defaultValues.resolution, 0.5);
 
 const api = compileRunningHubWebApi(config, app.id);
 const draft: VideoGenerationDraft = {
