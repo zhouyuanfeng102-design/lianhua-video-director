@@ -74,12 +74,15 @@ const segment5: H3PerformancePlan = {
 test('segment 5 renders the complete command with its owner, lip action and silent listeners', () => {
   const rendered = renderH3PerformancePlan({ plan: segment5, characters, language: 'en' });
   const command = rendered.events.find((event) => event.dialogueId === 'b1-d12')!.referenceAnchor!;
-  assert.match(command, /^From 10\.60 to 14\.40 seconds of this clip, 夏提雅 \(S2\) speaks on-screen to 贝里尤洛:/u);
+  assert.match(command, /贝里尤洛 \(S1\) keeps their mouth closed/u);
+  assert.match(command, /At 10\.60 seconds of this clip, the camera pans with small amplitude at slow speed toward 夏提雅 \(S2\)'s mouth/u);
+  assert.match(command, /From 10\.60 to 14\.40 seconds of this clip, 夏提雅 \(S2\) speaks on-screen to 贝里尤洛:/u);
+  assert.match(command, /夏提雅 \(S2\)'s mouth opens, and the lips move with this line/u);
   assert.match(command, /<d>\[中文\] 没错，我们的君王是为了支配你们而来的，下跪低头吧。<\/d>/u);
   assert.match(command, /夏提雅 keeps the chest and eyes toward 贝里尤洛/u);
   assert.match(command, /贝里尤洛 listens without speaking, with no speaking lip movement/u);
   assert.match(command, /亚乌拉 remains silent: watches the exchange/u);
-  assert.doesNotMatch(command, /贝里尤洛.*?speaks on-screen|夏提雅 remains silent|to 夏提雅 \(S2\) seconds/u);
+  assert.doesNotMatch(command, /贝里尤洛 \(S1\) speaks on-screen|夏提雅 remains silent|to 夏提雅 \(S2\) seconds/u);
   assert.equal(rendered.characters.find((entry) => entry.characterId === 'aura')?.speakerToken, undefined);
 });
 

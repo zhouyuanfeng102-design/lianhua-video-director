@@ -15,6 +15,16 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "4.1.1",
+    releasedAt: "2026-11-08",
+    title: "换人说话时嘴跟着换",
+    highlights: [
+      "同一镜换成另一个人时，上一张嘴先闭上，镜头再转到新的嘴。",
+      "新的一句由这张嘴张开。听的人和刚才说完的人都不接这句。",
+      "已保存的提示词和成片保持原样，重新生成该段后才会改。",
+    ],
+  },
+  {
     version: "4.1.0",
     releasedAt: "2026-11-08",
     title: "画外的人不再由画面里的人代说",

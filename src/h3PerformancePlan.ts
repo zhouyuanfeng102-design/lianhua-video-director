@@ -252,7 +252,25 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
     }
     return output;
   };
-  const renderEvent = (event: H3PerformanceEvent): string => {
+  let lastSpeechIds: string[] = [];
+  let lastSpeechShot = -1;
+  const speakerKey = (ids: readonly string[]): string => unique(ids).slice().sort().join('\0');
+  const mouthsClosed = (ids: readonly string[]): string => en
+    ? `${voiceLabel(ids)} keeps their mouth closed.`
+    : `${voiceLabel(ids)}的嘴保持闭合。`;
+  const mouthOpens = (ids: readonly string[]): string => en
+    ? `${voiceLabel(ids)}'s mouth opens, and the lips move with this line.`
+    : `${voiceLabel(ids)}的嘴张开，嘴唇随这句开合。`;
+  const cameraToMouth = (ids: readonly string[], startSec: number | undefined, place: string): string => {
+    const up = /半空|上方|高处|抬头/u.test(place);
+    const when = startSec !== undefined
+      ? (en ? `At ${seconds(startSec)} seconds of this clip, ` : `本段${seconds(startSec)}秒，`)
+      : '';
+    return en
+      ? `${when}the camera ${up ? 'tilts up' : 'pans'} with small amplitude at slow speed toward ${voiceLabel(ids)}'s mouth.`
+      : `${when}镜头以小幅度、慢速度${up ? '向上转，朝向' : '摇向'}${voiceLabel(ids)}的嘴。`;
+  };
+  const renderEvent = (event: H3PerformanceEvent, shot: H3PerformancePlan['shots'][number]): string => {
     const output: string[] = [];
     if (event.kind === 'visual') {
       if (event.description.trim()) output.push(sentence(time(event) + event.description, language));
@@ -283,6 +301,11 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
     if (event.kind === 'speech') {
       const dialogue = `<d>[${dialogueLanguageTag(event.language)}] ${event.continuesFromPreviousShot ? '<scenetrans>' : ''}${event.text}${event.continuesInNextShot ? '<scenetrans>' : ''}</d>`;
       const simultaneous = unique(event.speakerCharacterIds).length > 1 ? (en ? ' in unison' : '共同同步') : '';
+      const changedSpeaker = lastSpeechIds.length > 0 && speakerKey(lastSpeechIds) !== speakerKey(event.speakerCharacterIds);
+      if (!unseen && changedSpeaker) {
+        output.push(mouthsClosed(lastSpeechIds));
+        if (lastSpeechShot === shot.shotIndex) output.push(cameraToMouth(event.speakerCharacterIds, event.startSec, `${shot.visualDescription}\n${event.speakerAction || ''}`));
+      }
       output.push(`${time(event)}${speakers}${en ? ' ' : ''}${channel}${simultaneous}${target}: ${dialogue}`);
       if (unseen) {
         output.push(en ? `${speakers} remains outside this shot.` : `${speakers}留在这一镜的画面外。`);
@@ -290,6 +313,15 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
       } else if (listenerIds.length) output.push(en
         ? `${names(event.speakerCharacterIds)} keeps the chest and eyes toward ${names(listenerIds)}. The camera stays beside the line between them.`
         : `${names(event.speakerCharacterIds)}的胸口和眼睛留在${names(listenerIds)}身上，摄影机在两人连线的侧面。`);
+      if (!unseen) {
+        output.push(mouthOpens(event.speakerCharacterIds));
+        const stillOpen = listenerIds.filter((id) => !lastSpeechIds.includes(id));
+        if (stillOpen.length) output.push(mouthsClosed(stillOpen));
+      }
+      if (!unseen) {
+        lastSpeechIds = [...event.speakerCharacterIds];
+        lastSpeechShot = shot.shotIndex;
+      }
       if (event.continuesFromPreviousShot || event.continuesInNextShot) output.push(en
         ? `${speakers} keeps the same continuous voice across the authored cut, without restarting or repeating words.`
         : `${speakers}跨越既有切镜时保持声音连续，不重起或重复原话。`);
@@ -324,7 +356,7 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
   const shots = plan.shots.map((shot, index) => {
     const marker = `[Shot ${shot.shotIndex}]${index ? ` At ${cutTime(shot.startSec)}` : ''}`;
     const pose = lowPoseSentence(shot.visualDescription, en);
-    return [marker, !index ? integratedOpening : '', sentence(shot.visualDescription, language), pose, ...shot.events.map(renderEvent)].filter(Boolean).join('\n');
+    return [marker, !index ? integratedOpening : '', sentence(shot.visualDescription, language), pose, ...shot.events.map((event) => renderEvent(event, shot))].filter(Boolean).join('\n');
   });
   const body = [fullReference ? plan.preamble?.trim() : '', ...shots]
     .filter(Boolean).join('\n\n');
