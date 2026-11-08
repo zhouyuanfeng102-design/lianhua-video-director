@@ -15,6 +15,16 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "4.2.1",
+    releasedAt: "2026-11-08",
+    title: "没有预估也继续运行",
+    highlights: [
+      "网页上没有预估 RH 币时，不再拦住，照常点击运行。",
+      "页面上如果写了预估，任务记录里仍会带上。",
+      "已保存的提示词和成片保持原样。",
+    ],
+  },
+  {
     version: "4.2.0",
     releasedAt: "2026-11-08",
     title: "台词只从能看清的那张嘴说出来",

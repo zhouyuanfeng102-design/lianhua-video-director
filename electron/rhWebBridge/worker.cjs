@@ -437,8 +437,7 @@ function chargeOnPage(text) {
   return { quote: '', ready: /费用以实际用量结算/u.test(source) };
 }
 
-/** Old app pages still show ≈ N RH币 beside Run. New pages settle by points,
- * transitional RH coins and the wallet, and say 费用以实际用量结算 instead. */
+/** A visible estimate is recorded on the task. A page without one still runs. */
 async function readRunQuote(page) {
   const nearRun = await page.locator('.run-cell-main').filter({ hasText: '立即运行' }).first().evaluate((node) => {
     let current = node;
@@ -449,15 +448,10 @@ async function readRunQuote(page) {
     }
     return node.parentElement?.innerText || '';
   }).catch(() => '');
-  let charge = chargeOnPage(nearRun);
-  if (!charge.ready) {
-    const body = await page.locator('body').innerText();
-    const legacy = body.match(/≈\s*[\d,.]+\s*RH币/u);
-    if (legacy) charge = { quote: legacy[0], ready: true };
-    else if (/费用以实际用量结算/u.test(body)) charge = { quote: '', ready: true };
-  }
-  if (!charge.ready) throw new Error('网页上没有读到预估 RH 币，没有点击运行。');
-  return charge.quote;
+  const near = chargeOnPage(nearRun);
+  if (near.quote) return near.quote;
+  const body = await page.locator('body').innerText().catch(() => '');
+  return chargeOnPage(body).quote;
 }
 
 async function runJob(entry, body) {

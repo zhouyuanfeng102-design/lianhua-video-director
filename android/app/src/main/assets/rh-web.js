@@ -343,7 +343,6 @@ const operations = {
     const points = source.match(/≈\s*[\d,.]+\s*积分/);
     const transition = source.match(/≈\s*[\d,.]+\s*过渡\s*RH\s*币/);
     const quote = (legacy || points || transition || [])[0] || '';
-    if (!quote && !/费用以实际用量结算/.test(source)) throw new Error('网页上没有读到预估 RH 币，没有点击运行。');
     return { quote };
   },
   submit: async body => {

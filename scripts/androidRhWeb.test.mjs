@@ -105,8 +105,9 @@ try {
   assert.equal(submissions,1,'a new points page can be prepared without clicking run');
   await page.goto(`http://127.0.0.1:${server.address().port}/empty`);
   await page.evaluate(script);
-  await assert.rejects(page.evaluate(body=>window.__lianhuaRh.operations.prepare(body),body),/没有读到预估 RH 币/);
-  assert.equal(submissions,1,'an old page without the RH coin quote still does not run');
+  const emptyQuote=await page.evaluate(body=>window.__lianhuaRh.operations.prepare(body),{...body,client_id:'empty-page'});
+  assert.equal(emptyQuote.quote,'');
+  assert.equal(submissions,1,'preparing a page without a quote does not click run');
   console.log('Android RH page adapter: read, prepare, one submission, reload recovery and existing-task output passed (mock website only).');
   }
 } finally {await browser.close();await new Promise(resolve=>server.close(resolve));}
