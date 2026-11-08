@@ -15,6 +15,16 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "4.2.3",
+    releasedAt: "2026-11-08",
+    title: "15秒里的情节加快演完",
+    highlights: [
+      "原话和动作都留在这 15 秒里，时间超出就按顺序加快。",
+      "不再把机位写成结束，嘴闭合也不再跟人名贴在一起。",
+      "已保存的提示词和成片保持原样，重新生成该段后才会改。",
+    ],
+  },
+  {
     version: "4.2.2",
     releasedAt: "2026-11-08",
     title: "没要求配乐就不再配乐",

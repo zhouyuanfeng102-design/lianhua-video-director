@@ -346,8 +346,8 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
   const cutToMouth = (ids: readonly string[], listeners: readonly string[]): string => {
     const who = names(ids);
     const framing = en
-      ? `When this line starts, that framing ends. The camera cuts to a close view of ${who}'s mouth.`
-      : `这句开始时，刚才的机位结束。镜头切到${who}能看清的嘴。`;
+      ? `The camera cuts to a close view of ${who}'s mouth. The authored body action continues.`
+      : `镜头切到${who}能看清的嘴，已经写好的身体动作继续。`;
     const facing = listeners.length
       ? (en
         ? ` ${who} keeps the chest and eyes toward ${names(listeners)}. The camera stays beside the line between them.`
@@ -355,6 +355,11 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
       : '';
     return framing + facing;
   };
+  const lastOnScreenSpeech = new Map<string, string>();
+  for (const shot of plan.shots) for (const event of shot.events) {
+    if (event.kind === 'speech' && event.channel === 'on-screen') lastOnScreenSpeech.set(speakerKey(event.speakerCharacterIds), event.eventId);
+  }
+  const said = new Set<string>();
   const renderEvent = (event: H3PerformanceEvent, shot: H3PerformancePlan['shots'][number]): string => {
     const output: string[] = [];
     if (event.kind === 'visual') {
@@ -389,16 +394,18 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
         const stillSpeaking = lastSpeechIds.filter((id) => !listenerIds.includes(id));
         if (stillSpeaking.length) output.push(mouthsClosed(stillSpeaking));
       }
-      if (!unseen) output.push(cutToMouth(event.speakerCharacterIds, listenerIds));
+      const alreadySaid = said.has(event.text.trim()) && !event.continuesFromPreviousShot;
+      if (!alreadySaid && !unseen) output.push(cutToMouth(event.speakerCharacterIds, listenerIds));
       const preface = voicePreface(event.speakerCharacterIds);
       const comma = preface ? (en ? ',' : '，') : '';
-      output.push(`${time(event)}${speakers}${preface}${comma}${en ? ' ' : ''}${verb}: ${dialogue}`);
+      if (!alreadySaid) {
+        output.push(`${time(event)}${speakers}${preface}${comma}${en ? ' ' : ''}${verb}: ${dialogue}`);
+        said.add(event.text.trim());
+      }
       if (unseen) {
         output.push(en ? `${names(event.speakerCharacterIds)} remains outside this shot.` : `${names(event.speakerCharacterIds)}留在这一镜的画面外。`);
         output.push(closedMouths);
-      } else output.push(en
-        ? `${names(event.speakerCharacterIds)}'s mouth closes again. The other people continue the authored action.`
-        : `${names(event.speakerCharacterIds)}的嘴重新闭合，其他人继续原定动作。`);
+      }
       if (!unseen) lastSpeechIds = [...event.speakerCharacterIds];
       if (event.continuesFromPreviousShot || event.continuesInNextShot) output.push(en
         ? `${speakers} keeps the same continuous voice across the authored cut, without restarting or repeating words.`
@@ -423,6 +430,9 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
       if (pose) output.push(pose);
     }
     output.push(...reactions(event));
+    if (event.kind === 'speech' && !unseen && lastOnScreenSpeech.get(speakerKey(event.speakerCharacterIds)) === event.eventId) {
+      output.push(en ? 'That mouth closes.' : '这张嘴重新闭合。');
+    }
     const rendered = output.join(en ? ' ' : '');
     events.push({ eventId: event.eventId, kind: 'dialogue', ...(event.kind === 'speech' ? { dialogueId: event.dialogueId } : {}),
       ...(event.speakerCharacterIds.length === 1 ? { speakerCharacterId: event.speakerCharacterIds[0] } : {}),
@@ -447,29 +457,19 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
     });
     return edit(masked).replace(/\u0000(\d+)\u0000/gu, (_token, index) => blocks[Number(index)] ?? '');
   };
-  const mouthHidden = /背对|后脑|蒙眼|脸朝下|面朝下|侧后方|侧后|头发挡|看不见嘴|看不清嘴|跪趴|脸贴|嘴贴|blindfold|from behind|face down|back of the head|side-rear|side and behind|three-quarter profile|down the side|hair covers|view of (?:her|his|their) back|mouth (?:and cheek )?against|pressed against/iu;
-  const framingHeld = /does not move|do not move|stays at this distance|holds this frame|holds a |camera stays|camera holds|remains (?:at this distance|still|fixed)|static shot|through (?:her|his|their|the) line|保持这个距离|不再移动|不再动|保持不动|停在这一帧|固定机位|镜头(?:保持|停住|不动)|说话期间|这句进行时/iu;
-  const endCoveringFraming = (text: string): string => {
-    const endNote = en ? 'This view ends before the line.' : '这个画面在这句开始前结束。';
-    return text.split(/(?<=[。！？.!?])\s+|\n+/u).map((part) => {
-      const covers = mouthHidden.test(part) || framingHeld.test(part);
-      let sentenceText = part
-        .replace(/It stays at this distance(?: through (?:her|his|their|the) line)?[.]?/giu, '')
-        .replace(/\b(?:and )?does not move\b\.?/giu, '')
-        .replace(/\bdo not move\b\.?/giu, '')
-        .replace(/The camera holds this frame[^.]{0,80}\./giu, '')
-        .replace(/The camera (?:holds|stays)\b/giu, 'Before this line, the camera shows')
-        .replace(/镜头(?:保持|停住|不动)/gu, '这句开始前，镜头是')
-        .replace(/through (?:her|his|their|the) line/giu, '')
-        .replace(/镜头在[^。]{0,12}这句[^。]{0,24}(?:保持|停在)[^。]{0,40}。/gu, '')
-        .replace(/(?:说话期间|这句进行时|保持这个距离|不再移动|不再动)[^。]{0,40}。/gu, '');
-      sentenceText = sentenceText.replace(/\s{2,}/gu, ' ').trim();
-      if (!covers || !sentenceText || /这句开始前结束|ends before the line/u.test(sentenceText)) return sentenceText;
-      if (!en && !/[\u3400-\u9fff]/u.test(sentenceText)) return sentenceText;
-      const body = sentenceText.replace(/[。.\s]+$/u, '');
-      return en ? `${body}. ${endNote}` : `${body}。${endNote}`;
-    }).filter((part) => part.trim()).join(' ');
-  };
+  const releaseHeldFraming = (text: string): string => text.split(/(?<=[。！？.!?])\s+|\n+/u).map((part) => part
+    .replace(/It stays at this distance(?: through (?:her|his|their|the) line)?[.]?/giu, '')
+    .replace(/\b(?:and )?does not move\b\.?/giu, '')
+    .replace(/\bdo not move\b\.?/giu, '')
+    .replace(/The camera holds this frame[^.]{0,80}\./giu, '')
+    .replace(/through (?:her|his|their|the) line/giu, '')
+    .replace(/镜头在[^。]{0,12}这句[^。]{0,24}(?:保持|停在)[^。]{0,40}。/gu, '')
+    .replace(/(?:说话期间|这句进行时|保持这个距离|不再移动|不再动)[^。]{0,40}。/gu, '')
+    .replace(/这句开始时，刚才的机位结束。/gu, '')
+    .replace(/这个画面在这句开始前结束。/gu, '')
+    .replace(/When this line starts, that framing ends\.\s*/giu, '')
+    .replace(/This view ends before the line\.\s*/giu, '')
+    .replace(/\s{2,}/gu, ' ').trim()).filter((part) => part.trim()).join(' ');
   const dropSilenceLabel = (text: string, speaking: boolean): string => {
     const had = /台词\s*[:：]\s*无|Dialogue:\s*none/iu.test(text);
     const stripped = text.replace(/台词\s*[:：]\s*无[。.]?|Dialogue:\s*none[.]?/giu, '').replace(/[ \t]{2,}/gu, ' ').trim();
@@ -489,20 +489,19 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
       const who = named?.[1] || (en ? 'The declared voice source' : '已声明声源');
       const token = named ? ` (S${named[2]})` : '';
       const says = `${who}${token} says: ${match[0]}`;
+      if (said.has(dialogueText(match[0]))) continue;
+      said.add(dialogueText(match[0]));
       const closed = en ? 'The other mouths already in the picture stay closed.' : '画面里其他人的嘴保持闭合。';
       const camera = en
-        ? `When this line starts, that framing ends. The camera cuts to a close view of ${who}'s mouth.`
-        : `这句开始时，刚才的机位结束。镜头切到${who}能看清的嘴。`;
-      const done = en
-        ? `${who}'s mouth closes again. The other people continue the authored action.`
-        : `${who}的嘴重新闭合，其他人继续原定动作。`;
-      lines.push([closed, camera, says, done].join(en ? ' ' : ''));
+        ? `The camera cuts to a close view of ${who}'s mouth. The authored body action continues.`
+        : `镜头切到${who}能看清的嘴，已经写好的身体动作继续。`;
+      lines.push([closed, camera, says, en ? 'That mouth closes.' : '这张嘴重新闭合。'].join(en ? ' ' : ''));
     }
     const firstTag = visual.search(/<d>/u);
     const speakingShot = shot.events.some((event) => event.kind === 'speech' && event.channel === 'on-screen') || /<d>/u.test(visual);
     const strip = (text: string): string => {
       const unmarked = outsideDialogue(text, (value) => value.replace(/\s*\(S\d+(?:\s*,\s*S\d+)*\)/gu, ''));
-      const framed = speakingShot ? endCoveringFraming(unmarked) : unmarked;
+      const framed = speakingShot ? releaseHeldFraming(unmarked) : unmarked;
       return dropSilenceLabel(framed, speakingShot)
         .replace(/<d>[\s\S]*?<\/d>/gu, '')
         .replace(/Her mouth opens and her lips move with the words\.?/giu, '')
@@ -515,13 +514,43 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
       lines,
     };
   };
-  let speechOpenUntil = -1;
+  plan.shots.forEach((shot, index) => {
+    const windowStart = shot.startSec;
+    const windowEnd = plan.shots[index + 1]?.startSec;
+    const timed = shot.events.filter((event) => (event.startSec ?? windowStart) < windowStart - 0.001);
+    if (timed.length) {
+      const spans = timed.map((event) => Math.max(0.4, (event.endSec ?? event.startSec ?? windowStart) - (event.startSec ?? windowStart)));
+      const available = windowEnd !== undefined ? Math.max(0.4 * timed.length, windowEnd - windowStart) : spans.reduce((sum, span) => sum + span, 0);
+      const total = spans.reduce((sum, span) => sum + span, 0) || available;
+      const scale = total > available ? available / total : 1;
+      let cursor = windowStart;
+      timed.forEach((event, eventIndex) => {
+        const length = Math.max(0.2, spans[eventIndex] * scale);
+        const end = windowEnd === undefined ? cursor + length : Math.min(windowEnd, cursor + length);
+        event.startSec = Number(cursor.toFixed(3));
+        event.endSec = Number(end.toFixed(3));
+        cursor = event.endSec;
+      });
+    }
+    let proseCursor = windowStart;
+    const moveRange = (startText: string, endText: string, write: (from: number, to: number) => string): string => {
+      const start = Number(startText);
+      const end = Number(endText);
+      if (!(start < windowStart - 0.001)) return '';
+      const span = Math.max(0.2, end - start);
+      const room = windowEnd !== undefined ? Math.max(0.2, windowEnd - proseCursor) : span;
+      const length = Math.min(span, room);
+      const from = proseCursor;
+      const to = Number((from + length).toFixed(2));
+      proseCursor = to;
+      return write(from, to);
+    };
+    shot.visualDescription = shot.visualDescription
+      .replace(/本段\s*(\d+(?:\.\d+)?)\s*[–\-到至]\s*(\d+(?:\.\d+)?)\s*秒/gu, (whole, startText, endText) => moveRange(startText, endText, (from, to) => `本段${from.toFixed(2)}–${to.toFixed(2)}秒`) || whole)
+      .replace(/From\s+(\d+(?:\.\d+)?)\s+to\s+(\d+(?:\.\d+)?)\s+seconds of this clip/giu, (whole, startText, endText) => moveRange(startText, endText, (from, to) => `From ${from.toFixed(2)} to ${to.toFixed(2)} seconds of this clip`) || whole);
+  });
   const shots = plan.shots.map((shot, index) => {
-    const continuesLine = shot.events.some((event) => event.kind === 'speech' && event.continuesFromPreviousShot);
-    const cutAt = index && !continuesLine && speechOpenUntil > shot.startSec ? speechOpenUntil : shot.startSec;
-    const marker = `[Shot ${shot.shotIndex}]${index ? ` At ${cutTime(cutAt)}` : ''}`;
-    const onScreenEnds = shot.events.flatMap((event) => event.kind === 'speech' && event.channel === 'on-screen' && !event.continuesInNextShot && event.endSec !== undefined ? [event.endSec] : []);
-    if (onScreenEnds.length) speechOpenUntil = Math.max(speechOpenUntil, ...onScreenEnds);
+    const marker = `[Shot ${shot.shotIndex}]${index ? ` At ${cutTime(shot.startSec)}` : ''}`;
     const visual = shot.visualDescription.replace(/behind the brain/giu, 'across the back of the head');
     const lifted = liftBuriedDialogue(visual, shot);
     const pose = lowPoseSentence(visual, en);

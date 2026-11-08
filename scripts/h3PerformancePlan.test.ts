@@ -269,10 +269,10 @@ test('a hold through the line does not cover the spoken seconds', () => {
     characters: [{ characterId: 'qian', name: '千仞雪', referenceAnchor: '千仞雪' }],
     language: 'en',
   });
-  const framingAt = rendered.prompt.indexOf('When this line starts, that framing ends.');
+  const framingAt = rendered.prompt.indexOf('The authored body action continues.');
   const saysAt = rendered.prompt.indexOf('Qian Renxue (S1) says: <d>[中文] 唐三，你还要让我等多久？</d>');
   assert.ok(framingAt >= 0 && saysAt > framingAt);
-  assert.doesNotMatch(rendered.prompt, /through her line|does not move|Identity: 千仞雪 \(S1\)/u);
+  assert.doesNotMatch(rendered.prompt, /through her line|does not move|Identity: 千仞雪 \(S1\)|that framing ends|This view ends before the line/u);
   const held: H3PerformancePlan = {
     version: 1, timeBase: 'clip', descriptionLanguage: 'en',
     characters: [
@@ -298,7 +298,8 @@ test('a hold through the line does not cover the spoken seconds', () => {
   assert.match(again.prompt, /Identity: 千仞雪:/u);
   assert.doesNotMatch(again.prompt, /Identity: 千仞雪 \(S1\)|台词：无|does not move|唐三，你还要让我等多久？(?!<\/d>)/u);
   assert.match(again.prompt, /千仞雪 \(S1\) says: <d>\[中文\] 唐三，你还要让我等多久？<\/d>/u);
-  assert.match(again.prompt, /\[Shot 2\] At 00:14\.700/u);
+  assert.match(again.prompt, /\[Shot 2\] At 00:05\.000/u);
+  assert.doesNotMatch(again.prompt, /that framing ends|玉小刚's mouth closes again/u);
   assert.match(again.prompt, /玉小刚 keeps their mouth closed/u);
 });
 
@@ -335,6 +336,40 @@ test('an unrequested score becomes N/A and leaves the shot and soundscape', () =
   const kept = renderH3PerformancePlan({ plan, characters, language: 'en', keepScore: true });
   assert.match(kept.prompt, /无背景音乐，缓慢节拍的弦乐/);
   assert.match(kept.prompt, /低沉弦乐铺满这一镜/);
+});
+
+test('a line timed before its shot is played inside that shot, and the story does not end on the name', () => {
+  const plan: H3PerformancePlan = {
+    version: 1, timeBase: 'clip', descriptionLanguage: 'zh',
+    characters: [
+      { characterId: 'qian', visualDescription: '白发女子' },
+      { characterId: 'yu', visualDescription: '站着的男子' },
+    ],
+    shots: [
+      { shotIndex: 1, startSec: 0, visualDescription: '千仞雪跪在台上。', events: [
+        { eventId: 'ask', kind: 'speech', dialogueId: 'a', speakerCharacterIds: ['qian'], listenerCharacterIds: ['yu'], startSec: 0.6, endSec: 2, channel: 'on-screen', language: 'Chinese', text: '是你吗？' },
+      ] },
+      { shotIndex: 2, startSec: 9, visualDescription: '玉小刚按在腰侧。本段2.0-5.5秒她说完后仍跪着。', events: [
+        { eventId: 'answer', kind: 'speech', dialogueId: 'b', speakerCharacterIds: ['yu'], listenerCharacterIds: ['qian'], startSec: 2, endSec: 5.5, channel: 'on-screen', language: 'Chinese', text: '你终于来了，我等你很久了。' },
+      ] },
+    ],
+    overallSoundscape: '殿内安静。', nonDiegeticMusic: 'N/A',
+  };
+  const rendered = renderH3PerformancePlan({
+    plan,
+    characters: [
+      { characterId: 'qian', name: '千仞雪', referenceAnchor: '千仞雪' },
+      { characterId: 'yu', name: '玉小刚', referenceAnchor: '玉小刚' },
+    ],
+    language: 'zh',
+  });
+  assert.match(rendered.prompt, /<d>\[中文\] 是你吗？<\/d>/u);
+  assert.match(rendered.prompt, /<d>\[中文\] 你终于来了，我等你很久了。<\/d>/u);
+  assert.match(rendered.prompt, /本段9\.00–12\.50秒/u);
+  assert.match(rendered.prompt, /玉小刚按在腰侧/u);
+  assert.match(rendered.prompt, /From 9\.00 to 12\.50|本段9\.00–12\.50秒，玉小刚 \(S2\)/u);
+  assert.doesNotMatch(rendered.prompt, /刚才的机位结束|这个画面在这句开始前结束|玉小刚的嘴重新闭合/u);
+  assert.match(rendered.prompt, /这张嘴重新闭合/u);
 });
 
 console.log(`h3PerformancePlan: ${groups} groups passed`);
