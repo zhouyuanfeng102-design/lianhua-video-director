@@ -27,10 +27,13 @@ export const videoQueueBlockerSummary = (
   preparingTaskIds: ReadonlySet<string> = new Set(),
 ): string => {
   const seen = new Set<string>();
+  const owner = projects.find((project) => project.generationTasks.some((candidate) => candidate.id === waitingTask.id));
+  const waitingProjectId = waitingTask.videoJob?.snapshot.projectId;
   const blockers = projects.flatMap((project) => project.generationTasks.flatMap((candidate) => {
     if (candidate.kind != null && candidate.kind !== 'video') return [];
     const task = candidate as VideoGenerationTask;
-    if (task.id === waitingTask.id || seen.has(task.id) || videoTaskStoppedLocally(task) || (!videoTaskOccupiesGenerationSlot(task) && !preparingTaskIds.has(task.id))
+    const sameProject = owner ? project.id === owner.id : task.videoJob?.snapshot.projectId === waitingProjectId;
+    if (!sameProject || task.id === waitingTask.id || seen.has(task.id) || videoTaskStoppedLocally(task) || (!videoTaskOccupiesGenerationSlot(task) && !preparingTaskIds.has(task.id))
       || !videoTasksMayShareExecutionScope(task, waitingTask)) return [];
     seen.add(task.id);
     return [{ project, task }];
@@ -49,5 +52,5 @@ export const videoQueueBlockerSummary = (
     return `${index + 1}. 项目「${projectName}」／${taskName} · ${blockerStatus(task)}${origin} · 任务尾号 ${shortId}`;
   });
   if (blockers.length > MAX_VISIBLE_BLOCKERS) lines.push(`另有 ${blockers.length - MAX_VISIBLE_BLOCKERS} 条占位任务；以上按创建时间列出。`);
-  return `占位任务（同连接及来源待核实）：\n${lines.join('\n')}`;
+  return `占位任务（本项目）：\n${lines.join('\n')}`;
 };

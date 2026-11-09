@@ -253,21 +253,19 @@ test('lowering capacity while images prepare prevents already-preparing surplus 
   } finally { imageGate.resolve(); h.engine.dispose(); }
 });
 
-test('concurrency 3 is shared by two projects, independent batches, and a single task', async () => {
+test('each project keeps its own concurrency instead of borrowing another project slots', async () => {
   const h = fixture();
   try {
     h.configure('concurrent', 3);
     const first = await h.engine.startBatch(batchInput(h, 'project A', 2));
+    await waitFor(() => h.posts().length === 2, 'project A did not start its two tasks');
     switchProject(h, 'project-B');
-    const single = await h.engine.start(draft('project B single'));
+    await h.engine.start(draft('project B single'));
     await h.engine.startBatch(batchInput(h, 'project B batch', 3));
-    await waitFor(() => h.posts().length === 3, 'configured concurrency did not fill three slots');
-    await settle(); assert.equal(h.posts().length, 3, 'separate batch/project must not each receive a private limit');
-    assert.equal(h.tasks().filter((task) => task.remoteTaskId).length, 3);
-    const live = h.tasks().find((task) => task.remoteTaskId && [single, ...first.taskIds].includes(task.id))!;
-    await complete(h, live.id);
-    await waitFor(() => h.posts().length === 4, 'a remote completion did not free exactly one global slot');
-    await settle(); assert.equal(h.posts().length, 4);
+    await waitFor(() => h.posts().length === 5, 'project B should fill its own three slots while project A keeps two');
+    await settle(); assert.equal(h.posts().length, 5);
+    assert.equal(h.tasks().filter((task) => task.videoJob?.snapshot.projectId === 'project-B' && task.remoteTaskId).length, 3);
+    assert.equal(first.taskIds.filter((id) => h.task(id).remoteTaskId).length, 2);
   } finally { h.engine.dispose(); }
 });
 

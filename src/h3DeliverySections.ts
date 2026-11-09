@@ -19,6 +19,9 @@ export interface H3SectionLayoutOptions {
   preservedAudioPrompt?: string;
   /** This request's own wording asked for a score. Style and category do not. */
   musicRequested?: boolean;
+  /** Selected picture style sentence or custom name. Not the director category. */
+  pictureStyle?: string;
+  durationSec?: number;
 }
 
 const integratedNames = ['integrated_multimodal_description', 'overall_soundscape', 'non_diegetic_music'];

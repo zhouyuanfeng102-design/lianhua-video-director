@@ -60,8 +60,8 @@ export const videoTasksMayShareExecutionScope = (left: VideoGenerationTask, righ
   videoExecutionScopesMayShareCapacity(videoTaskExecutionScope(left), videoTaskExecutionScope(right))
 );
 
-/** Application-wide settings; the actual generation limit applies per frozen
- * connection scope across projects, single tasks, batches and continuations. */
+/** Application-wide settings. The numeric limit applies inside one project and
+ * one frozen connection. Another project's tasks do not consume these slots. */
 export const resolveVideoExecutionLimit = (settings: {
   videoExecutionMode?: unknown;
   videoExecutionConcurrency?: unknown;
@@ -133,9 +133,19 @@ export const videoTaskExplicitlyStopped = (task: VideoGenerationTask): boolean =
   || videoTaskStoppedLocally(task)
 );
 
-/** Stopped tasks, including persisted history in another project, release the
- * software's slot without changing remote evidence. Unstopped unknown POSTs
- * still reserve capacity; explicit resume queries the original task only. */
+/** An RH or rhTV web task with no remote id is not generating. Resume looks up
+ * the original page job and submits again only when that lookup finds nothing.
+ * A remote id, including one still running in this same project, still occupies. */
+export const videoTaskLacksWebRemoteId = (task: VideoGenerationTask): boolean => {
+  const provider = task.videoJob?.snapshot.connection.api?.provider;
+  if (provider !== 'rh_web' && provider !== 'rhtv_web') return false;
+  if (task.remoteTaskId || task.resultUrl || task.resultAssetId || task.videoJob?.resultAssetIds?.length) return false;
+  return !videoTaskRemoteGenerationEnded(task);
+};
+
+/** Stopped tasks release the software's slot without changing remote evidence.
+ * Unstopped work that already has a remote id still reserves this project's
+ * slot. A web task that never received an id does not reserve it against itself. */
 export const videoTaskOccupiesGenerationSlot = (task: VideoGenerationTask): boolean => (
-  !videoTaskStoppedLocally(task) && videoTaskHasUnresolvedSubmission(task)
+  !videoTaskStoppedLocally(task) && !videoTaskLacksWebRemoteId(task) && videoTaskHasUnresolvedSubmission(task)
 );

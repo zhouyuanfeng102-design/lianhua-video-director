@@ -143,6 +143,12 @@ const addHistory = (h: Fixture, name: string, count: number, connection: NonNull
   return project.generationTasks as VideoGenerationTask[];
 };
 const safeApi = (origin?: string) => { const { apiKey: _key, ...connection } = api(origin); return connection; };
+const rehome = (h: Fixture, name: string, tasks: VideoGenerationTask[]) => {
+  const project = h.holder.state.project;
+  for (const task of tasks) if (task.videoJob) task.videoJob.snapshot.projectId = project.id;
+  project.generationTasks.push(...tasks);
+  h.holder.state.projects = h.holder.state.projects.filter((entry) => entry.id !== name);
+};
 const safeComfy = (baseUrl = comfy.baseUrl) => {
   const { apiKey: _key, workflows: _workflows, ...connection } = comfy;
   return { ...connection, baseUrl };
@@ -211,35 +217,40 @@ test('seven stopped Comfy jobs do not stop RunningHub first segment, but preserv
   } finally { h.engine.dispose(); }
 });
 
-test('RunningHub workflows and same-origin API profiles share three real generation slots across projects', async () => {
+test('one project shares three slots on one connection; another project keeps its own slots', async () => {
   const h = fixture(); const gate = deferred();
   try {
     h.setPostGate(gate.promise);
     const first = await h.engine.startBatch(batch(h, 'same origin', [cloudDraft('cloud A'), cloudDraft('cloud B', cloudB.id)]));
     await waitFor(() => h.posts().length === 2, 'first two cloud submissions missing');
-    const saved = h.holder.state.project;
-    const next = { ...structuredClone(saved), id: 'another-project', name: 'another-project', generationTasks: [] };
-    h.holder.state = { ...h.holder.state, project: next, activeProjectId: next.id,
-      projects: [...h.holder.state.projects.filter((project) => project.id !== saved.id), saved, next] };
     h.holder.state.settings.videoApiProfiles = [{ ...api(cloudOrigin), id: 'cloud-generic-profile', name: 'same origin other profile', createdAt: 1, updatedAt: 1 }];
     const third = h.engine.start({ ...draft('third on same cloud origin'), apiProfileId: 'cloud-generic-profile' });
     await waitFor(() => h.posts().length === 3, 'third capacity slot missing');
     const fourth = await h.engine.start(cloudDraft('fourth on same cloud origin'));
-    await settle(); assert.equal(h.posts().length, 3, 'profile, workflow and project must not each receive three slots');
+    await settle();
+    assert.equal(h.posts().length, 3, 'workflow and profile in one project still share three slots');
     assert.equal(h.task(fourth).remoteTaskId, undefined);
-    gate.resolve(); await third;
+    const saved = h.holder.state.project;
+    const next = { ...structuredClone(saved), id: 'another-project', name: 'another-project', generationTasks: [] };
+    h.holder.state = { ...h.holder.state, project: next, activeProjectId: next.id,
+      projects: [...h.holder.state.projects.filter((project) => project.id !== saved.id), saved, next] };
+    const other = h.engine.start(cloudDraft('other project own slot'));
+    await waitFor(() => h.posts().length === 4, 'another project was blocked by this project');
+    gate.resolve(); await third; await other;
     await waitFor(() => Boolean(h.task(first.taskIds[0]).remoteTaskId), 'cloud acknowledgement missing');
+    const owner = h.holder.state.projects.find((project) => project.id === saved.id)!;
+    h.holder.state = { ...h.holder.state, project: owner, activeProjectId: owner.id,
+      projects: [...h.holder.state.projects.filter((project) => project.id !== owner.id && project.id !== next.id), next, owner] };
     h.configure(1); await settle();
-    assert.equal(h.posts().length, 3, 'lowering capacity must not cancel or re-POST existing tasks');
-    assert.equal(h.tasks().filter((task) => task.remoteTaskId).length, 3);
+    assert.equal(h.posts().length, 4, 'lowering capacity must not cancel or re-POST existing tasks');
     await complete(h, first.taskIds[0]);
-    await settle(); assert.equal(h.posts().length, 3, 'still two tasks exceed the newly lowered cap');
+    await settle(); assert.equal(h.posts().length, 4, 'two tasks in this project still fill the lowered cap');
     await complete(h, first.taskIds[1]);
-    await settle(); assert.equal(h.posts().length, 3, 'one occupied slot still fills queue mode');
+    await settle(); assert.equal(h.posts().length, 4, 'one occupied slot still fills queue mode');
     const thirdTask = h.tasks().find((task) => task.videoJob?.snapshot.draft.name === 'third on same cloud origin')!;
     await complete(h, thirdTask.id);
-    await waitFor(() => Boolean(h.task(fourth).remoteTaskId), 'fourth did not start once its own service truly freed');
-    assert.equal(h.posts().length, 4);
+    await waitFor(() => Boolean(h.task(fourth).remoteTaskId), 'fourth did not start once its own project freed a slot');
+    assert.equal(h.posts().length, 5);
   } finally { gate.resolve(); h.engine.dispose(); }
 });
 
@@ -266,15 +277,20 @@ test('stopped history on the same RunningHub connection leaves all three local s
   } finally { h.engine.dispose(); }
 });
 
-test('same-connection unknown tasks retain capacity across restart and are never re-POSTed', async () => {
+test('unknown tasks in another project do not block, and the same project still keeps their reservation', async () => {
   const h = fixture();
   try {
-    const old = addHistory(h, 'same-api-project', 3, { backend: 'api', api: safeApi() });
+    const foreign = addHistory(h, 'other-api-project', 3, { backend: 'api', api: safeApi() });
+    const open = await h.engine.start(draft('not blocked by another project'));
+    await waitFor(() => Boolean(h.task(open).remoteTaskId), 'another project reserved this project capacity');
+    assert.equal(h.posts().length, 1);
+    await h.engine.cancel(open); await settle();
+    rehome(h, 'other-api-project', foreign);
     const result = await h.engine.startBatch(batch(h, 'same service blocked', [draft('blocked')], false));
-    await settle(); assert.equal(h.posts().length, 0);
+    await settle(); assert.equal(h.posts().length, 1);
     assert.match(h.task(result.taskIds[0]).videoJob?.message || '', /同连接有 3 个占位任务/u);
-    h.restart(); await settle(); assert.equal(h.posts().length, 0);
-    assert.ok(old.every(videoTaskOccupiesGenerationSlot));
+    h.restart(); await settle(); assert.equal(h.posts().length, 1);
+    assert.ok(foreign.every(videoTaskOccupiesGenerationSlot));
     assert.equal(h.task(result.taskIds[0]).remoteTaskId, undefined);
   } finally { h.engine.dispose(); }
 });
@@ -305,6 +321,7 @@ test('ComfyUI loopback aliases and renamed workflows cannot multiply one server 
       alias.videoJob!.snapshot.connection.workflow!.id = 'renamed-workflow';
       assert.equal(videoTasksShareExecutionScope(old, alias), true);
     }
+    rehome(h, 'loopback-origin', [old]);
     h.holder.state.settings.comfyuiVideo!.baseUrl = 'http://localhost:8188';
     const waiting = await h.engine.start(draft('loopback alias same service', 'comfyui'));
     await settle();
@@ -423,7 +440,7 @@ test('mixed-service independent batch does not let its first blocked row starve 
   const h = fixture();
   try {
     h.configure(1);
-    addHistory(h, 'blocked-mixed', 1, { backend: 'api', api: safeApi() });
+    rehome(h, 'blocked-mixed', addHistory(h, 'blocked-mixed', 1, { backend: 'api', api: safeApi() }));
     const result = await h.engine.startBatch(batch(h, 'mixed queue', [draft('first blocked API'), cloudDraft('second ready cloud')]));
     await waitFor(() => Boolean(h.task(result.taskIds[1]).remoteTaskId), 'later different-service batch row was starved');
     assert.equal(h.task(result.taskIds[0]).remoteTaskId, undefined);
@@ -440,6 +457,7 @@ test('legacy and invalid-origin history conservatively reserve known connection 
     old[1].videoJob!.snapshot.connection.api!.endpoint = 'invalid fixture endpoint with private path';
     old[2].videoJob = undefined;
     old[2].status = 'failed';
+    rehome(h, 'unknown-origin', old);
     const result = await h.engine.start(draft('known target'));
     await settle();
     assert.equal(h.task(result).remoteTaskId, undefined);
@@ -450,8 +468,10 @@ test('legacy and invalid-origin history conservatively reserve known connection 
     assert.match(h.task(result).videoJob?.message || '', /3 个旧任务来源连接待核实/u);
     assert.equal(h.posts().length, 0);
     h.restart(); await settle(); assert.equal(h.posts().length, 0);
-    const owner = h.holder.state.projects.find((project) => project.id === 'unknown-origin')!;
-    owner.generationTasks = owner.generationTasks.map((task) => ({ ...task, status: 'succeeded' as const, resultAssetId: 'fixture-terminal-evidence' }));
+    const retired = new Set(old.map((task) => task.id));
+    h.holder.state.project.generationTasks = h.holder.state.project.generationTasks.map((task) => (
+      retired.has(task.id) ? { ...task, status: 'succeeded' as const, resultAssetId: 'fixture-terminal-evidence' } : task
+    ));
     h.engine.reconcile();
     await waitFor(() => Boolean(h.task(result).remoteTaskId), 'proven terminal legacy jobs should finally release capacity');
     assert.equal(h.posts().length, 1);

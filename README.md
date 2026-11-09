@@ -4,15 +4,15 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的工作台，提供 Windows 便携版和 Android 手机 APK。
 
-当前版本：**4.2.5** · 2026-11-09 · Windows x64 / Android
+当前版本：**4.3.1** · 2026-11-09 · Windows x64 / Android
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows EXE / Android APK](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-4.2.5.md) · [安卓安装说明](docs/android-install.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-4.3.1.md) · [安卓安装说明](docs/android-install.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
-1. 电脑下载 [Windows 便携版 EXE](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/download/v4.2.5/lianhua-video-director-4.2.5-windows-x64-portable.exe)，放在可写入的文件夹里双击运行；安卓手机下载 [Android APK](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/download/v4.2.5/lianhua-video-director-4.2.5-android.apk) 后安装。普通使用者无需安装开发环境。
+1. 电脑下载 [Windows 便携版 EXE](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/download/v4.3.1/lianhua-video-director-4.3.1-windows-x64-portable.exe)，放在可写入的文件夹里双击运行；安卓手机下载 [Android APK](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/download/v4.3.1/lianhua-video-director-4.3.1-android.apk) 后安装。普通使用者无需安装开发环境。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
 3. 导入 TXT / Markdown 分章原文或手动新建章节，选择章节后解析剧情，再进入导演台生成、编辑和导出提示词。导入不会自动调用 API 批量解析全书。
 
@@ -44,15 +44,15 @@
 - **自定义生图+反推图片提示词**：输入要求生成图片，或复用上传/资产库参考图，通过视觉 API 反推可复制的提示词与人物、物品、场景、风格详情。反推同步显示在聊天和资料任务，支持后台执行、停止、重试及项目保存恢复；原有生图支持原文直发或规则转换，结果自动入库。
 - **项目与资产管理**：管理图片、视频和音频，保存项目包、备份资料并导出提示词。
 
-## 最新更新 · v4.2.5
+## 最新更新 · v4.3.1
 
-- 网页上还没有「立即运行」时，这次不算提交，可以再点。
-- 按钮点下去之后，才记成已经交给网页。
-- 已保存的提示词和成片保持原样。
+- 云端已经有任务号时，不再显示成等待批量提交。
+- 这一段计入运行，执行时间从提交后继续走。
+- 网页生成结束后仍会自动保存，已保存的成片保持原样。
 
 后续常规版本持续双端交付；仅某一端独立 UI 调整使用明确单端参数。已有提示词和成片保持原样。
 
-[查看本版完整说明](docs/releases/发布说明-4.2.5.md) · [历史版本归档](docs/releases/README.md)
+[查看本版完整说明](docs/releases/发布说明-4.3.1.md) · [历史版本归档](docs/releases/README.md)
 
 ## 从源码运行
 

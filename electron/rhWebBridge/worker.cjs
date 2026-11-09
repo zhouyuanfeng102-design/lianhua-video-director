@@ -437,6 +437,19 @@ function chargeOnPage(text) {
   return { quote: '', ready: /费用以实际用量结算/u.test(source) };
 }
 
+async function findRunButton(page) {
+  const handle = await page.evaluateHandle(() => {
+    const normalize = (node) => (node.innerText || '').replace(/\s+/g, ' ').trim();
+    const wanted = new Set(['立即运行', 'Run Now']);
+    const nodes = [...document.querySelectorAll('button, [role="button"], .run-cell-main')];
+    return nodes.find((node) => wanted.has(normalize(node))
+      || (node.classList?.contains('run-cell-main') && /立即运行|Run Now/u.test(node.innerText || ''))) || null;
+  });
+  const element = handle.asElement();
+  if (!element) await handle.dispose();
+  return element;
+}
+
 /** A visible estimate is recorded on the task. A page without one still runs. */
 async function readRunQuote(page) {
   const nearRun = await page.locator('.run-cell-main').filter({ hasText: '立即运行' }).first().evaluate((node) => {
@@ -489,12 +502,13 @@ async function runJob(entry, body) {
     }
     await chooseInstance(page, body.instance);
     const quote = await readRunQuote(page);
-    const runButton = page.locator('.run-cell-main').filter({ hasText: '立即运行' });
-    try {
-      await runButton.waitFor({ state: 'visible', timeout: 30000 });
-    } catch {
-      throw new Error('网页上还没有「立即运行」，这次没有提交。');
+    const startedLook = Date.now();
+    let runButton = null;
+    while (!runButton && Date.now() - startedLook < 30000) {
+      runButton = await findRunButton(page);
+      if (!runButton) await page.waitForTimeout(400);
     }
+    if (!runButton) throw new Error('网页上还没有「立即运行」，这次没有提交。');
     job.message = quote ? `网页预估 ${quote}，正在点击运行` : '正在点击运行';
     job.handed_off = true;
     job.status = 'submission_unknown';

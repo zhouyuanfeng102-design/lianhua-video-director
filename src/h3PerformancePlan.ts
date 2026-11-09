@@ -101,6 +101,10 @@ export interface RenderH3PerformancePlanInput {
   /** Extra non-character definitions only. Character definitions and their
    * anchors are emitted from the paired plan by this renderer. */
   subjectDefinitions?: string;
+  /** Selected picture style only. Director category is not a picture style. */
+  pictureStyle?: string;
+  /** Fixed clip length used by the official first/last-frame alignment line. */
+  durationSec?: number;
   summary?: string;
   retentionAnalysis?: string;
 }
@@ -127,11 +131,24 @@ const dialogueLanguageTag = (value: string): string => {
   if (/^(english|en)$/iu.test(token)) return 'English';
   return token || '中文';
 };
+/** Color, material, light and texture only. A custom name with no such clauses stays whole. */
+export const h3PictureStyleLine = (value: string | undefined, en: boolean): string => {
+  const raw = (value || '').trim().replace(/^(?:画面风格|视觉风格|Picture style)\s*[:：]\s*/u, '');
+  if (!raw) return '';
+  const parts = raw.split(/[；;]/u).map((part) => part.trim()).filter(Boolean);
+  const kept = parts.filter((part) => /^(?:色彩|材质|光影|质感)\s*[:：]/u.test(part));
+  const body = (kept.length ? kept.join('；') : raw).replace(/[。．]\s*$/u, '');
+  return en ? `Picture style: ${body}.` : `画面风格：${body}。`;
+};
+const quoteVisibleText = (text: string): string => text.replace(/<d>[\s\S]*?<\/d>/gu, (block) => `\u0000${block}\u0000`)
+  .replace(/(招牌|标牌|字幕|霓虹字?|横幅|标签)([^。\n]{0,16}?)[「『“"]([^」』”"]+)[」』”"]/gu, '$1$2"$3"')
+  .replace(/(招牌|标牌|字幕|霓虹字?|横幅|标签)\s*[:：]\s*([^"。\n]{1,24})/gu, '$1: "$2"')
+  .replace(/\u0000(<d>[\s\S]*?<\/d>)\u0000/gu, '$1');
 const bodyChainSentence = (text: string, en: boolean): string | undefined => {
-  if (!/头|脸|颈|脖子|近景|特写|close-?up|close view|\bhead\b|\bface\b|\bneck\b/iu.test(text)) return undefined;
+  if (!/头|脸|颈|脖子|近景|特写|腰|髋|臀|腿|下半身|close-?up|close view|\bhead\b|\bface\b|\bneck\b|\bhips?\b|\bwaist\b|\bthighs?\b|lower body/iu.test(text)) return undefined;
   const chain = en
-    ? 'The head remains on this neck, the neck remains on these shoulders, the torso remains on these hips, and the foot remains on this ankle.'
-    : '头留在这截脖子上，脖子留在这对肩膀上，躯干留在这截腰上，脚留在这截脚踝上。';
+    ? 'This torso remains connected from these shoulders to these hips. The chest and shoulders remain on this torso when they are outside the top of the frame. The head remains on this neck, the neck remains on these shoulders, each foot remains on its own ankle, and both arms remain on these shoulders.'
+    : '这一条躯干从这对肩膀连到这截腰。胸和肩在画面上沿之外，也留在这条躯干上。头留在这截脖子上，脖子留在这对肩膀上。每只脚留在自己的脚踝上。两条手臂留在这对肩膀上。';
   const surface = /发带|金带|金丝|蒙眼|ribbon|blindfold|头发|\bhair\b/iu.test(text)
     ? (en
       ? ' Hair, ribbon, and any cloth over the eyes remain on the surface of the head, across the back of the head.'
@@ -282,6 +299,21 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
     || (speakerTokens.has(id) ? (en ? 'The declared voice source' : '已声明声源') : (en ? 'The declared character' : '已声明人物'));
   const label = (id: string): string => `${subjects.get(id) ? `${subjects.get(id)} ` : ''}${name(id)}`;
   const names = (ids: readonly string[]): string => unique(ids).map(label).join(en ? ' and ' : '与');
+  const pairedHandsSentence = (visual: string, shot: H3PerformancePlan['shots'][number]): string | undefined => {
+    const involved = unique(shot.events.flatMap((event) => [
+      ...('speakerCharacterIds' in event ? event.speakerCharacterIds : []),
+      ...('listenerCharacterIds' in event ? event.listenerCharacterIds || [] : []),
+      ...('silentCharacterIds' in event ? event.silentCharacterIds || [] : []),
+      ...('reactions' in event ? (event.reactions || []).map((reaction) => reaction.characterId) : []),
+    ]));
+    const named = input.characters.filter((entry) => entry.name && visual.includes(entry.name)).map((entry) => entry.characterId);
+    const people = unique([...involved, ...named]);
+    if (people.length < 2 || !/手|掌|扶|摸|抱|贴|握|按|腰|胸|背|髋|臀|hands|palms|hold|touch|waist|chest|\bback\b|hip/iu.test(visual)) return undefined;
+    const [first, second] = people.slice(0, 2).map(name);
+    return en
+      ? `${first}'s hands remain on ${first}'s wrists. ${second}'s hands remain on ${second}'s wrists.`
+      : `${first}的双手留在${first}的手腕上，${second}的双手留在${second}的手腕上。`;
+  };
   const voiceLabel = (ids: readonly string[]): string => {
     const tokens = unique(ids).map((id) => speakerTokens.get(id)).filter((token): token is string => Boolean(token));
     return `${names(ids)}${tokens.length ? ` (${tokens.map((token) => token.slice(1, -1)).join(',')})` : ''}`;
@@ -346,8 +378,8 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
   const cutToMouth = (ids: readonly string[], listeners: readonly string[]): string => {
     const who = names(ids);
     const framing = en
-      ? `The camera cuts to a close view of ${who}'s mouth. The authored body action continues.`
-      : `镜头切到${who}能看清的嘴，已经写好的身体动作继续。`;
+      ? `The camera shows a readable view of ${who}'s mouth. This torso remains connected from these shoulders to these hips.`
+      : `镜头能看清${who}的嘴。这条躯干仍从这对肩膀连到这截腰。`;
     const facing = listeners.length
       ? (en
         ? ` ${who} keeps the chest and eyes toward ${names(listeners)}. The camera stays beside the line between them.`
@@ -493,8 +525,8 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
       said.add(dialogueText(match[0]));
       const closed = en ? 'The other mouths already in the picture stay closed.' : '画面里其他人的嘴保持闭合。';
       const camera = en
-        ? `The camera cuts to a close view of ${who}'s mouth. The authored body action continues.`
-        : `镜头切到${who}能看清的嘴，已经写好的身体动作继续。`;
+        ? `The camera shows a readable view of ${who}'s mouth. This torso remains connected from these shoulders to these hips.`
+        : `镜头能看清${who}的嘴。这条躯干仍从这对肩膀连到这截腰。`;
       lines.push([closed, camera, says, en ? 'That mouth closes.' : '这张嘴重新闭合。'].join(en ? ' ' : ''));
     }
     const firstTag = visual.search(/<d>/u);
@@ -549,16 +581,21 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
       .replace(/本段\s*(\d+(?:\.\d+)?)\s*[–\-到至]\s*(\d+(?:\.\d+)?)\s*秒/gu, (whole, startText, endText) => moveRange(startText, endText, (from, to) => `本段${from.toFixed(2)}–${to.toFixed(2)}秒`) || whole)
       .replace(/From\s+(\d+(?:\.\d+)?)\s+to\s+(\d+(?:\.\d+)?)\s+seconds of this clip/giu, (whole, startText, endText) => moveRange(startText, endText, (from, to) => `From ${from.toFixed(2)} to ${to.toFixed(2)} seconds of this clip`) || whole);
   });
+  const styleLine = h3PictureStyleLine(input.pictureStyle, en);
+  if (styleLine && plan.shots[0] && !/画面风格|Picture style/u.test(plan.shots[0].visualDescription)) {
+    plan.shots[0].visualDescription = `${styleLine}${plan.shots[0].visualDescription}`;
+  }
   const shots = plan.shots.map((shot, index) => {
     const marker = `[Shot ${shot.shotIndex}]${index ? ` At ${cutTime(shot.startSec)}` : ''}`;
-    const visual = shot.visualDescription.replace(/behind the brain/giu, 'across the back of the head');
+    const visual = quoteVisibleText(shot.visualDescription).replace(/behind the brain/giu, 'across the back of the head');
     const lifted = liftBuriedDialogue(visual, shot);
     const pose = lowPoseSentence(visual, en);
     const chain = bodyChainSentence(visual, en);
     const hands = bracedHandsSentence(visual, en);
+    const pairedHands = pairedHandsSentence(visual, shot);
     const shownBefore = authored(lifted.before);
     const shownAfter = authored(lifted.after);
-    return [marker, !index ? integratedOpening : '', shownBefore ? sentence(shownBefore, language) : '', pose, chain, hands, ...lifted.lines, ...shot.events.map((event) => renderEvent(event, shot)), shownAfter ? sentence(shownAfter, language) : ''].filter(Boolean).join('\n');
+    return [marker, !index ? integratedOpening : '', shownBefore ? sentence(shownBefore, language) : '', pose, chain, hands, pairedHands, ...lifted.lines, ...shot.events.map((event) => renderEvent(event, shot)), shownAfter ? sentence(shownAfter, language) : ''].filter(Boolean).join('\n');
   });
   const body = [fullReference ? preamble : '', ...shots]
     .filter(Boolean).join('\n\n');
@@ -585,9 +622,22 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
   const summary = (input.summary ?? plan.summary)?.trim() || (en ? 'The authored scene unfolds in the following shots.' : '按下列镜头展开已确认的场景表演。');
   const retention = (input.retentionAnalysis ?? plan.retentionAnalysis)?.trim() || (en
     ? 'Keep the referenced identities and the authored scene relationships.' : '保留参考身份与已确认的场景关系。');
+  const duration = Number.isFinite(input.durationSec) ? Math.max(0, input.durationSec || 0)
+    : Math.max(0, ...plan.shots.map((shot) => shot.startSec), ...plan.shots.flatMap((shot) => shot.events.map((event) => event.endSec ?? event.startSec ?? 0)));
+  const firstFrame = (input.pictureUses || []).find((use) => use.role === 'first-frame');
+  const lastFrame = (input.pictureUses || []).find((use) => use.role === 'last-frame');
+  const shotCount = plan.shots.length || 1;
+  const end = duration.toFixed(2);
+  const alignment = fullReference ? '' : firstFrame && lastFrame
+    ? `How the reference pictures align with the target video — Picture ${firstFrame.number} (from Shot 1) aligns with the 0.00-second mark of the target video; Picture ${lastFrame.number} (from Shot ${shotCount}) aligns with the ${end}-second mark of the target video.`
+    : firstFrame
+      ? `For the target video, at 0.00 seconds into the target video, <Picture ${firstFrame.number}> (from [Shot 1]) is fully referenced.`
+      : lastFrame
+        ? `How the reference pictures align with the target video — <Picture ${lastFrame.number}> (from [Shot ${shotCount}]) aligns with the ${end}-second mark of the target video.`
+        : '';
   const prompt = deduplicateIdentityAnchors(renderH3DeliverySections({ body, subjectDefinitions: definitions.join('\n'),
     summary: /^\[reference generation[^\]]*\]/u.test(summary) ? summary : `[reference generation] ${summary}`,
     retentionAnalysis: retention, overallSoundscape: plan.overallSoundscape, nonDiegeticMusic: plan.nonDiegeticMusic,
   }, { mode: fullReference ? 'full-reference' : 'integrated', language }), renderedCharacters.map((entry) => entry.referenceAnchor));
-  return { prompt, body, plan, speakerTokens, characters: renderedCharacters, events };
+  return { prompt: alignment ? `${alignment}\n\n${prompt}` : prompt, body, plan, speakerTokens, characters: renderedCharacters, events };
 };

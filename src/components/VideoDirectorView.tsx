@@ -312,7 +312,8 @@ export function VideoTaskCard({ task, assets, runtime: fallbackRuntime, runtimeS
     || (task.videoJob?.trackingStopped === true && task.videoJob.stage === 'stopped');
   const state = explicitlyStopped ? task.videoJob : runtime ? { ...task.videoJob, ...runtime } : task.videoJob;
   const stage = explicitlyStopped ? 'stopped' : state?.stage || (task.status === 'succeeded' ? 'succeeded' : task.status === 'failed' ? 'failed' : 'queued');
-  const batchQueueLabel = ['waiting', 'ready'].includes(task.videoJob?.batchQueueState || '')
+  const batchQueueLabel = task.remoteTaskId ? undefined
+    : ['waiting', 'ready'].includes(task.videoJob?.batchQueueState || '')
     ? '等待批量提交'
     : task.videoJob?.batchQueueState === 'active' ? '正在批量提交'
       : task.videoJob?.batchQueueState === 'cancelled' ? '已停止后续提交' : undefined;

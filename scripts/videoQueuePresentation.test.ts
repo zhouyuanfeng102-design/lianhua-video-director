@@ -20,12 +20,13 @@ const stopped = task('stopped'); stopped.status = 'unknown'; stopped.videoJob!.t
 const other = task('other', 'https://another.invalid/run');
 const ended = task('ended'); ended.videoJob!.remoteGenerationEnded = true;
 const unknown = task('unknown'); unknown.videoJob!.legacyMetadataIncomplete = true;
-const projects = [project('当前项目', [waiting]), project('此前项目甲', [stopped]), project('不同服务', [other]),
-  project('已完成', [ended]), project('旧来源', [unknown])];
+const foreignUnknown = task('foreign-unknown'); foreignUnknown.videoJob!.legacyMetadataIncomplete = true;
+const projects = [project('当前项目', [waiting, unknown]), project('此前项目甲', [stopped]), project('不同服务', [other]),
+  project('已完成', [ended]), project('旧来源', [foreignUnknown])];
 const before = JSON.stringify(projects);
 const summary = videoQueueBlockerSummary(projects, waiting);
-assert.doesNotMatch(summary, /此前项目甲|Cloud render stopped|停止跟踪/u);
-assert.match(summary, /旧来源.*Cloud render unknown.*来源连接待核实/u);
+assert.doesNotMatch(summary, /此前项目甲|Cloud render stopped|停止跟踪|旧来源|foreign-unknown/u);
+assert.match(summary, /Cloud render unknown.*来源连接待核实/u);
 assert.doesNotMatch(summary, /不同服务|Cloud render other|Cloud render ended|Cloud render waiting|PRIVATE-FULL-PROMPT/u);
 assert.equal(JSON.stringify(projects), before);
 assert.equal(videoQueueBlockerSummary([project('unrelated', [other, ended])], waiting), '');

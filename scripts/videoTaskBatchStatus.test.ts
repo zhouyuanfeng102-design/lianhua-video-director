@@ -23,6 +23,9 @@ assert.equal(videoTaskBatchStatus(task('unknown', { stage: 'submission-unknown' 
 assert.equal(videoTaskBatchStatus(task('unknown', { stage: 'submission-unknown', tailPreparation: { phase: 'waiting', revision: 0 } })), 'unknown', 'unknown POST safety boundary must not look like an ordinary pending dependency');
 assert.equal(videoTaskBatchStatus(task('submitted', { stage: 'queued' })), 'queued');
 assert.equal(videoTaskBatchStatus(task('running', { stage: 'running' })), 'running');
+assert.equal(videoTaskBatchStatus({ ...task('running', { stage: 'running', batchQueueState: 'ready' }), remoteTaskId: '2119763159321767938' }), 'running', 'a submitted cloud task is running even if the batch flag is still ready');
+assert.equal(videoTaskBatchStatus({ ...task('draft', { stage: 'queued', batchQueueState: 'ready' }), remoteTaskId: '2119763159321767938' }), 'queued');
+assert.equal(videoTaskBatchStatus(task('draft', { stage: 'queued', batchQueueState: 'ready' })), 'pending');
 assert.equal(videoTaskBatchStatus(task('succeeded', { stage: 'succeeded' }, 'saved'), { stage: 'downloading' } as VideoGenerationRuntime), 'running');
 assert.equal(videoTaskBatchStatus(task('succeeded', { stage: 'succeeded' }, 'saved'), { stage: 'succeeded', downloadError: 'save failed' }), 'failed');
 console.log('video task batch display: waiting, extracting, blocked and saved completion checks passed');

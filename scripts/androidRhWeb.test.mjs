@@ -37,13 +37,14 @@ function render(){const start=Math.floor(holder.scrollTop/20);inner.innerHTML=''
 holder.onscroll=()=>requestAnimationFrame(render);render();};
 </script>`;
 const pointsHtml=html.replace('≈ 0.6 RH币','费用以实际用量结算').replace('H3 测试应用','积分测试应用');
+const plainHtml=html.replace('class="run-cell-main" ','');
 const emptyHtml=html.replace('<div>≈ 0.6 RH币</div>','<div>每秒消耗0.2个RH币</div>');
 const server=http.createServer((req,res)=>{
   if(req.url==='/task'){submissions++;res.setHeader('content-type','application/json');res.end(JSON.stringify({data:{taskId:'native-test-task-123'}}));return;}
   if(req.url==='/api/output/v2/history'){res.setHeader('content-type','application/json');res.end(JSON.stringify({data:{records:[{taskId:'native-test-task-123',taskStatus:'SUCCESS',fileUrl:'https://example.invalid/test.mp4'}]}}));return;}
   res.setHeader('content-type','text/html;charset=utf-8');
   const path=req.url.split('?')[0];
-  res.end(path==='/selects'?selectsHtml:path==='/points'?pointsHtml:path==='/empty'?emptyHtml:html);
+  res.end(path==='/selects'?selectsHtml:path==='/points'?pointsHtml:path==='/plain'?plainHtml:path==='/empty'?emptyHtml:html);
 });
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const browser=await chromium.launch({channel:'msedge',headless:true});
@@ -108,6 +109,11 @@ try {
   const emptyQuote=await page.evaluate(body=>window.__lianhuaRh.operations.prepare(body),{...body,client_id:'empty-page'});
   assert.equal(emptyQuote.quote,'');
   assert.equal(submissions,1,'preparing a page without a quote does not click run');
+  await page.goto(`http://127.0.0.1:${server.address().port}/plain`);
+  await page.evaluate(script);
+  const plain=await page.evaluate(body=>window.__lianhuaRh.operations.submit(body),{...body,client_id:'plain-button'});
+  assert.equal(plain.upstream_task_id,'native-test-task-123');
+  assert.equal(submissions,2,'a visible 立即运行 button outside the old cell still submits once');
   console.log('Android RH page adapter: read, prepare, one submission, reload recovery and existing-task output passed (mock website only).');
   }
 } finally {await browser.close();await new Promise(resolve=>server.close(resolve));}

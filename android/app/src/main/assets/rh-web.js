@@ -162,6 +162,11 @@ const waitFor = async (read, timeout = 20000) => {
   }
 };
 const text = node => (node?.textContent || '').replace(/\s+/g, ' ').trim();
+const findRunButton = () => {
+  const wanted = new Set(['立即运行', 'Run Now']);
+  const nodes = [...document.querySelectorAll('button, [role="button"], .run-cell-main')];
+  return nodes.find((node) => wanted.has(text(node)) || (node.classList?.contains('run-cell-main') && /立即运行|Run Now/.test(node.innerText || '')));
+};
 const exact = (nodes, label) => [...nodes].find(node => text(node) === label);
 const change = (input, value) => {
   const proto = input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
@@ -330,7 +335,7 @@ const operations = {
     for (const field of fields.filter(item => ['image', 'audio'].includes(item.kind))) await fillControl(field);
     const current = document.querySelector('.run-mode-current');
     if (body.instance && text(current) !== body.instance) await choose(current, body.instance);
-    const run = [...document.querySelectorAll('.run-cell-main')].find(node => text(node).includes('立即运行'));
+    const run = findRunButton();
     let region = '';
     let regionNode = run;
     for (let depth = 0; regionNode && depth < 8; depth += 1) {
@@ -349,12 +354,12 @@ const operations = {
     const key = `lianhua-task:${body.client_id}`;
     const saved = localStorage.getItem(key);
     if (saved) return JSON.parse(saved);
-    // Persist before clicking: a re-opened page cannot click run for this client.
+    const run = findRunButton();
+    if (!run) throw new Error('网页上还没有「立即运行」，这次没有提交。');
+    // Persist after the button is found, immediately before the click.
     const marker = { status: 'submission_unknown', message: '已交到网页，等待任务编号。' };
     localStorage.setItem(key, JSON.stringify(marker));
     captures.length = 0;
-    const run = [...document.querySelectorAll('.run-cell-main')].find(node => text(node).includes('立即运行'));
-    if (!run) throw new Error('网页运行按钮尚未显示。');
     run.click();
     const id = await waitFor(() => captures[0], 20000).catch(() => '');
     const result = id ? { status: 'running', upstream_task_id: id, message: `网页任务 ${id} 已提交。` }

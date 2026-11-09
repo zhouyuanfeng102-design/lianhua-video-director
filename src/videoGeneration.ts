@@ -26,7 +26,7 @@ import { videoBatchContinuationPersistenceIssue } from './videoBatchContinuation
 import { videoTaskIsClearedStoppedHistory } from './videoTaskDeletionSafety';
 import { runningHubRemoteSucceeded } from './videoResultRecovery';
 import { canRecoverComfyPreviewResult } from './comfyuiVideo';
-import { isUnsubmittedVideoTask, resolveVideoExecutionLimit, videoExecutionScopesMayShareCapacity, videoTaskExecutionScope, videoTaskOccupiesGenerationSlot, videoTaskRemoteGenerationEnded, videoTaskStoppedLocally, videoTasksMayShareExecutionScope, type VideoExecutionScope } from './videoGenerationQueue';
+import { isUnsubmittedVideoTask, resolveVideoExecutionLimit, videoExecutionScopesMayShareCapacity, videoTaskExecutionScope, videoTaskLacksWebRemoteId, videoTaskOccupiesGenerationSlot, videoTaskRemoteGenerationEnded, videoTaskStoppedLocally, videoTasksMayShareExecutionScope, type VideoExecutionScope } from './videoGenerationQueue';
 import { videoQueueBlockerSummary } from './videoQueuePresentation';
 import { getOfficialH3SubmissionIssue, isOfficialH3TargetId } from './officialPrompt';
 import { officialH3ContextForStoryboard } from './officialH3Context';
@@ -542,14 +542,19 @@ export class VideoGenerationEngine {
   }
 
   private generationScopeTasks(task: VideoGenerationTask): VideoGenerationTask[] {
-    return this.allVideoTasks().filter((candidate) => videoTasksMayShareExecutionScope(candidate, task));
+    const projectId = task.videoJob?.snapshot.projectId;
+    if (!projectId) return [];
+    return allProjects(this.options.getState()).flatMap((project) => (
+      project.id === projectId ? project.generationTasks.filter((candidate): candidate is VideoGenerationTask => (
+        (candidate.kind === 'video' || candidate.kind == null) && videoTasksMayShareExecutionScope(candidate, task)
+      )) : []
+    ));
   }
 
   private hasUnrestoredGenerationPreparation(tasks: VideoGenerationTask[]): boolean {
     // A journal can be newer than the project JSON and already contain a POST
-    // boundary. Read recoverable pre-POST records for this same frozen service,
-    // including other projects/batches. Unknown-origin records remain a
-    // conservative barrier; proven unrelated services must stay runnable.
+    // boundary. Read recoverable pre-POST records for this same project and
+    // frozen service. Another project's records do not hold this queue.
     return tasks.some((candidate) => candidate.videoJob?.preparation?.phase === 'preparing'
       && !videoTaskStoppedLocally(candidate)
       && !candidate.remoteTaskId && !candidate.resultAssetId
@@ -567,11 +572,18 @@ export class VideoGenerationEngine {
     const tasks = this.generationScopeTasks(task);
     if (this.hasUnrestoredGenerationPreparation(tasks)) return false;
     const occupied = new Set(tasks.filter(videoTaskOccupiesGenerationSlot).map((candidate) => candidate.id));
-    this.generationClaims.forEach((claimScope, taskId) => { if (videoExecutionScopesMayShareCapacity(claimScope, scope)) occupied.add(taskId); });
+    this.generationClaims.forEach((claimScope, taskId) => {
+      if (videoExecutionScopesMayShareCapacity(claimScope, scope) && tasks.some((candidate) => candidate.id === taskId)) occupied.add(taskId);
+    });
     const remaining = (task.videoJob?.snapshot.connection.api?.provider === 'rhtv_web' || task.videoJob?.snapshot.connection.api?.provider === 'rh_web' ? 1 : resolveVideoExecutionLimit(this.options.getState().settings)) - occupied.size;
     if (remaining <= 0) return false;
-    const admitted = this.generationQueueCandidates().filter((candidate) => videoTaskExecutionScope(candidate).key === scope.key
-      && !occupied.has(candidate.id)).slice(0, remaining);
+    const candidates = this.generationQueueCandidates().filter((candidate) => videoTaskExecutionScope(candidate).key === scope.key
+      && candidate.videoJob?.snapshot.projectId === task.videoJob?.snapshot.projectId && !occupied.has(candidate.id));
+    const retryingWebClick = task.videoJob?.preparation?.phase === 'post-started' && videoTaskLacksWebRemoteId(task) && !occupied.has(task.id);
+    if (retryingWebClick && !candidates.some((candidate) => candidate.id === task.id)) candidates.push(task);
+    const admitted = candidates.sort((left, right) => left.createdAt - right.createdAt
+      || (left.batchId === right.batchId ? (left.batchIndex || 0) - (right.batchIndex || 0) : 0)
+      || left.id.localeCompare(right.id)).slice(0, remaining);
     if (!admitted.some((candidate) => candidate.id === task.id)) return false;
     this.generationClaims.set(task.id, scope);
     return true;
@@ -595,7 +607,7 @@ export class VideoGenerationEngine {
     const limit = task.videoJob?.snapshot.connection.api?.provider === 'rhtv_web' || task.videoJob?.snapshot.connection.api?.provider === 'rh_web' ? 1 : resolveVideoExecutionLimit(settings);
     const waitingForJournal = this.hasUnrestoredGenerationPreparation(tasks);
     const unresolvedOrigins = unknownOrigins.length ? `另有 ${unknownOrigins.length} 个旧任务来源连接待核实，保守占位（不能认定远端已停止）；` : '';
-    const summary = `本地排队中（同连接最多同时生成 ${limit} 个；${scope.label}）`;
+    const summary = `本地排队中（本项目同一连接最多同时生成 ${limit} 个；${scope.label}）`;
     const knownSecrets = [...this.credentials.values(), settings.videoTaskApi?.apiKey, settings.comfyuiVideo?.apiKey,
       settings.runningHubVideo?.apiKey, settings.textApi?.apiKey, settings.visionApi?.apiKey, settings.imageApi?.apiKey,
       ...(settings.videoApiProfiles || []).map((profile) => profile.apiKey),
@@ -606,10 +618,10 @@ export class VideoGenerationEngine {
       .filter((secret): secret is string => typeof secret === 'string' && Boolean(secret));
     const blockers = videoQueueBlockerSummary(allProjects(state), task, knownSecrets, new Set(this.generationClaims.keys()));
     const reason = waitingForJournal
-      ? `${summary}：正在核对同连接或来源连接待核实的历史提交记录；本任务尚未发送到服务端。`
+      ? `${summary}：正在核对本项目同连接的历史提交记录；本任务尚未发送到服务端。`
       : unknownOrigins.length || uncertain.length
-        ? `${summary}：同连接有 ${confirmedOrigins} 个占位任务；${unresolvedOrigins}远端状态尚未确认的任务请恢复查询；本任务尚未提交，不会重复扣费。`
-        : `${summary}：等待同连接前序视频生成结束后自动提交（已占用 ${confirmedOrigins} 个名额）；本任务尚未发送到服务端。`;
+        ? `${summary}：本项目同连接有 ${confirmedOrigins} 个占位任务；${unresolvedOrigins}远端状态尚未确认的任务请恢复查询；本任务尚未提交，不会重复扣费。`
+        : `${summary}：等待本项目前序视频生成结束后自动提交（已占用 ${confirmedOrigins} 个名额）；本任务尚未发送到服务端。`;
     this.patch(live, {
       status: 'draft', error: undefined,
       videoJob: { ...liveJob, ...(live.batchId ? { batchQueueState: 'ready' as const } : {}) },
@@ -2173,8 +2185,12 @@ export class VideoGenerationEngine {
   private async prepareAndSubmit(original: VideoGenerationTask, initialKey?: string): Promise<string> {
     const taskId = original.id;
     if (this.busy.has(taskId)) return taskId;
-    if (original.videoJob?.preparation?.version !== 1 || original.videoJob.preparation.phase !== 'preparing' || original.remoteTaskId) return taskId;
-    if (original.batchId && !['ready', 'active'].includes(original.videoJob.batchQueueState || '')) return taskId;
+    const webProvider = original.videoJob?.snapshot.connection.api?.provider;
+    const webClickMissing = (webProvider === 'rh_web' || webProvider === 'rhtv_web')
+      && !original.remoteTaskId && original.videoJob?.preparation?.phase === 'post-started';
+    if (original.videoJob?.preparation?.version !== 1 || original.remoteTaskId) return taskId;
+    if (original.videoJob.preparation.phase !== 'preparing' && !webClickMissing) return taskId;
+    if (original.batchId && !['ready', 'active'].includes(original.videoJob.batchQueueState || '') && !webClickMissing) return taskId;
     if (!this.tailReady(original)) {
       throw new Error('本段依赖的上一段尾帧尚未保存，不能提交视频生成。');
     }
@@ -2396,7 +2412,7 @@ export class VideoGenerationEngine {
       // A synchronous Success+file_id is generated but still needs file retrieval.
       // Keep it pollable until its actual downloadable video has been resolved.
       const submittedAt = Date.now();
-      const next = await this.checkpoint({ ...task, remoteTaskId: mapped.remoteTaskId, status: mapped.status === 'unknown' || (mapped.status === 'succeeded' && !mapped.resultUrl && !mapped.downloadError) ? 'submitted' : mapped.status, resultUrl: mapped.resultUrl, response: redactVideoSecrets(result), error: mapped.status === 'failed' ? mapped.message : undefined, videoJob: { ...task.videoJob!, preparation: { ...task.videoJob!.preparation!, phase: 'acknowledged' }, stage: mapped.stage, message: mapped.message, downloadError: mapped.downloadError, submittedAt, ...(['succeeded', 'failed'].includes(mapped.status) ? { remoteGenerationEnded: true as const } : {}), ...(mapped.stage === 'running' ? { startedAt: submittedAt } : {}), ...(mapped.status === 'failed' || mapped.downloadError ? { completedAt: submittedAt } : {}) } });
+      const next = await this.checkpoint({ ...task, remoteTaskId: mapped.remoteTaskId, status: mapped.status === 'unknown' || (mapped.status === 'succeeded' && !mapped.resultUrl && !mapped.downloadError) ? 'submitted' : mapped.status, resultUrl: mapped.resultUrl, response: redactVideoSecrets(result), error: mapped.status === 'failed' ? mapped.message : undefined, videoJob: { ...task.videoJob!, ...(task.batchId && ['waiting', 'ready', 'active'].includes(task.videoJob!.batchQueueState || '') ? { batchQueueState: 'done' as const } : {}), preparation: { ...task.videoJob!.preparation!, phase: 'acknowledged' }, stage: mapped.stage, message: mapped.message, downloadError: mapped.downloadError, submittedAt, ...(['succeeded', 'failed'].includes(mapped.status) ? { remoteGenerationEnded: true as const } : {}), ...(mapped.stage === 'running' ? { startedAt: task.videoJob!.startedAt || submittedAt } : {}), ...(mapped.status === 'failed' || mapped.downloadError ? { completedAt: submittedAt } : {}) } });
       if (!this.stopping.has(taskId)) {
         if (mapped.resultUrl) {
           // The provider is already terminal. Independent rows may use the
@@ -3976,6 +3992,13 @@ export class VideoGenerationEngine {
             videoJob: { ...this.liveTask(taskId)!.videoJob!, preparation: { ...task.videoJob.preparation!, phase: 'acknowledged' }, trackingStopped: false } });
           this.schedule(taskId, 0); return;
         }
+        this.patch(task, { status: 'submitting', error: undefined }, {
+          stage: 'submitting', trackingStopped: false, message: '正在把原任务再交给网页一次',
+        });
+        const latest = this.liveTask(taskId);
+        if (!latest?.videoJob || !this.controlIsCurrent(task, epoch)) return;
+        await this.prepareAndSubmit(latest);
+        return;
       }
       if (await this.recoverComfyAcknowledgement(task)) return;
       throw new Error('提交结果没有远端任务 ID，尚未找到原任务；不能安全恢复查询，程序不会自动重新提交。');

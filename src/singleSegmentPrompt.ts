@@ -16,6 +16,7 @@ import {
 } from './officialPrompt';
 import { buildBudgetedOfficialH3References } from './officialReferenceBudget';
 import { h3MediaModeForReferences, h3PromptModeForReferences, type PromptReferenceInput } from './promptAdapters';
+import { visualStyleDefinitions } from './visualStyles';
 import { translateVideoPromptToEnglish } from './promptTranslation';
 import { createRuntimeErrorLogEntry } from './runtimeErrorLog';
 import { resolveConfirmedMasterSliceSource, type ConfirmedMasterSliceSourceContext } from './confirmedMasterSliceSource';
@@ -354,6 +355,13 @@ const appendCanonicalDialoguesToH3 = (
   return `${prompt.slice(0, bodyStart)}${body}${prompt.slice(bodyEnd)}`;
 };
 
+const resolveSelectedPictureStyle = (value: string | undefined): string => {
+  const name = value?.trim() || '';
+  if (!name || name === '无附加风格') return '';
+  const found = visualStyleDefinitions.find((item) => item.name === name || item.id === name || item.aliases?.includes(name));
+  return found ? found.promptAnchor.trim() : name;
+};
+
 /** Render explicit performance, or preserve the entire legacy body inside the
  * known H3 layout. Neither path guesses roles from missing section titles. */
 export const renderDeliveredH3Performance = (delivery: ReturnType<typeof readH3DeliveryEnvelope>,
@@ -403,6 +411,7 @@ export const renderDeliveredH3Performance = (delivery: ReturnType<typeof readH3D
     ...(otherDefinitions.length ? { subjectDefinitions: otherDefinitions.join('\n') } : {}),
     summary: bindings.performance.summary ?? sections.get('summary'),
     retentionAnalysis: bindings.performance.retentionAnalysis ?? sections.get('retention_analysis'),
+    pictureStyle: layout.pictureStyle, durationSec: layout.durationSec,
   });
   const characterParticipation = delivery.characterParticipation ? {
     ...delivery.characterParticipation,
@@ -840,6 +849,7 @@ export async function generateSingleSegmentPrompt(
       (chooseDeliveryFormat ? deliveryMediaMode === 'full-reference'
         : /^subject_definitions\s*[:：]/mu.test(delivery.h3Prompt) || /^subject_definitions\s*[:：]/mu.test(official.officialPromptZh || '')) ? 'full-reference' : 'integrated',
       { audioMode: official.audioMode, musicRequested: h3MusicRequested(input.board.extraRequirement),
+        pictureStyle: resolveSelectedPictureStyle(official.visualStyle), durationSec: official.durationSec,
         ...(preserveExistingAudio ? { preservedAudioPrompt: official.officialPromptZh } : {}) }, synchronized.shots);
     const prompt = delivery.h3Prompt;
     assertCurrent();

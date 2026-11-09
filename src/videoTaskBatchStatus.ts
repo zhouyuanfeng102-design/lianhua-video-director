@@ -19,7 +19,11 @@ export const videoTaskBatchStatus = (task: VideoGenerationTask, runtime?: VideoG
   if (job?.tailPreparation?.phase === 'extracting') return 'submitting';
   if (task.status === 'failed' || stage === 'failed') return 'failed';
   if (task.status === 'succeeded' || stage === 'succeeded') return job && !task.resultAssetId ? 'running' : 'succeeded';
-  if (job?.batchQueueState === 'waiting' || job?.batchQueueState === 'ready' || task.status === 'draft') return 'pending';
+  // A cloud task id means this row already left the local submit queue.
+  // A leftover ready/waiting flag must not keep it out of the running count.
+  if (task.remoteTaskId && (stage === 'running' || stage === 'reconnecting' || task.status === 'running')) return 'running';
+  if (task.remoteTaskId && (stage === 'queued' || stage === 'submitting' || task.status === 'submitted' || task.status === 'submitting')) return stage === 'submitting' || task.status === 'submitting' ? 'submitting' : 'queued';
+  if (!task.remoteTaskId && (job?.batchQueueState === 'waiting' || job?.batchQueueState === 'ready' || task.status === 'draft')) return 'pending';
   if (task.status === 'submitting' || job?.batchQueueState === 'active' || stage === 'preparing' || stage === 'submitting') return 'submitting';
   if (task.status === 'running' || stage === 'running' || stage === 'reconnecting') return 'running';
   if (task.status === 'submitted' || stage === 'queued') return 'queued';
