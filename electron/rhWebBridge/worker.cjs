@@ -489,12 +489,18 @@ async function runJob(entry, body) {
     }
     await chooseInstance(page, body.instance);
     const quote = await readRunQuote(page);
+    const runButton = page.locator('.run-cell-main').filter({ hasText: '立即运行' });
+    try {
+      await runButton.waitFor({ state: 'visible', timeout: 30000 });
+    } catch {
+      throw new Error('网页上还没有「立即运行」，这次没有提交。');
+    }
     job.message = quote ? `网页预估 ${quote}，正在点击运行` : '正在点击运行';
     job.handed_off = true;
     job.status = 'submission_unknown';
     saveJobs();
     const watch = rememberTask(page);
-    await page.locator('.run-cell-main').filter({ hasText: '立即运行' }).click();
+    await runButton.click();
     const started = Date.now();
     while (!watch.found.length && Date.now() - started < 20000) await page.waitForTimeout(500);
     watch.stop();

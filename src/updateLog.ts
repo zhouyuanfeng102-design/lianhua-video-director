@@ -15,6 +15,16 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "4.2.5",
+    releasedAt: "2026-11-09",
+    title: "没点到运行就不算已提交",
+    highlights: [
+      "网页上还没有「立即运行」时，这次不算提交，可以再点。",
+      "按钮点下去之后，才记成已经交给网页。",
+      "已保存的提示词和成片保持原样。",
+    ],
+  },
+  {
     version: "4.2.4",
     releasedAt: "2026-11-09",
     title: "中文英文分开写完，本段结尾演完整",
