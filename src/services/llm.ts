@@ -4825,7 +4825,42 @@ export const detectNsfwCharacterNames = (
   return names.filter((name) => selected.has(name));
 };
 
-const parseStoryAnalysisResult = (result: string): StoryAnalysisResponse => {
+const SOLE_PERSON_PRONOUN = /^(?:她|他|它|我|你|她们|他们|它们|我们|你们|一个人)$/u;
+const appearanceIsInStory = (value: string, story: string): boolean => {
+  const compact = value.replace(/\s+/gu, '');
+  if (compact.length < 4) return story.includes(compact);
+  for (let index = 0; index + 4 <= compact.length; index += 1) {
+    if (story.includes(compact.slice(index, index + 4))) return true;
+  }
+  return false;
+};
+/** One pronoun-only person is one character. A face the source never wrote is not kept. */
+export const foldSolePronounCharacters = (
+  characters: StoryAnalysisCharacter[],
+  story: string,
+): StoryAnalysisCharacter[] => {
+  const pronouns = characters.filter((character) => character.name && SOLE_PERSON_PRONOUN.test(character.name));
+  const named = characters.filter((character) => character.name && !SOLE_PERSON_PRONOUN.test(character.name));
+  const hosts = pronouns.length && named.length <= 1
+    ? [{
+      ...(named[0] || { name: DEFAULT_FIRST_PERSON_SUBJECT }),
+      name: named[0]?.name || DEFAULT_FIRST_PERSON_SUBJECT,
+      aliases: [...new Set([...(named[0]?.aliases || []), ...pronouns.map((character) => character.name || '')].filter(Boolean))],
+    }]
+    : named;
+  return hosts.map((character) => {
+    if (character.existingEntityId) return character;
+    const keep = (value: string | undefined): string | undefined => value && appearanceIsInStory(value, story) ? value : '';
+    return {
+      ...character,
+      ...(character.appearance !== undefined ? { appearance: keep(character.appearance) } : {}),
+      ...(character.outfit !== undefined ? { outfit: keep(character.outfit) } : {}),
+      ...(character.nsfwProfile && !appearanceIsInStory(JSON.stringify(character.nsfwProfile), story) ? { nsfwProfile: undefined } : {}),
+    };
+  });
+};
+
+const parseStoryAnalysisResult = (result: string, story = ''): StoryAnalysisResponse => {
   const parsed = parseModelJsonObject(
     result,
     '剧情分析结果',
@@ -4896,7 +4931,26 @@ const parseStoryAnalysisResult = (result: string): StoryAnalysisResponse => {
     }))
     .filter((item: StoryAnalysisResponse['scenes'][number]) => Boolean(item.content));
   if (!scenes.length) throw new Error('文本模型返回的场景内容为空');
-  return { scenes, characters, locations, props };
+  const foldedCharacters = foldSolePronounCharacters(characters, story);
+  const canonicalName = new Map<string, string>();
+  foldedCharacters.forEach((character) => {
+    if (!character.name) return;
+    canonicalName.set(character.name, character.name);
+    (character.aliases || []).forEach((alias) => canonicalName.set(alias, character.name || alias));
+  });
+  return {
+    scenes: scenes.map((scene) => ({
+      ...scene,
+      characters: (scene.characters || []).flatMap((character: StoryAnalysisCharacter) => {
+        const name = character.name && canonicalName.get(character.name);
+        if (character.name && SOLE_PERSON_PRONOUN.test(character.name) && !name) return [];
+        return [{ ...character, ...(name ? { name } : {}) }];
+      }),
+    })),
+    characters: foldedCharacters,
+    locations,
+    props,
+  };
 };
 
 export interface StoryAnalysisOptions {
@@ -4963,8 +5017,8 @@ const requestStoryAnalysisChunk = async (
     options.entityCatalog ? '已有资料目录中的 details 是逐字段的现有资料；existingEntityId 只表示已确定身份，不表示资料已经完整。本部分涉及的已有实体也须返回完整资料对象：沿用 details 中已有的非空内容，结合本部分剧情补齐尚未填写的普通字段，不要因为目录里已经有名字或简短 description 就跳过。lockedFields 是已确认字段，包含确认留空的字段，原值必须保留；useStory=false 的资料仅沿用身份与现有内容，不用剧情补写。目录中未涉及本部分的实体不要重新设计或加入本场角色。' : '',
     '在读完全文后，按地点、时间、人物关系或明显事件变化确定全局可拍摄场景边界，保持真实事件顺序并覆盖全文，不能因篇幅长遗漏后段。保留每个场景的关键原文，不要编造剧情。',
     `实体名称必须是跨场景可复用的稳定名称：第一人称叙事若原文没有给主角姓名，统一命名为“${DEFAULT_FIRST_PERSON_SUBJECT}”，不得把“我”保存为人物名。`,
-    '根据完整前后文统一同一人的姓名和别名：同一人物的“师傅、师姐、道侣”等称呼、真名、昵称与代词不要分别建立人物；能确认真名就统一使用该真名，未给真名则保留可靠稳定称谓，无法确认同人时不要猜测合并。每个场景引用同一套全局标准名称。',
-    '人物名称只写真实姓名、稳定称谓或原文明示的稳定群体名称；“她们、他们、我们、她、他、我”只是代词，不能仅凭代词另外建立人物或群体。先从完整上下文找到实际对应人物，再引用其全局名称。',
+    '根据完整前后文统一同一人的姓名和别名：同一人物的“师傅、师姐、道侣”等称呼、真名、昵称与代词不要分别建立人物；能确认真名就统一使用该真名，未给真名则保留可靠稳定称谓。两个已经写出姓名的人，无法确认是同一人时不要猜测合并。每个场景引用同一套全局标准名称。',
+    `人物名称只写真实姓名、稳定称谓或原文明示的稳定群体名称。“她们、他们、我们、她、他、我、一个人”只是代词，不能单独成为另一张人物卡。一段原文里只有一个人，用这些代词指代时，只返回这一个人物；没有姓名时 name 用“${DEFAULT_FIRST_PERSON_SUBJECT}”，代词写入 aliases。已有一个姓名时，代词写入这个人的 aliases，不要再返回名为“她”或“他”的记录。`,
     '“祈凌霜笑盈盈”“语气平静却带着宠溺”“低声道”“只”“雪衣道侣走”“目光只落”“细剑抱”一类副词、语气、发声方式或主体后粘连动作、身体部位、物品、谓语的动作片段，绝不能作为人物或角色名称。不要按最近逗号、冒号或动作词机械截取名字。',
     '地点名称只写可复用的场所本体；去掉“一处、这座、前、后、内、外、方向”等相对位置包装，不能把“珠光下轻轻发亮”一类状态或谓语片段作为地点名称。',
     'gender 必须根据剧情中的姓名、称谓、代词、身份关系和生物设定判断：人类或人形角色填写“男”或“女”；动物、灵兽、怪物等非人角色填写“雄性”或“雌性”；原文明示无性、双性、性别流动或其他特殊设定时，原样填写可自由描述的自定义性别，不得强制改成四个预设值。群体可填写“男性群体”“女性群体”“雌雄混合群体”等准确属性。不得把服装风格单独当作性别依据。',
@@ -4972,7 +5026,7 @@ const requestStoryAnalysisChunk = async (
     CHARACTER_MORPHOLOGY_RULE,
     CHARACTER_VARIANT_RULE,
     FEMALE_CHARACTER_NEUTRAL_AGE_STAGE_RULE,
-    '同时根据完整剧情统一整理项目圣经资料，人物、地点、道具不能只返回名称，必须给出后续生图可用的详细外观与材质信息。普通资料字段必须填写（signatureProps 没有长期装备时返回空字符串）；baseName/formLabel/variantOf/transformationType 四个形态字段仅限确有独立形态变化的人物，普通人物省略，不为了填满JSON示例而补造形态。普通资料中原文未明确的信息要根据题材、时代、阵营、身份和剧情作用合理补全，禁止使用“未知、待补充、根据剧情、无资料”等占位词。apparentAge 是外观年龄/视觉年龄，actualAge 是实际年龄/设定年龄；两者优先沿用原文明确事实，只有相应项缺失时才按剧情上下文推算。height 是身高/高度/体型尺度，按原文明确尺度或上下文合理补全。后续生图按 apparentAge 控制年龄感，不按 actualAge 把长寿或修仙角色画老，并按 height 稳定身体比例。',
+    '同时根据完整剧情统一整理项目圣经资料，人物、地点、道具不能只返回名称，必须给出后续生图可用的详细外观与材质信息。普通资料字段必须填写（signatureProps 没有长期装备时返回空字符串）；baseName/formLabel/variantOf/transformationType 四个形态字段仅限确有独立形态变化的人物，普通人物省略，不为了填满JSON示例而补造形态。地点、道具和人物里原文已经写出的事实要保留。人物的脸、头发、眼睛、五官和衣服只写原文已经写出的内容，原文没有的不补，对应字段留空，不要写“待补充、未知、根据剧情、无资料”。apparentAge 是外观年龄/视觉年龄，actualAge 是实际年龄/设定年龄；两者优先沿用原文明确事实，只有相应项缺失时才按剧情上下文推算。height 是身高/高度/体型尺度，按原文明确尺度或上下文合理补全。后续生图按 apparentAge 控制年龄感，不按 actualAge 把长寿或修仙角色画老，并按 height 稳定身体比例。',
     STORY_AGE_FACT_PRESERVATION_RULE,
     NONHUMAN_AGE_LIFECYCLE_RULE,
     storyHasNsfw
@@ -5013,7 +5067,7 @@ const requestStoryAnalysisChunk = async (
   if (signal?.aborted) throw createAbortError();
   // Content meaning belongs to the AI. Local handling decodes the response
   // shape and normalizes the shared female-character field vocabulary only.
-  const parsedAnalysis = parseStoryAnalysisResult(result);
+  const parsedAnalysis = parseStoryAnalysisResult(result, story);
   validateStoryReferenceBindings(parsedAnalysis, options.referenceContext);
   const mergeEntities = <T extends { name?: string }>(items: T[], primaryItems: T[] = []): T[] => {
     const byName = new Map<string, T>();
