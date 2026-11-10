@@ -1,6 +1,6 @@
 import type { H3IdentityBindings, H3IdentityEventBinding, H3PerformancePlan, SemanticSegmentSource } from './types';
 import { getPromptVisibleTextSpans } from './promptDialogueLanguage';
-import { h3KeepsScore, renderH3PerformancePlan } from './h3PerformancePlan';
+import { h3KeepsScore, normalizeH3DialogueLanguageTags, renderH3PerformancePlan } from './h3PerformancePlan';
 
 export interface PromptTranslationSourceCharacter {
   id: string;
@@ -532,11 +532,12 @@ export const renderPromptTranslationDocument = (
   const values = translationValues(translations);
   const missing: string[] = [];
   const renderAtom = (atom: PromptTranslationLiteral | PromptTranslationSlot): string => {
-    if (atom.kind === 'literal') return atom.text;
+    if (atom.kind === 'literal') return normalizeH3DialogueLanguageTags(atom.text);
     const value = values.get(atom.id);
     if (value === undefined) missing.push(atom.id);
     const literals = new Map(atom.protectedText?.map((literal) => [literal.token, literal.text]) || []);
-    return (value ?? atom.sourceText).replace(/__H3_[A-Z_]+_\d+__/gu, (token) => literals.get(token) ?? token);
+    const translated = (value ?? atom.sourceText).replace(/__H3_[A-Z_]+_\d+__/gu, (token) => literals.get(token) ?? token);
+    return normalizeH3DialogueLanguageTags(translated);
   };
   const warnings = (): string[] => missing.length
     ? [`英文翻译有 ${missing.length} 个完整描述单元未返回，已保留对应来源描述；原对白和人物绑定保持。`] : [];

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { assertH3DescriptionLanguage } from './fixtures/h3LanguageContract';
-import { NO_DIALOGUE_PERFORMANCE_RULE, VISUAL_IDENTITY_SPEECH_SCOPE_RULE } from '../src/audioPromptPolicy';
+import { DIALOGUE_VOICE_IDENTITY_RULE, NO_DIALOGUE_PERFORMANCE_RULE, VISUAL_IDENTITY_SPEECH_SCOPE_RULE } from '../src/audioPromptPolicy';
+import { SPOKEN_CUE_CONTENT_RULE } from '../src/videoInteractionRules';
 import {
   H3_DIALOGUE_FORMAT_RULE,
   H3_FINAL_BODY_FORMAT_RULE,
@@ -14,33 +15,32 @@ import {
 } from '../src/h3PromptProtocol';
 
 assert.equal(
-  omitCopiedEnglishExamples('双膝留在支撑面上。英文写成 She remains kneeling bent over. Both knees remain on the platform。特写或下移只改摄影机。英文写成 The torso remains below the bed board, knees bent. He does not stand upright in the gap.完整保留每项行动。英文写成 She says: <d>[中文] 三哥……</d>。下一个人换编号。'),
+  omitCopiedEnglishExamples('双膝留在支撑面上。英文写成 She remains kneeling bent over. Both knees remain on the platform。特写或下移只改摄影机。英文写成 The torso remains below the bed board, knees bent. He does not stand upright in the gap.完整保留每项行动。英文写成 She says: <d>[Chinese] 三哥……</d>。下一个人换编号。'),
   '双膝留在支撑面上。特写或下移只改摄影机。完整保留每项行动。下一个人换编号。',
 );
-assert.match(H3_DIALOGUE_FORMAT_RULE, /Her mouth opens and her lips move with the words/u);
-assert.doesNotMatch(omitCopiedEnglishExamples(H3_DIALOGUE_FORMAT_RULE), /Her mouth opens and her lips move with the words/u);
-assert.match(omitCopiedEnglishExamples(H3_DIALOGUE_FORMAT_RULE), /先说话的人写成：小舞/u);
-
-assert.match(H3_DIALOGUE_FORMAT_RULE, /有明确说话人和话题但只是转述时.*自然、完整、可念的一句.*不把话题摘要机械塞进/u,
-  'H3 converts narrated speech topics into clear dialogue without misquoting the summary');
-assert.match(H3_DIALOGUE_FORMAT_RULE, /Her mouth opens and her lips move with the words\. Tang San's mouth stays closed, and the Grand Elder's mouth stays closed/u,
-  'each spoken line names the speaker, opens that mouth, and closes the listeners');
-assert.match(H3_DIALOGUE_FORMAT_RULE, /台词：无的镜头不给任何人标\(S1\)。身份句、Identity句和参考图职责里不写声源编号/u,
-  'a silent shot does not attach a speaker id to an identity line');
-assert.match(H3_DIALOGUE_FORMAT_RULE, /Before the first line, every visible mouth stays closed/u,
-  'mouths stay closed until the first written line');
-assert.match(H3_DIALOGUE_FORMAT_RULE, /While he says these lines, his weight stays on one foot and his hand keeps a small motion until the last line ends/u,
-  'a spoken stretch keeps one body motion until the last line ends');
-assert.match(H3_DIALOGUE_FORMAT_RULE, /The sign reads "OPEN"/u,
-  'quotation marks stay on sign text');
-assert.match(H3_DIALOGUE_FORMAT_RULE, /From 22\.500s to 24\.000s, he says: <d>\[中文\] 小舞……<\/d> His lips close\. His hand stays on her head/u,
-  'the time stays before the line and the next sentence is a visible action');
-assert.match(H3_DIALOGUE_FORMAT_RULE, /Audio 1 supplies only the voice\. She says the line already written in <d>/u,
-  'a timbre reference keeps the written line');
-assert.match(H3_DIALOGUE_FORMAT_RULE, /Tang San says the name\. The camera holds on Tang San's mouth for this line\. His mouth opens\. The Grand Elder's mouth stays closed\. Xiao Wu's mouth stays closed/u,
-  'a shouted name stays with the speaker and that speaker mouth');
-assert.match(H3_DIALOGUE_FORMAT_RULE, /Her mouth stays closed during his line\. Her brows stay drawn, tears stay on her cheeks, and her chest keeps rising/u,
-  'a closed mouth during another line keeps the written face reaction');
+assert.ok(H3_DIALOGUE_FORMAT_RULE.includes(DIALOGUE_VOICE_IDENTITY_RULE),
+  'the concise dialogue contract retains source-grounded voice ownership');
+assert.ok(H3_DIALOGUE_FORMAT_RULE.includes(SPOKEN_CUE_CONTENT_RULE),
+  'source-authored speech topics still use their confirmed facts');
+assert.match(H3_DIALOGUE_FORMAT_RULE, /稳定的\(S1\)、\(S2\)声源ID.*首次发声顺序/u);
+assert.match(H3_DIALOGUE_FORMAT_RULE, /静默人物不分配ID/u);
+assert.match(H3_DIALOGUE_FORMAT_RULE, /Picture、Subject与S编号职责独立/u);
+for (const tag of ['<d>[Chinese]', '<d>[English]']) assert.ok(H3_DIALOGUE_FORMAT_RULE.includes(tag));
+assert.doesNotMatch(H3_DIALOGUE_FORMAT_RULE, /<d>\[中文\]|不改成\[Chinese\]|语言标签写成\[中文\]/u,
+  'new dialogue instructions cannot reintroduce the translated language label');
+assert.match(H3_DIALOGUE_FORMAT_RULE, /保留原话、标点、说话人和顺序，不翻译台词/u);
+assert.match(H3_DIALOGUE_FORMAT_RULE, /清楚、自然、可辨识的普通话/u);
+assert.match(H3_DIALOGUE_FORMAT_RULE, /已确认时间窗.*自然语速逐字说完/u);
+assert.match(H3_DIALOGUE_FORMAT_RULE, /不得用喘息、呻吟、临时音节或含混发声代替台词/u);
+assert.match(H3_DIALOGUE_FORMAT_RULE, /只有原剧情或用户明确要求耳语、哭腔或喘息时才保留/u);
+assert.match(H3_DIALOGUE_FORMAT_RULE, /voiceDescription只写.*稳定声音身份.*delivery只写本句情绪/u);
+assert.match(H3_DIALOGUE_FORMAT_RULE, /同一声音特征不在voiceDescription、delivery、speakerAction和overall_soundscape重复/u);
+assert.match(H3_DIALOGUE_FORMAT_RULE, /原剧情明确的笑、哭、咳嗽或喘息只保留在对应事件及其时间内/u);
+assert.match(H3_DIALOGUE_FORMAT_RULE, /听者不代说、不做说话口型.*表情和动作/u);
+assert.match(H3_DIALOGUE_FORMAT_RULE, /画外声、旁白和内心声保持原有类别/u);
+assert.match(H3_DIALOGUE_FORMAT_RULE, /跨越已确认切镜.*<scenetrans>.*同一声源ID.*不重复.*不漏字.*不新增切点/u);
+assert.equal(omitCopiedEnglishExamples(H3_DIALOGUE_FORMAT_RULE), H3_DIALOGUE_FORMAT_RULE,
+  'the concise contract contains no copyable English example paragraphs');
 assert.match(H3_FINAL_BODY_FORMAT_RULE, /全部\[Shot N\]写在同一个integrated_multimodal_description或detailed_description里/u,
   'every shot stays inside one description before the single soundscape');
 
@@ -54,11 +54,11 @@ for (const language of ['中文', '英文'] as const) {
   } else {
     assert.match(rule, /完整翻译其中所有可译描述，包括已有英文和中英混写的单元/u);
   }
-  assert.match(rule, /对白、歌词及其语言标注保持原稿指定的语言和原字/u);
+  assert.match(rule, /对白和歌词保留原稿指定语种及逐字内容/u);
+  assert.match(rule, /语言标签使用英文语种名.*\[Chinese\]/u);
   assert.match(rule, /人物姓名、代号及其身份映射保持原样/u);
-  assert.match(rule, /实际出现在标牌、屏幕等画面中的文字保持原字/u);
-  assert.match(rule, /本次明确要求原文保留的对白、姓名、画中文字和协议标记仍原样保留/u);
-  assert.match(rule, /不借语言要求重译整份旧稿或扩大修改范围/u);
+  assert.match(rule, /出现在标牌、屏幕等画面中的文字保持原字/u);
+  assert.match(rule, /不修改加载、导出或未被本次操作触及的已保存正文/u);
   assert.match(rule, /H3字段名、\[Shot N\]、At切点/u);
 }
 
@@ -338,14 +338,11 @@ for (const language of ['中文', '英文'] as const) {
       assertH3DescriptionLanguage(system, language);
       assert.ok(system.includes(VISUAL_IDENTITY_SPEECH_SCOPE_RULE));
       assert.ok(system.includes(NO_DIALOGUE_PERFORMANCE_RULE));
-      if (language === '中文') {
-        assert.match(system, /先说话的人写成：小舞/u);
-        assert.doesNotMatch(system, /Her mouth opens and her lips move with the words/u);
-      } else {
-        assert.ok(system.includes(H3_DIALOGUE_FORMAT_RULE));
-      }
-      assert.match(system, /不能写成<d>None<\/d>/u,
-        'no-dialogue states are not serialized into pronounceable dialogue');
+      assert.ok(system.includes(H3_DIALOGUE_FORMAT_RULE));
+      assert.match(system, /<d>\[Chinese\]/u);
+      assert.doesNotMatch(system, /<d>\[中文\]|语言标签写成\[中文\]/u,
+        'the existing format-repair request uses the same official language-label contract');
+      assert.match(system, /无对白区间不增加闲聊、旁白或即兴音节/u);
       const data = JSON.parse(user.match(/<h3_format_repair_data>\n([\s\S]*?)\n<\/h3_format_repair_data>/u)![1]);
       assert.deepEqual(data.sourceContext, sourceContext);
       assert.equal(data.candidatePrompt, invalid.trim());

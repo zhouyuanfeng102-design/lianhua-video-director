@@ -331,8 +331,9 @@ const performanceResult = renderPromptTranslationDocument(performanceDocument, {
 })), performance: { shots: [{ events: [{ speakerCharacterIds: ['king'], text: '篡改台词' }] }] } });
 assert.deepEqual(performanceResult.deliveryWarnings, []);
 assert.match(performanceResult.prompt, /From 9\.00 to 10\.20 seconds[^\n]*贝里尤洛 \(S1\)[^\n]*<d>\[Chinese\] 支配？<\/d>/u);
-assert.match(performanceResult.prompt, /From 10\.60 to 14\.40 seconds[^\n]*夏提雅 \(S2\)[^\n]*to 贝里尤洛[^\n]*<d>\[Chinese\] 没错/u);
-assert.match(performanceResult.prompt, /夏提雅 produces the speaking lip movements/u);
+assert.match(performanceResult.prompt, /From 10\.60 to 14\.40 seconds[^\n]*夏提雅 \(S2\)[^\n]*<d>\[Chinese\] 没错/u);
+assert.match(performanceResult.prompt, /夏提雅 keeps the chest and eyes toward 贝里尤洛/u);
+assert.match(performanceResult.prompt, /贝里尤洛 listens without speaking, with no speaking lip movement/u);
 assert.match(performanceResult.prompt, /贝里尤洛[^\n]*Watches the red armor silently/u);
 assert.match(performanceResult.prompt, /夏提雅[^\n]*A female vampire voice/u);
 assert.doesNotMatch(performanceResult.prompt, /夏提雅不张嘴|from 6\.20|骷髅头盔|与龙僵持|篡改台词|亚乌拉 \(S\d+\)/u);
@@ -361,7 +362,8 @@ const fullResult = renderPromptTranslationDocument(fullDocument, { slots: fullDo
   text: performanceTranslation[slot.sourceText] || slot.sourceText.replace('是开场构图。', 'is the opening composition.'),
 })) });
 assert.match(fullResult.prompt, /<Subject 1>[^\n]*贝里尤洛[^\n]*<Picture 5>/u);
-assert.match(fullResult.prompt, /<Subject 2>[^\n]*夏提雅[^\n]*<Picture 3>[^\n]*<Audio 1>/u);
+assert.match(fullResult.prompt, /<Subject 2>[^\n]*夏提雅[^\n]*<Picture 3>/u);
+assert.match(fullResult.prompt, /夏提雅 \(S2\)[^\n]*with the voice referenced from <Audio 1>[^\n]*<d>\[Chinese\]/u);
 assert.match(fullResult.prompt, /<Picture 1> is the opening composition\./u);
 assert.match(fullResult.prompt, /<Subject 2>[^\n]*夏提雅[^\n]*\(S2\)[^\n]*<d>\[Chinese\] 没错/u);
 assert.deepEqual(readH3PromptProtocol(fullResult.prompt).sections,
@@ -392,7 +394,8 @@ for (const voiceDefinition of ['声音身份: 旁白声 (S1)，声音参考为<A
   })) });
   assert.equal(voiceOnlyResult.prompt.match(/(?:Voice identity|声音身份): 旁白声/gu)?.length, 1,
     'the previous generated voice-only definition is replaced, not appended to the rebuilt definition');
-  assert.match(voiceOnlyResult.prompt, /Voice identity: 旁白声 \(S1\)[^\n]*<Audio 2>/u);
+  assert.match(voiceOnlyResult.prompt, /Voice identity: 旁白声, referenced from <Audio 2>/u);
+  assert.match(voiceOnlyResult.prompt, /旁白声 \(S1\)[^\n]*<Audio 2>[^\n]*says in an off-screen voiceover: <d>\[Chinese\] 暮色降临。/u);
   assert.match(voiceOnlyResult.prompt, /Voice identity: 未绑定访客 \(S8\)\./u,
     'a voice not explicitly named in the saved plan is not assigned, removed or inferred');
 }

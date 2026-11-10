@@ -511,7 +511,21 @@ for (const route of ['confirmed-slice', 'converted-gap', 'draft-gap'] as const) 
     },
   });
   assert.deepEqual(stages, [...(route === 'confirmed-slice' ? [] : ['convert']), 'review', 'translate']);
-  assert.equal(repaired.officialPromptZh, outputs[0].officialPromptZh);
+  const restoredDialogue = '旅人 (S1) says: <d>[Chinese] 先开门。</d>';
+  const expectedH3 = route === 'confirmed-slice'
+    ? outputs[0].officialPromptZh
+    : outputs[0].officialPromptZh!.replace('\n\n[Shot 2]', `\n${restoredDialogue}\n[Shot 2]`);
+  assert.equal(repaired.officialPromptZh, expectedH3,
+    `${route}: format repair preserves the complete authored H3 delivery and restores canonical dialogue when needed`);
+  assert.equal(repaired.targetOutput?.prompt, expectedH3);
+  assert.equal(repaired.officialPromptZh?.match(/<d>\[Chinese\] 先开门。<\/d>/gu)?.length || 0,
+    route === 'confirmed-slice' ? 0 : 1,
+    'the canonical utterance is compiled into one H3 line only when the existing delivery is missing it');
+  assert.match(repaired.officialPromptZh!, /\[Shot 1\][^\n]*台词：第1s <Subject 1>："先开门。"/u,
+    'the dialogue remains attached to its original shot and speaker evidence');
+  if (route !== 'confirmed-slice') assert.ok(repaired.officialPromptZh?.includes(restoredDialogue));
+  assert.deepEqual(repaired.shots.map((shot) => [shot.id, shot.startSec, shot.endSec, shot.referenceAssetIds]),
+    sourceBoard.shots.map((shot) => [shot.id, shot.startSec, shot.endSec, shot.referenceAssetIds]));
   assert.equal(repaired.officialPromptEnError, '');
   assert.equal(JSON.stringify(sourceBoard), snapshot);
 }
@@ -673,7 +687,7 @@ for (const { purpose, formatRepair } of [
         assert.ok(!user.includes('<semantic_segment_source_data>'), 'translation does not receive a fresh semantic assignment');
         assert.ok(system.includes('STORY_CAUSALITY_TRANSLATION_V1'));
         assert.ok(!user.includes('随后二人前往庭院。'), 'English translates the approved Chinese, not fresh outside events');
-        assert.match(system, /以已确认的 sourcePrompt|保真已确认中文sourcePrompt/u);
+        assert.match(system, /以已确认sourcePrompt为唯一翻译来源|声音翻译与其格式修复以已确认的sourcePrompt为准/u);
         const translatedSource = readTranslationDocument(user).sourcePrompt;
         if (formatRepair) {
           for (const line of candidateChinese.replace('overall_soundscape:', 'invalid_soundscape:').split('\n').filter((line) => line.trim() && !line.startsWith('non_diegetic_music:'))) {
@@ -681,7 +695,13 @@ for (const { purpose, formatRepair } of [
           }
           assert.match(translatedSource, /overall_soundscape:\n仅呈现上述镜头/u);
           assert.match(translatedSource, /non_diegetic_music:\nN\/A$/u);
-        } else assert.equal(translatedSource, candidateChinese, 'completed source fields are translated without rewriting');
+        } else {
+          const canonicalLine = '旅人 (S1) says: <d>[Chinese] 先开门。</d>';
+          const expectedSource = candidateChinese.includes(canonicalLine) ? candidateChinese
+            : candidateChinese.replace(/\n+\[Shot 2\]/u, `\n${canonicalLine}\n[Shot 2]`);
+          assert.equal(translatedSource, expectedSource,
+            'completed source fields stay intact while a missing canonical dialogue is compiled once into H3');
+        }
         return mockEnglish(user);
       }
       assert.match(system, /同一次发话/u);

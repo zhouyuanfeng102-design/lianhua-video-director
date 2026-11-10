@@ -351,7 +351,7 @@ for (const characters of [7254, 19281, 25000]) {
       requests += 1;
       assert.equal(system, withVideoActionChoreographyScope(`${VIDEO_PROMPT_ENGLISH_TRANSLATION_SYSTEM_PROMPT}\n\n${H3_CLIP_TIME_RULE}\n本次只返回完整提示词正文，不返回JSON。\n\n${h3DescriptionLanguageRule('英文')}`, 'translation'));
       assertH3DescriptionLanguage(system, '英文');
-      assert.doesNotMatch(system + user, /7000|字符(?:上限|预算)|精简|unit_\d+|<h3_|"translations"/u);
+      assert.doesNotMatch(system + user, /7000|字符(?:上限|预算)|unit_\d+|<h3_|"translations"/u);
       return expected;
     },
   });
@@ -977,7 +977,7 @@ try {
     },
   });
   assert.equal(calls, 1);
-  assert.match(translated, /From 10\.60 to 14\.40 seconds[^\n]*夏提雅 \(S1\) speaks on-screen to 贝里尤洛: <d>\[Chinese\] 没错/u);
+  assert.match(translated, /From 10\.60 to 14\.40 seconds[^\n]*夏提雅 \(S1\) says: <d>\[Chinese\] 没错/u);
   assert.match(translated, /贝里尤洛[^\n]*Watches the red armor silently/u);
   assert.doesNotMatch(translated, /骷髅头盔|贝里尤洛 \(S\d+\)/u);
   assert.equal(delivered?.performance?.descriptionLanguage, 'en');

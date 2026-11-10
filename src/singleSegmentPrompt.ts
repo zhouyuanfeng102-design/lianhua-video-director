@@ -30,7 +30,7 @@ import {
   omitCopiedEnglishExamples,
 } from './h3PromptProtocol';
 import { createH3IdentityDeliveryReader, H3_IDENTITY_BINDINGS_RULE, H3_PERFORMANCE_DELIVERY_RULE, readH3DeliveryEnvelope } from './h3IdentityBindings';
-import { h3KeepsScore, h3MusicRequested, renderH3PerformancePlan } from './h3PerformancePlan';
+import { h3KeepsScore, h3MusicRequested, normalizeH3DialogueLanguageTags, renderH3PerformancePlan } from './h3PerformancePlan';
 import { serializeAuthoredH3Prompt, type H3SectionLayoutOptions } from './h3DeliverySections';
 import { VIDEO_STORY_PERFORMANCE_SEPARATION_RULE } from './videoInteractionRules';
 import type { PromptTranslationSourceDialogue, PromptTranslationSourceEvent } from './promptTranslationDocument';
@@ -309,7 +309,7 @@ const appendCanonicalDialoguesToH3 = (
         : dialogue.startSec !== undefined ? `At ${dialogue.startSec.toFixed(2)} seconds of this clip, ` : '';
       const annotation = dialogue.annotation ? ` ${dialogue.annotation}` : '';
       const text = `${time}${speaker || 'Voice source'} ${token}${annotation} says: <d>[${h3DialogueLanguage(dialogue.text)}] ${dialogue.text}</d>`;
-      return [{ text, dialogueText: dialogue.text, speakerKey: canonicalDialogueSpeakerKey(speaker, identityBindings) }];
+      return [{ text, dialogueText: dialogue.text, speaker, speakerKey: canonicalDialogueSpeakerKey(speaker, identityBindings) }];
     });
     if (!lines.length) continue;
     const markerIndex = shotMarkers.findIndex((marker) => Number(marker[1]) === shotNumber);
@@ -317,22 +317,23 @@ const appendCanonicalDialoguesToH3 = (
     const start = shotMarkers[markerIndex].index!;
     const end = shotMarkers[markerIndex + 1]?.index ?? body.length;
     const shotBody = body.slice(start, end);
-    const existingDialogueCounts = new Map<string, number>();
-    const parsedDialogues = getPromptDialogues(shotBody);
     const parsedTextCounts = new Map<string, number>();
-    for (const dialogue of parsedDialogues) {
-      const textKey = dialogueOccurrenceKey(dialogue.content, '');
-      parsedTextCounts.set(textKey, (parsedTextCounts.get(textKey) || 0) + 1);
-      const key = dialogueOccurrenceKey(dialogue.content, canonicalDialogueSpeakerKey(dialogue.speaker, identityBindings));
-      existingDialogueCounts.set(key, (existingDialogueCounts.get(key) || 0) + 1);
-    }
+    const existingDialogueCounts = new Map<string, number>();
     const rawTextCounts = new Map<string, number>();
+    let previousTagEnd = 0;
     for (const match of shotBody.matchAll(/<d>\[[^\]]+\]\s*([\s\S]*?)<\/d>/gu)) {
-      const textKey = dialogueOccurrenceKey(match[1], '');
+      const content = match[1].trim();
+      const textKey = dialogueOccurrenceKey(content, '');
+      parsedTextCounts.set(textKey, (parsedTextCounts.get(textKey) || 0) + 1);
       const occurrence = (rawTextCounts.get(textKey) || 0) + 1;
       rawTextCounts.set(textKey, occurrence);
-      if (occurrence <= (parsedTextCounts.get(textKey) || 0)) continue;
-      const key = dialogueOccurrenceKey(match[1], '');
+      const cue = shotBody.slice(previousTagEnd, match.index!);
+      previousTagEnd = match.index! + match[0].length;
+      const owners = lines.filter((line) => line.speaker && cue.includes(line.speaker))
+        .sort((left, right) => cue.lastIndexOf(right.speaker) - cue.lastIndexOf(left.speaker));
+      const key = owners[0]
+        ? dialogueOccurrenceKey(content, owners[0].speakerKey)
+        : dialogueOccurrenceKey(content, '');
       existingDialogueCounts.set(key, (existingDialogueCounts.get(key) || 0) + 1);
     }
     const canonicalOccurrences = new Map<string, number>();
@@ -368,7 +369,7 @@ export const renderDeliveredH3Performance = (delivery: ReturnType<typeof readH3D
   mode: 'integrated' | 'full-reference', layout: H3SectionLayoutOptions = {}, canonicalShots: readonly VideoShot[] = []): ReturnType<typeof readH3DeliveryEnvelope> => {
   const bindings = delivery.identityBindings;
   if (!bindings?.performance) {
-    const prompt = serializeAuthoredH3Prompt(delivery.h3Prompt, { ...layout, mode, language: 'zh' });
+    const prompt = serializeAuthoredH3Prompt(normalizeH3DialogueLanguageTags(delivery.h3Prompt), { ...layout, mode, language: 'zh' });
     return { ...delivery, h3Prompt: appendCanonicalDialoguesToH3(prompt, canonicalShots, mode, bindings, layout.audioMode) };
   }
   const matches = [...delivery.h3Prompt.matchAll(/^(subject_definitions|summary|retention_analysis|detailed_description|integrated_multimodal_description|overall_soundscape|non_diegetic_music)\s*[:：][ \t]*/gmu)];

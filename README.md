@@ -4,15 +4,15 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的工作台，提供 Windows 便携版和 Android 手机 APK。
 
-当前版本：**4.3.9** · 2026-11-10 · Windows x64 / Android
+当前版本：**4.4.0** · 2026-11-10 · Windows x64 / Android
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows EXE / Android APK](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-4.3.9.md) · [安卓安装说明](docs/android-install.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-4.4.0.md) · [安卓安装说明](docs/android-install.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
-1. 电脑下载 [Windows 便携版 EXE](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/download/v4.3.9/lianhua-video-director-4.3.9-windows-x64-portable.exe)，放在可写入的文件夹里双击运行；安卓手机下载 [Android APK](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/download/v4.3.9/lianhua-video-director-4.3.9-android.apk) 后安装。普通使用者无需安装开发环境。
+1. 电脑下载 [Windows 便携版 EXE](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/download/v4.4.0/lianhua-video-director-4.4.0-windows-x64-portable.exe)，放在可写入的文件夹里双击运行；安卓手机下载 [Android APK](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/download/v4.4.0/lianhua-video-director-4.4.0-android.apk) 后安装。普通使用者无需安装开发环境。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
 3. 导入 TXT / Markdown 分章原文或手动新建章节，选择章节后解析剧情，再进入导演台生成、编辑和导出提示词。导入不会自动调用 API 批量解析全书。
 
@@ -44,15 +44,15 @@
 - **自定义生图+反推图片提示词**：输入要求生成图片，或复用上传/资产库参考图，通过视觉 API 反推可复制的提示词与人物、物品、场景、风格详情。反推同步显示在聊天和资料任务，支持后台执行、停止、重试及项目保存恢复；原有生图支持原文直发或规则转换，结果自动入库。
 - **项目与资产管理**：管理图片、视频和音频，保存项目包、备份资料并导出提示词。
 
-## 最新更新 · v4.3.9
+## 最新更新 · v4.4.0
 
-- 从后面进入时，阴茎留在对方的阴道里，抽送时仍留在里面。
-- 手握住对方、嘴贴着嘴，也写这一端留在那一端上。
-- 只跟在身后、没有进入时，不写成插入。已保存的提示词和成片保持原样。
+- 新生成 H3 中文对白统一写成 `<d>[Chinese] 原话</d>`；主动英译时规范旧语言标签，保留对白原字和已保存中文稿。
+- 英文描述单元完整翻译，人物原名、对白和画面文字保持原字；稳定声线与单句语气分开，减少重复气声和断续修饰。
+- 仅在本次授权的新排程中为完整台词留出时间，不强制加速塞词。没有明确配乐时仍写 `non_diegetic_music: N/A`；当前 RunningHub 应用没有已确认可用的禁乐开关，不能保证上游结果完全没有背景音乐。
 
-后续常规版本持续双端交付；仅某一端独立 UI 调整使用明确单端参数。已有提示词和成片保持原样。
+本次没有新增运行时校验、拦截、重试、按钮或模型请求。后续常规版本持续双端交付；仅某一端独立 UI 调整使用明确单端参数。已有提示词和成片保持原样。
 
-[查看本版完整说明](docs/releases/发布说明-4.3.9.md) · [历史版本归档](docs/releases/README.md)
+[查看本版完整说明](docs/releases/发布说明-4.4.0.md) · [历史版本归档](docs/releases/README.md)
 
 ## 从源码运行
 

@@ -79,7 +79,7 @@ for (const sourcePrompt of [keyframeSource, omniSource]) {
         isCurrent: () => true,
         request: async (system: string, user: string) => {
           requests.push([system, user]);
-          assert.doesNotMatch(system + user, /7000|字符(?:上限|预算)|精简|h3_translation_units|h3_bounded_translation|unit_\d+|__LH_H3_NAME_|__LH_H3_DIALOGUE_|"translations"/u);
+          assert.doesNotMatch(system + user, /7000|字符(?:上限|预算)|h3_translation_units|h3_bounded_translation|unit_\d+|__LH_H3_NAME_|__LH_H3_DIALOGUE_|"translations"/u);
           return expected;
         },
       };
@@ -183,7 +183,7 @@ const documentH3 = await translateH3PromptWithinBudget({
     aiTranslationCalls += 1;
     assert.ok(system.includes(VIDEO_PROMPT_ENGLISH_DOCUMENT_TRANSLATION_SYSTEM_PROMPT.split('\n')
       .find((line) => line.startsWith('本次翻译采用来源文档'))!));
-    assert.match(system, /每个slot都要把其中所有可译的画面、动作、身份说明、摄影、光影和声音描述完整写成英文/u);
+    assert.match(system, /每个slot必须把所有可译的画面、动作、身份说明、摄影、光影和声音描述完整写成英文/u);
     const data = JSON.parse(user) as H3DescriptionRequest;
     assert.equal(data.sourcePrompt, omniSource);
     return JSON.stringify({ slots: data.slots.map((slot) => ({ id: slot.id, text: translateDescriptions(slot.sourceText) })) });
@@ -211,7 +211,7 @@ const h3DialogueSource = [
   'non_diegetic_music: N/A',
 ].join('\n');
 assert.equal(getH3PromptProtocolIssue(h3DialogueSource), undefined, 'H3 dialogue tags do not alter the existing section/shot protocol');
-assert.ok(H3_DIALOGUE_FORMAT_RULE.includes('(S1)') && H3_DIALOGUE_FORMAT_RULE.includes('<d>[中文]'), 'the official H3 rule names stable speaker IDs and language-tagged dialogue');
+assert.ok(H3_DIALOGUE_FORMAT_RULE.includes('(S1)') && H3_DIALOGUE_FORMAT_RULE.includes('<d>[Chinese]'), 'the official H3 rule names stable speaker IDs and language-tagged dialogue');
 assert.ok(H3_DIALOGUE_FORMAT_RULE.includes('<scenetrans>'), 'the official H3 rule covers dialogue spanning an existing cut');
 let h3DialogueCalls = 0;
 const translatedH3Dialogue = await translateVideoPromptToEnglish({
@@ -220,7 +220,7 @@ const translatedH3Dialogue = await translateVideoPromptToEnglish({
   clean: () => { throw new Error('H3 source dialogue must not enter full-body cleanup'); },
   request: async (system, user) => {
     h3DialogueCalls += 1;
-    assert.match(system, /<d>\[中文\]/u);
+    assert.match(system, /\[Chinese\]/u);
     assert.match(system, /<scenetrans>/u);
     const data = JSON.parse(user) as H3DescriptionRequest;
     assert.equal(data.sourcePrompt, h3DialogueSource);
@@ -240,6 +240,21 @@ for (const token of ['(S1)', '(S2)', '<d>[Chinese] 我把药草交给你，<scen
 }
 assert.doesNotMatch(translatedH3Dialogue, /主体：|空间：|光影：|镜头：|台词：|音效：/u, 'H3 translation does not become an ordinary six-field timeline');
 
+const legacyDialogueSource = h3DialogueSource.replaceAll('[Chinese]', '[中文]');
+let legacyDialogueCalls = 0;
+const translatedLegacyDialogue = await translateVideoPromptToEnglish({
+  promptFormat: 'h3', sourcePrompt: legacyDialogueSource,
+  clean: (value) => value.trim(),
+  request: async (_system, user) => {
+    legacyDialogueCalls += 1;
+    const data = JSON.parse(user) as H3DescriptionRequest;
+    return JSON.stringify({ slots: data.slots.map((slot) => ({ id: slot.id, text: slot.sourceText })) });
+  },
+});
+assert.equal(legacyDialogueCalls, 1, 'canonical language tags require no extra translation or review request');
+assert.equal(translatedLegacyDialogue, h3DialogueSource, 'explicit English translation canonicalizes only the old language tag while retaining speech, cuts and references');
+assert.ok(legacyDialogueSource.includes('<d>[中文] 我把药草交给你，<scenetrans></d>'), 'the saved Chinese source remains unchanged');
+
 let h3RepairCalls = 0;
 const repairedH3Dialogue = await repairH3PromptProtocolWithAi({
   formatReferencePrompt: h3DialogueSource,
@@ -247,8 +262,8 @@ const repairedH3Dialogue = await repairH3PromptProtocolWithAi({
   language: '中文',
   request: async (system, user) => {
     h3RepairCalls += 1;
-    assert.match(system, /稳定\(S1\)、\(S2\)/u);
-    assert.match(system, /<d>\[中文\]/u);
+    assert.match(system, /稳定的\(S1\)、\(S2\)/u);
+    assert.match(system, /<d>\[Chinese\]/u);
     const data = JSON.parse(user.match(/<h3_format_repair_data>\n([\s\S]+)\n<\/h3_format_repair_data>/u)![1]);
     assert.equal(data.requiredProtocol.shots.length, 2);
     return h3DialogueSource;

@@ -64,6 +64,11 @@ const delivery = { canonicalPrompt: revised, h3Prompt: zh, identityBindings: bin
 const emptyMetadata: H3StagingShotMetadata = { sourceBeatIds: [], sourceExcerpt: '', sourceLocationStatus: 'unlocated',
   nsfwContinuity: null, visiblePrivatePartsByCharacter: {} };
 const json = (user: string, tag: string) => JSON.parse(user.match(new RegExp(`<${tag}>\\s*([\\s\\S]*?)\\s*</${tag}>`, 'u'))![1]);
+const translatedSlots = (user: string, transform: (sourceText: string) => string = (sourceText) => sourceText): string => {
+  const data = JSON.parse(user) as { slots: Array<{ id: string; sourceText: string }> };
+  assert.ok(Array.isArray(data.slots));
+  return JSON.stringify({ slots: data.slots.map((slot) => ({ id: slot.id, text: transform(slot.sourceText) })) });
+};
 let count = 0;
 const test = async (name: string, run: () => void | Promise<void>) => { await run(); count += 1; console.log(`PASS ${name}`); };
 
@@ -164,13 +169,17 @@ await test('initial preserves source schedule through three existing stages whil
         // Extra model metadata has no authority to replan ordinary delivery.
         return JSON.stringify({ ...delivery, h3Prompt: initialZh });
       }
-      if (++translations === 1) assert.equal(json(user, 'translation_identity_data').sourcePrompt, initialZh);
-      else {
+      if (++translations === 1) {
+        const data = JSON.parse(user) as { sourcePrompt: string; slots: Array<{ id: string; sourceText: string }> };
+        assert.equal(data.sourcePrompt, initialZh);
+        assert.ok(Array.isArray(data.slots));
+        return JSON.stringify({ slots: data.slots.map((slot) => ({ id: slot.id, text: slot.sourceText.replaceAll('成年人。', 'adult.') })) });
+      } else {
         const data = json(user, 'review_data');
         assert.equal(data.sourcePrompt, initialZh); assert.equal(data.stagingContext.canonicalPrompt, original);
         assert.equal(data.stagingContext.shots[1].startSec, 11.5); assert.deepEqual(data.sourceIdentityBindings, bindings);
+        return JSON.stringify({ h3Prompt: initialEn, identityBindings: enBindings });
       }
-      return JSON.stringify({ h3Prompt: initialEn, identityBindings: enBindings });
     } });
   assert.deepEqual(stages, ['convert', 'review', 'translate']);
   assert.equal(result.finalPrompt, original); assert.equal(result.shots[1].startSec, 11.5);
@@ -185,12 +194,12 @@ await test('initial preserves source schedule through three existing stages whil
 await test('explicit dialogue repair bypasses converter even for confirmed old source and reuses review', async () => {
   const saved = applyOfficialH3Prompt(board, context); const stages: SingleSegmentPromptStage[] = [];
   const result = await generateSingleSegmentPrompt({ board: saved, context, purpose: 'dialogue-repair', skipConversion: true,
-    clean: (text) => text, request: async (system, _user, stage) => {
+    clean: (text) => text, request: async (system, user, stage) => {
       stages.push(stage); assert.notEqual(stage, 'convert');
       if (stage === 'review') { assert.ok(system.includes(H3_STAGING_DELIVERY_RULE)); return JSON.stringify(delivery); }
-      return JSON.stringify({ h3Prompt: en, identityBindings: enBindings });
+      return translatedSlots(user, (sourceText) => sourceText.replaceAll('成年人。', 'adult.'));
     } });
-  assert.deepEqual(stages, ['review', 'translate', 'translate']);
+  assert.deepEqual(stages, ['review', 'translate']);
   assert.equal(result.finalPrompt, revised); assert.equal(result.shots[1].startSec, 5);
 });
 
@@ -210,28 +219,39 @@ await test('an old English H3 candidate does not change Chinese delivery authori
   saved.targetOutput = { ...saved.targetOutput!, prompt: englishBody };
   const before = JSON.stringify(saved);
   const stages: SingleSegmentPromptStage[] = [];
-  let englishRequests = 0;
   const result = await generateSingleSegmentPrompt({
     board: saved, context, purpose: 'dialogue-repair', reviewWithAi: true, clean: (text) => text,
     request: async (system, user, stage) => {
       stages.push(stage);
-      assertH3DescriptionLanguage(system, stage === 'review' ? '中文' : '英文');
       if (stage === 'review') {
+        assertH3DescriptionLanguage(system, '中文');
         assert.equal(json(user, 'video_staging_review_data').candidatePrompt, englishBody,
           'the existing English candidate remains evidence instead of becoming language authority');
         return JSON.stringify({ canonicalPrompt: revised, h3Prompt: chineseBody, shotSourceIds: [['shot-0'], ['shot-1']] });
       }
-      englishRequests += 1;
-      assert.equal(englishRequests === 1 ? user : json(user, 'review_data').sourcePrompt, chineseBody,
-        'translation and its existing review receive the newly delivered Chinese, never the stale English candidate');
-      return englishBody;
+      assert.match(system, /每个slot必须把所有可译的画面、动作、身份说明、摄影、光影和声音描述完整写成英文/u);
+      assert.match(system, /对白语言标签使用官方英文语种名\[Chinese\]或\[English\]/u);
+      const translationRequest = JSON.parse(user) as { sourcePrompt: string };
+      assert.equal(translationRequest.sourcePrompt, chineseBody,
+        'the document translation receives the newly delivered Chinese, never the stale English candidate');
+      return translatedSlots(user, (sourceText) => sourceText
+        .replaceAll('放下杯子', 'puts down the cup')
+        .replaceAll('拿起地图', 'picks up the map')
+        .replaceAll('安静等候', 'waits quietly')
+        .replaceAll('说：', 'says ')
+        .replaceAll('递出地图并回答：', 'hands over the map and replies ')
+        .replaceAll('闭口倾听', 'listens without speaking')
+        .replaceAll('。', '.'));
     },
   });
-  assert.deepEqual(stages, ['review', 'translate', 'translate'], 'language selection adds no detector or extra model request');
+  assert.deepEqual(stages, ['review', 'translate'], 'language selection adds no detector or extra model request');
   assert.equal(result.officialPromptEnError || '', '');
   assert.equal(result.officialPromptZh, chineseBody);
   assert.equal(result.targetOutput?.prompt, chineseBody);
-  assert.equal(result.officialPromptEn, englishBody);
+  assert.ok(result.officialPromptEn?.includes('puts down the cup'));
+  assert.ok(result.officialPromptEn?.includes('hands over the map and replies'));
+  assert.ok(result.officialPromptEn?.includes('listens without speaking'));
+  assert.doesNotMatch(result.officialPromptEn || '', /放下杯子|拿起地图|安静等候|递出地图并回答|闭口倾听/u);
   assert.equal(result.officialPromptEnSource, chineseBody);
   for (const text of [result.officialPromptZh!, result.officialPromptEn!]) {
     assert.ok(text.includes('<d>[Chinese] 请把地图给我。</d>'));
@@ -240,7 +260,7 @@ await test('an old English H3 candidate does not change Chinese delivery authori
   assert.equal(JSON.stringify(saved), before, 'request processing does not mutate a saved legacy result');
 });
 
-await test('confirmed reused slice does not acquire replanning authority and legacy pure H3 remains compatible', async () => {
+await test('confirmed reused slice does not acquire replanning authority and H3 body can omit identity metadata', async () => {
   let expected = ''; const calls: SingleSegmentPromptStage[] = [];
   const result = await generateSingleSegmentPrompt({ board, context, skipConversion: true, reviewWithAi: true,
     clean: (text) => text, request: async (system, user, stage) => {
@@ -248,12 +268,14 @@ await test('confirmed reused slice does not acquire replanning authority and leg
       if (stage === 'review') {
         assert.ok(!system.includes(H3_STAGING_DELIVERY_RULE));
         const data = json(user, 'video_staging_review_data');
-        assert.equal(data.taskAuthority, 'preserve-confirmed-schedule'); expected = data.candidatePrompt; return expected;
+        assert.equal(data.taskAuthority, 'preserve-confirmed-schedule');
+        expected = data.candidatePrompt || applyOfficialH3Prompt(board, context).officialPromptZh!;
+        return expected;
       }
-      return expected;
+      return translatedSlots(user);
     } });
   assert.equal(result.finalPrompt, original); assert.equal(result.shots[1].startSec, 11.5);
-  assert.equal(result.h3IdentityBindings, undefined); assert.deepEqual(calls, ['review', 'translate', 'translate']);
+  assert.equal(result.h3IdentityBindings, undefined); assert.deepEqual(calls, ['review', 'translate']);
 });
 
 await test('malformed staging JSON is repaired through bounded same-stage retries and never saved partially', async () => {
@@ -314,7 +336,14 @@ await test('English metadata is translated in the existing call even when separa
   let requests = 0; let translated: H3IdentityBindings | undefined;
   const result = await translateVideoPromptToEnglish({ sourcePrompt: zh, identityBindings: bindings,
     onIdentityBindings: (value) => { translated = value; }, clean: () => { throw new Error('no local prose rewrite'); },
-    request: async (system) => { requests += 1; assertH3DescriptionLanguage(system, '英文'); assert.ok(system.includes(H3_CLIP_TIME_RULE)); return JSON.stringify({ h3Prompt: en, identityBindings: enBindings }); } });
+    request: async (system, user) => {
+      requests += 1;
+      assert.match(system, /每个slot必须把所有可译的画面、动作、身份说明、摄影、光影和声音描述完整写成英文/u);
+      assert.match(system, /对白语言标签使用官方英文语种名\[Chinese\]或\[English\]/u);
+      assert.ok(system.includes(H3_CLIP_TIME_RULE));
+      const data = JSON.parse(user) as { slots: Array<{ id: string; sourceText: string }> };
+      return JSON.stringify({ slots: data.slots.map((slot) => ({ id: slot.id, text: slot.sourceText.replaceAll('成年人。', 'adult.') })) });
+    } });
   assert.equal(requests, 1); assert.equal(result, en); assert.deepEqual(translated, enBindings);
 });
 
@@ -378,26 +407,23 @@ await test('provider refusal never becomes a JSON/story repair or consumes extra
   assert.ok(result.h3DeliveryWarnings?.some((warning) => warning.includes('AI复核未完成')));
 });
 
-await test('English initial/review/format phases share one three-retry transport and serialization budget', async () => {
+await test('English document translation remains a single slot request without an added retry', async () => {
   let translations = 0;
   const sourceBoard = { ...applyOfficialH3Prompt(sync, context), officialPromptZh: zh, h3IdentityBindings: bindings };
   sourceBoard.targetOutput = { ...sourceBoard.targetOutput!, prompt: zh };
   const result = await generateSingleSegmentPrompt({ board: sourceBoard, context, mode: 'translate-english', reviewWithAi: true,
     maxOutputTokens: 6000, clean: (text) => text,
-    request: async (system, _user, stage, transport) => {
-      assertH3DescriptionLanguage(system, '英文');
+    request: async (system, user, stage) => {
+      assert.match(system, /每个slot必须把所有可译的画面、动作、身份说明、摄影、光影和声音描述完整写成英文/u);
+      assert.match(system, /对白语言标签使用官方英文语种名\[Chinese\]或\[English\]/u);
       assert.equal(stage, 'translate'); translations += 1;
-      if (translations === 1) { assert.equal(transport?.maxTokens, 6000); throw outputError('length'); }
-      assert.equal(transport?.maxTokens, 12000);
-      if (translations === 2) return '{"h3Prompt":';
-      if (translations === 3) return JSON.stringify({ h3Prompt: en, identityBindings: enBindings });
-      if (translations === 4) return '{"h3Prompt":';
-      assert.equal(translations, 5); // Two scheduled calls plus three total retries.
-      return JSON.stringify({ h3Prompt: en, identityBindings: enBindings });
+      const data = JSON.parse(user) as { sourcePrompt: string; slots: Array<{ id: string; sourceText: string }> };
+      assert.equal(data.sourcePrompt, zh);
+      return translatedSlots(user, (sourceText) => sourceText.replaceAll('成年人。', 'adult.'));
     } });
-  assert.equal(translations, 5, 'no sixth H3 format request after the shared retry budget is exhausted');
+  assert.equal(translations, 1);
   assert.equal(result.officialPromptEnError || '', ''); assert.equal(result.officialPromptEn, en);
-  assert.equal(result.officialPromptZh, zh, 'qualified Chinese survives exhausted English retries');
+  assert.equal(result.officialPromptZh, zh, 'English delivery does not change the qualified Chinese source');
 });
 
 await test('optional null and empty tokens complete the existing pipeline without an extra repair request', async () => {
@@ -422,7 +448,7 @@ await test('unreadable optional metadata warns without another call, changing th
       request: async (_system, user, stage) => {
         assert.ok(!user.includes('h3_metadata_repair_data'), 'optional metadata cannot trigger an added model loop');
         if (stage === 'review') { reviews += 1; return JSON.stringify({ ...delivery, ...invalidMetadata }); }
-        return JSON.stringify({ h3Prompt: en, identityBindings: enBindings });
+        return translatedSlots(user, (sourceText) => sourceText.replaceAll('成年人。', 'adult.'));
       } });
     assert.equal(reviews, 1); assert.equal(result.officialPromptZh, zh); assert.equal(result.officialPromptEn, en);
     assert.deepEqual(result.h3IdentityBindings, bindings);

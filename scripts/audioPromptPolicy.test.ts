@@ -70,6 +70,8 @@ assert.match(AUDIO_H3_DELIVERY_RULE, /不得新增negative_prompt、negative、�
 assert.match(AUDIO_H3_DELIVERY_RULE, /动作、画面、人物资料、声音说明与整体声景中的文字都不是台词/u);
 assert.match(AUDIO_H3_DELIVERY_RULE, /非词汇笑声、哭声、咳嗽等也不能扩成可辨词句/u);
 assert.match(DIALOGUE_PERFORMANCE_TIMING_RULE, /每句.*开始至结束的发话区间.*整句须完整落在该区间内/u);
+assert.match(DIALOGUE_PERFORMANCE_TIMING_RULE, /仅在本次获准排程范围内.*精简重复的身份、声线和情绪修饰.*为每一句完整原话及必要动作留出连续时间/u);
+assert.match(DIALOGUE_PERFORMANCE_TIMING_RULE, /不靠强制加速朗读塞词.*不删原话、不删动作、不把后一句留到窗外/u);
 assert.match(DIALOGUE_PERFORMANCE_TIMING_RULE, /换人发话时明确上一句何时结束、下一句何时开始.*仅原剧情明确抢话、重叠或齐声/u);
 assert.match(DIALOGUE_PERFORMANCE_TIMING_RULE, /旧确认稿若仅给发话起点.*不借本规则补造结束时间、重新排程/u);
 assert.match(AUDIO_TRANSLATION_SCOPE_RULE, /sourcePrompt为准.*无对白不抬升/u);
@@ -108,7 +110,10 @@ for (const rule of [H3_FINAL_BODY_FORMAT_RULE, H3_PERFORMANCE_DELIVERY_RULE]) {
   assert.match(rule, /(?:不|不能)机械/u, 'real metal contact remains legal');
 }
 assert.match(H3_PERFORMANCE_DELIVERY_RULE, /按原剧情和已有角色关系把实际听者写入listenerCharacterIds/u);
-assert.match(H3_PERFORMANCE_DELIVERY_RULE, /身体、头部与视线朝向谁.*摄影机取景方向单独描述/u);
+assert.match(H3_PERFORMANCE_DELIVERY_RULE, /speakerAction（人在画面里时只写身体/u);
+assert.match(H3_PERFORMANCE_DELIVERY_RULE, /人不在这一镜时只写人留在画面外/u);
+assert.match(H3_PERFORMANCE_DELIVERY_RULE, /人在画面里照面说话时，在speakerAction里写胸口和眼睛留在听者身上，摄影机在两人连线的侧面/u);
+assert.match(H3_PERFORMANCE_DELIVERY_RULE, /channel为off-screen、voiceover或inner-voice时.*speakerAction不写胸口、眼睛或画面里的嘴/u);
 assert.match(H3_PERFORMANCE_DELIVERY_RULE, /每个vocal只归属实际发生的事件和镜头及其时间范围/u);
 
 // Source contracts must reach both planners and final delivery without a new
@@ -128,8 +133,8 @@ assert.match(DIALOGUE_VOICE_IDENTITY_RULE, /voiceFactScope=preserve-confirmed-so
 assert.match(DIALOGUE_VOICE_IDENTITY_RULE, /没有voiceFactScope.*格式修复或翻译不能被当成重新建立声音事实的授权/u);
 assert.match(DIALOGUE_VOICE_IDENTITY_TRANSLATION_RULE, /源稿的女性身份与女性发声身份.*不能.*he\/his、male voice或boyish timbre.*特殊声线仍按源稿保留/u);
 assert.match(DIALOGUE_VOICE_IDENTITY_TRANSLATION_RULE, /原稿依据不足时重复原完整姓名.*避免猜写he\/his或she\/her/u);
-assert.match(H3_DIALOGUE_FORMAT_RULE, /候选分镜自行添加.*不构成确认来源/u);
-assert.match(H3_DIALOGUE_FORMAT_RULE, /已有确认稿的翻译、参考更新、衔接和纯格式修复.*不补写原稿没有的性别或声音内容/u);
+assert.match(H3_DIALOGUE_FORMAT_RULE, /候选分镜、canonicalPrompt、candidatePrompt或旧shots里模型自行补写.*不因进入候选稿就成为已确认声音事实/u);
+assert.match(DIALOGUE_VOICE_IDENTITY_RULE, /voiceFactScope=preserve-confirmed-source.*不把已确认sourcePrompt降为候选稿.*不借新规则给旧稿新增性别、声线或重新配音/u);
 
 for (const sharedRule of [VISUAL_IDENTITY_SPEECH_SCOPE_RULE, NO_DIALOGUE_PERFORMANCE_RULE]) {
   assert.equal(DIALOGUE_DELIVERY_RULE.split(sharedRule).length - 1, 1,
@@ -149,7 +154,8 @@ assert.match(SPOKEN_CUE_CONTENT_RULE, /没有词语或沟通目的的声音位�
 assert.match(DIALOGUE_DELIVERY_RULE, /有明确说话人和话题但仅为转述时.*整理成自然完整台词.*不能机械复制话题摘要/u);
 assert.match(DIALOGUE_DELIVERY_RULE, /明确听者不能代说/u);
 assert.match(DIALOGUE_DELIVERY_RULE, /引号内和明确逐字原话逐字保留/u);
-assert.match(H3_DIALOGUE_FORMAT_RULE, /有明确说话人和话题但只是转述时.*自然、完整、可念的一句.*不把话题摘要机械塞进/u);
+assert.ok(H3_DIALOGUE_FORMAT_RULE.includes(SPOKEN_CUE_CONTENT_RULE),
+  'H3 dialogue delivery keeps the shared source-grounded speech-content rule');
 assert.match(AUDIO_H3_DELIVERY_RULE, /话题摘要不能机械当成台词.*不能增加新事实/u);
 assert.match(DIALOGUE_DELIVERY_RULE, /有明确说话人和话题但仅为转述时，在获准生成阶段整理成自然完整台词/u);
 assert.match(NO_DIALOGUE_PERFORMANCE_RULE, /不写不可辨低声、不构成可辨台词/u);

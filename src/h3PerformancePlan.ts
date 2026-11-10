@@ -127,10 +127,20 @@ const cutTime = (value: number): string => {
 };
 const dialogueLanguageTag = (value: string): string => {
   const token = value.trim();
-  if (/^(chinese|zh|zh-cn|中文)$/iu.test(token)) return '中文';
-  if (/^(english|en)$/iu.test(token)) return 'English';
-  return token || '中文';
+  if (/^(chinese|zh|zh-cn|中文)$/iu.test(token)) return 'Chinese';
+  if (/^(english|en|英文|英语)$/iu.test(token)) return 'English';
+  return token || 'Chinese';
 };
+
+/** Canonicalize H3 language labels without touching source-authored dialogue. */
+export const normalizeH3DialogueLanguageTags = (prompt: string): string => prompt.replace(
+  /(<d>\s*)\[([^\]\r\n]+)\]/giu,
+  (match, prefix: string, value: string) => {
+    if (/^(?:chinese|zh|zh-cn|中文)$/iu.test(value.trim())) return `${prefix}[Chinese]`;
+    if (/^(?:english|en|英文|英语)$/iu.test(value.trim())) return `${prefix}[English]`;
+    return match;
+  },
+);
 /** Color, material, light and texture only. A custom name with no such clauses stays whole. */
 export const h3PictureStyleLine = (value: string | undefined, en: boolean): string => {
   const raw = (value || '').trim().replace(/^(?:画面风格|视觉风格|Picture style)\s*[:：]\s*/u, '');
@@ -798,8 +808,8 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
     const shownAfter = authored(lifted.after);
     return [marker, !index ? integratedOpening : '', shownBefore ? sentence(shownBefore, language) : '', mouthsQuiet, pose, chain, hands, pairedHands, axisLine, ...lifted.lines, ...shot.events.map((event) => renderEvent(event, shot)), shownAfter ? sentence(shownAfter, language) : ''].filter(Boolean).join('\n');
   });
-  const body = [fullReference ? preamble : '', ...shots]
-    .filter(Boolean).join('\n\n');
+  const body = normalizeH3DialogueLanguageTags([fullReference ? preamble : '', ...shots]
+    .filter(Boolean).join('\n\n'));
   const definitions = [...renderedCharacters.map((entry) => entry.referenceAnchor), ...voiceOnlyDefinitions];
   if (input.subjectDefinitions?.trim()) definitions.push(input.subjectDefinitions.trim());
   const pictureRoles: Record<string, string> = {

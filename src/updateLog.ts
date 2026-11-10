@@ -15,6 +15,16 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "4.4.0",
+    releasedAt: "2026-11-10",
+    title: "对白标签统一，声线与语气分开",
+    highlights: [
+      "新生成H3中文对白统一使用[Chinese]；主动英译规范旧标签，保留原话和已保存中文稿。",
+      "英文描述完整翻译，稳定声线与单句语气分开，保留剧情明确的非语言声音。",
+      "获准的新排程为完整台词留时间，不强制加速塞词；当前RunningHub应用仍无已确认可用的禁乐开关。",
+    ],
+  },
+  {
     version: "4.3.9",
     releasedAt: "2026-11-10",
     title: "进入写两端还连着",

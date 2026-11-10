@@ -1,9 +1,21 @@
 import assert from 'node:assert/strict';
-import { h3PerformanceSpeakerTokens, normalizeH3PerformancePlan, parseH3PerformancePlan, renderH3PerformancePlan } from '../src/h3PerformancePlan';
+import { h3PerformanceSpeakerTokens, normalizeH3DialogueLanguageTags, normalizeH3PerformancePlan, parseH3PerformancePlan, renderH3PerformancePlan } from '../src/h3PerformancePlan';
 import { H3_EXISTING_SOUND_SUMMARY_ZH } from '../src/h3DeliverySections';
 import { H3_PERFORMANCE_DELIVERY_RULE } from '../src/h3IdentityBindings';
+import { DIALOGUE_PERFORMANCE_TIMING_RULE } from '../src/audioPromptPolicy';
 import { readH3PromptProtocol } from '../src/h3PromptProtocol';
 import type { H3IdentityBindings, H3PerformancePlan } from '../src/types';
+
+const savedDialogue = '<d>[中文] 原话 [中文] 与标点……<scenetrans></d>';
+assert.equal(normalizeH3DialogueLanguageTags(savedDialogue), '<d>[Chinese] 原话 [中文] 与标点……<scenetrans></d>');
+assert.equal(savedDialogue, '<d>[中文] 原话 [中文] 与标点……<scenetrans></d>', 'new output formatting does not mutate the saved source');
+assert.equal(normalizeH3DialogueLanguageTags('<d>[zh-cn] 原话</d> <d>[英语] Hello.</d> <d>[Japanese] はい。</d>'),
+  '<d>[Chinese] 原话</d> <d>[English] Hello.</d> <d>[Japanese] はい。</d>');
+for (const rule of [DIALOGUE_PERFORMANCE_TIMING_RULE, H3_PERFORMANCE_DELIVERY_RULE]) {
+  assert.match(rule, /不靠强制加速朗读塞词/u, 'existing planning calls protect intelligible speech instead of forcing a faster reading');
+  assert.match(rule, /不删原话、不删动作、不把后一句留到窗外/u, 'speech clarity cannot discard the rest of the assigned story');
+  assert.doesNotMatch(rule, /固定时长装不下时按先后加快/u);
+}
 
 const characters: H3IdentityBindings['characters'] = [
   { characterId: 'wolf', name: '贝里尤洛', speakerToken: '(S1)', referenceAnchor: '旧贝里尤洛 (S1)' },
@@ -84,7 +96,7 @@ test('segment 5 renders the complete command with its owner, lip action and sile
   assert.doesNotMatch(command, /贝里尤洛 \(S1\) keeps their mouth closed/u);
   assert.match(command, /From 10\.60 to 14\.40 seconds of this clip, 夏提雅 \(S2\), the established voice, says:/u);
   assert.doesNotMatch(command, /lips move with the words|speaks on-screen/u);
-  assert.match(command, /<d>\[中文\] 没错，我们的君王是为了支配你们而来的，下跪低头吧。<\/d>/u);
+  assert.match(command, /<d>\[Chinese\] 没错，我们的君王是为了支配你们而来的，下跪低头吧。<\/d>/u);
   assert.match(command, /夏提雅 keeps the chest and eyes toward 贝里尤洛/u);
   assert.match(command, /贝里尤洛 listens without speaking, with no speaking lip movement/u);
   assert.match(command, /亚乌拉 remains silent: watches the exchange/u);
@@ -137,7 +149,7 @@ test('explicit voiceover, internal voice, non-verbal voice and simultaneous spee
   assert.doesNotMatch(rendered.prompt, /Voice identity: 叙述者 \(S1\)/u);
   assert.match(rendered.prompt, /叙述者 \(S1\), the established narration voice, with the voice referenced from <Audio 4>, says in an off-screen voiceover/u);
   assert.equal(rendered.prompt.match(/says in an off-screen voiceover/gu)?.length, 1);
-  assert.match(rendered.prompt, /亚乌拉 \(S3\) says: <d>\[中文\] 原来如此。<\/d>/u);
+  assert.match(rendered.prompt, /亚乌拉 \(S3\) says: <d>\[Chinese\] 原来如此。<\/d>/u);
   assert.match(rendered.prompt, /The mouths already in the picture stay closed/u);
   assert.match(rendered.prompt, /remains outside this shot/u);
   assert.doesNotMatch(rendered.prompt, /speaks from off-screen|speaks on-screen|is heard in an explicitly authored inner voice/u);
@@ -153,8 +165,8 @@ test('authored cross-cut dialogue keeps one voice and only the authored word spl
     { shotIndex: 2, startSec: 2, visualDescription: 'The authored reverse angle.', events: [{ eventId: 'd-b', kind: 'speech', dialogueId: 'd', speakerCharacterIds: ['shalltear'], channel: 'off-screen', language: 'Chinese', text: '下跪低头吧。', startSec: 0, endSec: 1.5, continuesFromPreviousShot: true }] },
   ], overallSoundscape: 'N/A', nonDiegeticMusic: 'N/A' };
   const rendered = renderH3PerformancePlan({ plan, characters, language: 'en' });
-  assert.match(rendered.prompt, /<d>\[中文\] 没错，<scenetrans><\/d>/u);
-  assert.match(rendered.prompt, /<d>\[中文\] <scenetrans>下跪低头吧。<\/d>/u);
+  assert.match(rendered.prompt, /<d>\[Chinese\] 没错，<scenetrans><\/d>/u);
+  assert.match(rendered.prompt, /<d>\[Chinese\] <scenetrans>下跪低头吧。<\/d>/u);
   assert.equal(rendered.prompt.match(/<scenetrans>/gu)?.length, 2);
   assert.doesNotMatch(rendered.prompt, /<cutoff>/u);
   assert.equal(rendered.speakerTokens.get('shalltear'), '(S1)');
@@ -195,7 +207,7 @@ test('a hidden mouth is closed on everyone else before the line reaches the spea
   const speechAt = line.indexOf('says:');
   assert.ok(closedAt >= 0 && speechAt > closedAt);
   assert.doesNotMatch(line, /能看清千仞雪的嘴/u);
-  assert.match(line, /<d>\[中文\] 唐三，你还要让我等多久？<\/d>/u);
+  assert.match(line, /<d>\[Chinese\] 唐三，你还要让我等多久？<\/d>/u);
   assert.doesNotMatch(line, /玉小刚 says:|玉小刚的嘴张开|lips move with the words/u);
 });
 
@@ -328,7 +340,7 @@ test('a repeated line is spoken again and a late line stays inside the clip', ()
     language: 'zh',
     durationSec: 15,
   });
-  assert.equal(rendered.prompt.match(/<d>\[中文\] 还要多久。<\/d>/gu)?.length, 2);
+  assert.equal(rendered.prompt.match(/<d>\[Chinese\] 还要多久。<\/d>/gu)?.length, 2);
   assert.match(rendered.prompt, /<\/d>\n这张嘴保持闭合。/u);
   assert.match(rendered.prompt, /没有人说台词时，画面里的嘴保持闭合/u);
   assert.doesNotMatch(rendered.prompt, /<\/d>。/u);
@@ -348,7 +360,7 @@ test('a line buried in a behind-view shot is spoken from the readable mouth', ()
     characters: [{ characterId: 'qian', name: '千仞雪', referenceAnchor: '千仞雪' }],
     language: 'zh',
   });
-  const saysAt = rendered.prompt.indexOf('千仞雪 (S1) says: <d>[中文] 唐三，你还要让我等多久？</d>');
+  const saysAt = rendered.prompt.indexOf('千仞雪 (S1) says: <d>[Chinese] 唐三，你还要让我等多久？</d>');
   const closedAt = rendered.prompt.indexOf('说完后她的嘴唇闭合');
   assert.ok(saysAt >= 0 && closedAt > saysAt);
   assert.doesNotMatch(rendered.prompt, /能看清千仞雪的嘴/u);
@@ -385,7 +397,7 @@ test('a hold through the line does not cover the spoken seconds', () => {
     characters: [{ characterId: 'qian', name: '千仞雪', referenceAnchor: '千仞雪' }],
     language: 'en',
   });
-  const saysAt = rendered.prompt.indexOf('Qian Renxue (S1) says: <d>[中文] 唐三，你还要让我等多久？</d>');
+  const saysAt = rendered.prompt.indexOf('Qian Renxue (S1) says: <d>[Chinese] 唐三，你还要让我等多久？</d>');
   assert.ok(saysAt >= 0);
   assert.doesNotMatch(rendered.prompt, /This torso remains connected from these shoulders to these hips/u);
   assert.doesNotMatch(rendered.prompt, /through her line|does not move|Identity: 千仞雪 \(S1\)|that framing ends|This view ends before the line/u);
@@ -413,7 +425,7 @@ test('a hold through the line does not cover the spoken seconds', () => {
   });
   assert.match(again.prompt, /Identity: 千仞雪:/u);
   assert.doesNotMatch(again.prompt, /Identity: 千仞雪 \(S1\)|台词：无|does not move|唐三，你还要让我等多久？(?!<\/d>)/u);
-  assert.match(again.prompt, /千仞雪 \(S1\) says: <d>\[中文\] 唐三，你还要让我等多久？<\/d>/u);
+  assert.match(again.prompt, /千仞雪 \(S1\) says: <d>\[Chinese\] 唐三，你还要让我等多久？<\/d>/u);
   assert.match(again.prompt, /\[Shot 2\] At 00:05\.000/u);
   assert.doesNotMatch(again.prompt, /that framing ends|玉小刚's mouth closes again/u);
   assert.match(again.prompt, /玉小刚 keeps their mouth closed/u);
@@ -492,8 +504,8 @@ test('a line timed before its shot is played inside that shot, and the story doe
     ],
     language: 'zh',
   });
-  assert.match(rendered.prompt, /<d>\[中文\] 是你吗？<\/d>/u);
-  assert.match(rendered.prompt, /<d>\[中文\] 你终于来了，我等你很久了。<\/d>/u);
+  assert.match(rendered.prompt, /<d>\[Chinese\] 是你吗？<\/d>/u);
+  assert.match(rendered.prompt, /<d>\[Chinese\] 你终于来了，我等你很久了。<\/d>/u);
   assert.match(rendered.prompt, /本段9\.00–12\.50秒/u);
   assert.match(rendered.prompt, /玉小刚按在腰侧/u);
   assert.match(rendered.prompt, /From 9\.00 to 12\.50|本段9\.00–12\.50秒，玉小刚 \(S2\)/u);
