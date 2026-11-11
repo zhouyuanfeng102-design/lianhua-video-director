@@ -12,6 +12,7 @@ import { SPATIAL_COORDINATE_RULE, SPATIAL_TRANSLATION_RULE } from '../src/spatia
 import { requestTextModel } from '../src/services/llm';
 import type { H3IdentityBindings, TextApiConfig } from '../src/types';
 import {
+  endWithBehindBodyTranslation,
   translateVideoPromptToEnglish,
   VIDEO_PROMPT_ENGLISH_AI_REVIEW_SYSTEM_PROMPT,
   VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT,
@@ -45,7 +46,7 @@ const english = await translateVideoPromptToEnglish({
 
 assert.equal(
   receivedSystemPrompt,
-  withVideoActionChoreographyScope(`${VIDEO_PROMPT_ENGLISH_TRANSLATION_SYSTEM_PROMPT}\n本次只返回完整提示词正文，不返回JSON。`, 'translation'),
+  endWithBehindBodyTranslation(withVideoActionChoreographyScope(`${VIDEO_PROMPT_ENGLISH_TRANSLATION_SYSTEM_PROMPT}\n本次只返回完整提示词正文，不返回JSON。`, 'translation')),
   'body-only callers receive the shared translation rules plus one explicit body output contract',
 );
 assert.match(
@@ -349,7 +350,7 @@ for (const characters of [7254, 19281, 25000]) {
     clean: (value) => value.trim(),
     request: async (system, user) => {
       requests += 1;
-      assert.equal(system, withVideoActionChoreographyScope(`${VIDEO_PROMPT_ENGLISH_TRANSLATION_SYSTEM_PROMPT}\n\n${H3_CLIP_TIME_RULE}\n本次只返回完整提示词正文，不返回JSON。\n\n${h3DescriptionLanguageRule('英文')}`, 'translation'));
+      assert.equal(system, endWithBehindBodyTranslation(withVideoActionChoreographyScope(`${VIDEO_PROMPT_ENGLISH_TRANSLATION_SYSTEM_PROMPT}\n\n${H3_CLIP_TIME_RULE}\n本次只返回完整提示词正文，不返回JSON。\n\n${h3DescriptionLanguageRule('英文')}`, 'translation')));
       assertH3DescriptionLanguage(system, '英文');
       assert.doesNotMatch(system + user, /7000|字符(?:上限|预算)|unit_\d+|<h3_|"translations"/u);
       return expected;
@@ -395,7 +396,7 @@ const genericWithoutBudget = await translateVideoPromptToEnglish({
   clean: (value) => value.trim(),
   request: async (system, user) => {
     genericCalls += 1;
-    assert.equal(system, withVideoActionChoreographyScope(`${VIDEO_PROMPT_ENGLISH_TRANSLATION_SYSTEM_PROMPT}\n本次只返回完整提示词正文，不返回JSON。`, 'translation'));
+    assert.equal(system, endWithBehindBodyTranslation(withVideoActionChoreographyScope(`${VIDEO_PROMPT_ENGLISH_TRANSLATION_SYSTEM_PROMPT}\n本次只返回完整提示词正文，不返回JSON。`, 'translation')));
     assert.equal(user, '普通场景。');
     return 'An ordinary scene. '.repeat(600);
   },

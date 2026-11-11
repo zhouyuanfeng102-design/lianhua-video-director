@@ -2753,8 +2753,8 @@ const renderModelAuthoredTimelineShot = (
     authoredTimelineAtom(shot.action),
     continuityOut ? `交接下一段〔${authoredTimelineAtom(continuityOut)}〕` : '',
   ].filter(Boolean).join('；');
-  const space = authoredTimelineAtom(shot.space) || '沿用本镜动作中的地点与空间关系';
-  const direction = authoredTimelineAtom(shot.direction) || '按本镜动作与摄影描述';
+  const space = authoredTimelineAtom(shot.space);
+  const direction = authoredTimelineAtom(shot.direction);
   const lighting = [authoredTimelineAtom(shot.lighting), visualStyle].filter(Boolean).join(' ');
   const camera = [authoredTimelineAtom(shot.camera), shot.transition ? `切换〔${authoredTimelineAtom(shot.transition)}〕` : ''].filter(Boolean).join('；');
   const dialogue = audioMode === 'none' ? '无'
@@ -2762,8 +2762,9 @@ const renderModelAuthoredTimelineShot = (
   // Keep authored sound layers and their original timestamps verbatim; no
   // ambient-noise regex, inferred foley, clamping, or local music selection.
   const sound = audioMode === 'none' ? '无（按用户静音设置）' : shot.sound.replace(/[\r\n\t]+/gu, ' ').trim();
-  const purpose = [authoredTimelineAtom(shot.purpose), shot.result ? `镜尾状态〔${authoredTimelineAtom(shot.result)}〕` : ''].filter(Boolean).join('；');
-  return `【${start}s-${end}s】 主体：@${subject}（${performance}）[朝向：${direction}] 正在 [${action}]（${purpose}）；空间：[${space}]；光影：[${lighting}]；镜头：[${camera}]；台词：${dialogue}；音效：${sound}`;
+  const facing = direction ? `[朝向：${direction}] ` : '';
+  const place = space ? `空间：[${space}]；` : '';
+  return `【${start}s-${end}s】 主体：@${subject}（${performance}）${facing}${place}正在 [${action}]；光影：[${lighting}]；镜头：[${camera}]；台词：${dialogue}；音效：${sound}`;
 };
 
 const renderTimelineShot = (

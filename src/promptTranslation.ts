@@ -48,7 +48,15 @@ export interface TranslateVideoPromptToEnglishOptions {
   stagingContext?: Readonly<Record<string, unknown>>;
 }
 
+export const BEHIND_BODY_TRANSLATION = '英文第一句写成 Her face points one way and her hips point the opposite way. Her head stays at one end of her back and her hips stay at the other end. He remains on the back side of that line, and his head remains on his own neck. His tongue remains in his mouth. 分镜标题不译进这第一句。原文没有写阴蒂特写时，不译成从两腿中间看阴蒂。';
+
+/** The choreography wrapper moves its own rule to the end. Call this after that wrapper. */
+export const endWithBehindBodyTranslation = (system: string): string => (
+  system.endsWith(BEHIND_BODY_TRANSLATION) ? system : `${system}\n\n${BEHIND_BODY_TRANSLATION}`
+);
+
 const VIDEO_PROMPT_ENGLISH_TRANSLATION_RULES = [
+  BEHIND_BODY_TRANSLATION,
   '你是专业的视频生成提示词翻译器。只将画面、动作、环境与音效描述翻译成自然、准确的英文，人物对白的原语言不随提示词描述语言改变。',
   '只翻译sourcePrompt已采用的场面：事件阶段、世界关系、行动与末态先成立，摄影和可见身份按原稿逐项传递；sceneStaging与人物档案只帮助理解，不重排身体朝向、视线、动作对象、cameraTarget或动作终点。保留原有镜数、切点、姓名、因果、对白、字段和参考关系，不在翻译阶段重新导演。',
   '若输入是 MiniMax H3 官方格式，严格保留全部官方 section 的名称与顺序、每个 [Shot N] 标记、<Subject N>/<Picture N>/<Video N>/<Audio N> 引用及镜头切点。',
@@ -58,7 +66,7 @@ const VIDEO_PROMPT_ENGLISH_TRANSLATION_RULES = [
   VIDEO_ACTING_CAMERA_TRANSLATION_RULE,
   VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE,
   '以上衣着规则在翻译阶段只用于忠实保持 sourcePrompt 已确认的穿着、遮挡、可见范围和有剧情依据的变化；stagingContext 与人物资料是理解上下文的证据，不是新增画面内容。普通亲吻、拥抱或隔衣触碰不能在译文中变成脱衣；原文明示的换装也不能被人物资料的旧 outfit 覆盖。',
-  '声音只忠实翻译现有事件，不把“无”、N/A、安静背景或声音间隙扩写成连续底噪、room tone、hiss或持续风声/水声；不得自行补配乐。中文non_diegetic_music这一行是N/A时，英文原样留下N/A，不译成None、no music或一句配乐，也不因为导演分类或画面风格补上音乐。源稿 [Shot 1] 开头已有的画面风格原句保留，译成色彩、材质、光影和质感，不删掉，也不译成配乐。回答画面里某个人时，脸留在那个人身上，译成 Her face remains toward him. The camera stays beside the line between them. 不译成 front view、faces forward、faces the camera 或 in front of her。他在她身后的舔、含、舌、碾、磨、抬、进入、滑入、抵上或抽送译成：Her head remains on her neck, her chest and back remain on her torso, and that torso remains joined to her hips. The vulva stays on those hips and points the same way as the hips. He remains behind her, with his chest toward her back and his face toward her back. His tongue remains in his mouth. His penis remains on his body, enters from behind her hips, and remains inside her vagina. 不把分镜标题译成对着镜头的下身特写，也不把他译成站在下身前面。原文明确要求的背景音乐必须保留，并忠实保留低音量、让位于对白和动作声的混音要求。',
+  '声音只忠实翻译现有事件，不把“无”、N/A、安静背景或声音间隙扩写成连续底噪、room tone、hiss或持续风声/水声；不得自行补配乐。中文non_diegetic_music这一行是N/A时，英文原样留下N/A，不译成None、no music或一句配乐，也不因为导演分类或画面风格补上音乐。源稿 [Shot 1] 开头已有的画面风格原句保留，译成色彩、材质、光影和质感，不删掉，也不译成配乐。回答画面里某个人时，脸留在那个人身上，译成 Her face remains toward him. The camera stays beside the line between them. 不译成 front view、faces forward、faces the camera 或 in front of her。他在她身后的舔、含、舌、碾、磨、抬、进入、滑入、抵上或抽送译成：Her face points one way and her hips point the opposite way. Her head stays at one end of her back and her hips stay at the other end. He remains on the back side of that line, and his head remains on his own neck. His tongue remains in his mouth. His penis remains on his body, enters from behind her hips, and remains inside her vagina. The camera remains on his side of that line and sees his back and her back. 不把分镜标题译成从两腿中间看阴蒂。原文明确要求的背景音乐必须保留，并忠实保留低音量、让位于对白和动作声的混音要求。',
   '以下共享声音规则只用于保持源稿已有声源、时序和混音意图，不授权翻译阶段新增原稿没有的动作或声音。',
   AUDIO_TRANSLATION_SCOPE_RULE,
   DIALOGUE_VOICE_IDENTITY_TRANSLATION_RULE,
@@ -70,6 +78,7 @@ const VIDEO_PROMPT_ENGLISH_TRANSLATION_RULES = [
   '默认保留每句对白的原字、原语言、出现顺序、说话人原名和相对时间；中文对白仍用中文说，其他语言及已有英文对白也原样保留。不能把边缘划水等人物代号意译成 Edge Drifter。',
   '只有该句对白紧邻的原稿标注明确要求“用英语说”“英文对白”等，才翻译这一句对白为英文；“用英文写提示词”“不要英文对白”“学英语”不是改对白语言的授权。普通非对白说明中的引号内容照常翻译，不能保留未翻译的中文描述；原稿明确要求实际出现在标牌、屏幕等画面中的文字保持原字，仅翻译外围说明。',
   '描述为英文、对白保持指定语言。H3英译中的普通说明、镜头叙述、身份外貌说明、动作、运镜、时间说明和声景均须使用完整英文，不能将中文或中英混写的叙述原样留在英文稿。人物原名、对白原词和画中文字按对应规则保留。新写的H3语言标签使用官方英文语种名[Chinese]或[English]，不输出[中文]、[英文]作为语言标签。不要添加解释、标题或代码围栏；外层返回形状按本次交付协议执行。',
+  BEHIND_BODY_TRANSLATION,
 ];
 
 /** Compatibility path for callers that explicitly retain token protection. */
@@ -102,8 +111,9 @@ export const VIDEO_PROMPT_ENGLISH_DOCUMENT_TRANSLATION_SYSTEM_PROMPT = [
  * still receive translation/staging review without being told to invent H3
  * sections. */
 const VIDEO_PROMPT_ENGLISH_AI_REVIEW_BASE_SYSTEM_PROMPT = [
+  BEHIND_BODY_TRANSLATION,
   '你是视频提示词的独立 AI 校验与修复器。本次是另一次 API 调用，不是要求用户自行检查或手动修复。',
-  ...VIDEO_PROMPT_ENGLISH_TRANSLATION_RULES.slice(1),
+  ...VIDEO_PROMPT_ENGLISH_TRANSLATION_RULES.slice(2),
   '对照 sourcePrompt 完整原稿，亲自逐镜校验 candidateEnglishPrompt 候选译文：主体与姓名、身份与指代、动作及因果、摄影与运镜、时间戳与切点、字段顺序、镜头数量和参考图/视频/音频关系。人物中文原名不能因罗马音、英文意译或代词替换而失去对应身份。',
   '亲自逐句核对全部对白的原字、原语言、说话人、顺序、所属镜头与相对时刻；默认保持原语言对白，不把中文对白擅自翻成英文，不改变说话人，不新增台词。只有原稿对该句有明确语言授权才按授权翻译。',
   '本阶段以已确认的 sourcePrompt 为翻译依据，stagingContext 仅帮助理解原镜头与人物，不授权再次改剧情、重排镜界或虚构机位。检查中文稿已有的声音—口型绑定、逐镜空间/朝向与转身过渡是否在英文中原样成立；修复翻译造成的遗漏和矛盾，不对中文稿另作本地推断。',
@@ -293,6 +303,7 @@ export const translateVideoPromptToEnglish = async ({
             .replace('H3字段、切点和原语言对白保持不变。', 'Seedance 章节、已确认起止时间和原语言对白保持不变。'));
       }
       scopedSystem = withVideoActionChoreographyScope(scopedSystem, 'translation', promptFormat === 'seedance' ? 'seedance' : undefined);
+      if (promptFormat !== 'seedance') scopedSystem = endWithBehindBodyTranslation(scopedSystem);
       const response = await request(scopedSystem, user,
         (includesStagingContext && stagingContext) || serializationRepair || sourceDocumentTranslation ? {
           ...(includesStagingContext && stagingContext ? { includesStagingContext: true as const } : {}),

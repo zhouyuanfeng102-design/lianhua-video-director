@@ -15,6 +15,26 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "4.5.3",
+    releasedAt: "2026-11-11",
+    title: "第一句先写人和身后",
+    highlights: [
+      "分镜标题不再接进交给模型的第一句动作。",
+      "身体和身后的三句放在分镜和英文翻译的开头和结尾。",
+      "已保存的成片要重新生成提示词才会改。",
+    ],
+  },
+  {
+    version: "4.5.2",
+    releasedAt: "2026-11-11",
+    title: "头和髋分在背的两头",
+    highlights: [
+      "她的脸朝向一个方向，髋朝向相反方向，背在头和髋之间。",
+      "他的头留在他自己的脖子上，人留在她的背这一侧。",
+      "镜头站在他身后这一侧。已保存的成片要重新生成提示词才会改。",
+    ],
+  },
+  {
     version: "4.5.1",
     releasedAt: "2026-11-11",
     title: "分镜改写留住原文的人和身后",

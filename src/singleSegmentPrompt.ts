@@ -17,7 +17,7 @@ import {
 import { buildBudgetedOfficialH3References } from './officialReferenceBudget';
 import { h3MediaModeForReferences, h3PromptModeForReferences, type PromptReferenceInput } from './promptAdapters';
 import { visualStyleDefinitions } from './visualStyles';
-import { translateVideoPromptToEnglish } from './promptTranslation';
+import { endWithBehindBodyTranslation, translateVideoPromptToEnglish } from './promptTranslation';
 import { createRuntimeErrorLogEntry } from './runtimeErrorLog';
 import { resolveConfirmedMasterSliceSource, type ConfirmedMasterSliceSourceContext } from './confirmedMasterSliceSource';
 import { VIDEO_DIALOGUE_STAGING_RULE, VIDEO_SPATIAL_CONTINUITY_RULE, VIDEO_WARDROBE_SCOPE_RULE, VIDEO_STAGING_TRANSCRIPTION_RULE, VIDEO_PROMPT_FOCUS_RULE, VIDEO_SEQUENCE_TEXT_HANDOFF_RULE, VIDEO_SEQUENCE_TEXT_HANDOFF_TRANSLATION_RULE, VIDEO_SEQUENCE_TEXT_HANDOFF_UNLABELLED_ACTOR_RULE, VIDEO_SELECTED_STYLE_DELIVERY_RULE, selectedVideoStyleFields } from './videoConversionRules';
@@ -524,6 +524,7 @@ export async function generateSingleSegmentPrompt(
       // not turn an explicit fresh conversion into preservation of old prose.
       scopedSystem = withVideoActionChoreographyScope(scopedSystem, stage === 'translate' ? 'translation'
         : canReplanStaging && stage === 'review' && !formatOnly && !serializationRepair ? 'generation' : 'format-only');
+      if (stage === 'translate' && !seedance) scopedSystem = endWithBehindBodyTranslation(scopedSystem);
       for (;;) {
         const allowance = stage === 'convert' || seedance ? undefined : allowances[stage];
         try {
