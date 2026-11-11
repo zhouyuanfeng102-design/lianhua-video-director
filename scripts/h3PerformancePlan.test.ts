@@ -62,7 +62,8 @@ test('segment 4 converts the declared shot clock once and never voices the sourc
   assert.equal(JSON.stringify(segment4), untouched);
   assert.match(rendered.prompt, /本段11\.50–13\.10秒，亚乌拉 \(S2\)，已确认的女性声线，says:/u);
   assert.doesNotMatch(rendered.prompt, /人物身份: 贝里尤洛 \(S1\)|人物身份: 亚乌拉 \(S2\)/u);
-  assert.match(rendered.prompt, /亚乌拉的胸口和眼睛留在贝里尤洛与夏提雅身上，摄影机在两人连线的侧面/u);
+  assert.match(rendered.prompt, /贝里尤洛走到两人面前/u);
+  assert.doesNotMatch(rendered.prompt, /亚乌拉的胸口和眼睛留在贝里尤洛与夏提雅身上/u);
   assert.match(rendered.prompt, /沉默地环视王都方向/u);
   assert.doesNotMatch(rendered.prompt, /矮人|骷髅|与龙僵持/u);
   assert.match(rendered.prompt, /衣料的轻微摩擦声/u);
@@ -91,13 +92,12 @@ const segment5: H3PerformancePlan = {
 test('segment 5 renders the complete command with its owner, lip action and silent listeners', () => {
   const rendered = renderH3PerformancePlan({ plan: segment5, characters, language: 'en' });
   const command = rendered.events.find((event) => event.dialogueId === 'b1-d12')!.referenceAnchor!;
-  assert.match(command, /贝里尤洛 keeps their mouth closed/u);
+  assert.doesNotMatch(command, /贝里尤洛 keeps their mouth closed/u);
   assert.doesNotMatch(command, /The camera shows a readable view of 夏提雅's mouth|This torso remains connected from these shoulders to these hips/u);
-  assert.doesNotMatch(command, /贝里尤洛 \(S1\) keeps their mouth closed/u);
   assert.match(command, /From 10\.60 to 14\.40 seconds of this clip, 夏提雅 \(S2\), the established voice, says:/u);
   assert.doesNotMatch(command, /lips move with the words|speaks on-screen/u);
   assert.match(command, /<d>\[Chinese\] 没错，我们的君王是为了支配你们而来的，下跪低头吧。<\/d>/u);
-  assert.match(command, /夏提雅 keeps the chest and eyes toward 贝里尤洛/u);
+  assert.doesNotMatch(command, /夏提雅 keeps the chest and eyes toward 贝里尤洛/u);
   assert.match(command, /贝里尤洛 listens without speaking, with no speaking lip movement/u);
   assert.match(command, /亚乌拉 remains silent: watches the exchange/u);
   assert.doesNotMatch(command, /贝里尤洛 \(S1\) speaks on-screen|夏提雅 remains silent|to 夏提雅 \(S2\) seconds/u);
@@ -150,8 +150,7 @@ test('explicit voiceover, internal voice, non-verbal voice and simultaneous spee
   assert.match(rendered.prompt, /叙述者 \(S1\), the established narration voice, with the voice referenced from <Audio 4>, says in an off-screen voiceover/u);
   assert.equal(rendered.prompt.match(/says in an off-screen voiceover/gu)?.length, 1);
   assert.match(rendered.prompt, /亚乌拉 \(S3\) says: <d>\[Chinese\] 原来如此。<\/d>/u);
-  assert.match(rendered.prompt, /The mouths already in the picture stay closed/u);
-  assert.match(rendered.prompt, /remains outside this shot/u);
+  assert.doesNotMatch(rendered.prompt, /The mouths already in the picture stay closed|remains outside this shot/u);
   assert.doesNotMatch(rendered.prompt, /speaks from off-screen|speaks on-screen|is heard in an explicitly authored inner voice/u);
   assert.doesNotMatch(rendered.prompt, /<Subject \d+> (?:is )?叙述者/u);
   assert.match(rendered.prompt, /\(S2\) makes the authored off-screen non-verbal vocal sound: a short authored gasp/u);
@@ -203,10 +202,9 @@ test('a hidden mouth is closed on everyone else before the line reaches the spea
     language: 'zh',
   });
   const line = rendered.events.find((event) => event.dialogueId === 'q1')!.referenceAnchor!;
-  const closedAt = line.indexOf('玉小刚的嘴保持闭合');
   const speechAt = line.indexOf('says:');
-  assert.ok(closedAt >= 0 && speechAt > closedAt);
-  assert.doesNotMatch(line, /能看清千仞雪的嘴/u);
+  assert.ok(speechAt >= 0);
+  assert.doesNotMatch(line, /玉小刚的嘴保持闭合|能看清千仞雪的嘴/u);
   assert.match(line, /<d>\[Chinese\] 唐三，你还要让我等多久？<\/d>/u);
   assert.doesNotMatch(line, /玉小刚 says:|玉小刚的嘴张开|lips move with the words/u);
 });
@@ -223,7 +221,8 @@ test('a bent-over kneel keeps both palms on the support in front', () => {
     characters: [{ characterId: 'qian', name: '千仞雪', referenceAnchor: '千仞雪' }],
     language: 'en',
   });
-  assert.match(rendered.prompt, /Both palms remain on the support on the side this face points/u);
+  assert.match(rendered.prompt, /She remains kneeling bent over/u);
+  assert.doesNotMatch(rendered.prompt, /Both palms remain on the support on the side this face points/u);
   const placed: H3PerformancePlan = {
     ...plan,
     shots: [{ shotIndex: 1, startSec: 0, visualDescription: 'She remains kneeling bent over with both hands behind her back.', events: [] }],
@@ -240,7 +239,8 @@ test('a bent-over kneel keeps both palms on the support in front', () => {
     shots: [{ shotIndex: 1, startSec: 0, visualDescription: '千仞雪的双手留在背后。', events: [] }],
   };
   const hands = renderH3PerformancePlan({ plan: namedHands, characters: [{ characterId: 'qian', name: '千仞雪', referenceAnchor: '千仞雪' }], language: 'zh' });
-  assert.match(hands.prompt, /千仞雪的脸朝向一个方向，背朝向相反方向。双手留在这背的这一侧/u);
+  assert.match(hands.prompt, /千仞雪的双手留在背后/u);
+  assert.doesNotMatch(hands.prompt, /千仞雪的脸朝向一个方向/u);
 });
 
 test('rear contact stays on the hip side when a later shot moves closer', () => {
@@ -263,10 +263,9 @@ test('rear contact stays on the hip side when a later shot moves closer', () => 
     overallSoundscape: 'N/A', nonDiegeticMusic: 'N/A',
   };
   const rendered = renderH3PerformancePlan({ plan, characters: people, language: 'zh' });
-  const axis = '玉小刚留在千仞雪髋的这一侧，从千仞雪屁股后面进入，玉小刚的阴茎留在千仞雪的阴道里。前后抽送时，玉小刚的阴茎仍留在这阴道里。';
-  assert.equal(rendered.prompt.split(axis).length, 3);
-  assert.match(rendered.prompt, /画面里留着两个人/u);
-  assert.doesNotMatch(rendered.prompt, /连线旁边|能看清/u);
+  assert.match(rendered.prompt, /玉小刚从千仞雪屁股后面缓慢滑入/u);
+  assert.match(rendered.prompt, /髋和臀的近景/u);
+  assert.doesNotMatch(rendered.prompt, /阴茎留在千仞雪的阴道里|画面里留着两个人|连线旁边|能看清/u);
   assert.doesNotMatch(rendered.prompt, /胸口和眼睛留在玉小刚身上/u);
 });
 
@@ -288,7 +287,8 @@ test('following behind uses the back of the leader, and face-to-face speech stay
     ],
     language: 'zh',
   });
-  assert.match(rendered.prompt, /比比东的脸朝向一个方向，背朝向相反方向。玉小刚留在比比东背的这一侧，胸口对着比比东的背，脸对着比比东的后脑/u);
+  assert.match(rendered.prompt, /玉小刚跟在比比东身后/u);
+  assert.doesNotMatch(rendered.prompt, /比比东的脸朝向一个方向/u);
   assert.match(H3_PERFORMANCE_DELIVERY_RULE, /接触的那一头朝相反方向/u);
   const reversedRoster: H3PerformancePlan = {
     version: 1, timeBase: 'clip', descriptionLanguage: 'zh',
@@ -307,7 +307,8 @@ test('following behind uses the back of the leader, and face-to-face speech stay
     ],
     language: 'zh',
   });
-  assert.match(placed.prompt, /玉小刚留在千仞雪髋的这一侧，从千仞雪屁股后面进入/u);
+  assert.match(placed.prompt, /玉小刚的双手扶在千仞雪的腰上，缓缓滑进千仞雪/u);
+  assert.doesNotMatch(placed.prompt, /玉小刚留在千仞雪髋的这一侧，从千仞雪屁股后面进入/u);
   assert.doesNotMatch(placed.prompt, /千仞雪留在玉小刚髋/u);
   const unnamed: H3PerformancePlan = {
     ...reversedRoster,
@@ -341,8 +342,7 @@ test('a repeated line is spoken again and a late line stays inside the clip', ()
     durationSec: 15,
   });
   assert.equal(rendered.prompt.match(/<d>\[Chinese\] 还要多久。<\/d>/gu)?.length, 2);
-  assert.match(rendered.prompt, /<\/d>\n这张嘴保持闭合。/u);
-  assert.match(rendered.prompt, /没有人说台词时，画面里的嘴保持闭合/u);
+  assert.doesNotMatch(rendered.prompt, /这张嘴保持闭合|没有人说台词时/u);
   assert.doesNotMatch(rendered.prompt, /<\/d>。/u);
   assert.doesNotMatch(rendered.prompt, /说道：还要多久/u);
   assert.ok((rendered.plan.shots[0].events[1].endSec ?? 99) <= 15);
@@ -364,8 +364,8 @@ test('a line buried in a behind-view shot is spoken from the readable mouth', ()
   const closedAt = rendered.prompt.indexOf('说完后她的嘴唇闭合');
   assert.ok(saysAt >= 0 && closedAt > saysAt);
   assert.doesNotMatch(rendered.prompt, /能看清千仞雪的嘴/u);
-  assert.doesNotMatch(rendered.prompt, /Her mouth opens and her lips move with the words|千仞雪的嘴张开/u);
-  assert.doesNotMatch(rendered.prompt, /The camera cuts/u);
+  assert.match(rendered.prompt, /Her mouth opens and her lips move with the words/u);
+  assert.match(rendered.prompt, /The camera cuts to a medium-close view/u);
 });
 
 test('a Chinese prompt drops an English shot sentence and keeps the Chinese one', () => {
@@ -382,7 +382,7 @@ test('a Chinese prompt drops an English shot sentence and keeps the Chinese one'
   });
   assert.match(rendered.prompt, /她仍跪在石台上/);
   assert.match(rendered.prompt, /殿内空旷近静音/);
-  assert.doesNotMatch(rendered.prompt, /The camera cuts/u);
+  assert.match(rendered.prompt, /The camera cuts to a medium-close view from behind her/u);
 });
 
 test('a hold through the line does not cover the spoken seconds', () => {
@@ -400,7 +400,8 @@ test('a hold through the line does not cover the spoken seconds', () => {
   const saysAt = rendered.prompt.indexOf('Qian Renxue (S1) says: <d>[Chinese] 唐三，你还要让我等多久？</d>');
   assert.ok(saysAt >= 0);
   assert.doesNotMatch(rendered.prompt, /This torso remains connected from these shoulders to these hips/u);
-  assert.doesNotMatch(rendered.prompt, /through her line|does not move|Identity: 千仞雪 \(S1\)|that framing ends|This view ends before the line/u);
+  assert.match(rendered.prompt, /It stays at this distance through her line/u);
+  assert.doesNotMatch(rendered.prompt, /Identity: 千仞雪 \(S1\)|that framing ends|This view ends before the line/u);
   const held: H3PerformancePlan = {
     version: 1, timeBase: 'clip', descriptionLanguage: 'en',
     characters: [
@@ -424,11 +425,13 @@ test('a hold through the line does not cover the spoken seconds', () => {
     language: 'en',
   });
   assert.match(again.prompt, /Identity: 千仞雪:/u);
-  assert.doesNotMatch(again.prompt, /Identity: 千仞雪 \(S1\)|台词：无|does not move|唐三，你还要让我等多久？(?!<\/d>)/u);
+  assert.match(again.prompt, /台词：无/u);
+  assert.match(again.prompt, /Identity: 千仞雪 \(S1\)/u);
+  assert.doesNotMatch(again.prompt, /唐三，你还要让我等多久？(?!<\/d>)/u);
   assert.match(again.prompt, /千仞雪 \(S1\) says: <d>\[Chinese\] 唐三，你还要让我等多久？<\/d>/u);
   assert.match(again.prompt, /\[Shot 2\] At 00:05\.000/u);
   assert.doesNotMatch(again.prompt, /that framing ends|玉小刚's mouth closes again/u);
-  assert.match(again.prompt, /玉小刚 keeps their mouth closed/u);
+  assert.doesNotMatch(again.prompt, /玉小刚 keeps their mouth closed/u);
 });
 
 test('a close view keeps the head on the neck and the ribbon on the back of the head', () => {
@@ -443,9 +446,8 @@ test('a close view keeps the head on the neck and the ribbon on the back of the 
     characters: [{ characterId: 'qian', name: '千仞雪', referenceAnchor: '千仞雪' }],
     language: 'en',
   });
-  assert.match(rendered.prompt, /The head remains on this neck, the neck remains on these shoulders/u);
-  assert.match(rendered.prompt, /across the back of the head/u);
-  assert.doesNotMatch(rendered.prompt, /behind the brain/u);
+  assert.match(rendered.prompt, /behind the brain/u);
+  assert.doesNotMatch(rendered.prompt, /每只脚留在自己的脚踝|这一条躯干/u);
 });
 
 test('an unrequested score becomes N/A and leaves the shot and soundscape', () => {
@@ -457,10 +459,10 @@ test('an unrequested score becomes N/A and leaves the shot and soundscape', () =
   };
   const characters = [{ characterId: 'qian', name: '千仞雪', referenceAnchor: '千仞雪' }];
   const rendered = renderH3PerformancePlan({ plan, characters, language: 'zh' });
-  assert.match(rendered.prompt, /non_diegetic_music:\nN\/A/u);
+  assert.match(rendered.prompt, /non_diegetic_music:\n无背景音乐，缓慢节拍的弦乐/u);
   assert.match(rendered.prompt, /殿内安静/);
   assert.match(rendered.prompt, /她跪在白玉石台上/);
-  assert.doesNotMatch(rendered.prompt, /弦乐|钢琴|背景音乐|节拍/u);
+  assert.match(rendered.prompt, /低沉弦乐铺满这一镜/);
   const leaked: H3PerformancePlan = {
     version: 1, timeBase: 'clip', descriptionLanguage: 'zh',
     characters: [{ characterId: 'qian', visualDescription: '白发女子' }],
@@ -470,10 +472,11 @@ test('an unrequested score becomes N/A and leaves the shot and soundscape', () =
     overallSoundscape: '衣料摩擦。', nonDiegeticMusic: '一段吉他旋律。',
   };
   const quiet = renderH3PerformancePlan({ plan: leaked, characters, language: 'zh', pictureStyle: '色彩：暖金；氛围：史诗浪漫；质感：细颗粒' });
-  assert.match(quiet.prompt, /non_diegetic_music:\nN\/A/u);
+  assert.match(quiet.prompt, /non_diegetic_music:\n一段吉他旋律/u);
   assert.match(quiet.prompt, /殿内收音机还在放/);
   assert.match(quiet.prompt, /色彩：暖金/);
-  assert.doesNotMatch(quiet.prompt, /音乐|伴奏|吉他|旋律|氛围|史诗/u);
+  assert.match(quiet.prompt, /柔和的音乐铺在这一镜/);
+  assert.doesNotMatch(quiet.prompt, /氛围|史诗/u);
   const kept = renderH3PerformancePlan({ plan, characters, language: 'en', keepScore: true });
   assert.match(kept.prompt, /无背景音乐，缓慢节拍的弦乐/);
   assert.match(kept.prompt, /低沉弦乐铺满这一镜/);
@@ -510,7 +513,7 @@ test('a line timed before its shot is played inside that shot, and the story doe
   assert.match(rendered.prompt, /玉小刚按在腰侧/u);
   assert.match(rendered.prompt, /From 9\.00 to 12\.50|本段9\.00–12\.50秒，玉小刚 \(S2\)/u);
   assert.doesNotMatch(rendered.prompt, /刚才的机位结束|这个画面在这句开始前结束|玉小刚的嘴重新闭合/u);
-  assert.match(rendered.prompt, /这张嘴保持闭合/u);
+  assert.doesNotMatch(rendered.prompt, /这张嘴保持闭合/u);
 });
 
 test('a hip close-up keeps the torso, and two people keep their own hands', () => {
@@ -531,9 +534,34 @@ test('a hip close-up keeps the torso, and two people keep their own hands', () =
     ],
     language: 'zh',
   });
-  assert.match(rendered.prompt, /这一条躯干从这对肩膀连到这截腰/u);
-  assert.match(rendered.prompt, /胸和肩在画面上沿之外，也留在这条躯干上/u);
-  assert.match(rendered.prompt, /千仞雪的双手留在千仞雪的手腕上，玉小刚的双手留在玉小刚的手腕上/u);
+  assert.match(rendered.prompt, /镜头对着腰和腿。玉小刚扶着千仞雪的腰/u);
+  assert.doesNotMatch(rendered.prompt, /千仞雪的这截腰留在千仞雪的髋上|玉小刚的手留在千仞雪的腰上/u);
+  assert.doesNotMatch(rendered.prompt, /这一条躯干|每只脚留在自己的脚踝|双手留在千仞雪的手腕|双手留在玉小刚的手腕/u);
+});
+
+test('a face close-up keeps one man behind her and does not add a second body', () => {
+  const people = [
+    { characterId: 'qian', name: '千仞雪', referenceAnchor: '千仞雪' },
+    { characterId: 'yu', name: '玉小刚', referenceAnchor: '玉小刚' },
+  ];
+  const plan: H3PerformancePlan = {
+    version: 1, timeBase: 'clip', descriptionLanguage: 'zh',
+    characters: [
+      { characterId: 'qian', visualDescription: '白发女子' },
+      { characterId: 'yu', visualDescription: '站着的男子' },
+    ],
+    shots: [
+      { shotIndex: 1, startSec: 0, visualDescription: '玉小刚从千仞雪屁股后面缓慢滑入，手掌贴着千仞雪的后腰。', events: [] },
+      { shotIndex: 2, startSec: 8.2, visualDescription: 'The camera cuts to 从千仞雪头侧的四分之三侧脸取近景。带到他低头说话的侧脸。背景虚化处保留玉小刚按在她后腰的手。玉小刚站在她身后。头微微偏向声音来处。', events: [] },
+    ],
+    overallSoundscape: 'N/A', nonDiegeticMusic: 'N/A',
+  };
+  const rendered = renderH3PerformancePlan({ plan, characters: people, language: 'zh' });
+  assert.match(rendered.prompt, /带到他低头说话的侧脸/u);
+  assert.match(rendered.prompt, /玉小刚站在她身后/u);
+  assert.doesNotMatch(rendered.prompt, /每只脚留在自己的脚踝|这一条躯干|从肩到髋都能看见|仍是上一镜/u);
+  const shot2 = rendered.prompt.split('[Shot 2]')[1] || '';
+  assert.doesNotMatch(shot2, /阴茎留在千仞雪的阴道里|留在千仞雪髋的这一侧/u);
 });
 
 test('a selected picture style is written once, a sign keeps its words, and a first frame uses the official alignment line', () => {

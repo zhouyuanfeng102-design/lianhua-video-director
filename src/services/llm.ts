@@ -4931,7 +4931,7 @@ const parseStoryAnalysisResult = (result: string, story = ''): StoryAnalysisResp
     }))
     .filter((item: StoryAnalysisResponse['scenes'][number]) => Boolean(item.content));
   if (!scenes.length) throw new Error('文本模型返回的场景内容为空');
-  const foldedCharacters = foldSolePronounCharacters(characters, story);
+  const foldedCharacters = characters;
   const canonicalName = new Map<string, string>();
   foldedCharacters.forEach((character) => {
     if (!character.name) return;
@@ -4943,7 +4943,6 @@ const parseStoryAnalysisResult = (result: string, story = ''): StoryAnalysisResp
       ...scene,
       characters: (scene.characters || []).flatMap((character: StoryAnalysisCharacter) => {
         const name = character.name && canonicalName.get(character.name);
-        if (character.name && SOLE_PERSON_PRONOUN.test(character.name) && !name) return [];
         return [{ ...character, ...(name ? { name } : {}) }];
       }),
     })),

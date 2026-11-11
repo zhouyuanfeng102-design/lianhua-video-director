@@ -66,7 +66,11 @@ try {
     assert.equal(await page.evaluate(()=>window.selectWrites),0,'reading options must not change the selected values');
     assert.equal(await page.locator('.ant-select-dropdown').count(),0,'read operation closes its dropdown');
     assert.equal(submissions,0,'reading multiple selects must not submit a model job');
-    console.log('Android RH multiple-select read passed: stable LLM/aspect/sampler keys, 25 virtual LLM options plus current value, separate option lists, unchanged LoRA and selections, 0 model submissions (local mock only).');
+    await page.evaluate(() => { const area = document.createElement('textarea'); document.querySelector('.ai-side').append(area); });
+    await page.evaluate(() => window.__lianhuaRh.operations.prepare({ fields: [{ key: 'select:LLM', label: 'LLM', kind: 'select', value: 'LLM 模型 25' }] }));
+    assert.equal(await page.evaluate(() => document.querySelector('[data-field="LLM"] .ant-select-selection-item').textContent), 'LLM 模型 25');
+    assert.equal(submissions,0,'choosing a virtual-list option must not submit a model job');
+    console.log('Android RH multiple-select read passed: stable LLM/aspect/sampler keys, 25 virtual LLM options plus current value, separate option lists, unchanged LoRA and selections, off-screen option click, 0 model submissions (local mock only).');
   }else{
   await page.goto(`http://127.0.0.1:${server.address().port}`);
   await page.evaluate(script);

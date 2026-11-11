@@ -186,8 +186,41 @@ const planeFor = assignment => {
 };
 const choose = async (trigger, value) => {
   if (!trigger) throw new Error('网页选项尚未显示。');
+  const ant = trigger.classList.contains('ant-select');
+  for (const node of document.querySelectorAll('.ant-select-dropdown')) delete node.dataset.lianhuaOptionScan;
   trigger.click();
-  const option = await waitFor(() => exact(document.querySelectorAll('.ant-select-item-option-content, [role="option"], .run-mode-item'), String(value)), 8000);
+  const wanted = String(value).replace(/\s+/g, ' ').trim();
+  const option = await waitFor(() => {
+    const dropdown = openDropdowns().at(-1);
+    if (!dropdown) return ant ? null : exact(document.querySelectorAll('[role="option"], .run-mode-item'), wanted);
+    const holder = dropdown.querySelector('.rc-virtual-list-holder');
+    if (holder && !dropdown.dataset.lianhuaOptionScan) {
+      holder.scrollTop = 0;
+      dropdown.dataset.lianhuaOptionScan = '1';
+      return null;
+    }
+    dropdown.dataset.lianhuaOptionScan = '1';
+    const box = (holder || dropdown).getBoundingClientRect();
+    const rows = [...dropdown.querySelectorAll('.ant-select-item-option')];
+    const pool = rows.length ? rows : [...dropdown.querySelectorAll('.ant-select-item-option-content')];
+    const match = pool.find((item) => text(item) === wanted);
+    if (!match) {
+      if (!holder) return null;
+      const before = holder.scrollTop;
+      holder.scrollTop = before + Math.max(24, holder.clientHeight);
+      return null;
+    }
+    const rect = match.getBoundingClientRect();
+    const visible = rect.width > 0 && rect.height > 0 && rect.bottom > box.top + 1 && rect.top < box.bottom - 1;
+    if (!visible) {
+      if (!holder) return null;
+      holder.scrollTop += rect.top >= box.bottom
+        ? Math.max(24, rect.top - box.bottom + rect.height)
+        : -Math.max(24, box.top - rect.bottom + rect.height);
+      return null;
+    }
+    return match;
+  }, 8000);
   option.click();
 };
 const openDropdowns = () => [...document.querySelectorAll('.ant-select-dropdown:not(.ant-select-dropdown-hidden)')]

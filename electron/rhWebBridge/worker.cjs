@@ -233,6 +233,49 @@ async function readSelectOptions(page) {
 
 const exactText = (label) => new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')}$`, 'u');
 
+/** Ant Design keeps unselected rows outside the open list. Click only the row that is inside it. */
+async function chooseOpenOption(page, value) {
+  const wanted = String(value).replace(/\s+/gu, ' ').trim();
+  const dropdown = page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').last();
+  await dropdown.waitFor({ state: 'visible', timeout: 8000 });
+  for (let step = 0; step < 24; step += 1) {
+    const outcome = await dropdown.evaluate((node, payload) => {
+      const wanted = payload.wanted;
+      const normalize = (item) => (item || '').replace(/\s+/g, ' ').trim();
+      const holder = node.querySelector('.rc-virtual-list-holder');
+      if (payload.reset && holder && holder.scrollTop !== 0) {
+        holder.scrollTop = 0;
+        return 'scrolled';
+      }
+      const box = (holder || node).getBoundingClientRect();
+      const rows = [...node.querySelectorAll('.ant-select-item-option')];
+      const pool = rows.length ? rows : [...node.querySelectorAll('.ant-select-item-option-content')];
+      const match = pool.find((option) => normalize(option.innerText) === wanted);
+      if (!match) {
+        if (!holder) return 'missing';
+        const before = holder.scrollTop;
+        holder.scrollTop = before + Math.max(24, holder.clientHeight);
+        return holder.scrollTop === before ? 'missing' : 'scrolled';
+      }
+      const rect = match.getBoundingClientRect();
+      const visible = rect.width > 0 && rect.height > 0 && rect.bottom > box.top + 1 && rect.top < box.bottom - 1;
+      if (!visible) {
+        if (!holder) return 'missing';
+        holder.scrollTop += rect.top >= box.bottom
+          ? Math.max(24, rect.top - box.bottom + rect.height)
+          : -Math.max(24, box.top - rect.bottom + rect.height);
+        return 'scrolled';
+      }
+      match.click();
+      return 'clicked';
+    }, { wanted, reset: step === 0 });
+    if (outcome === 'clicked') return;
+    if (outcome === 'missing') break;
+    await dropdown.locator('.ant-select-item-option').first().waitFor({ state: 'attached', timeout: 300 }).catch(() => {});
+  }
+  throw new Error(`网页选项里没有 ${wanted}`);
+}
+
 async function mediaItem(page, label) {
   const items = page.locator('.ai-side .media-group-item').filter({
     has: page.locator('.media-group-item-label', { hasText: exactText(label) }),
@@ -386,7 +429,7 @@ async function fillControl(page, assignment) {
   }
   if (assignment.kind === 'select') {
     await plane.locator('.ant-select').first().click();
-    await page.getByText(String(assignment.value), { exact: true }).last().click();
+    await chooseOpenOption(page, assignment.value);
     return;
   }
   const area = plane.locator('textarea');
@@ -397,7 +440,7 @@ async function fillControl(page, assignment) {
   const select = plane.locator('.ant-select').first();
   if (await select.count()) {
     await select.click();
-    await page.getByText(String(assignment.value), { exact: true }).last().click();
+    await chooseOpenOption(page, assignment.value);
     return;
   }
   throw new Error(`网页上的 ${assignment.label} 不是可填写的文本框。`);
