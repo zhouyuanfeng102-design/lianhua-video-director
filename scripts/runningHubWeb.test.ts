@@ -51,6 +51,28 @@ assert.equal(fields.find((field) => field.key === 'number:duration')?.value, 12)
 const keptDuration = buildRhWebBody({ ...api, rhWebFields: (api.rhWebFields || []).map((field) => field.key === 'number:duration' ? { ...field, value: '30' } : field) }, { ...draft, parameters: { idea: '她转身看向镜头' } }, []);
 assert.equal((keptDuration.fields as Array<{ key: string; value: unknown }>).find((field) => field.key === 'number:duration')?.value, 30);
 assert.equal(fields.find((field) => field.key === 'select:aspect')?.value, '9:16 (Portrait Widescreen)');
+const h3Draft: VideoGenerationDraft = { ...draft, prompt: '  detailed_description:\n[Shot 1] 玉小刚 (S1) says: <d>[Chinese]是我。</d>\n',
+  source: { promptFormat: 'h3', language: 'en' } };
+const h3Snapshot = structuredClone(h3Draft);
+const h3Config = structuredClone(api);
+const h3Fields = buildRhWebBody(api, h3Draft, []).fields as Array<{ key: string; value: unknown }>;
+assert.equal(h3Fields.find((field) => field.key === 'text:prompt')?.value, h3Draft.prompt,
+  'an already authored H3 script replaces the stale short idea with the exact selected full prompt');
+assert.equal(h3Fields.find((field) => field.key === 'boolean:auto-prompt')?.value, false,
+  'the recognized remote rewriter is disabled for a new complete H3 delivery');
+assert.deepEqual(h3Draft, h3Snapshot);
+assert.deepEqual(api, h3Config, 'request assignments do not mutate frozen settings');
+const reusedFields = buildRhWebBody(api, { ...h3Draft, reuseTaskId: 'historical-task' }, []).fields as Array<{ key: string; value: unknown }>;
+assert.equal(reusedFields.find((field) => field.key === 'boolean:auto-prompt')?.value, true,
+  'an explicit historical reuse retains its frozen automatic-prompt setting');
+assert.equal(reusedFields.find((field) => field.key === 'text:prompt')?.value, draft.parameters.idea);
+const plainFields = buildRhWebBody(api, draft, []).fields as Array<{ key: string; value: unknown }>;
+assert.equal(plainFields.find((field) => field.key === 'boolean:auto-prompt')?.value, true,
+  'a short idea still uses the existing remote rewrite mode');
+const promptBoundConfig = { ...api, rhWebFields: api.rhWebFields!.map((field) => field.key === 'text:prompt' ? { ...field, bind: 'prompt' as const } : field) };
+const promptBoundFields = buildRhWebBody(promptBoundConfig, { ...h3Draft, parameters: {} }, []).fields as Array<{ key: string; value: unknown }>;
+assert.equal(promptBoundFields.find((field) => field.key === 'text:prompt')?.value, h3Draft.prompt,
+  'a complete H3 script also preserves its bytes through a direct prompt binding');
 const withoutIdea = buildRhWebBody(api, { ...draft, parameters: {} }, []);
 assert.equal((withoutIdea.fields as Array<{ key: string; value: unknown }>).find((field) => field.key === 'text:prompt')?.value, draft.prompt);
 assert.throws(() => buildRhWebBody(api, { ...draft, prompt: '拍摄时尚杂志，性感姿势', parameters: { idea: '拍摄时尚杂志，性感姿势' } }, []), /提示词是空的/u);

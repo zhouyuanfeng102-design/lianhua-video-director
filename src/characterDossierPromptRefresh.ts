@@ -8,6 +8,7 @@ export const CHARACTER_DOSSIER_REFRESH_RULE = [
   '保留原剧情事件、动作因果、人物出场与说话人、每句对白原字、已有台词和音效时间、音乐及音量安排、机位与光影、镜头顺序、镜数、镜头id、固定切点和总时长。不能重新导演、拆镜、合镜或借资料更新补新剧情。原文没有要求时，不因为新服装或资料自动改变人物动作或可见范围；私密资料不属于本次覆盖范围。原H3中的主体编号和声源编号保持；转移人物后的当前ID以给定资料为准。',
   '只返回完整JSON对象：{"canonicalPrompt":"与原镜数、切点一致的完整普通六字段正文","h3Prompt":"同一内容的完整合法H3正文","identityBindings":{"version":1,"characters":[]},"shotSourceIds":[["对应原shot.id"]],"shotMetadata":[null]}。两稿同步更新普通人物事实，禁止只改H3留下旧canonicalPrompt；shotSourceIds严格一对一且原序，每项仅包含该位置原shot.id；shotMetadata全部为null，不改变来源范围和已保存镜头状态。canonicalPrompt沿用原【起始s-结束s】主体/空间/光影/镜头/台词/音效六字段格式；台词、音效字段原文保持。',
   'H3原section名称、参考标签语法、[Shot N]与At切点格式保持，不添加人物资料JSON到H3正文。只更新实际变更的图片编号/职责与普通身份句，保持有效referenceAnchor逐字对应；不把管理别名写入对白。不要审核说明、代码围栏或局部补丁。',
+  '本次交付仍保留identityBindings内的performance，不能因上面的简写示例只列characters而省略它。沿用已有speech事件的eventId、dialogueId、原话、语种、时窗及发话归属，只在获准范围同步普通人物描述；原话继续仅由speech.text承载，不复制到外观、动作或声景。纯读取历史稿不补造performance。',
 ].join('\n');
 
 const soundFields = (prompt: string): string[] => {

@@ -293,8 +293,12 @@ export const buildRhWebBody = (
     }
   }
   let instance = config.rhWebInstance || 'Plus';
+  const rawPrompt = draft.origin === 'custom' && draft.promptMode === 'raw';
+  // A new director delivery is already an executable H3 script. Reusing a
+  // historical task retains its frozen page-field contract instead.
+  const completeH3Prompt = draft.source?.promptFormat === 'h3' && !draft.reuseTaskId;
   const assignments = fields.map((item) => {
-    if (draft.origin === 'custom' && draft.promptMode === 'raw'
+    if ((rawPrompt || completeH3Prompt)
       && item.label === '自动提示词' && item.kind === 'boolean') {
       return { key: item.key, label: item.label, kind: item.kind, value: false };
     }
@@ -309,7 +313,7 @@ export const buildRhWebBody = (
       return { key: item.key, label: item.label, kind: item.kind, value: referenceIndex >= 0 ? audios[referenceIndex] : '' };
     }
     if (item.label === '提示词' || item.bind === 'prompt' || item.bind === 'idea') {
-      if (draft.origin === 'custom' && draft.promptMode === 'raw') {
+      if (rawPrompt || completeH3Prompt && (item.bind === 'prompt' || item.bind === 'idea')) {
         return { key: item.key, label: item.label, kind: item.kind, value: draft.prompt };
       }
       const idea = item.bind === 'idea' ? parameterValue(draft.parameters, 'idea') : undefined;

@@ -77,6 +77,7 @@ import {
   Orbit,
   Package,
   Plane,
+  Eraser,
   Plus,
   RefreshCw,
   RotateCcw,
@@ -18864,6 +18865,91 @@ function ImageWorkbenchView(ctx: AppContext) {
     selectEntity("");
     notify(`已开始新增${assetKind === "character" ? "角色" : assetKind === "location" ? "场景" : "物品"}资料。`);
   };
+  const clearSelectedEntityProfile = () => {
+    if (assetKind === "grid") return;
+    const kindLabel = assetKind === "character" ? "角色" : assetKind === "location" ? "场景" : "物品";
+    const keptName = (assetForm.name || "").trim();
+    const clearedForm: Record<string, string> = {
+      ...createInheritedAssetForm(),
+      name: keptName,
+      gender: "",
+      morphology: "",
+      bodyPlan: "",
+      appearance: "",
+      outfit: "",
+      props: "",
+      personality: "",
+      age: "",
+      actualAge: "",
+      height: "",
+      race: "",
+      motion: "",
+      anchor: "",
+      nsfwFullBody: "",
+      nsfwBreasts: "",
+      nsfwVulva: "",
+      nsfwAnus: "",
+      nsfwPenis: "",
+      nsfwScrotum: "",
+      description: "",
+      weather: "",
+      lighting: "",
+      palette: "",
+      fixedProps: "",
+      category: "",
+      material: "",
+      effect: "",
+      stateRules: "",
+      style: "",
+    };
+    setAssetForm(clearedForm);
+    setAssetFormStyleSource("manual");
+    autofillTargetEpochRef.current += 1;
+    if (autofillRequestBasisRef.current) autofillRequestBasisRef.current.invalidated = true;
+    clearImageGenerationOutputs();
+    if (assetKind === "character") {
+      updateCharacterDossier({
+        ...characterDossierRef.current,
+        confirmedFields: [],
+        fieldSources: {},
+        updatedAt: Date.now(),
+      });
+    }
+    if (!selectedEntityId) {
+      notify(`已清空当前填写的${kindLabel}资料。`);
+      return;
+    }
+    const entityKind = assetKind as ImageEntityKind;
+    const existing = entities.find((item: Character | Location | Prop) => item.id === selectedEntityId);
+    if (!existing) {
+      notify("当前选择的资料已不存在。", "error");
+      return;
+    }
+    const nextEntity = buildImageWorkbenchEntity(entityKind, selectedEntityId, clearedForm, existing);
+    if (entityKind === "character") {
+      const character = nextEntity as Character;
+      character.negativeContinuity = "";
+      character.dossier = {
+        ...characterDossierRef.current,
+        confirmedFields: [],
+        fieldSources: {},
+        updatedAt: Date.now(),
+      };
+    }
+    updateProject((project: AppState["project"]) => ({
+      ...project,
+      characters: entityKind === "character"
+        ? project.characters.map((item) => item.id === selectedEntityId ? nextEntity as Character : item)
+        : project.characters,
+      locations: entityKind === "location"
+        ? project.locations.map((item) => item.id === selectedEntityId ? nextEntity as Location : item)
+        : project.locations,
+      props: entityKind === "prop"
+        ? project.props.map((item) => item.id === selectedEntityId ? nextEntity as Prop : item)
+        : project.props,
+    }));
+    notify(`已清空${keptName || kindLabel}的资料，名称仍保留。`);
+  };
   const saveEntity = () => {
     if (assetKind === "grid") return;
     const name = (assetForm.name || "").trim();
@@ -21170,6 +21256,15 @@ function ImageWorkbenchView(ctx: AppContext) {
                       ))}
                     </select>
                     <div className="row image-entity-actions">
+                      <Button
+                        small
+                        icon={<Eraser size={14} />}
+                        onClick={clearSelectedEntityProfile}
+                        disabled={busy || autofillBusy}
+                        title="清空当前人物、场景或物品已填写的资料，保留名称"
+                      >
+                        清空
+                      </Button>
                       <Button
                         small
                         icon={<Plus size={14} />}

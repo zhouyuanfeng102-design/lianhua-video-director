@@ -587,7 +587,7 @@ export const compileRunningHubVideoApi = (config: RunningHubVideoConfig, workflo
 export const bindRunningHubVideoRequest = (
   template: string,
   mappedFields: NonNullable<VideoTaskApiConfig['runningHubMappedFields']>,
-  draft: Pick<VideoGenerationDraft, 'prompt' | 'parameters'> & Partial<Pick<VideoGenerationDraft, 'origin' | 'promptMode' | 'references' | 'audioReferences' | 'videoReferences'>>,
+  draft: Pick<VideoGenerationDraft, 'prompt' | 'parameters'> & Partial<Pick<VideoGenerationDraft, 'origin' | 'promptMode' | 'source' | 'reuseTaskId' | 'references' | 'audioReferences' | 'videoReferences'>>,
   images: string[],
   submitContext?: Pick<VideoTaskApiConfig, 'provider' | 'runningHubAppId' | 'endpoint'>,
   audios: string[] = [],
@@ -614,7 +614,9 @@ export const bindRunningHubVideoRequest = (
     audioBySlot.set(reference.slotIndex, { audio, index, bindingId: reference.bindingId });
   });
   const request = readRunningHubVideoRequest(template);
-  const submittedPrompt = !(draft.origin === 'custom' && draft.promptMode === 'raw')
+  const directPrompt = draft.origin === 'custom' && draft.promptMode === 'raw'
+    || draft.source?.promptFormat === 'h3' && !draft.reuseTaskId;
+  const submittedPrompt = !directPrompt
     && submitContext && isRunningHubH3AutoPromptInput({ ...submitContext, runningHubMappedFields: mappedFields })
     ? runningHubH3AutoPromptInput(draft.prompt, uploadBySlot.size) : draft.prompt;
   const parameterNames = new Set(mappedFields.filter((field) => field.kind === 'parameter' && field.parameter).map((field) => field.parameter!));

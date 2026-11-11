@@ -30,7 +30,7 @@ import {
   omitCopiedEnglishExamples,
 } from './h3PromptProtocol';
 import { createH3IdentityDeliveryReader, H3_IDENTITY_BINDINGS_RULE, H3_PERFORMANCE_DELIVERY_RULE, readH3DeliveryEnvelope } from './h3IdentityBindings';
-import { h3KeepsScore, h3MusicRequested, normalizeH3DialogueLanguageTags, renderH3PerformancePlan } from './h3PerformancePlan';
+import { h3KeepsScore, h3MusicRequested, renderH3PerformancePlan } from './h3PerformancePlan';
 import { serializeAuthoredH3Prompt, type H3SectionLayoutOptions } from './h3DeliverySections';
 import { VIDEO_STORY_PERFORMANCE_SEPARATION_RULE } from './videoInteractionRules';
 import type { PromptTranslationSourceDialogue, PromptTranslationSourceEvent } from './promptTranslationDocument';
@@ -186,7 +186,6 @@ export const savedH3TranslationFacts = (bindings?: H3IdentityBindings, canonical
   })) || [];
   const sourceDialogues: PromptTranslationSourceDialogue[] = [];
   const sourceEvents: PromptTranslationSourceEvent[] = [];
-  const performanceDialogueCounts = new Map<string, number>();
   for (const shot of bindings?.performance?.shots || []) for (const event of shot.events) {
     sourceEvents.push({ id: event.eventId, description: event.sourceFact
       || (event.kind === 'visual' ? event.description : event.kind === 'speech' ? event.text : event.vocalDescription) });
@@ -195,22 +194,17 @@ export const savedH3TranslationFacts = (bindings?: H3IdentityBindings, canonical
         ...(event.speakerCharacterIds.length === 1 ? { speakerCharacterId: event.speakerCharacterIds[0] } : {}),
         ...(event.listenerCharacterIds ? { listenerCharacterIds: [...event.listenerCharacterIds] } : {}),
       });
-      const key = `${shot.shotIndex}\u0000${dialogueOccurrenceKey(event.text,
-        event.speakerCharacterIds.length === 1 ? `id:${event.speakerCharacterIds[0]}` : '')}`;
-      performanceDialogueCounts.set(key, (performanceDialogueCounts.get(key) || 0) + 1);
     }
   }
-  const canonicalDialogueCounts = new Map<string, number>();
+  // A paired performance owns the final utterances. Canonical shots remain
+  // source evidence for legacy prose, never a second set to append or translate.
+  if (bindings?.performance) return { sourceCharacters, sourceDialogues, sourceEvents };
   for (const [shotIndex, shot] of canonicalShots.entries()) {
     const shotNumber = Number.isFinite(shot.index) ? shot.index : shotIndex + 1;
     const source = canonicalShotDialogue(shot);
     const dialogues = canonicalShotDialogues(source, shot.startSec);
     for (const [dialogueIndex, dialogue] of dialogues.entries()) {
       const speaker = dialogue.speaker || shot.subject.trim();
-      const key = `${shotNumber}\u0000${dialogueOccurrenceKey(dialogue.text, canonicalDialogueSpeakerKey(speaker, bindings))}`;
-      const occurrence = (canonicalDialogueCounts.get(key) || 0) + 1;
-      canonicalDialogueCounts.set(key, occurrence);
-      if (occurrence <= (performanceDialogueCounts.get(key) || 0)) continue;
       const speakerCharacterId = bindings?.characters.find((entry) => entry.name === speaker)?.characterId;
       sourceDialogues.push({ id: `${shot.id || shotNumber}-dialogue-${dialogueIndex + 1}`, text: dialogue.text,
         ...(speakerCharacterId ? { speakerCharacterId } : {}),
@@ -248,114 +242,6 @@ const canonicalShotDialogues = (source: string, clipOffsetSec = 0): Array<{ spea
     ...canonicalDialogueCue(source, dialogue.sourceStart, dialogue.speakerCandidate, clipOffsetSec) }));
 };
 
-const dialogueOccurrenceKey = (text: string, speakerKey: string): string =>
-  `${speakerKey}\u0000${text.trim()}`;
-
-const canonicalDialogueSpeakerKey = (speaker: string, bindings?: H3IdentityBindings): string => {
-  if (!speaker) return '';
-  const character = bindings?.characters.find((entry) => entry.name === speaker);
-  return character ? `id:${character.characterId}` : `name:${speaker.trim()}`;
-};
-
-const h3DialogueLanguage = (text: string): string => {
-  if (/\p{Script=Han}/u.test(text)) return 'Chinese';
-  if (/[\p{Script=Hiragana}\p{Script=Katakana}]/u.test(text)) return 'Japanese';
-  if (/\p{Script=Hangul}/u.test(text)) return 'Korean';
-  if (/\p{Script=Cyrillic}/u.test(text)) return 'Russian';
-  if (/\p{Script=Arabic}/u.test(text)) return 'Arabic';
-  return 'English';
-};
-
-const appendCanonicalDialoguesToH3 = (
-  prompt: string,
-  canonicalShots: readonly VideoShot[],
-  mode: 'integrated' | 'full-reference',
-  identityBindings?: H3IdentityBindings,
-  audioMode?: string,
-): string => {
-  if (audioMode === 'none') return prompt;
-  const bodyName = mode === 'full-reference' ? 'detailed_description' : 'integrated_multimodal_description';
-  const sections = [...prompt.matchAll(/^(subject_definitions|summary|retention_analysis|detailed_description|integrated_multimodal_description|overall_soundscape|non_diegetic_music)\s*[:：][ \t]*/gmu)];
-  const bodyHeader = sections.find((section) => section[1] === bodyName);
-  if (!bodyHeader) return prompt;
-  const bodyStart = bodyHeader.index! + bodyHeader[0].length;
-  const bodyEnd = sections.find((section) => section.index! > bodyHeader.index!)?.index ?? prompt.length;
-  let body = prompt.slice(bodyStart, bodyEnd);
-  const shotMarkers = [...body.matchAll(/^\[Shot\s+(\d+)\][^\r\n]*/gmu)];
-  if (!shotMarkers.length) return prompt;
-  const speakerTokens = new Map<string, string>();
-  const usedSpeakerTokens = new Set([...body.matchAll(/\(S(\d+)\)/gu)].map((match) => `(S${match[1]})`));
-  for (const entry of identityBindings?.characters || []) {
-    if (entry.speakerToken) { speakerTokens.set(entry.name, entry.speakerToken); usedSpeakerTokens.add(entry.speakerToken); }
-  }
-  let nextSpeakerNumber = Math.max(0, ...[...usedSpeakerTokens].map((token) => Number(token.match(/\d+/u)?.[0] || 0))) + 1;
-  const additions: Array<{ shotIndex: number; text: string }> = [];
-  for (const [shotIndex, shot] of canonicalShots.entries()) {
-    const shotNumber = Number.isFinite(shot.index) ? shot.index : shotIndex + 1;
-    const lines = canonicalShotDialogues(canonicalShotDialogue(shot), shot.startSec).flatMap((dialogue) => {
-      const speaker = dialogue.speaker || shot.subject.trim();
-      const key = speaker || `shot-${shotIndex + 1}`;
-      let token = speakerTokens.get(key);
-      if (!token) {
-        const escaped = key.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
-        const existing = escaped ? new RegExp(`${escaped}\\s+\\(S\\d+\\)`, 'gu').exec(body)?.[0].match(/\(S\d+\)/u)?.[0] : undefined;
-        while (usedSpeakerTokens.has(`(S${nextSpeakerNumber})`)) nextSpeakerNumber += 1;
-        token = existing || `(S${nextSpeakerNumber++})`;
-        speakerTokens.set(key, token);
-        usedSpeakerTokens.add(token);
-      }
-      const time = dialogue.startSec !== undefined && dialogue.endSec !== undefined
-        ? `From ${dialogue.startSec.toFixed(2)} to ${dialogue.endSec.toFixed(2)} seconds of this clip, `
-        : dialogue.startSec !== undefined ? `At ${dialogue.startSec.toFixed(2)} seconds of this clip, ` : '';
-      const annotation = dialogue.annotation ? ` ${dialogue.annotation}` : '';
-      const text = `${time}${speaker || 'Voice source'} ${token}${annotation} says: <d>[${h3DialogueLanguage(dialogue.text)}] ${dialogue.text}</d>`;
-      return [{ text, dialogueText: dialogue.text, speaker, speakerKey: canonicalDialogueSpeakerKey(speaker, identityBindings) }];
-    });
-    if (!lines.length) continue;
-    const markerIndex = shotMarkers.findIndex((marker) => Number(marker[1]) === shotNumber);
-    if (markerIndex < 0) continue;
-    const start = shotMarkers[markerIndex].index!;
-    const end = shotMarkers[markerIndex + 1]?.index ?? body.length;
-    const shotBody = body.slice(start, end);
-    const parsedTextCounts = new Map<string, number>();
-    const existingDialogueCounts = new Map<string, number>();
-    const rawTextCounts = new Map<string, number>();
-    let previousTagEnd = 0;
-    for (const match of shotBody.matchAll(/<d>\[[^\]]+\]\s*([\s\S]*?)<\/d>/gu)) {
-      const content = match[1].trim();
-      const textKey = dialogueOccurrenceKey(content, '');
-      parsedTextCounts.set(textKey, (parsedTextCounts.get(textKey) || 0) + 1);
-      const occurrence = (rawTextCounts.get(textKey) || 0) + 1;
-      rawTextCounts.set(textKey, occurrence);
-      const cue = shotBody.slice(previousTagEnd, match.index!);
-      previousTagEnd = match.index! + match[0].length;
-      const owners = lines.filter((line) => line.speaker && cue.includes(line.speaker))
-        .sort((left, right) => cue.lastIndexOf(right.speaker) - cue.lastIndexOf(left.speaker));
-      const key = owners[0]
-        ? dialogueOccurrenceKey(content, owners[0].speakerKey)
-        : dialogueOccurrenceKey(content, '');
-      existingDialogueCounts.set(key, (existingDialogueCounts.get(key) || 0) + 1);
-    }
-    const canonicalOccurrences = new Map<string, number>();
-    const missing = lines.filter((line) => {
-      const key = dialogueOccurrenceKey(line.dialogueText, line.speakerKey);
-      const occurrence = (canonicalOccurrences.get(key) || 0) + 1;
-      canonicalOccurrences.set(key, occurrence);
-      const unknownSpeakerCount = line.speakerKey ? existingDialogueCounts.get(dialogueOccurrenceKey(line.dialogueText, '')) || 0 : 0;
-      return occurrence > (existingDialogueCounts.get(key) || 0) + unknownSpeakerCount;
-    });
-    if (missing.length) additions.push({ shotIndex: shotNumber, text: missing.map((line) => line.text).join('\n') });
-  }
-  for (const { shotIndex, text } of additions.reverse()) {
-    const markerIndex = shotMarkers.findIndex((marker) => Number(marker[1]) === shotIndex);
-    if (markerIndex < 0) continue;
-    const start = shotMarkers[markerIndex].index!;
-    const end = shotMarkers[markerIndex + 1]?.index ?? body.length;
-    body = `${body.slice(0, end).trimEnd()}\n${text}\n${body.slice(end).replace(/^\s*/u, '')}`;
-  }
-  return `${prompt.slice(0, bodyStart)}${body}${prompt.slice(bodyEnd)}`;
-};
-
 const resolveSelectedPictureStyle = (value: string | undefined): string => {
   const name = value?.trim() || '';
   if (!name || name === '无附加风格') return '';
@@ -366,11 +252,10 @@ const resolveSelectedPictureStyle = (value: string | undefined): string => {
 /** Render explicit performance, or preserve the entire legacy body inside the
  * known H3 layout. Neither path guesses roles from missing section titles. */
 export const renderDeliveredH3Performance = (delivery: ReturnType<typeof readH3DeliveryEnvelope>,
-  mode: 'integrated' | 'full-reference', layout: H3SectionLayoutOptions = {}, canonicalShots: readonly VideoShot[] = []): ReturnType<typeof readH3DeliveryEnvelope> => {
+  mode: 'integrated' | 'full-reference', layout: H3SectionLayoutOptions = {}, _canonicalShots: readonly VideoShot[] = []): ReturnType<typeof readH3DeliveryEnvelope> => {
   const bindings = delivery.identityBindings;
   if (!bindings?.performance) {
-    const prompt = serializeAuthoredH3Prompt(normalizeH3DialogueLanguageTags(delivery.h3Prompt), { ...layout, mode, language: 'zh' });
-    return { ...delivery, h3Prompt: appendCanonicalDialoguesToH3(prompt, canonicalShots, mode, bindings, layout.audioMode) };
+    return { ...delivery, h3Prompt: serializeAuthoredH3Prompt(delivery.h3Prompt, { ...layout, mode, language: 'zh' }) };
   }
   const matches = [...delivery.h3Prompt.matchAll(/^(subject_definitions|summary|retention_analysis|detailed_description|integrated_multimodal_description|overall_soundscape|non_diegetic_music)\s*[:：][ \t]*/gmu)];
   const sections = new Map(matches.map((match, index) => [match[1],
@@ -391,7 +276,7 @@ export const renderDeliveredH3Performance = (delivery: ReturnType<typeof readH3D
     // plan establish a voice-only owner; aliases and arbitrary prose do not.
     const voiceOwners = voiceOnlyCharacters.filter((entry) => ['Voice identity: ', '声音身份: '].some((prefix) => {
       const start = `${prefix}${entry.name}`;
-      return line.trimStart().startsWith(start) && /^\s+\(S\d+\)(?:[\s,，。.]|$)/u.test(line.trimStart().slice(start.length));
+      return line.trimStart().startsWith(start) && /^(?:\s+\(S\d+\))?(?:\s*[,，。.]|$)/u.test(line.trimStart().slice(start.length));
     }));
     const definitionOwner = owner || (voiceOwners.length === 1 ? voiceOwners[0] : undefined);
     if (definitionOwner) {
@@ -432,9 +317,7 @@ export const renderDeliveredH3Performance = (delivery: ReturnType<typeof readH3D
       return currentEvidence ? [{ ...entry, evidence: currentEvidence }] : [];
     }),
   } : undefined;
-  const h3Prompt = appendCanonicalDialoguesToH3(rendered.prompt, canonicalShots, mode,
-    { ...bindings, characters: rendered.characters }, layout.audioMode);
-  return { ...delivery, h3Prompt, identityBindings: {
+  return { ...delivery, h3Prompt: rendered.prompt, identityBindings: {
     version: 1, characters: rendered.characters, events: rendered.events, performance: rendered.plan,
   }, ...(characterParticipation ? { characterParticipation } : {}) };
 };
@@ -794,8 +677,9 @@ export async function generateSingleSegmentPrompt(
       referenceNotice,
       ...(needsIdentityEnvelope && !synchronizeCanonical ? [H3_IDENTITY_BINDINGS_RULE,
         existingBindings
-          ? '当前正文带candidateIdentityBindings，本次最终交付仅返回JSON对象{"h3Prompt":"完整正文","identityBindings":{"version":1,"characters":[]}}。保留已有characterId、原名与Subject/声源映射，逐字更新受本次修改影响的referenceAnchor，不沿用旧锚点，不遗漏、清空绑定记录；不扩展本次参考更新或衔接修复范围。'
-          : '本次最终交付返回JSON对象{"h3Prompt":"完整正文","identityBindings":{"version":1,"characters":[]},"characterParticipation":{"version":1,"characters":[]}}，依据最终H3登记真实人物参与与身份锚点。只交付H3及人物记录，保留canonicalPrompt与源头摄影和排程，不输出重新规划的canonicalPrompt、shotSourceIds或shotMetadata。'] : []),
+          ? '当前正文带candidateIdentityBindings，本次最终交付返回完整JSON，identityBindings内同时返回performance；h3Prompt按同一performance排版，不能退回只有version和characters的缩减对象。保留已有characterId、原名与Subject/声源映射，逐字更新受本次修改影响的referenceAnchor，不沿用旧锚点，不遗漏、清空绑定记录；不扩展本次参考更新或衔接修复范围。'
+          : '本次最终交付返回h3Prompt、identityBindings和characterParticipation完整JSON，identityBindings内同时返回performance；h3Prompt按同一performance排版，依据最终H3登记真实人物参与与身份锚点。只交付H3及人物记录，保留canonicalPrompt与源头摄影和排程，不输出重新规划的canonicalPrompt、shotSourceIds或shotMetadata。'] : []),
+      '最终排版中每次发话只由performance.shots[].events里对应kind:"speech"事件的text输出一次；canonicalPrompt、h3Prompt旧候选和视觉字段不另作补充发话来源。保留原剧情中不同发话事件的真实重复，同一事件跨镜只接续该镜实际词段。',
       ...(dossierRefresh ? [H3_IDENTITY_BINDINGS_RULE, CHARACTER_DOSSIER_REFRESH_RULE] : []),
       ...(requiresParticipation ? [CHARACTER_PARTICIPATION_RULE,
         '本次完整JSON交付必须同时包含characterParticipation；不能只返回正文、仅有identityBindings或省略人物参与字段。其证据以本次最终h3Prompt为准。'] : []),

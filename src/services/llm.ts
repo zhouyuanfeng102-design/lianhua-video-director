@@ -4199,7 +4199,7 @@ export const requestShotRecommendation = async (
       VIDEO_PROMPT_FOCUS_RULE,
       VIDEO_PRIVATE_SCOPE_SELECTION_RULE,
       '每镜 sourceExcerpt 可填写你从完整 sourceStory 中自行选择的原文依据；该字段只帮助用户追溯，不是本地内容覆盖门禁。不要把改写文字冒充逐字原文；无需填写本地句子 ID。',
-      '同时自行填写 space（空间关系）、performance（可见表演）、direction（朝向）和 dialogue（每句完整可朗读原对白及本镜相对起止区间，无词语对白写“无”）。dialogue 必须写出真实说话人、声道、听者和完整台词；“低声应门”“人物发声”“声音从门后传来”只能作为delivery/channel或动作背景，不能代替dialogue文字。程序直接排版你的字段，不会替你从 action 抽台词、按字数重排对白时间、猜测说话人、补写动作/镜头/光影/音效。action 中保留完整动作与发生顺序，sound 只写当前镜实际可听的非词汇人声、环境声和动作声，不能把台词或泛化发声提示塞进sound；交代发声对象、接触材质与随动作起止的关系，不从题材、风格、参考图或静置/携带的道具推导拟音。',
+      'subject 保持原文里的姓名，不改成阴唇、穴口、阴蒂或屁股。action 先照原文写她是同一个人：头留在脖子上，胸和背留在躯干上，躯干连着髋，这些部位留在这个髋上、朝向和髋相同；再写他的动作。他在她身后时，direction 和 space 写他留在她身后，胸口对着她的背，脸对着她的背，不写他站到两腿中间、脸冲着镜头。他的舌留在他的嘴里。camera 观看这些人；原文没有写这个部位的特写时，不把景别收成这个部位。同时自行填写 space（照原文的站位）、performance（可见表演）、direction（照原文的朝向）和 dialogue（每句完整可朗读原对白及本镜相对起止区间，无词语对白写“无”）。dialogue 必须写出真实说话人、声道、听者和完整台词；“低声应门”“人物发声”“声音从门后传来”只能作为delivery/channel或动作背景，不能代替dialogue文字。程序直接排版你的字段，不会替你从 action 抽台词、按字数重排对白时间、猜测说话人、补写动作/镜头/光影/音效。action 中保留完整动作与发生顺序，sound 只写当前镜实际可听的非词汇人声、环境声和动作声，不能把台词或泛化发声提示塞进sound；交代发声对象、接触材质与随动作起止的关系，不从题材、风格、参考图或静置/携带的道具推导拟音。',
       STORYBOARD_SCENE_STAGING_OUTPUT_RULE,
       'dialogue 在每句原话旁直接注明完整说话人、项目已知身份、画内/背影/画外声源及相对起止时刻；有原剧情或用户确认的声线时才附具体音色，没有特殊声线要求时保持项目已知的性别与基本发声身份，不为填“声音身份”自行补造少年音、男声、音高或特殊音色。怯懦、结巴、低声和喊叫只表达本句表演，不能改变人物声音身份；本轮候选自行补出的声线不是用户确认事实。身份资料用于辨认，是否出场或发声仍由本段剧情决定。未获授权的其他人物在该句期间不发该句、不做同步说话口型。',
       STORYBOARD_STABLE_SUBJECT_CONTRACT,
@@ -4216,7 +4216,7 @@ export const requestShotRecommendation = async (
       ...(params.executionContext ? ['executionContext是当前视频连接的已知事实，与提示词格式独立；unknown表示未知，不从模型名称猜测输入或参数能力。不因这些资料增删动作、次数、对白或改变固定时长、当前规划权限，不把内部连接字段写入交付正文。'] : []),
       '每个 shots 项包含 startSec、endSec、sourceExcerpt、purpose、subject、action、camera、transition、lighting、sound、result。',
       '若数据中提供 requiredShotCount，shots 数量必须与其完全一致；未提供时由你独立决定最合适的镜头数量。',
-      `JSON 字段格式示意：${JSON.stringify({ reason: '连续场面的叙事职责与必要观察安排', breakdown: ['本次具体依据'], aiReview: { status: 'passed', summary: '本次对照全文的结论', issues: [] }, shots: [{ startSec: 0, endSec: params.durationSec, durationSec: params.durationSec, localTimeRangeSec: [0, params.durationSec], sourceExcerpt: '对应原文依据', purpose: '本镜承担的完整叙事职责', subject: '剧情中的稳定主体名', action: '本镜内多个真实动作、对白及回应的连续过程', camera: '能表达观看重点的景别、机位与简单连续摄影', transition: '开场或实际换镜的叙事触发与状态承接', lighting: '场面光影', sound: '非词汇人声、环境声或动作声；不放台词', result: '本镜结束时供后续继承的状态', space: '人物和物体的空间关系', performance: '剧情触发的可见表演', direction: '具名人物的朝向与作用目标', dialogue: '无，或本镜相对起点–终点秒 @原说话人（有依据的声音身份、在画/画外、听者）：完整可朗读原台词', visiblePrivatePartsByCharacter: {} }] })}。这里只示意字段，不设定本次镜数、镜长或语速，也不要求一镜到底；实际分镜覆盖本次获准总时长。主体名、原文、动作、时间和对白均替换为当前剧情。visiblePrivatePartsByCharacter 可省略，没有本镜明确可见需求时保持空对象。`,
+      `JSON 字段格式示意：${JSON.stringify({ reason: '连续场面的叙事职责与必要观察安排', breakdown: ['本次具体依据'], aiReview: { status: 'passed', summary: '本次对照全文的结论', issues: [] }, shots: [{ startSec: 0, endSec: params.durationSec, durationSec: params.durationSec, localTimeRangeSec: [0, params.durationSec], sourceExcerpt: '对应原文依据', purpose: '本镜承担的完整叙事职责', subject: '原文里的姓名，不改成身体部位', action: '先写她的头、胸、背、髋是同一个人，再写他在她身后的连续动作', camera: '观看这些人；原文没有写部位特写时不收成这个部位', transition: '开场或实际换镜的叙事触发与状态承接', lighting: '场面光影', sound: '非词汇人声、环境声或动作声；不放台词', result: '本镜结束时供后续继承的状态', space: '照原文写谁在谁身后', performance: '剧情触发的可见表演', direction: '照原文写朝向；他在她身后就留在她身后', dialogue: '无，或本镜相对起点–终点秒 @原说话人（有依据的声音身份、在画/画外、听者）：完整可朗读原台词', visiblePrivatePartsByCharacter: {} }] })}。这里只示意字段，不设定本次镜数、镜长或语速，也不要求一镜到底；实际分镜覆盖本次获准总时长。主体名、原文、动作、时间和对白均替换为当前剧情。visiblePrivatePartsByCharacter 可省略，没有本镜明确可见需求时保持空对象。`,
       '摄影选择对照例仅说明场面组织，不是本次剧情或镜数配额：若原文是“门开，来者进入半步停住，室内人物持武器站立”，先以门口与室内的空间关系连续表达入场和相遇，不默认分别拍每人、武器和脸的介绍镜；若原文在连续交谈或攻防后揭示一项当前机位看不清的关键线索，可在揭示时换观察位置，新镜接续同一行动与原话，不重新起手。不要把例子的人物、武器或线索补进当前剧情。',
       '普通转头、迈步、持物和表情变化使用自然先后与连续速度表达；数字时间主要服务真正切点、完整发话区间及确需同步的关键事件，不逐个小动作安排毫秒刻度。每个shots项内部保持真实连续摄影，不在其camera或action里暗藏未列出的反打、插入镜头或“切到特写”。',
       '镜头总数必须在 1—900 之间。',
@@ -4931,7 +4931,7 @@ const parseStoryAnalysisResult = (result: string, story = ''): StoryAnalysisResp
     }))
     .filter((item: StoryAnalysisResponse['scenes'][number]) => Boolean(item.content));
   if (!scenes.length) throw new Error('文本模型返回的场景内容为空');
-  const foldedCharacters = characters;
+  const foldedCharacters = foldSolePronounCharacters(characters, story);
   const canonicalName = new Map<string, string>();
   foldedCharacters.forEach((character) => {
     if (!character.name) return;
@@ -5007,8 +5007,9 @@ const requestStoryAnalysisChunk = async (
     : '';
   const systemPrompt = [
     '你是中文小说的视频前期分析助手。先通读提供的完整剧情，由你自己全局识别人物、地点、道具和场景关系，再一次性返回完整严格 JSON；不要 Markdown、解释或代码围栏。',
+    `通读全文后，一个连续的人只返回一张人物卡。没有姓名、只用「她、他、我、一个人」指代时，name 用“${DEFAULT_FIRST_PERSON_SUBJECT}”，代词只写进 aliases。不要再返回 name 为「她」或「他」的第二张卡。示例只含这一个人物对象：{"name":"${DEFAULT_FIRST_PERSON_SUBJECT}","aliases":["她"]}。两个已经写出姓名的人各留各的，不猜测合并。`,
     STORY_CAUSALITY_RULE,
-    '场景content保留关键行动及受击结果的因果，不因原文侧面描写或固定栏目位置漏掉动作。scenes.characters包括本场实际参与事件、有证据造成结果的人物，不仅是句面主语或当前观察者；画外行动者不因此消失。全局人物清单不等于每场全部入画。characters[].aliases仅保存全文能够确认的别名称呼，未确认同人不猜测绑定；场景正文仍保留原有身份揭示顺序。',
+    '场景content保留关键行动及受击结果的因果，不因原文侧面描写或固定栏目位置漏掉动作。scenes.characters包括本场实际参与事件、有证据造成结果的人物，不仅是句面主语或当前观察者；画外行动者不因此消失。全局人物清单不等于每场全部入画。characters[].aliases保存指代这个人的代词和全文已经确认的别名。她、他、我不是另一张人物卡。两个已经写出姓名的人，无法确认是同一人时不要猜测合并。场景正文仍保留原有身份揭示顺序。',
     options.chunkCount && options.chunkCount > 1
       ? '本次输入是超长章节按原文字符区间分出的连续部分，所有部分将依次分析并合并，原文没有截断或改写。必须覆盖本部分全部事件。已有资料目录包含项目实体及前面部分已确认的实体，先核对同一身份，不能凭称呼相似猜测合并。'
       : '输入为当前章节的完整原文，必须分析全文前后文，不能只分析开头或把后文真名另建成新人。',
@@ -5016,7 +5017,7 @@ const requestStoryAnalysisChunk = async (
     options.entityCatalog ? '已有资料目录中的 details 是逐字段的现有资料；existingEntityId 只表示已确定身份，不表示资料已经完整。本部分涉及的已有实体也须返回完整资料对象：沿用 details 中已有的非空内容，结合本部分剧情补齐尚未填写的普通字段，不要因为目录里已经有名字或简短 description 就跳过。lockedFields 是已确认字段，包含确认留空的字段，原值必须保留；useStory=false 的资料仅沿用身份与现有内容，不用剧情补写。目录中未涉及本部分的实体不要重新设计或加入本场角色。' : '',
     '在读完全文后，按地点、时间、人物关系或明显事件变化确定全局可拍摄场景边界，保持真实事件顺序并覆盖全文，不能因篇幅长遗漏后段。保留每个场景的关键原文，不要编造剧情。',
     `实体名称必须是跨场景可复用的稳定名称：第一人称叙事若原文没有给主角姓名，统一命名为“${DEFAULT_FIRST_PERSON_SUBJECT}”，不得把“我”保存为人物名。`,
-    '根据完整前后文统一同一人的姓名和别名：同一人物的“师傅、师姐、道侣”等称呼、真名、昵称与代词不要分别建立人物；能确认真名就统一使用该真名，未给真名则保留可靠稳定称谓。两个已经写出姓名的人，无法确认是同一人时不要猜测合并。每个场景引用同一套全局标准名称。',
+    '根据完整前后文统一同一人的姓名和别名：同一人物的“师傅、师姐、道侣”等称呼、真名、昵称与代词不要分别建立人物；能确认真名就统一使用该真名，未给真名则保留可靠稳定称谓。两个已经写出姓名的人，无法确认是同一人时不要猜测合并；她、他、我不是姓名。每个场景引用同一套全局标准名称。',
     `人物名称只写真实姓名、稳定称谓或原文明示的稳定群体名称。“她们、他们、我们、她、他、我、一个人”只是代词，不能单独成为另一张人物卡。一段原文里只有一个人，用这些代词指代时，只返回这一个人物；没有姓名时 name 用“${DEFAULT_FIRST_PERSON_SUBJECT}”，代词写入 aliases。已有一个姓名时，代词写入这个人的 aliases，不要再返回名为“她”或“他”的记录。`,
     '“祈凌霜笑盈盈”“语气平静却带着宠溺”“低声道”“只”“雪衣道侣走”“目光只落”“细剑抱”一类副词、语气、发声方式或主体后粘连动作、身体部位、物品、谓语的动作片段，绝不能作为人物或角色名称。不要按最近逗号、冒号或动作词机械截取名字。',
     '地点名称只写可复用的场所本体；去掉“一处、这座、前、后、内、外、方向”等相对位置包装，不能把“珠光下轻轻发亮”一类状态或谓语片段作为地点名称。',

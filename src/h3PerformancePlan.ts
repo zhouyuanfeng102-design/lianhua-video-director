@@ -304,7 +304,6 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
     const heard = audio.length ? (en ? `, with the voice referenced from ${audio.map((number) => `<Audio ${number}>`).join(', ')}` : `，声音参考为${audio.map((number) => `<Audio ${number}>`).join('、')}`) : '';
     return `${voice}${heard}`;
   };
-  const said = new Set<string>();
   const joinSpoken = (parts: string[]): string => parts.reduce((acc, part, index) => {
     if (!index) return part;
     const prev = parts[index - 1];
@@ -331,13 +330,13 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
       return `${who}${tokens.length ? ` (${tokens.map((token) => token.slice(1, -1)).join(',')})` : ''}`;
     };
     const speakers = unseen ? spokenNames(event.speakerCharacterIds) : voiceLabel(event.speakerCharacterIds);
-    const verb = narration ? 'says in an off-screen voiceover' : 'says';
+    const verb = en ? narration ? 'says in an off-screen voiceover' : 'says'
+      : narration ? '以画外旁白说' : '说';
     if (event.kind === 'speech') {
       const dialogue = `<d>[${dialogueLanguageTag(event.language)}] ${event.continuesFromPreviousShot ? '<scenetrans>' : ''}${event.text}${event.continuesInNextShot ? '<scenetrans>' : ''}</d>`;
       const preface = voicePreface(event.speakerCharacterIds);
       const comma = preface ? (en ? ',' : '，') : '';
-      output.push(`${time(event)}${speakers}${preface}${comma}${en ? ' ' : ''}${verb}: ${dialogue}`);
-      said.add(event.text.trim());
+      output.push(`${time(event)}${speakers}${preface}${comma}${en ? ` ${verb}: ` : `${verb}：`}${dialogue}`);
     } else {
       const position = event.channel === 'on-screen' ? (en ? 'on-screen' : '画内') : (en ? 'off-screen' : '画外');
       const vocal = authored(event.vocalDescription || '');
@@ -366,44 +365,6 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
     });
   const preamble = authored(plan.preamble?.trim() || '');
   const integratedOpening = !fullReference ? [...renderedCharacters.map((entry) => entry.referenceAnchor), ...voiceOnlyDefinitions, preamble].filter(Boolean).join('\n') : '';
-  const spokenByEvents = (shot: H3PerformancePlan['shots'][number]): Set<string> => new Set(shot.events.flatMap((event) => event.kind === 'speech' ? [event.text.trim()] : []));
-  const dialogueText = (tag: string): string => tag.replace(/<\/?d>/gu, '').replace(/^\s*\[[^\]]+\]\s*/u, '').trim();
-  const liftBuriedDialogue = (visual: string, shot: H3PerformancePlan['shots'][number]): { before: string; after: string; lines: string[] } => {
-    const known = spokenByEvents(shot);
-    const lines: string[] = [];
-    for (const match of visual.matchAll(/<d>[\s\S]*?<\/d>/gu)) {
-      if (known.has(dialogueText(match[0]))) continue;
-      const beforeTag = visual.slice(Math.max(0, (match.index ?? 0) - 80), match.index ?? 0);
-      const namedMatches = [...beforeTag.matchAll(/((?:[\u3400-\u9fff]{1,8}|[A-Za-z]+)(?:[ ·](?:[\u3400-\u9fff]{1,8}|[A-Za-z]+)){0,3})\s*\(S(\d+)\)/gu)];
-      const named = namedMatches[namedMatches.length - 1];
-      const who = named?.[1] || (en ? 'The declared voice source' : '已声明声源');
-      const token = named ? ` (S${named[2]})` : '';
-      const says = `${who}${token} says: ${match[0]}`;
-      said.add(dialogueText(match[0]));
-      lines.push(says);
-    }
-    const firstTag = visual.search(/<d>/u);
-    const spokenLines = shot.events.filter((event) => event.kind === 'speech').map((event) => event.text.trim()).filter(Boolean);
-    const dropRetoldLine = (value: string): string => {
-      if (!spokenLines.length) return value;
-      return value.split(/(?<=[。！？])/u).filter((part) => {
-        const compact = part.replace(/\s/gu, '');
-        return !spokenLines.some((line) => {
-          const words = line.replace(/\s/gu, '');
-          return Boolean(words) && (compact.includes(`说：${words}`) || compact.includes(`说:${words}`) || compact.includes(`说道：${words}`) || compact === words || compact === `${words}。`);
-        });
-      }).join('');
-    };
-    const strip = (text: string): string => dropRetoldLine(text)
-      .replace(/<d>[\s\S]*?<\/d>/gu, '')
-      .replace(/[\u3400-\u9fffA-Za-z·]{1,16}\s*\(S\d+\)[^。\n]{0,24}说[:：]\s*$/u, '')
-      .replace(/[\u3400-\u9fff]{1,16}说[:：]\s*$/u, '');
-    return {
-      before: strip(firstTag >= 0 ? visual.slice(0, firstTag) : visual),
-      after: strip(firstTag >= 0 ? visual.slice(firstTag) : ''),
-      lines,
-    };
-  };
   plan.shots.forEach((shot, index) => {
     const windowStart = shot.startSec;
     const windowEnd = plan.shots[index + 1]?.startSec;
@@ -475,10 +436,8 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
   const shots = plan.shots.map((shot, index) => {
     const marker = `[Shot ${shot.shotIndex}]${index ? ` At ${cutTime(shot.startSec)}` : ''}`;
     const visual = quoteVisibleText(shot.visualDescription);
-    const lifted = liftBuriedDialogue(visual, shot);
-    const shownBefore = authored(lifted.before);
-    const shownAfter = authored(lifted.after);
-    return [marker, !index ? integratedOpening : '', shownBefore ? sentence(shownBefore, language) : '', ...lifted.lines, ...shot.events.map((event) => renderEvent(event, shot)), shownAfter ? sentence(shownAfter, language) : ''].filter(Boolean).join('\n');
+    return [marker, !index ? integratedOpening : '', visual ? sentence(authored(visual), language) : '',
+      ...shot.events.map((event) => renderEvent(event, shot))].filter(Boolean).join('\n');
   });
   const body = normalizeH3DialogueLanguageTags([fullReference ? preamble : '', ...shots]
     .filter(Boolean).join('\n\n'));

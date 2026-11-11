@@ -60,7 +60,7 @@ test('segment 4 converts the declared shot clock once and never voices the sourc
   assert.equal(rendered.plan.shots[1].events[1].endSec, 13.1);
   assert.deepEqual(normalizeH3PerformancePlan(rendered.plan), rendered.plan);
   assert.equal(JSON.stringify(segment4), untouched);
-  assert.match(rendered.prompt, /本段11\.50–13\.10秒，亚乌拉 \(S2\)，已确认的女性声线，says:/u);
+  assert.match(rendered.prompt, /本段11\.50–13\.10秒，亚乌拉 \(S2\)，已确认的女性声线，说：/u);
   assert.doesNotMatch(rendered.prompt, /人物身份: 贝里尤洛 \(S1\)|人物身份: 亚乌拉 \(S2\)/u);
   assert.match(rendered.prompt, /贝里尤洛走到两人面前/u);
   assert.doesNotMatch(rendered.prompt, /亚乌拉的胸口和眼睛留在贝里尤洛与夏提雅身上/u);
@@ -202,7 +202,7 @@ test('a hidden mouth is closed on everyone else before the line reaches the spea
     language: 'zh',
   });
   const line = rendered.events.find((event) => event.dialogueId === 'q1')!.referenceAnchor!;
-  const speechAt = line.indexOf('says:');
+  const speechAt = line.indexOf('说：');
   assert.ok(speechAt >= 0);
   assert.doesNotMatch(line, /玉小刚的嘴保持闭合|能看清千仞雪的嘴/u);
   assert.match(line, /<d>\[Chinese\] 唐三，你还要让我等多久？<\/d>/u);
@@ -289,7 +289,8 @@ test('following behind uses the back of the leader, and face-to-face speech stay
   });
   assert.match(rendered.prompt, /玉小刚跟在比比东身后/u);
   assert.doesNotMatch(rendered.prompt, /比比东的脸朝向一个方向/u);
-  assert.match(H3_PERFORMANCE_DELIVERY_RULE, /他留在她身后，胸口对着她的背/u);
+  assert.match(H3_PERFORMANCE_DELIVERY_RULE, /他留在她身后，胸口对着她的背，脸对着她的背/u);
+  assert.match(H3_PERFORMANCE_DELIVERY_RULE, /他的舌留在他的嘴里/u);
   assert.match(H3_PERFORMANCE_DELIVERY_RULE, /她的头留在她的脖子上/u);
   assert.doesNotMatch(H3_PERFORMANCE_DELIVERY_RULE, /髋朝向这头并对准|不写从肩到髋都能看见/u);
   const reversedRoster: H3PerformancePlan = {
@@ -331,7 +332,7 @@ test('a repeated line is spoken again and a late line stays inside the clip', ()
   const plan: H3PerformancePlan = {
     version: 1, timeBase: 'clip', descriptionLanguage: 'zh',
     characters: [{ characterId: 'qian', visualDescription: '白发女子' }],
-    shots: [{ shotIndex: 1, startSec: 0, visualDescription: '千仞雪说道：还要多久。殿内仍是原来的光。', events: [
+    shots: [{ shotIndex: 1, startSec: 0, visualDescription: '殿内仍是原来的光。', events: [
       { eventId: 'a', kind: 'speech', dialogueId: 'a', speakerCharacterIds: ['qian'], startSec: 1, endSec: 2, channel: 'on-screen', language: 'Chinese', text: '还要多久。' },
       { eventId: 'b', kind: 'speech', dialogueId: 'b', speakerCharacterIds: ['qian'], startSec: 16, endSec: 18, channel: 'on-screen', language: 'Chinese', text: '还要多久。' },
     ] }],
@@ -350,7 +351,7 @@ test('a repeated line is spoken again and a late line stays inside the clip', ()
   assert.ok((rendered.plan.shots[0].events[1].endSec ?? 99) <= 15);
 });
 
-test('a line buried in a behind-view shot is spoken from the readable mouth', () => {
+test('legacy visual prose is retained without inferring a new speaker event', () => {
   const plan: H3PerformancePlan = {
     version: 1, timeBase: 'clip', descriptionLanguage: 'zh',
     characters: [{ characterId: 'qian', visualDescription: '白发女子' }],
@@ -362,15 +363,17 @@ test('a line buried in a behind-view shot is spoken from the readable mouth', ()
     characters: [{ characterId: 'qian', name: '千仞雪', referenceAnchor: '千仞雪' }],
     language: 'zh',
   });
-  const saysAt = rendered.prompt.indexOf('千仞雪 (S1) says: <d>[Chinese] 唐三，你还要让我等多久？</d>');
+  const saysAt = rendered.prompt.indexOf('千仞雪 (S1)说: <d>[Chinese] 唐三，你还要让我等多久？</d>');
   const closedAt = rendered.prompt.indexOf('说完后她的嘴唇闭合');
   assert.ok(saysAt >= 0 && closedAt > saysAt);
   assert.doesNotMatch(rendered.prompt, /能看清千仞雪的嘴/u);
   assert.match(rendered.prompt, /Her mouth opens and her lips move with the words/u);
   assert.match(rendered.prompt, /The camera cuts to a medium-close view/u);
+  assert.equal(rendered.events.length, 0, 'visual compatibility prose does not fabricate a structured dialogue event');
+  assert.doesNotMatch(rendered.prompt, /已声明声源|千仞雪 \(S1\) says:/u);
 });
 
-test('a Chinese prompt drops an English shot sentence and keeps the Chinese one', () => {
+test('legacy mixed-language visual prose stays intact without a local language rewrite', () => {
   const plan: H3PerformancePlan = {
     version: 1, timeBase: 'clip', descriptionLanguage: 'zh',
     characters: [{ characterId: 'qian', visualDescription: '白发女子' }],

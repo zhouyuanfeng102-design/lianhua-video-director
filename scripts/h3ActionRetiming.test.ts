@@ -45,8 +45,8 @@ const canonicalDialogueShot: VideoShot = { ...baseline.shots[0], subject: '玉�
   prompt: `【0s-5s】主体：@玉小刚，正在 [站在门后]；空间：门内；光影：昏暗；镜头：固定中景；台词：${authoredDoorDialogue}；音效：门外轻敲。` };
 const dialogueFallback = renderDeliveredH3Performance({ h3Prompt: 'integrated_multimodal_description:\n[Shot 1] 玉小刚的声音从门后传来。\n\noverall_soundscape:\n门外敲门声。\n\nnon_diegetic_music:\nN/A', envelope: true },
   'integrated', {}, [canonicalDialogueShot]);
-assert.ok(dialogueFallback.h3Prompt.includes('<d>[Chinese] 进来。</d>'), 'canonical six-field dialogue is serialized when performance is absent');
-assert.match(dialogueFallback.h3Prompt, /From 1\.10 to 2\.10 seconds of this clip, 玉小刚 \(S1\).*成年男性，低而稳，画外，隔门，听者：小舞.*says: <d>\[Chinese\] 进来。<\/d>/u);
+assert.equal(dialogueFallback.h3Prompt, 'integrated_multimodal_description:\n[Shot 1] 玉小刚的声音从门后传来。\n\noverall_soundscape:\n门外敲门声。\n\nnon_diegetic_music:\nN/A',
+  'legacy H3 body stays exact; canonical evidence is not compiled into a second dialogue source');
 assert.deepEqual(savedH3TranslationFacts(undefined, [canonicalDialogueShot]).sourceDialogues.map((entry) => entry.text), ['进来。'],
   'English translation receives the exact original-language words from canonical shots');
 const sidecarDialogueFallback = renderDeliveredH3Performance({ h3Prompt: 'integrated_multimodal_description:\n[Shot 1] 玉小刚站在门后。\n\noverall_soundscape:\n门外敲门声。\n\nnon_diegetic_music:\nN/A',
@@ -56,8 +56,8 @@ const sidecarDialogueFallback = renderDeliveredH3Performance({ h3Prompt: 'integr
       { eventId: 'door-action', kind: 'visual', description: '门外有人敲门。', startSec: 0, endSec: 1 },
     ] }], overallSoundscape: '门外敲门声。', nonDiegeticMusic: 'N/A' } } },
   'integrated', {}, [canonicalDialogueShot]);
-assert.match(sidecarDialogueFallback.h3Prompt, /玉小刚 \(S1\).*成年男性，低而稳，画外，隔门，听者：小舞.*says: <d>\[Chinese\] 进来。<\/d>/u,
-  'canonical dialogue is retained when an existing performance sidecar omits the speech event');
+assert.doesNotMatch(sidecarDialogueFallback.h3Prompt, /<d>|says:/u,
+  'performance events own the output; old canonical text cannot add a second speech event');
 const repeatedDialogueShot: VideoShot = { ...canonicalDialogueShot, startSec: 5,
   dialogue: '第1.1s–2.1s @玉小刚（成年男性，低而稳，画外，隔门，听者：小舞）：“进来。”；第3.1s–4.1s @玉小刚（成年男性，低而稳，画外，隔门，听者：小舞）：“进来。”' };
 const repeatedDialogueBindings: H3IdentityBindings = { version: 1,
@@ -66,23 +66,25 @@ const repeatedDialogueBindings: H3IdentityBindings = { version: 1,
     characters: [{ characterId: 'door-speaker', name: '玉小刚', visualDescription: '成年男性。' }],
     shots: [{ shotIndex: 1, startSec: 5, visualDescription: '玉小刚站在门后。', events: [
       { eventId: 'door-speech-1', dialogueId: 'door-dialogue-1', kind: 'speech', text: '进来。', language: 'Chinese',
-        speakerCharacterIds: ['door-speaker'], channel: 'off-screen', startSec: 1.1, endSec: 2.1 },
+        speakerCharacterIds: ['door-speaker'], channel: 'off-screen', startSec: 6.1, endSec: 7.1 },
+      { eventId: 'door-speech-2', dialogueId: 'door-dialogue-2', kind: 'speech', text: '进来。', language: 'Chinese',
+        speakerCharacterIds: ['door-speaker'], channel: 'off-screen', startSec: 8.1, endSec: 9.1 },
     ] }], overallSoundscape: '门外敲门声。', nonDiegeticMusic: 'N/A' } };
 const repeatedDialogueFacts = savedH3TranslationFacts(repeatedDialogueBindings, [repeatedDialogueShot]);
 assert.deepEqual(repeatedDialogueFacts.sourceDialogues.map((entry) => entry.text), ['进来。', '进来。'],
-  'translation facts retain repeated source speech that the performance sidecar omitted');
+  'translation facts retain two distinct authored speech events with identical words');
 const repeatedDialogueDelivery = renderDeliveredH3Performance({ h3Prompt: '', envelope: true,
   identityBindings: repeatedDialogueBindings }, 'integrated', {}, [repeatedDialogueShot]);
 assert.equal([...repeatedDialogueDelivery.h3Prompt.matchAll(/<d>\[Chinese\] 进来。<\/d>/gu)].length, 2,
-  'H3 backfill retains the second occurrence of identical dialogue');
-assert.match(repeatedDialogueDelivery.h3Prompt, /From 8\.10 to 9\.10 seconds of this clip/u,
-  'shot-relative dialogue timing is converted to clip time from the canonical shot start');
+  'two authored events remain two performances without a canonical backfill');
+assert.match(repeatedDialogueDelivery.h3Prompt, /本段8\.10–9\.10秒/u,
+  'Chinese fixed prose keeps the declared clip-time window in Chinese');
 const punctuationBindings = structuredClone(repeatedDialogueBindings);
 punctuationBindings.performance!.shots[0].events = [{ eventId: 'door-speech-question', dialogueId: 'door-dialogue-question', kind: 'speech',
   text: '进来？', language: 'Chinese', speakerCharacterIds: ['door-speaker'], channel: 'off-screen', startSec: 6.1, endSec: 7.1 }];
 assert.deepEqual(savedH3TranslationFacts(punctuationBindings, [{ ...repeatedDialogueShot,
   dialogue: '第1.1s–2.1s @玉小刚（成年男性，低而稳，画外，隔门，听者：小舞）：“进来！”' }]).sourceDialogues.map((entry) => entry.text),
-['进来？', '进来！'], 'punctuation-distinct canonical dialogue is retained in translation facts');
+['进来？'], 'a paired performance is the translation authority, not a union with older canonical dialogue');
 const legacySubjectBindings: H3IdentityBindings = { version: 1,
   characters: [{ characterId: 'door-speaker', name: '玉小刚', referenceAnchor: '声音身份：玉小刚。' }],
   performance: { version: 1, timeBase: 'clip', descriptionLanguage: 'zh',

@@ -498,6 +498,10 @@ for (const route of ['confirmed-slice', 'converted-gap', 'draft-gap'] as const) 
       if (stage === 'convert') return invalidTimelinePrompt;
       if (stage === 'translate') return mockEnglish(user);
       const data = jsonBlock(user, 'video_staging_review_data');
+      assert.match(system, /identityBindings内同时返回performance/u,
+        'the actual existing delivery request retains the structured performance contract');
+      assert.match(system, /每次发话只由performance\.shots\[\]\.events里对应kind:"speech"事件的text输出一次/u,
+        'the final delivery instruction keeps one speech source after all other format rules');
       assert.equal(data.taskAuthority, 'preserve-confirmed-schedule', 'format delivery preserves the source schedule');
       assert.ok(!system.includes('VIDEO_AI_SHOT_COVERAGE_V'), 'downstream delivery never receives autonomous shot coverage rules');
       assert.equal(data.canonicalPrompt, invalidTimelinePrompt, 'the existing review receives the untouched AI canonical response');
@@ -511,19 +515,14 @@ for (const route of ['confirmed-slice', 'converted-gap', 'draft-gap'] as const) 
     },
   });
   assert.deepEqual(stages, [...(route === 'confirmed-slice' ? [] : ['convert']), 'review', 'translate']);
-  const restoredDialogue = '旅人 (S1) says: <d>[Chinese] 先开门。</d>';
-  const expectedH3 = route === 'confirmed-slice'
-    ? outputs[0].officialPromptZh
-    : outputs[0].officialPromptZh!.replace('\n\n[Shot 2]', `\n${restoredDialogue}\n[Shot 2]`);
+  const expectedH3 = outputs[0].officialPromptZh;
   assert.equal(repaired.officialPromptZh, expectedH3,
-    `${route}: format repair preserves the complete authored H3 delivery and restores canonical dialogue when needed`);
+    `${route}: compatible free-text delivery stays exact without canonical dialogue backfill`);
   assert.equal(repaired.targetOutput?.prompt, expectedH3);
   assert.equal(repaired.officialPromptZh?.match(/<d>\[Chinese\] 先开门。<\/d>/gu)?.length || 0,
-    route === 'confirmed-slice' ? 0 : 1,
-    'the canonical utterance is compiled into one H3 line only when the existing delivery is missing it');
+    0, 'the legacy canonical quote is not compiled a second time as an extra H3 speech tag');
   assert.match(repaired.officialPromptZh!, /\[Shot 1\][^\n]*台词：第1s <Subject 1>："先开门。"/u,
     'the dialogue remains attached to its original shot and speaker evidence');
-  if (route !== 'confirmed-slice') assert.ok(repaired.officialPromptZh?.includes(restoredDialogue));
   assert.deepEqual(repaired.shots.map((shot) => [shot.id, shot.startSec, shot.endSec, shot.referenceAssetIds]),
     sourceBoard.shots.map((shot) => [shot.id, shot.startSec, shot.endSec, shot.referenceAssetIds]));
   assert.equal(repaired.officialPromptEnError, '');
@@ -696,11 +695,8 @@ for (const { purpose, formatRepair } of [
           assert.match(translatedSource, /overall_soundscape:\n仅呈现上述镜头/u);
           assert.match(translatedSource, /non_diegetic_music:\nN\/A$/u);
         } else {
-          const canonicalLine = '旅人 (S1) says: <d>[Chinese] 先开门。</d>';
-          const expectedSource = candidateChinese.includes(canonicalLine) ? candidateChinese
-            : candidateChinese.replace(/\n+\[Shot 2\]/u, `\n${canonicalLine}\n[Shot 2]`);
-          assert.equal(translatedSource, expectedSource,
-            'completed source fields stay intact while a missing canonical dialogue is compiled once into H3');
+          assert.equal(translatedSource, candidateChinese,
+            'compatible authored fields reach translation without adding canonical dialogue a second time');
         }
         return mockEnglish(user);
       }

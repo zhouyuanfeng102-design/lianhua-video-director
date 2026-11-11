@@ -1,6 +1,6 @@
 import type { H3IdentityBindings, H3IdentityEventBinding, H3PerformancePlan, SemanticSegmentSource } from './types';
 import { getPromptVisibleTextSpans } from './promptDialogueLanguage';
-import { h3KeepsScore, normalizeH3DialogueLanguageTags, renderH3PerformancePlan } from './h3PerformancePlan';
+import { h3KeepsScore, h3PerformanceSpeakerTokens, normalizeH3DialogueLanguageTags, renderH3PerformancePlan } from './h3PerformancePlan';
 
 export interface PromptTranslationSourceCharacter {
   id: string;
@@ -64,6 +64,10 @@ export interface PromptTranslationSourceDialogue {
 export interface PromptTranslationUtterance extends SourceRange {
   id: string;
   text: string;
+  /** Structured deliveries use the event as their source; legacy prose keeps its span. */
+  eventId?: string;
+  dialogueId?: string;
+  language?: string;
   /** Absent when the source does not explicitly identify a unique speaker. */
   speakerCharacterId?: string;
   speakerToken?: string;
@@ -349,7 +353,19 @@ const withPerformanceTranslation = (
   const definitionAtoms = allDefinitionAtoms.filter((atom) => atom.kind === 'literal'
     ? atom.literalKind === 'layout' : !characterDefinitionLines.has(atom.groupSourceText));
   for (const atom of definitionAtoms) if (atom.kind === 'slot') slots.push(atom);
-  return { ...document, slots, groups: slots.map((slot) => ({ id: slot.groupId, sourceStart: slot.sourceStart,
+  // Each authored speech event is one occurrence, including repeated words or
+  // separate pieces of one cross-cut dialogue. Free-text quotes are not a second source.
+  const speakerTokens = h3PerformanceSpeakerTokens(plan);
+  const utterances = plan.shots.flatMap((shot) => shot.events.flatMap((event): PromptTranslationUtterance[] => {
+    if (event.kind !== 'speech') return [];
+    const anchor = document.eventAnchors.find((entry) => entry.eventId === event.eventId);
+    const speakerCharacterId = event.speakerCharacterIds.length === 1 ? event.speakerCharacterIds[0] : undefined;
+    return [{ id: event.eventId, eventId: event.eventId, dialogueId: event.dialogueId, text: event.text, language: event.language,
+      sourceStart: anchor?.sourceStart ?? -1, sourceEnd: anchor?.sourceEnd ?? -1,
+      ...(speakerCharacterId ? { speakerCharacterId, speakerToken: speakerTokens.get(speakerCharacterId) } : {}),
+      ...(event.listenerCharacterIds ? { listenerCharacterIds: [...event.listenerCharacterIds] } : {}) }];
+  }));
+  return { ...document, utterances, slots, groups: slots.map((slot) => ({ id: slot.groupId, sourceStart: slot.sourceStart,
     sourceEnd: slot.sourceEnd, sourceText: slot.groupSourceText, slotIds: [slot.id] })),
   performancePlan: plan, performanceFields: fields, performanceDefinitionAtoms: definitionAtoms,
   performanceCharacterPictures: characterPictures, performanceCharacterAudio: characterAudio };

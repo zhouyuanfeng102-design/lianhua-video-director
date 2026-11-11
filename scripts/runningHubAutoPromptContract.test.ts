@@ -54,6 +54,14 @@ for (const count of [1, 6]) {
   assert.deepEqual(draft, before); assert.deepEqual(api, apiBefore, 'saved draft/API snapshots are unchanged');
   assert.equal(valueAt(bindRunningHubVideoRequest(api.requestTemplate!, api.runningHubMappedFields!, draft, uploadedImages), '456', 'text'), prompt,
     'without explicit submit context, old standalone/frozen binders are unchanged');
+
+  const h3Draft: VideoGenerationDraft = { ...draft, source: { promptFormat: 'h3', language: 'en' } };
+  const h3Snapshot = structuredClone(h3Draft);
+  assert.equal(valueAt(buildVideoApiBody(api, h3Draft, uploadedImages), '456', 'text'), prompt,
+    'an explicit complete H3 delivery enters its existing prompt mapping verbatim without another rewrite instruction wrapper');
+  assert.deepEqual(h3Draft, h3Snapshot, 'direct H3 transport does not rewrite the source or frozen media mapping');
+  assert.equal(valueAt(buildVideoApiBody(api, { ...h3Draft, reuseTaskId: 'historical-task' }, uploadedImages), '456', 'text'), submitted,
+    'an explicit historical reuse retains its prior remote-generator input contract');
 }
 
 const draft: VideoGenerationDraft = { backend: 'api', name: '未修改来源', prompt: 'subject_definitions: 角色 reference <Picture 1>\nintegrated_multimodal_description: 原动作。',

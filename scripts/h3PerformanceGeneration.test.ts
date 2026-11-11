@@ -51,6 +51,38 @@ const legacy = readH3DeliveryEnvelope(JSON.stringify({ h3Prompt: oldBody, identi
 assert.equal(renderDeliveredH3Performance(legacy, 'integrated').h3Prompt, oldBody);
 const malformedSidecar = readH3DeliveryEnvelope(JSON.stringify({ ...envelope, identityBindings: { version: 1, characters: [], performance: { old: true } } }), { acceptAiAuthoredContent: true });
 assert.equal(renderDeliveredH3Performance(malformedSidecar, 'integrated').h3Prompt, oldBody, 'unreadable optional sidecar does not block old prose');
+const exactLines = ['唐三……', '是你吗？', '是我。'];
+const repeatedFreeText = 'integrated_multimodal_description:\n[Shot 1] 她呼唤“唐三……”，随后问“是你吗？”。'
+  + '<d>[Chinese]唐三……</d><d>[Chinese]是你吗？</d>\n'
+  + '[Shot 2] At 00:05.500, Then he answers in a low voice “是我。” <d>[Chinese]是我。</d>\n'
+  + '[Shot 3] At 00:10.500, 两人在原地等待。\n\noverall_soundscape:\n殿内安静。\n\nnon_diegetic_music:\nN/A';
+const replyPlan: H3PerformancePlan = { version: 1, timeBase: 'clip', descriptionLanguage: 'zh',
+  characters: [{ characterId: 'woman', visualDescription: '女子。' }, { characterId: 'man', visualDescription: '男子。' }],
+  shots: [
+    { shotIndex: 1, startSec: 0, visualDescription: '女子转头望向门口。', events: [
+      { kind: 'speech', eventId: 'call', dialogueId: 'call', speakerCharacterIds: ['woman'], listenerCharacterIds: ['man'], channel: 'on-screen',
+        startSec: 0.5, endSec: 2.2, text: exactLines[0], language: 'Chinese' },
+      { kind: 'speech', eventId: 'question', dialogueId: 'question', speakerCharacterIds: ['woman'], listenerCharacterIds: ['man'], channel: 'on-screen',
+        startSec: 3, endSec: 4.4, text: exactLines[1], language: 'Chinese' },
+    ] },
+    { shotIndex: 2, startSec: 5.5, visualDescription: '男子抬起眼睛，衣袖轻轻移动。', events: [
+      { kind: 'speech', eventId: 'reply', dialogueId: 'reply', speakerCharacterIds: ['man'], listenerCharacterIds: ['woman'], channel: 'on-screen',
+        startSec: 8.7, endSec: 9.7, text: exactLines[2], language: 'Chinese', speakerAction: '说完后男子的嘴唇闭合。' },
+    ] },
+    { shotIndex: 3, startSec: 10.5, visualDescription: '两人的嘴唇保持闭合，继续原有动作。', events: [] },
+  ], overallSoundscape: '原有同期声随对应动作发生和结束。', nonDiegeticMusic: 'N/A' };
+const singleSource = renderDeliveredH3Performance({ h3Prompt: repeatedFreeText, envelope: true, identityBindings: { version: 1,
+  characters: [{ characterId: 'woman', name: '女子', referenceAnchor: '女子。' }, { characterId: 'man', name: '男子', referenceAnchor: '男子。' }],
+  performance: replyPlan } }, 'integrated');
+for (const line of exactLines) assert.equal(singleSource.h3Prompt.split(line).length - 1, 1,
+  'the final performance is rendered from one event source, not merged with duplicate free-text dialogue');
+assert.deepEqual(singleSource.identityBindings?.performance?.shots.map((shot) => shot.startSec), [0, 5.5, 10.5]);
+assert.match(singleSource.h3Prompt, /本段8\.70–9\.70秒，男子 \(S2\)说：<d>\[Chinese\] 是我。<\/d>/u);
+assert.match(singleSource.h3Prompt, /男子抬起眼睛，衣袖轻轻移动/u);
+assert.match(singleSource.h3Prompt, /说完后男子的嘴唇闭合/u);
+assert.doesNotMatch(singleSource.h3Prompt, /Then he answers|From|says:/u);
+assert.equal(renderDeliveredH3Performance({ h3Prompt: repeatedFreeText, envelope: true }, 'integrated').h3Prompt, repeatedFreeText,
+  'reading an old body does not silently rewrite or deduplicate its saved dialogue');
 const referenceBindings: H3IdentityBindings = { ...identityBindings, characters: identityBindings.characters.map((entry, index) => ({
   ...entry, subjectToken: `<Subject ${index + 1}>`, referenceAnchor: `<Subject ${index + 1}> ${entry.name} ${entry.speakerToken}, <Picture ${index + 3}>${index === 0 ? ', <Audio 1>' : ''}, 原有服装。`,
 })) };
@@ -99,7 +131,12 @@ const generated = await generateSingleSegmentPrompt({ board, context: { characte
   request: async (system, user, stage) => {
     calls.push(stage);
     if (stage === 'convert') { assert.ok(system.includes('原文依据、实际可见表演、真实声音')); return canonical; }
-    if (stage === 'review') { assert.ok(system.includes('identityBindings内同时返回performance')); return JSON.stringify(envelope); }
+    if (stage === 'review') {
+      assert.ok(system.includes('identityBindings内同时返回performance'));
+      assert.ok(system.includes('h3Prompt按同一performance排版'), 'the final delivery example does not drop performance');
+      assert.ok(system.includes('每次发话只由performance.shots[].events里对应kind:"speech"事件的text输出一次'));
+      return JSON.stringify(envelope);
+    }
     const data = JSON.parse(user);
     return JSON.stringify({ slots: data.slots.map((slot: { id: string; sourceText: string }) => ({ id: slot.id, text: slot.sourceText })) });
   },

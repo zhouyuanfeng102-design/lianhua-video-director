@@ -984,4 +984,81 @@ try {
   assert.equal(delivered?.events?.find((event) => event.dialogueId === 'b1-d12')?.speakerCharacterId, 'shalltear');
 }
 
+// One speech event remains one utterance even when the old free-text source
+// retells it. Real repetitions and cross-cut pieces retain their distinct IDs.
+{
+  const savedSource = [
+    'integrated_multimodal_description:',
+    '[Shot 1] 她呼唤“唐三……”，随后问“是你吗？”。千仞雪(S1)说：<d>[Chinese]唐三……</d><d>[Chinese]是你吗？</d>',
+    '[Shot 2] At 00:05.500 他低声回应“是我。”。玉小刚(S2)说：<d>[Chinese]是我。</d>',
+    '[Shot 3] At 00:10.500 两人保持原位。',
+    'overall_soundscape: 间隙安静。', 'non_diegetic_music: N/A',
+  ].join('\n');
+  const bindings: H3IdentityBindings = { version: 1, characters: [
+    { characterId: 'qian', name: '千仞雪', referenceAnchor: '千仞雪。' },
+    { characterId: 'yu', name: '玉小刚', referenceAnchor: '玉小刚。' },
+  ], performance: { version: 1, timeBase: 'clip', descriptionLanguage: 'zh',
+    shots: [
+      { shotIndex: 1, startSec: 0, visualDescription: '两人留在原处。', events: [
+        { kind: 'speech', eventId: 'call', dialogueId: 'dialogue-call', text: '唐三……', language: 'Chinese',
+          startSec: 0.8, endSec: 1.4, channel: 'on-screen', speakerCharacterIds: ['qian'], listenerCharacterIds: ['yu'] },
+        { kind: 'speech', eventId: 'question', dialogueId: 'dialogue-question', text: '是你吗？', language: 'Chinese',
+          startSec: 2.5, endSec: 3.3, channel: 'on-screen', speakerCharacterIds: ['qian'], listenerCharacterIds: ['yu'] },
+      ] },
+      { shotIndex: 2, startSec: 5.5, visualDescription: '机位保持既定构图。', events: [
+        { kind: 'speech', eventId: 'answer', dialogueId: 'dialogue-answer', text: '是我。', language: 'Chinese',
+          startSec: 8.7, endSec: 9.7, channel: 'on-screen', speakerCharacterIds: ['yu'], listenerCharacterIds: ['qian'], delivery: '低声而清楚。' },
+        { kind: 'speech', eventId: 'cross-before', dialogueId: 'dialogue-cross', text: '你先', language: 'Chinese',
+          startSec: 10, endSec: 10.5, channel: 'on-screen', speakerCharacterIds: ['yu'], listenerCharacterIds: ['qian'], continuesInNextShot: true },
+      ] },
+      { shotIndex: 3, startSec: 10.5, visualDescription: '两人姿态保持自然。', events: [
+        { kind: 'speech', eventId: 'cross-after', dialogueId: 'dialogue-cross', text: '听我说。', language: 'Chinese',
+          startSec: 10.5, endSec: 11, channel: 'on-screen', speakerCharacterIds: ['yu'], listenerCharacterIds: ['qian'], continuesFromPreviousShot: true },
+        { kind: 'speech', eventId: 'answer-repeat', dialogueId: 'dialogue-answer-repeat', text: '是我。', language: 'Chinese',
+          startSec: 12, endSec: 12.7, channel: 'on-screen', speakerCharacterIds: ['yu'], listenerCharacterIds: ['qian'] },
+      ] },
+    ], overallSoundscape: '间隙安静。', nonDiegeticMusic: 'N/A' } };
+  const speechFacts = (value: H3IdentityBindings) => value.performance!.shots.flatMap((shot) => shot.events.flatMap((event) =>
+    event.kind === 'speech' ? [{ shotIndex: shot.shotIndex, eventId: event.eventId, dialogueId: event.dialogueId, text: event.text,
+      language: event.language, channel: event.channel, startSec: event.startSec, endSec: event.endSec,
+      speakerCharacterIds: event.speakerCharacterIds, listenerCharacterIds: event.listenerCharacterIds,
+      continuesInNextShot: event.continuesInNextShot, continuesFromPreviousShot: event.continuesFromPreviousShot }] : []));
+  const originalBindings = structuredClone(bindings);
+  const expectedSpeech = speechFacts(bindings);
+  let calls = 0;
+  let delivered: H3IdentityBindings | undefined;
+  const translated = await translateVideoPromptToEnglish({ sourcePrompt: savedSource, identityBindings: bindings,
+    promptFormat: 'h3', acceptAiAuthoredContent: true, reviewWithAi: true, clean: (value) => value,
+    onReview: () => assert.fail('owned speech translation has no additional review request'),
+    onIdentityBindings: (value) => { delivered = value; },
+    request: async (_system, user, transport) => {
+      calls += 1;
+      assert.equal(transport?.sourceDocumentTranslation, true);
+      const data = JSON.parse(user);
+      assert.deepEqual(data.utterances.map(({ id, eventId, dialogueId, text, language, speakerCharacterId }: {
+        id: string; eventId: string; dialogueId: string; text: string; language: string; speakerCharacterId: string;
+      }) => ({ id, eventId, dialogueId, text, language, speakerCharacterId })), expectedSpeech.map((event) => ({
+        id: event.eventId, eventId: event.eventId, dialogueId: event.dialogueId, text: event.text,
+        language: event.language, speakerCharacterId: event.speakerCharacterIds[0],
+      })), 'the translation context takes speech occurrences from events, not duplicated free-text quotes');
+      assert.deepEqual(data.performanceContext.shots.map((shot: { startSec: number }) => shot.startSec), [0, 5.5, 10.5]);
+      assert.doesNotMatch(JSON.stringify(data.slots), /唐三|是你吗|是我|你先|听我说/u,
+        'exact words and cross-cut pieces are not writable description slots');
+      return descriptionSlotsResponse(data, (text) => text.replaceAll('两人留在原处。', 'Both remain in their positions.')
+        .replaceAll('机位保持既定构图。', 'The camera preserves the established composition.')
+        .replaceAll('两人姿态保持自然。', 'Both retain natural postures.')
+        .replaceAll('低声而清楚。', 'Quiet and clear.').replaceAll('间隙安静。', 'The gaps remain quiet.'));
+    },
+  });
+  assert.equal(calls, 1);
+  assert.deepEqual([...translated.matchAll(/<d>[\s\S]*?<\/d>/gu)].map((match) => match[0]), [
+    '<d>[Chinese] 唐三……</d>', '<d>[Chinese] 是你吗？</d>', '<d>[Chinese] 是我。</d>',
+    '<d>[Chinese] 你先<scenetrans></d>', '<d>[Chinese] <scenetrans>听我说。</d>', '<d>[Chinese] 是我。</d>',
+  ]);
+  assert.doesNotMatch(translated.replace(/<d>[\s\S]*?<\/d>/gu, ''), /唐三|是你吗|是我|听我说/u,
+    'the free-text retelling is not spliced into the owned performance result');
+  assert.deepEqual(speechFacts(delivered!), expectedSpeech, 'words, speakers, clocks and continuation identity remain source-owned');
+  assert.deepEqual(bindings, originalBindings, 'translation never mutates the saved Chinese source plan');
+}
+
 console.log('prompt translation: one-request complete-unit and performance translation contracts passed');
