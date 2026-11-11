@@ -55,14 +55,6 @@
 
 [查看本版完整说明](docs/releases/发布说明-4.5.1.md) · [历史版本归档](docs/releases/README.md)
 
-## 更早一版更新 · v4.4.5
-
-- 比例下拉只使用页面上真正可见的那一个列表。
-- 藏在页面里的空列表不再把提交拖到超时。
-- 已经停住的任务不会自动重投。
-
-[查看上一版完整说明](docs/releases/发布说明-4.4.5.md) · [历史版本归档](docs/releases/README.md)
-
 ## 从源码运行
 
 项目使用 Electron、React、TypeScript 和 Vite。在源码目录执行：
