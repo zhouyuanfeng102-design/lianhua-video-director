@@ -700,6 +700,9 @@ const prepareVideoH3ReferenceDraftInternal = (
 export const prepareVideoH3ReferenceDraft = (
   project: Project, draft: VideoGenerationDraft, context: VideoH3ReferenceContext,
 ): PreparedVideoH3ReferenceDraft => {
+  if (draft.origin === 'custom' && draft.promptMode === 'raw') {
+    return { draft, warnings: [], characterStates: [] };
+  }
   const prepared = prepareVideoH3ReferenceDraftInternal(project, draft, context);
   if (!draft.reuseTaskId && draft.source?.promptFormat === 'seedance') {
     const specification = renderVideoSeedanceSpecification(prepared.draft.prompt, draft.parameters, context.api);

@@ -1,7 +1,7 @@
 import { applyOwnedProjectUpdate } from './appEffects';
 import { bindComfyVideoWorkflow, comfyVideoExecutionStartedAt, mapComfyVideoProgress, parseComfyVideoWorkflow, resolveComfyVideoOutputs } from './comfyuiVideo';
 import { ComfyMissingTaskTracker, ComfyQueuePresenceCache } from './comfyPolling';
-import { assertNoEmbeddedVideoCredentials, buildVideoApiBody, defaultMiniMaxVideoApi, defaultRunningHubVideoApi, isRunningHubUploadedFile, parseVideoApiResult, redactVideoSecrets, runningHubVideoResults, videoApiSubmitEndpoint } from './videoGenerationApi';
+import { assertNoEmbeddedVideoCredentials, buildVideoApiBody, defaultMiniMaxH3VideoApi, defaultMiniMaxVideoApi, defaultRunningHubVideoApi, isRunningHubUploadedFile, parseVideoApiResult, redactVideoSecrets, runningHubVideoResults, videoApiSubmitEndpoint } from './videoGenerationApi';
 import { compileRunningHubVideoApi, resolveConfiguredVideoApi } from './runningHubVideo';
 import { migrateRunningHubVideoApiImageProtocol, resolveRunningHubVideoImageProtocol } from './runningHubImageProtocol';
 import { nestedValue } from './videoTasks';
@@ -93,17 +93,22 @@ const completedFileResult = (task: VideoGenerationTask): string | undefined => {
 const pending = (task: VideoGenerationTask) => Boolean(task.videoJob && !task.videoJob.trackingStopped && (task.remoteTaskId || completedFileResult(task)) && ['submitted', 'running', 'unknown'].includes(task.status));
 const allProjects = (state: AppState): Project[] => [state.project, ...state.projects.filter((project) => project.id !== state.project.id)];
 /**
- * H3's saved official delivery is the only source allowed across the paid
- * request boundary.  Keep this check outside the renderer/body builder so it
- * can resolve the owning storyboard and its exact source context.  Non-H3
- * models intentionally return no issue and retain the existing generic path.
+ * Director-authored H3 deliveries retain their saved storyboard source at the
+ * request boundary. Explicit custom/raw tasks use the user's own text instead.
+ * Keep the director check outside the body builder so it can resolve the owning
+ * storyboard and its exact source context; legacy tasks keep their old path.
  */
 const officialH3SubmissionIssue = (
   body: Record<string, unknown>,
   draft: VideoGenerationDraft,
   project: Project | undefined,
 ): string | undefined => {
+  if (draft.origin === 'custom' && draft.promptMode === 'raw') return undefined;
   if (!isOfficialH3TargetId(body.model)) return undefined;
+  const submittedPrompt = typeof body.prompt === 'string' ? body.prompt
+    : Array.isArray(body.content) ? body.content.find((item) => record(item) && item.type === 'text' && typeof item.text === 'string')?.text as string | undefined
+      : undefined;
+  const comparableBody = { ...body, prompt: submittedPrompt || '' };
   const board = project?.storyboards.find((item) => item.id === draft.source?.storyboardId);
   const binding = draft.h3ReferenceBinding;
   const audio = draft.audioReferenceBinding;
@@ -112,7 +117,7 @@ const officialH3SubmissionIssue = (
   const authoredSource = mediaUpdate && binding?.basePrompt === mediaUpdate.updatedPrompt
     ? mediaUpdate.sourcePrompt : binding?.basePrompt;
   const officialBody = binding && binding.projectId === project?.id && imagePrompt === binding.renderedPrompt
-    && body.prompt === draft.prompt ? { ...body, prompt: authoredSource } : body;
+    && submittedPrompt === draft.prompt ? { ...comparableBody, prompt: authoredSource } : comparableBody;
   return getOfficialH3SubmissionIssue(
     officialBody,
     board,
@@ -1390,8 +1395,8 @@ export class VideoGenerationEngine {
   }
 
   private assertAudioConnection(draft: VideoGenerationDraft, config?: Omit<VideoTaskApiConfig, 'apiKey'>): void {
-    if (draft.audioReferences?.length && (draft.backend !== 'api' || (config?.provider !== 'runninghub' && config?.provider !== 'rh_web'))) {
-      throw new Error('当前连接不支持参考音频，请选择带音频槽的 RunningHub 工作流或 RH 网页应用。');
+    if (draft.audioReferences?.length && (draft.backend !== 'api' || (config?.provider !== 'runninghub' && config?.provider !== 'rh_web' && config?.provider !== 'minimax_h3'))) {
+      throw new Error('当前连接不支持参考音频，请选择支持音频输入的 H3 API、RunningHub 工作流或 RH 网页应用。');
     }
   }
 
@@ -1535,6 +1540,7 @@ export class VideoGenerationEngine {
    * bindings afterward without consulting mutable project voice presets. */
   private prepareReferenceDraft(project: Project, draft: VideoGenerationDraft, context: Parameters<typeof prepareVideoH3ReferenceDraft>[2]) {
     if (draft.reuseTaskId) return { draft, issue: undefined };
+    if (draft.origin === 'custom' && draft.promptMode === 'raw') return { draft, issue: undefined };
     draft = { ...draft, prompt: stripVideoMotionPromptBinding(draft), videoReferenceBinding: undefined };
     const audio = draft.audioReferenceBinding;
     const unbound = audio && draft.prompt === audio.renderedPrompt ? { ...draft, prompt: audio.basePrompt, audioReferenceBinding: undefined } : draft;
@@ -1604,7 +1610,8 @@ export class VideoGenerationEngine {
       ? { ...reuse.connection.comfyui, apiKey: await this.key(reusedTask!), workflows: reuse.connection.workflow ? [reuse.connection.workflow] : [] }
       : state.settings.comfyuiVideo || defaultComfyVideoConfig;
     const workflow = reuse?.connection.workflow || comfy.workflows.find((entry) => entry.id === (draft.workflowId || comfy.activeWorkflowId));
-    validationDraft.references = videoReferenceUsage(validationDraft.references, { backend: draft.backend, workflow, api: config, slotRoles: validationDraft.referenceSlotRoles });
+    validationDraft.references = videoReferenceUsage(validationDraft.references, { backend: draft.backend, workflow, api: config,
+      slotRoles: validationDraft.referenceSlotRoles ?? (draft.origin === 'custom' && draft.promptMode === 'raw' ? [] : undefined) });
     if (requestedTail) {
       // A per-segment slot purpose is authoritative even when it differs from
       // the historical tail placement role.  Keep the selected physical slot
@@ -1755,7 +1762,8 @@ export class VideoGenerationEngine {
         ...(requestedTail.requireAiSelection ? { requireAiSelection: true as const, aiMaxAttempts: 4 } : {}),
       };
     }
-    draft.references = videoReferenceUsage(draft.references, { backend: draft.backend, workflow: prepared.workflow, api: prepared.config, slotRoles: draft.referenceSlotRoles });
+    draft.references = videoReferenceUsage(draft.references, { backend: draft.backend, workflow: prepared.workflow, api: prepared.config,
+      slotRoles: draft.referenceSlotRoles ?? (draft.origin === 'custom' && draft.promptMode === 'raw' ? [] : undefined) });
     const boundDraft = this.prepareReferenceDraft(project, draft, { backend: draft.backend, workflow: prepared.workflow, api: prepared.config });
     if (boundDraft.issue) throw new Error(boundDraft.issue);
     Object.assign(draft, boundDraft.draft);
@@ -2106,7 +2114,8 @@ export class VideoGenerationEngine {
       : draft.backend === 'api' ? resolveConfiguredVideoApi(state.settings, draft) : undefined;
     const comfy = reuse?.connection.comfyui ? { ...reuse.connection.comfyui, apiKey: await this.key(reusedTask!), workflows: reuse.connection.workflow ? [reuse.connection.workflow] : [] } : state.settings.comfyuiVideo || defaultComfyVideoConfig;
     const workflow = reuse?.connection.workflow || comfy.workflows.find((item) => item.id === (draft.workflowId || comfy.activeWorkflowId));
-    draft.references = videoReferenceUsage(draft.references, { backend: draft.backend, workflow, api: config, slotRoles: draft.referenceSlotRoles });
+    draft.references = videoReferenceUsage(draft.references, { backend: draft.backend, workflow, api: config,
+      slotRoles: draft.referenceSlotRoles ?? (draft.origin === 'custom' && draft.promptMode === 'raw' ? [] : undefined) });
     const boundDraft = this.prepareReferenceDraft(project, draft, { backend: draft.backend, workflow, api: config });
     if (boundDraft.issue) throw new Error(boundDraft.issue);
     Object.assign(draft, boundDraft.draft);
@@ -2307,6 +2316,10 @@ export class VideoGenerationEngine {
         const audios = [...task.videoJob!.snapshot.audios!]; audios[index] = frozen.audio;
         task = await this.checkpoint({ ...task, videoJob: { ...task.videoJob!, snapshot: { ...task.videoJob!.snapshot, audios },
           message: `已保存音频快照，正在传入音频 ${index + 1}/${audios.length}` } });
+        if (config?.provider === 'minimax_h3') {
+          audioValues.push(frozen.dataUrl);
+          continue;
+        }
         if (config?.provider === 'rh_web') {
           const result = await this.request(task, { url: `${RHWEB_ORIGIN}/v1/assets`, method: 'POST', multipart: {
             files: [{ fieldName: 'file', fileName: frozen.audio.fileName || 'reference.wav', dataUrl: frozen.dataUrl }],
@@ -2366,9 +2379,8 @@ export class VideoGenerationEngine {
       if (config?.provider === 'rhtv_web' || config?.provider === 'rh_web') body.client_id = task.videoJob!.snapshot.clientId;
       if (draft.backend === 'api') {
         const ownerProject = allProjects(this.options.getState()).find((project) => project.id === task.videoJob!.snapshot.projectId);
-        // Re-check immediately before the POST.  A queued/retried task may
-        // outlive the storyboard source that was current when it was created;
-        // never let that stale or hand-edited H3 text cross the paid boundary.
+        // Director tasks may outlive their saved source while queued. Custom
+        // raw tasks remain independent of storyboard deliveries at this boundary.
         assertOfficialH3Submission(body, draft, ownerProject);
       }
       // Build and validate the actual transport before persisting the paid
@@ -3431,7 +3443,8 @@ export class VideoGenerationEngine {
             generatedAt: task.videoJob!.generatedAt || Date.now(),
           }); return;
         }
-        const statusEndpoint = config.provider === 'rhtv_web' ? defaultRhTvApi.statusEndpointTemplate : config.provider === 'rh_web' ? `${RHWEB_ORIGIN}/v1/videos/{id}` : config.statusEndpointTemplate || (config.provider === 'minimax'
+        const statusEndpoint = config.provider === 'rhtv_web' ? defaultRhTvApi.statusEndpointTemplate : config.provider === 'rh_web' ? `${RHWEB_ORIGIN}/v1/videos/{id}` : config.statusEndpointTemplate || (config.provider === 'minimax_h3'
+          ? defaultMiniMaxH3VideoApi.statusEndpointTemplate : config.provider === 'minimax'
           ? defaultMiniMaxVideoApi.statusEndpointTemplate
           : config.provider === 'runninghub' ? defaultRunningHubVideoApi.statusEndpointTemplate : genericVideoStatusEndpoint(config));
         if (!statusEndpoint) { this.patch(task, { error: '此任务的接口快照没有状态查询端点。' }, { stage: 'stopped', trackingStopped: true, message: '缺少状态查询端点；任务未重新提交' }); return; }
@@ -3530,11 +3543,14 @@ export class VideoGenerationEngine {
       }
       const candidates = downloadCandidates(task);
       if (!candidates.length) throw new Error('原任务的允许输出节点没有可下载的视频或 ZIP；未使用其他节点或不明来源的旧链接。请检查输出节点设置后重新获取原任务成片，不会重新生成。');
+      const customRawRunningHub = source.backend === 'api' && source.api?.provider === 'runninghub'
+        && task.videoJob.snapshot.draft.origin === 'custom' && task.videoJob.snapshot.draft.promptMode === 'raw';
+      const directVideoCandidates = customRawRunningHub ? candidates.filter((candidate) => !candidate.archiveHint) : [];
+      const downloadCandidatesForTask = directVideoCandidates.length ? directVideoCandidates : candidates;
       const origin = source.backend === 'comfyui' ? source.comfyui!.baseUrl : videoApiSubmitEndpoint(source.api!);
       const failures: string[] = [];
-      let managed: Awaited<ReturnType<Desktop['downloadGeneratedMedia']>> | undefined;
-      let resultUrl: string | undefined;
-      for (const [candidateIndex, candidate] of candidates.entries()) {
+      const received: Array<{ media: Awaited<ReturnType<Desktop['downloadGeneratedMedia']>>; resultUrl: string }> = [];
+      for (const [candidateIndex, candidate] of downloadCandidatesForTask.entries()) {
         ensureDownloadActive();
         const requestId = id(`video_download_${task.id}`);
         this.downloadOwners.set(requestId, task.id); requests.add(requestId);
@@ -3558,8 +3574,8 @@ export class VideoGenerationEngine {
           if ([downloaded, ...(downloaded.additionalVideos || [])].some((video) => video.mediaType !== 'video')) {
             throw new Error('下载内容不是视频，未作为成片保存');
           }
-          managed = downloaded; resultUrl = candidate.resultUrl;
-          break;
+          received.push({ media: downloaded, resultUrl: candidate.resultUrl });
+          if (!directVideoCandidates.length) break;
         } catch (error) {
           // A late failed download must not trigger the next candidate after
           // cancellation, owner removal, or replacement of the frozen task.
@@ -3572,15 +3588,19 @@ export class VideoGenerationEngine {
           requests.delete(requestId); this.downloadOwners.delete(requestId);
         }
       }
-      if (!managed || !resultUrl) throw new Error(`已尝试 ${candidates.length} 个云端输出，均未能保存可用视频。${failures.join('；')}。可重新获取原任务成片；不会重新生成或重复扣费。`);
+      if (!received.length) throw new Error(`已尝试 ${downloadCandidatesForTask.length} 个云端输出，均未能保存可用视频。${failures.join('；')}。可重新获取原任务成片；不会重新生成或重复扣费。`);
       ensureDownloadActive();
-      const { additionalVideos, archiveFileName, ...primaryMedia } = managed;
-      const videos = [primaryMedia, ...(additionalVideos || [])];
+      const videos = received.flatMap(({ media }) => {
+        const { additionalVideos: _additionalVideos, archiveFileName: _archiveFileName, ...primary } = media;
+        return [primary, ...(media.additionalVideos || [])];
+      });
+      const archiveFileName = received.map(({ media }) => media.archiveFileName).find((name): name is string => Boolean(name));
+      const resultUrl = received[0].resultUrl;
       const now = Date.now();
       // The desktop store owns the global filename namespace. It may normalize a
       // Windows-reserved name or add a collision version that the project-local
       // allocator could not see, so its returned filename is authoritative.
-      const storedName = videoFileStem(primaryMedia.fileName || task.videoJob.snapshot.draft.name);
+      const storedName = videoFileStem(videos[0].fileName || task.videoJob.snapshot.draft.name);
       const assets: ReferenceAsset[] = videos.map((video) => ({
         id: id('asset'), name: videoFileStem(video.fileName || task.videoJob!.snapshot.draft.name), type: 'video', role: 'motion', ...video,
         mediaType: 'video', referenceRole: 'motion', source: 'generated', sourceVideoTaskId: task.id,
@@ -3589,9 +3609,10 @@ export class VideoGenerationEngine {
       }));
       const resultSelectionRequired = assets.length > 1;
       const outputSelectionWarning = source.backend === 'comfyui' && record(task.response) && typeof task.response.outputSelectionWarning === 'string' ? task.response.outputSelectionWarning : '';
-      const savedMessage = (resultSelectionRequired ? `ZIP 内 ${assets.length} 段视频已全部保存，请选择本任务使用的成片；后续尾帧衔接正在等待` : '已保存到视频资产库')
+      const savedMessage = (resultSelectionRequired ? `${customRawRunningHub && directVideoCandidates.length ? '本次返回的' : 'ZIP 内'} ${assets.length} 段视频已保存，请选择本任务使用的成片；后续尾帧衔接正在等待` : '已保存到视频资产库')
+        + (failures.length ? `；另有 ${failures.length} 个输出无法读取：${failures.join('；')}` : '')
         + (outputSelectionWarning ? `；${outputSelectionWarning}` : '');
-      const filingMessage = resultSelectionRequired ? savedMessage : '已保存到视频资产库';
+      const filingMessage = resultSelectionRequired || failures.length ? savedMessage : '已保存到视频资产库';
       this.options.setState((current) => applyOwnedProjectUpdate(current, task.videoJob!.snapshot.projectId, (project) => {
         const existing = project.generationTasks.find((item) => item.id === task.id);
         if (!existing || this.disposed || this.stopping.has(task.id) || (existing as VideoGenerationTask).videoJob?.trackingStopped

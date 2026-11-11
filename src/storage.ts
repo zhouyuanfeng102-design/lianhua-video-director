@@ -2844,6 +2844,17 @@ const normalizePersistedProject = (
   const customImageDraft = normalizeCustomImageDraft(incoming.customImageDraft);
   if (customImageDraft) project.customImageDraft = customImageDraft;
   else delete project.customImageDraft;
+  const customVideoDraft = isRecord(incoming.customVideoDraft) && incoming.customVideoDraft.version === 1
+    && isRecord(incoming.customVideoDraft.draft)
+    && typeof incoming.customVideoDraft.draft.name === 'string'
+    && typeof incoming.customVideoDraft.draft.prompt === 'string'
+    && ['api', 'comfyui'].includes(incoming.customVideoDraft.draft.backend)
+    && Array.isArray(incoming.customVideoDraft.draft.references)
+    && isRecord(incoming.customVideoDraft.draft.parameters)
+    && typeof incoming.customVideoDraft.parameterText === 'string'
+    ? normalizeVideoTransportDraft(incoming.customVideoDraft) : undefined;
+  if (customVideoDraft) project.customVideoDraft = customVideoDraft as Project['customVideoDraft'];
+  else delete project.customVideoDraft;
   // Presets belong to this project, including IDs whose assets are imported
   // later. Never inherit another project's voices through the import fallback.
   const voicePresets = normalizeProjectVoicePresets(incoming.voicePresets);

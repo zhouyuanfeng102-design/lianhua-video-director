@@ -12,7 +12,7 @@ export interface VideoMotionCapability {
   supported: boolean;
   slotCount: number;
   slots: Array<{ slotIndex: number; bindingId: string; label: string }>;
-  source: 'runninghub-mapping' | 'request-template' | 'comfyui-mapping' | 'unsupported';
+  source: 'minimax-h3' | 'runninghub-mapping' | 'request-template' | 'comfyui-mapping' | 'unsupported';
 }
 export const isVideoDirectorMotionVideo = (asset: ReferenceAsset): boolean =>
   asset.mediaType === 'video' || asset.type === 'video' || Boolean(asset.mimeType?.startsWith('video/'));
@@ -25,6 +25,10 @@ export const videoMotionCapability = (context: VideoMotionContext): VideoMotionC
     slots = (context.workflow?.mapping.videos || []).map((binding, slotIndex) => ({ slotIndex,
       bindingId: JSON.stringify([binding.nodeId, binding.inputName]), label: `视频槽 ${slotIndex + 1}` }));
     if (slots.length) source = 'comfyui-mapping';
+  } else if (context.api?.provider === 'minimax_h3') {
+    slots = Array.from({ length: 3 }, (_, slotIndex) => ({ slotIndex,
+      bindingId: `minimax-h3-video-${slotIndex + 1}`, label: `参考视频 ${slotIndex + 1}` }));
+    source = 'minimax-h3';
   } else if (context.api?.provider === 'runninghub' && context.api.runningHubMappedFields) {
     slots = context.api.runningHubMappedFields.filter((field) => field.kind === 'video' && Number.isSafeInteger(field.videoIndex) && field.videoIndex! >= 0)
       .map((field) => ({ slotIndex: field.videoIndex!, bindingId: JSON.stringify([field.nodeId, field.fieldName]), label: `视频槽 ${field.videoIndex! + 1}` }));
@@ -61,6 +65,9 @@ export const videoMotionReferenceNumbers = (references: readonly VideoMotionRefe
 /** Render after image/audio bindings. This adds no actions, duration, camera moves or audio sources. */
 export const renderVideoMotionDraft = (_project: Project, draft: VideoGenerationDraft, context: VideoMotionContext): VideoGenerationDraft => {
   if (draft.reuseTaskId) return draft;
+  if (draft.origin === 'custom' && draft.promptMode === 'raw') {
+    return { ...draft, videoReferenceBinding: undefined };
+  }
   const basePrompt = stripVideoMotionPromptBinding(draft);
   const capability = videoMotionCapability(context);
   const references = capability.supported ? (draft.videoReferences || []).filter((reference) =>

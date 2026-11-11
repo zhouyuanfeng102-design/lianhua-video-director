@@ -587,7 +587,7 @@ export const compileRunningHubVideoApi = (config: RunningHubVideoConfig, workflo
 export const bindRunningHubVideoRequest = (
   template: string,
   mappedFields: NonNullable<VideoTaskApiConfig['runningHubMappedFields']>,
-  draft: Pick<VideoGenerationDraft, 'prompt' | 'parameters'> & Partial<Pick<VideoGenerationDraft, 'references' | 'audioReferences' | 'videoReferences'>>,
+  draft: Pick<VideoGenerationDraft, 'prompt' | 'parameters'> & Partial<Pick<VideoGenerationDraft, 'origin' | 'promptMode' | 'references' | 'audioReferences' | 'videoReferences'>>,
   images: string[],
   submitContext?: Pick<VideoTaskApiConfig, 'provider' | 'runningHubAppId' | 'endpoint'>,
   audios: string[] = [],
@@ -614,7 +614,8 @@ export const bindRunningHubVideoRequest = (
     audioBySlot.set(reference.slotIndex, { audio, index, bindingId: reference.bindingId });
   });
   const request = readRunningHubVideoRequest(template);
-  const submittedPrompt = submitContext && isRunningHubH3AutoPromptInput({ ...submitContext, runningHubMappedFields: mappedFields })
+  const submittedPrompt = !(draft.origin === 'custom' && draft.promptMode === 'raw')
+    && submitContext && isRunningHubH3AutoPromptInput({ ...submitContext, runningHubMappedFields: mappedFields })
     ? runningHubH3AutoPromptInput(draft.prompt, uploadBySlot.size) : draft.prompt;
   const parameterNames = new Set(mappedFields.filter((field) => field.kind === 'parameter' && field.parameter).map((field) => field.parameter!));
   const unmapped = Object.keys(draft.parameters).filter((name) => draft.parameters[name] !== undefined && !parameterNames.has(name));
@@ -684,7 +685,9 @@ export const bindRunningHubVideoRequest = (
   if (!prompts) throw new Error('RunningHub 工作流未明确绑定提示词字段。');
   if (consumedImages.size !== images.length) throw new Error('参考图数量与 RunningHub 工作流的明确图槽不一致；不会静默丢弃图片。');
   if (consumedAudios.size !== audios.length) throw new Error('参考音频与 RunningHub 工作流的明确音频槽不一致；不会静默丢弃音频。');
-  assertRunningHubPromptPictureSlots(mappedFields, submittedPrompt, [...uploadBySlot.keys()]);
+  if (!(draft.origin === 'custom' && draft.promptMode === 'raw')) {
+    assertRunningHubPromptPictureSlots(mappedFields, submittedPrompt, [...uploadBySlot.keys()]);
+  }
   return request;
 };
 

@@ -122,6 +122,10 @@ export interface VideoImageReference {
 export interface VideoGenerationDraft {
   name: string;
   prompt: string;
+  /** Explicitly identifies a standalone workbench task, independent of storyboards. */
+  origin?: 'custom';
+  /** Custom mode sends the authored prompt through local preparation unchanged. */
+  promptMode?: 'raw';
   /** Final selected-media contract; frozen with the actual connection and parameters. */
   h3MediaMode?: import('./videoH3MediaMode').VideoH3MediaModeContract;
   /** Explicit request-only AI reference update; the saved storyboard is untouched. */
@@ -160,6 +164,15 @@ export interface VideoGenerationDraft {
   workflowId?: string;
   /** Reuse this task's frozen connection/workflow and credential, not newly edited settings. */
   reuseTaskId?: string;
+}
+export interface CustomVideoDraft {
+  version: 1;
+  active?: boolean;
+  /** Identifies which connection/model owns the visible parameter draft. */
+  parameterConnectionKey?: string;
+  draft: VideoGenerationDraft;
+  parameterText: string;
+  parameterDrafts: Array<[string, string]>;
 }
 export interface ComfyVideoInputBinding { nodeId: string; inputName: string }
 export interface ComfyVideoMapping {

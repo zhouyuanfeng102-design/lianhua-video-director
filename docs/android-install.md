@@ -1,6 +1,6 @@
 # 安卓安装、更新与备份
 
-当前版本：**4.4.3**，2026-11-10（亚洲/上海）。安装文件：`lianhua-video-director-4.4.3-android.apk`。最低系统为 Android 8.0（API 26）；设备需有可用且兼容现代网页功能的 Android System WebView，系统版本较旧时应先更新厂商提供的 WebView。安装门槛不表示所有出厂旧 WebView 都已通过测试，基础能力与既有测试边界见 [3.9.7 能力与验证记录](releases/能力与验证记录-3.9.7.md)；尚无本版 Android 设备安装与原生功能实测记录。
+当前版本：**4.4.7**，2026-11-11（亚洲/上海）。安装文件：`lianhua-video-director-4.4.7-android.apk`。最低系统为 Android 8.0（API 26）；设备需有可用且兼容现代网页功能的 Android System WebView，系统版本较旧时应先更新厂商提供的 WebView。安装门槛不表示所有出厂旧 WebView 都已通过测试，本版构建与界面检查见 [4.4.7 能力与验证记录](releases/能力与验证记录-4.4.7.md)，安卓基础能力与既有测试边界见 [3.9.7 记录](releases/能力与验证记录-3.9.7.md)；本版未运行 Android 实机安装测试。
 
 ## 安装与开始使用
 

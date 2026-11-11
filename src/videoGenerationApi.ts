@@ -19,6 +19,15 @@ export const defaultMiniMaxVideoApi: VideoTaskApiConfig = {
   fileIdPath: 'file_id', fileEndpointTemplate: 'https://api.minimaxi.com/v1/files/retrieve?file_id={id}', fileUrlPath: 'file.download_url',
 };
 
+/** Official MiniMax-H3 v2 is a separate protocol from the legacy Hailuo v1 API. */
+export const defaultMiniMaxH3VideoApi: VideoTaskApiConfig = {
+  enabled: true, provider: 'minimax_h3', model: 'MiniMax-H3',
+  endpoint: 'https://api.minimax.io/v2/video_generation',
+  statusEndpointTemplate: 'https://api.minimax.io/v2/query/video_generation/{id}',
+  apiKey: '', authHeader: 'Authorization', authScheme: 'Bearer',
+  taskIdPath: 'task_id', statusPath: 'task.status', resultUrlPath: 'task.content.url',
+};
+
 export const runningHubRequestTemplate = JSON.stringify({
   nodeInfoList: [
     {
@@ -114,7 +123,7 @@ export const buildVideoApiBody = (config: Omit<VideoTaskApiConfig, 'apiKey'>, dr
   if (config.provider === 'rh_web') return buildRhWebBody(config, draft, images, audios);
   const imageCapacity = getVideoApiImageCapacity(config);
   if (imageCapacity && images.length > imageCapacity.maxCount) throw new Error(`当前接口返回的模型图片容量为 ${imageCapacity.maxCount} 张，本次选了 ${images.length} 张；不会丢弃图片，尚未提交视频。`);
-  if ((draft.audioReferences?.length || audios.length) && config.provider !== 'runninghub') {
+  if ((draft.audioReferences?.length || audios.length) && config.provider !== 'runninghub' && config.provider !== 'minimax_h3') {
     throw new Error('当前连接不支持参考音频，请选择 RunningHub 音频工作流。');
   }
   assertVideoReferenceSlots(draft.references);
@@ -125,6 +134,49 @@ export const buildVideoApiBody = (config: Omit<VideoTaskApiConfig, 'apiKey'>, dr
   const firstIndex = draft.references.findIndex((image) => image.role === 'first-frame');
   const lastIndex = draft.references.findIndex((image) => image.role === 'last-frame');
   const slots = draft.references.map(videoReferenceSlotIndex);
+  if (config.provider === 'minimax_h3') {
+    const content: Array<Record<string, unknown>> = [{ type: 'text', text: draft.prompt }];
+    draft.references.map((reference, index) => ({ reference, index })).sort((a, b) => videoReferenceSlotIndex(a.reference, a.index) - videoReferenceSlotIndex(b.reference, b.index)).forEach(({ reference, index }) => {
+      const url = images[index];
+      const role = reference.role === 'first-frame' ? 'first_frame'
+        : reference.role === 'last-frame' ? 'last_frame' : 'reference_image';
+      content.push({ type: 'image_url', image_url: { url }, role });
+    });
+    (draft.videoReferences || []).map((reference, index) => ({ reference, index })).sort((a, b) => a.reference.slotIndex - b.reference.slotIndex).forEach(({ index }) => {
+      content.push({ type: 'video_url', video_url: { url: videos[index] }, role: 'reference_video' });
+    });
+    (draft.audioReferences || []).map((reference, index) => ({ reference, index })).sort((a, b) => a.reference.slotIndex - b.reference.slotIndex).forEach(({ index }) => {
+      content.push({ type: 'audio_url', audio_url: { url: audios[index] }, role: 'reference_audio' });
+    });
+
+    const parameters = { ...draft.parameters };
+    for (const key of ['model', 'content', 'prompt', 'images', 'first_frame_image', 'last_frame_image', 'image_url', 'video_url', 'audio_url']) delete parameters[key];
+    const model = config.model || 'MiniMax-H3';
+    const hasFrame = firstIndex >= 0 || lastIndex >= 0;
+    const hasReferenceMedia = draft.references.some((reference) => reference.role !== 'first-frame' && reference.role !== 'last-frame')
+      || Boolean(draft.videoReferences?.length || draft.audioReferences?.length);
+    const rawRatio = parameters.ratio ?? parameters.aspect_ratio;
+    delete parameters.aspect_ratio;
+    delete parameters.ratio;
+    const ratio = hasFrame ? 'adaptive'
+      : typeof rawRatio === 'string' && rawRatio ? rawRatio
+        : hasReferenceMedia && model !== 'MiniMax-H3-Lite' ? 'adaptive' : '16:9';
+    const resolution = parameters.resolution ?? '768P';
+    const duration = parameters.duration ?? 5;
+    delete parameters.resolution;
+    delete parameters.duration;
+    const body: Record<string, unknown> = {
+      ...parameters,
+      model,
+      content,
+      resolution,
+      duration,
+      ratio,
+    };
+    if (model === 'MiniMax-H3-Max' && parameters.extra !== undefined) body.extra = parameters.extra;
+    else delete body.extra;
+    return body;
+  }
   if (config.provider === 'runninghub') {
     if ((draft.audioReferences?.length || 0) !== audios.length) throw new Error('RunningHub 已选参考音频与上传回执数量不一致；不会漏传音频。');
     if (audios.length && !config.runningHubMappedFields) throw new Error('RunningHub 参考音频缺少明确节点映射；尚未提交视频。');
@@ -152,8 +204,8 @@ export const buildVideoApiBody = (config: Omit<VideoTaskApiConfig, 'apiKey'>, dr
     if (lastIndex >= 0 && firstIndex < 0) throw new Error('MiniMax 首尾帧生成需要同时选择首帧。');
     // Prompt optimizer would rewrite dialogue and audio. Preserve the explicitly chosen text.
     return {
-      model: config.model || 'MiniMax-Hailuo-2.3',
       ...draft.parameters,
+      model: config.model || 'MiniMax-Hailuo-2.3',
       prompt: draft.prompt,
       prompt_optimizer: false,
       ...(firstIndex >= 0 ? { first_frame_image: images[firstIndex] } : {}),
@@ -167,9 +219,9 @@ export const buildVideoApiBody = (config: Omit<VideoTaskApiConfig, 'apiKey'>, dr
     let raw: unknown;
     try { raw = JSON.parse(config.requestTemplate); } catch { throw new Error('视频 API 请求模板不是有效 JSON。'); }
     if (config.provider === 'runninghub') assertRunningHubTemplateNumbersSafe(config.requestTemplate);
-    const result = config.provider === 'runninghub' && config.runningHubMappedFields
-      ? bindRunningHubVideoRequest(config.requestTemplate, config.runningHubMappedFields, draft, images, config, audios, videos)
-      : expandTemplate(config.provider === 'runninghub' ? clearUnusedRunningHubTemplateImages(raw, new Set(slots)) : raw, {
+    const customRaw = draft.origin === 'custom' && draft.promptMode === 'raw';
+    const templateVariables = {
+      ...draft.parameters,
       prompt: draft.prompt, model: config.model || '', images, videos,
       video_references: videos.map((video_url, index) => ({ video_url, role: 'reference', slot_index: draft.videoReferences?.[index]?.slotIndex ?? index })),
       ...Object.fromEntries([...config.requestTemplate.matchAll(/\{\{video_([1-9]\d*)\}\}/gu)].map((match) => [`video_${match[1]}`, ''])),
@@ -181,11 +233,16 @@ export const buildVideoApiBody = (config: Omit<VideoTaskApiConfig, 'apiKey'>, dr
         ...(slots[index] !== undefined && slots[index] !== index ? { slot_index: slots[index] } : {}) })),
       first_image: firstIndex >= 0 ? images[firstIndex] : '', last_image: lastIndex >= 0 ? images[lastIndex] : '',
       parameters: draft.parameters,
-      ...(config.provider !== 'runninghub' && slots.some((slot, index) => slot !== index) ? Object.fromEntries([...config.requestTemplate.matchAll(/\{\{image_([1-9]\d*)\}\}/gu)]
-        .map((match) => [`image_${match[1]}`, ''])) : {}),
+      ...(config.provider !== 'runninghub' && slots.some((slot, index) => slot !== index)
+        ? Object.fromEntries([...config.requestTemplate.matchAll(/\{\{image_([1-9]\d*)\}\}/gu)].map((match) => [`image_${match[1]}`, ''])) : {}),
       ...Object.fromEntries(images.map((image, index) => [`image_${(slots[index] ?? index) + 1}`, image])),
-      ...draft.parameters,
-    });
+    };
+    const result = config.provider === 'runninghub' && config.runningHubMappedFields
+      ? bindRunningHubVideoRequest(config.requestTemplate, config.runningHubMappedFields, draft, images, config, audios, videos)
+      : expandTemplate(config.provider === 'runninghub' ? clearUnusedRunningHubTemplateImages(raw, new Set(slots)) : raw, {
+        ...templateVariables,
+        ...(!customRaw ? draft.parameters : {}),
+      });
     if (!record(result)) throw new Error('视频 API 请求模板必须是 JSON 对象。');
     if (config.provider === 'runninghub') {
       const nodeInfoList = result.nodeInfoList;
@@ -204,7 +261,13 @@ export const buildVideoApiBody = (config: Omit<VideoTaskApiConfig, 'apiKey'>, dr
   }
   if (isV6kVideoBuiltinProtocol(config)) return buildV6kVideoApiBody(config, draft, images);
   if (isLaoliVideoBuiltinProtocol(config)) return buildLaoliVideoApiBody(config, draft, images);
-  return { ...(config.model ? { model: config.model } : {}), ...draft.parameters, prompt: draft.prompt,
+  const customRaw = draft.origin === 'custom' && draft.promptMode === 'raw';
+  const parameters = { ...draft.parameters };
+  if (customRaw) {
+    for (const key of ['prompt', 'model', 'images', 'references', 'videos', 'first_frame_image', 'last_frame_image', 'origin', 'promptMode']) delete parameters[key];
+  }
+  return { ...(customRaw ? parameters : config.model ? { model: config.model } : {}),
+    ...(customRaw ? (config.model ? { model: config.model } : {}) : parameters), prompt: draft.prompt,
     ...(images.length ? { images } : {}),
     ...(firstIndex >= 0 ? { first_frame_image: images[firstIndex] } : {}),
     ...(lastIndex >= 0 ? { last_frame_image: images[lastIndex] } : {}),
@@ -266,6 +329,28 @@ export const runningHubVideoResult = (body: unknown, outputNodeIds: readonly str
 export const parseVideoApiResult = (body: unknown, config: Omit<VideoTaskApiConfig, 'apiKey'>): {
   remoteTaskId: string; stage: VideoGenerationStage; status: 'submitted' | 'running' | 'succeeded' | 'failed' | 'unknown'; resultUrl?: string; archiveHint?: boolean; downloadError?: string; fileId?: string; progress?: number; message?: string;
 } => {
+  if (config.provider === 'minimax_h3') {
+    const task = nestedValue(body, 'task');
+    const remoteTaskId = String(nestedValue(task, 'id') || nestedValue(body, config.taskIdPath || 'task_id') || '');
+    const rawStatus = String(nestedValue(task, 'status') || nestedValue(body, config.statusPath || 'status') || '').toLowerCase();
+    const resultUrl = nestedValue(task, 'content.url') || nestedValue(body, config.resultUrlPath || 'task.content.url');
+    const error = nestedValue(body, 'error.message') || nestedValue(task, 'error.message') || nestedValue(body, 'message');
+    const status = /^(?:succeeded|success|completed|done)$/u.test(rawStatus) || typeof resultUrl === 'string' && Boolean(resultUrl)
+      ? 'succeeded'
+      : /^(?:failed|fail|error|cancelled|canceled)$/u.test(rawStatus) ? 'failed'
+        : /^(?:running|processing|generating|in_progress)$/u.test(rawStatus) ? 'running'
+          : rawStatus ? 'submitted' : remoteTaskId ? 'submitted' : 'unknown';
+    return {
+      remoteTaskId,
+      stage: status === 'succeeded' ? resultUrl ? 'downloading' : 'succeeded'
+        : status === 'failed' ? 'failed' : status === 'running' ? 'running' : status === 'unknown' ? 'reconnecting' : 'queued',
+      status,
+      ...(typeof resultUrl === 'string' && resultUrl ? { resultUrl } : {}),
+      ...(status === 'failed' ? { message: String(error || 'MiniMax H3 任务失败') }
+        : { message: rawStatus ? `MiniMax H3 状态：${rawStatus}` : 'MiniMax H3 任务已提交' }),
+      ...(status === 'succeeded' && !resultUrl ? { downloadError: 'MiniMax H3 任务已完成，但查询结果没有成片地址。' } : {}),
+    };
+  }
   if (config.provider === 'rh_web') {
     const remoteTaskId = String(nestedValue(body, 'id') || '');
     const raw = String(nestedValue(body, 'status') || '');

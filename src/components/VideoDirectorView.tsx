@@ -1,6 +1,8 @@
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { assetPreviewUrl } from '../media';
 import { PhoneVideoComposer } from './mobile/PhoneVideoComposer';
+import { CustomVideoWorkbenchPanel, defaultCustomVideoDraft } from './CustomVideoWorkbenchPanel';
+import { AssetVideoPlayerDialog } from './AssetVideoPlayerDialog';
 import { isVideoGenerationTask } from '../generationTasks';
 import { formatUserFacingError } from '../userFacingError';
 import { getSafeErrorDiagnostics } from '../errorDiagnostics';
@@ -24,7 +26,7 @@ import { videoReferenceByteLimit } from '../videoReferenceCompression';
 import { VideoExecutionControls, type VideoExecutionPreferences } from './VideoExecutionControls';
 import { useVideoTaskRuntime, type VideoRuntimeStore } from '../videoRuntimeStore';
 import type { AppSettings, Project, ReferenceAsset, ReferenceRole, VideoGenerationTask } from '../types';
-import type { ComfyVideoWorkflowPreset, VideoBatchStartInput, VideoGenerationController, VideoGenerationDraft, VideoGenerationRuntime, VideoGenerationStage, VideoImageReference, VideoPromptSource, VideoPromptFormat } from '../videoGenerationTypes';
+import type { ComfyVideoWorkflowPreset, CustomVideoDraft, VideoBatchStartInput, VideoGenerationController, VideoGenerationDraft, VideoGenerationRuntime, VideoGenerationStage, VideoImageReference, VideoPromptSource, VideoPromptFormat } from '../videoGenerationTypes';
 import { findReusableVideoTask, frozenVideoReferenceAsset } from '../videoProvenance';
 import { useCurrentVideoDraftImages, videoDraftReferenceAsset } from '../videoDirectorReferences';
 import {
@@ -68,10 +70,14 @@ export interface VideoDirectorViewProps {
   chapterId?: string;
   chapterDraft?: VideoDirectorChapterDraft;
   onChapterDraftChange?: (projectId: string, chapterId: string, draft: VideoDirectorChapterDraft) => void;
+  customVideoDraft?: CustomVideoDraft;
+  onCustomVideoDraftChange?: (draft: CustomVideoDraft) => void;
+  onImportCustomVideoImages?: (files: File[]) => Promise<ReferenceAsset[]>;
   settings: AppSettings;
   controller: VideoGenerationController;
   tailFrameTools?: TailFrameTools;
   launchRequest?: VideoDirectorLaunchRequest;
+  onLeaveCustomMode?: () => void;
   onOpenSettings?: () => void;
   onOpenPrompt?: (storyboardId: string, source?: VideoPromptSource) => void;
   onOpenVideoAssets?: () => void;
@@ -1688,16 +1694,24 @@ function MaybeDetails({ enabled, children }: { enabled?: boolean; children: Reac
 }
 
 export function VideoDirectorView(props: VideoDirectorViewProps) {
+  const [customModeActive, setCustomModeActive] = useState(() => props.customVideoDraft?.active === true);
+  useEffect(() => setCustomModeActive(props.customVideoDraft?.active === true), [props.project.id, props.customVideoDraft?.active]);
   const chapterId = props.chapterId || activeChapter(props.project)?.id;
+  const changeCustomMode = (active: boolean) => {
+    setCustomModeActive(active);
+    const next = { ...(props.customVideoDraft || defaultCustomVideoDraft()), active };
+    if (JSON.stringify(next) !== JSON.stringify(props.customVideoDraft)) props.onCustomVideoDraftChange?.(next);
+  };
   // The controller remains outside this keyed view. Leaving a chapter unmounts
   // only its editor; a late form callback cannot edit another chapter's draft.
-  return <ChapterVideoDirectorView key={videoDirectorChapterKey(props.project.id, chapterId)} {...props} chapterId={chapterId} />;
+  return <ChapterVideoDirectorView key={videoDirectorChapterKey(props.project.id, chapterId)} {...props}
+    customModeActive={customModeActive} onCustomModeChange={changeCustomMode} chapterId={chapterId} />;
 }
 
-function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterDraftChange, settings, controller, tailFrameTools, launchRequest, onOpenSettings, onOpenPrompt, onOpenVideoAssets, onOpenJobs, onChangeExecution, onVideoApiParametersChange, onRepairIdentityBindings, onRefreshH3References, onVoicePresetsChange, onCharacterVoiceProfileChange, onImportAudioFiles, phoneLayout }: VideoDirectorViewProps) {
+function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterDraftChange, customVideoDraft, onCustomVideoDraftChange, onImportCustomVideoImages, customModeActive, onCustomModeChange, settings, controller, tailFrameTools, launchRequest, onOpenSettings, onOpenPrompt, onOpenVideoAssets, onOpenJobs, onChangeExecution, onVideoApiParametersChange, onRepairIdentityBindings, onRefreshH3References, onVoicePresetsChange, onCharacterVoiceProfileChange, onImportAudioFiles, phoneLayout }: VideoDirectorViewProps & { customModeActive: boolean; onCustomModeChange: (active: boolean) => void }) {
   const draftScope = videoDirectorChapterKey(project.id, chapterId);
   const [initial] = useState(() => readVideoDirectorChapterDraft(chapterDraft || (chapterId ? chapterWorkspace(project, chapterId)?.videoDirector : undefined)) || draftCache.get(draftScope));
-  const [generationMode, setGenerationMode] = useState<'single' | 'batch'>(initial?.generationMode || 'single');
+  const [generationMode, setGenerationMode] = useState<'single' | 'batch' | 'custom'>(() => customModeActive ? 'custom' : initial?.generationMode || 'single');
   const [batchDraft, setBatchDraft] = useState<VideoDirectorBatchDraft | undefined>(initial?.batch);
   const [batchSubmitting, setBatchSubmitting] = useState(false);
   const [identityRepairing, setIdentityRepairing] = useState(false);
@@ -1716,6 +1730,7 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
   const [pickedSelection, setPickedSelection] = useState<VideoReferenceSelection>({ references: [] });
   const pickedAssetIds = pickedSelection.references.map((reference) => reference.assetId);
   const [previewAsset, setPreviewAsset] = useState<ReferenceAsset>();
+  const [previewVideoAsset, setPreviewVideoAsset] = useState<ReferenceAsset>();
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
   const [submitting, setSubmitting] = useState(false);
@@ -1831,7 +1846,7 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
   draftChangeRef.current = onChapterDraftChange;
   const persistedSignature = useRef('');
   useEffect(() => {
-    const next: VideoDirectorChapterDraft = { draft, parameterText, parameterDrafts: [...parameterDrafts.current], generationMode, batch: batchDraft };
+    const next: VideoDirectorChapterDraft = { draft, parameterText, parameterDrafts: [...parameterDrafts.current], generationMode: generationMode === 'batch' ? 'batch' : 'single', batch: batchDraft };
     const signature = JSON.stringify(next);
     if (signature === persistedSignature.current) return;
     persistedSignature.current = signature;
@@ -1942,21 +1957,27 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
   const slotMismatch = draft.backend === 'comfyui' && activeWorkflow && videoReferenceSlotSpan(draft.references) > activeWorkflow.mapping.images.length;
 
   const generationModeTabs = <div className="vd-mode-tabs vd-generation-mode" role="tablist" aria-label="视频生成模式">
-      <button type="button" role="tab" aria-selected={generationMode === 'single'} aria-controls="vd-single-generation-panel" className={`btn ${generationMode === 'single' ? 'primary' : ''}`} disabled={submitting || batchSubmitting || identityRepairing || singleTail.busy || tailFrameTools?.busy} onClick={() => setGenerationMode('single')}>单段生成</button>
-      <button type="button" role="tab" aria-selected={generationMode === 'batch'} aria-controls="vd-batch-generation-panel" className={`btn ${generationMode === 'batch' ? 'primary' : ''}`} disabled={submitting || batchSubmitting || identityRepairing || singleTail.busy || tailFrameTools?.busy} onClick={() => setGenerationMode('batch')}>长剧情批量</button>
+      <button type="button" role="tab" aria-selected={generationMode === 'single'} aria-controls="vd-single-generation-panel" className={`btn ${generationMode === 'single' ? 'primary' : ''}`} disabled={submitting || batchSubmitting || identityRepairing || singleTail.busy || tailFrameTools?.busy} onClick={() => { if (generationMode === 'custom') onCustomModeChange(false); setGenerationMode('single'); }}>单段生成</button>
+      <button type="button" role="tab" aria-selected={generationMode === 'batch'} aria-controls="vd-batch-generation-panel" className={`btn ${generationMode === 'batch' ? 'primary' : ''}`} disabled={submitting || batchSubmitting || identityRepairing || singleTail.busy || tailFrameTools?.busy} onClick={() => { if (generationMode === 'custom') onCustomModeChange(false); setGenerationMode('batch'); }}>长剧情批量</button>
+      <button type="button" role="tab" aria-selected={generationMode === 'custom'} aria-controls="vd-custom-generation-panel" className={`btn ${generationMode === 'custom' ? 'primary' : ''}`} onClick={() => { onCustomModeChange(true); setGenerationMode('custom'); }}>自定义生成</button>
     </div>;
 
   const phoneSingle = Boolean(phoneLayout && generationMode === 'single');
   return <div className="video-director-view" data-mode={generationMode}>
-    {!phoneSingle && <div className="section-heading"><div><h1>视频导演台</h1><p>直接选择已有提示词和图片资产，生成后自动存入视频资产库。这里的编辑不会改动原分镜或原提示词。</p></div>{generationMode === 'batch' && generationModeTabs}<div className="vd-toolbar">{onOpenSettings && <button className="btn" type="button" onClick={onOpenSettings}>视频连接设置</button>}{onOpenVideoAssets && <button className="btn" type="button" onClick={onOpenVideoAssets}>视频资产库</button>}{onOpenJobs && <button className="btn" type="button" onClick={onOpenJobs}>查看生成任务</button>}</div></div>}
-    {!phoneSingle && chapterId && <p className="field-hint vd-chapter-context">当前章节：{project.sourceDocuments.find((chapter) => chapter.id === chapterId)?.name || '未命名章节'} · 提示词和分段按本章显示，参考图片全项目共用。</p>}
-    {sourceStale && <p className="vd-notice">本章原文已更新，当前历史提示词需要重新生成后才能提交；已提交的视频任务继续运行。</p>}
+    {!phoneSingle && <div className="section-heading"><div><h1>视频导演台</h1><p>直接选择已有提示词和图片资产，生成后自动存入视频资产库。这里的编辑不会改动原分镜或原提示词。</p></div>{generationModeTabs}<div className="vd-toolbar">{onOpenSettings && <button className="btn" type="button" onClick={onOpenSettings}>视频连接设置</button>}{onOpenVideoAssets && <button className="btn" type="button" onClick={onOpenVideoAssets}>视频资产库</button>}{onOpenJobs && <button className="btn" type="button" onClick={onOpenJobs}>查看生成任务</button>}</div></div>}
+    {!phoneSingle && generationMode !== 'custom' && chapterId && <p className="field-hint vd-chapter-context">当前章节：{project.sourceDocuments.find((chapter) => chapter.id === chapterId)?.name || '未命名章节'} · 提示词和分段按本章显示，参考图片全项目共用。</p>}
+    {generationMode === 'single' && sourceStale && <p className="vd-notice">本章原文已更新，当前历史提示词需要重新生成后才能提交；已提交的视频任务继续运行。</p>}
     {generationMode === 'single' && draftReferencePreview && <div className="vd-notice">{draftReferencePreview.referenceNotice}{onOpenPrompt && <button type="button" className="btn small" onClick={() => onOpenPrompt(draftReferencePreview.storyboardId, draft.source)}>回提示词导演台更新参考图</button>}</div>}
-    {!phoneSingle && generationMode === 'single' && generationModeTabs}
     {!phoneSingle && onChangeExecution && <VideoExecutionControls settings={settings} onChange={onChangeExecution} />}
     {onImportAudioFiles && <input hidden ref={audioFileInput} type="file" accept=".mp3,.wav,.flac" multiple aria-label="导入参考音频文件" onChange={(event) => { const files = Array.from(event.target.files || []); event.target.value = ''; if (files.length) void onImportAudioFiles(files).then(() => setNotice('参考音频已加入资产库，请在声音预设或本段音频槽中选择。'), (cause) => setError(formatUserFacingError(cause))); }} />}
-    {!phoneSingle && onVoicePresetsChange && <ProjectVoicePresetEditor project={project} disabled={submitting || batchSubmitting} onChange={onVoicePresetsChange} onCharacterVoiceProfileChange={onCharacterVoiceProfileChange} onImportAudio={importAudio} />}
+    {!phoneSingle && generationMode !== 'custom' && onVoicePresetsChange && <ProjectVoicePresetEditor project={project} disabled={submitting || batchSubmitting} onChange={onVoicePresetsChange} onCharacterVoiceProfileChange={onCharacterVoiceProfileChange} onImportAudio={importAudio} />}
     {generationMode === 'batch' && <div id="vd-batch-generation-panel" role="tabpanel" className="vd-batch-host"><VideoBatchPanel key={`${draftScope}:${launchRequest?.batchTaskIds?.length ? launchRequest.id : 'standard-batch'}`} project={project} chapterId={chapterId} savedBatch={batchDraft} onBatchDraftChange={setBatchDraft} settings={settings} controller={controller} tailFrameTools={tailFrameTools} initialDraft={draft} initialParameterText={parameterText} retryTaskIds={launchRequest?.batchTaskIds} onOpenSettings={onOpenSettings} onOpenJobs={onOpenJobs} onOpenPrompt={onOpenPrompt} onSubmittingChange={setBatchSubmitting} onRepairIdentityBindings={onRepairIdentityBindings} onRefreshH3References={onRefreshH3References} onImportAudio={importAudio} onVideoApiParametersChange={onVideoApiParametersChange} /></div>}
+    {generationMode === 'custom' && <div id="vd-custom-generation-panel" role="tabpanel" className="vd-custom-generation-host"><CustomVideoWorkbenchPanel project={project} settings={settings} controller={controller}
+      draft={customVideoDraft} onDraftChange={(next) => onCustomVideoDraftChange?.(next)}
+      onImportImageFiles={onImportCustomVideoImages || (async () => [])}
+      onOpenSettings={onOpenSettings} onOpenJobs={onOpenJobs} onOpenVideoAssets={onOpenVideoAssets}
+      onVideoApiParametersChange={onVideoApiParametersChange} onPlayVideo={setPreviewVideoAsset} phoneLayout={phoneLayout} />
+    </div>}
     {generationMode === 'single' && phoneLayout && <PhoneVideoComposer
       taskLabel={(() => { const tasks = project.generationTasks.filter(isVideoGenerationTask); const active = tasks.find((task) => !['succeeded', 'failed', 'stopped'].includes(task.status)); const latest = active || tasks[0]; return latest ? `任务：${latest.status} · ${new Date(latest.createdAt).toLocaleString('zh-CN')}` : undefined; })()}
       onOpenJobs={onOpenJobs}
@@ -2057,5 +2078,6 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
       <div className="vd-modal-footer"><span>已选 {pickedAssetIds.length} 张 · 图片和槽位用途一起保存，仅用于本段</span><button className="btn primary" type="button" disabled={pickedCompression.busy} onClick={() => { setDraft((current) => ({ ...current, ...pickedSelection, reuseTaskId: undefined })); setNotice('已使用本段选图与用途并同步本次参考说明；剧情、对白、镜头时间和参数保留，不调用文本或视觉 AI。'); setPicker(undefined); }}>使用所选图片</button></div></VideoPickerDialog>}
     {picker === 'images' && pickedCompression.review && <VideoPickerDialog title={pickedCompression.review.title} className="vd-compression-dialog" onClose={pickedCompression.review.onClose}>{pickedCompression.review.content}</VideoPickerDialog>}
     {previewAsset && <VideoPickerDialog title={`图片预览 · ${previewAsset.name}`} onClose={() => setPreviewAsset(undefined)}><img className="vd-full-image" src={assetPreviewUrl(previewAsset)} alt={previewAsset.name} /><p className="field-hint">{previewAsset.width || '?'} × {previewAsset.height || '?'} · {previewAsset.fileName || previewAsset.name}</p></VideoPickerDialog>}
+    {previewVideoAsset && <AssetVideoPlayerDialog asset={previewVideoAsset} onClose={() => setPreviewVideoAsset(undefined)} onMetadata={() => undefined} />}
   </div>;
 }

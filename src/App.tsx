@@ -6567,6 +6567,25 @@ export default function App() {
       return applyOwnedProjectUpdate(current, projectId, (project) => ({ ...project, assets: [...imported, ...project.assets], updatedAt: Date.now() }));
     });
   };
+  const handleCustomVideoImageFilesImport = async (files: File[]): Promise<ReferenceAsset[]> => {
+    const projectId = stateRef.current.project.id;
+    const epoch = workspaceEpochRef.current;
+    const imported: ReferenceAsset[] = [];
+    for (const file of files) {
+      if (workspaceEpochRef.current !== epoch || stateRef.current.project.id !== projectId) throw new Error("项目已切换，本次图片导入已取消。");
+      const dataUrl = await readImageAsDataUrl(file, Number.POSITIVE_INFINITY);
+      const managed = await desktopBridge()?.storeVideoReferenceImage?.({ dataUrl, fileName: file.name });
+      const local = buildLocalReferenceAsset({ id: createId("asset"), fileName: file.name, dataUrl,
+        mimeType: referenceImageMimeType(dataUrl), role: "composition" });
+      imported.push({ ...local, ...(managed || {}), dataUrl: managed ? undefined : dataUrl,
+        referenceRole: "general", referenceScope: "general", tags: [...local.tags, "自定义视频参考"], missing: false });
+    }
+    setState((current) => {
+      if (workspaceEpochRef.current !== epoch || current.project.id !== projectId) return current;
+      return applyOwnedProjectUpdate(current, projectId, (project) => ({ ...project, assets: [...imported, ...project.assets], updatedAt: Date.now() }));
+    });
+    return imported;
+  };
   const handleStoryReferenceRecognize = async (referenceId: string) => {
     const source = stateRef.current;
     const chapterId = activeChapter(source.project)?.id;
@@ -10322,6 +10341,15 @@ export default function App() {
             return settings === current.settings ? current : { ...current, settings };
           })}
           controller={videoController} launchRequest={videoLaunchRequest}
+          customVideoDraft={state.project.customVideoDraft}
+          onCustomVideoDraftChange={(draft) => setBackgroundState((current) => {
+            const owner = current.project.id === state.project.id ? current.project : current.projects.find((project) => project.id === state.project.id);
+            if (!owner || JSON.stringify(owner.customVideoDraft) === JSON.stringify(draft)) return current;
+            const updated = { ...owner, customVideoDraft: draft, updatedAt: Date.now() };
+            return { ...current, project: current.project.id === owner.id ? updated : current.project,
+              projects: current.projects.map((project) => project.id === owner.id ? updated : project) };
+          })}
+          onImportCustomVideoImages={handleCustomVideoImageFilesImport}
           onChapterDraftChange={(projectId, chapterId, draft) => setBackgroundState((current) => {
             const owner = current.project.id === projectId ? current.project : current.projects.find((project) => project.id === projectId);
             if (!owner || JSON.stringify(chapterWorkspace(owner, chapterId).videoDirector) === JSON.stringify(draft)) return current;

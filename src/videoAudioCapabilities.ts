@@ -12,6 +12,14 @@ export interface VideoAudioCapability {
 export const videoAudioCapability = (api: AudioApi, backend: VideoGenerationDraft['backend'] = 'api'): VideoAudioCapability => {
   if (backend !== 'api') return { status: 'unsupported', capacity: 0, reason: '当前视频连接尚未实现参考音频传输；可以继续使用文字声线描述。' };
   if (!api) return { status: 'unknown', capacity: 0, reason: '尚未选择视频连接，参考音频能力未确定。' };
+  if (api.provider === 'minimax_h3') return { status: 'supported', capacity: 3,
+    reason: 'MiniMax H3 v2 支持参考音频；仅使用本次选择的音频，声音效果由模型决定。' };
+  if (api.provider === 'rh_web') {
+    const capacity = (api.rhWebFields || []).filter((field) => field.bind === 'audio').length;
+    return capacity ? { status: 'supported', capacity,
+      reason: '当前 RH 网页应用已配置音频输入；生成时使用本次选择的音频。' }
+      : { status: 'unsupported', capacity: 0, reason: '当前 RH 网页应用没有配置音频输入槽。' };
+  }
   if (api.provider === 'runninghub') {
     const fields = (Array.isArray(api.runningHubMappedFields) ? api.runningHubMappedFields : []).filter((field) => field?.kind === 'audio'
       && typeof field.nodeId === 'string' && field.nodeId.trim() && typeof field.fieldName === 'string' && field.fieldName.trim()

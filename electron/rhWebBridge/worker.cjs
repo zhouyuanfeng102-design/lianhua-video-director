@@ -191,8 +191,10 @@ async function readForm(page) {
   });
 }
 
+const openDropdown = (page) => page.locator('.ant-select-dropdown').locator('visible=true').last();
+
 async function readOpenOptions(page) {
-  const dropdown = page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').last();
+  const dropdown = openDropdown(page);
   if (await dropdown.count() < 1) return [];
   const seen = [];
   for (let step = 0; step < 12; step += 1) {
@@ -223,7 +225,7 @@ async function readSelectOptions(page) {
     const label = ((await title.getAttribute('title')) || (await title.textContent()) || '').trim();
     if (!label || label === '上传图片' || label === '上传音频') continue;
     await plane.locator('.ant-select').first().click();
-    await page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden) .ant-select-item-option-content').first().waitFor({ state: 'visible', timeout: 2500 }).catch(() => {});
+    await openDropdown(page).locator('.ant-select-item-option-content').first().waitFor({ state: 'visible', timeout: 2500 }).catch(() => {});
     const options = await readOpenOptions(page);
     await page.keyboard.press('Escape').catch(() => {});
     found.push({ label, options });
@@ -236,7 +238,7 @@ const exactText = (label) => new RegExp(`^${label.replace(/[.*+?^${}()|[\]\\]/gu
 /** Ant Design keeps unselected rows outside the open list. Click only the row that is inside it. */
 async function chooseOpenOption(page, value) {
   const wanted = String(value).replace(/\s+/gu, ' ').trim();
-  const dropdown = page.locator('.ant-select-dropdown:not(.ant-select-dropdown-hidden)').last();
+  const dropdown = openDropdown(page);
   await dropdown.waitFor({ state: 'visible', timeout: 8000 });
   for (let step = 0; step < 24; step += 1) {
     const outcome = await dropdown.evaluate((node, payload) => {

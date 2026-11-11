@@ -4,15 +4,15 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的工作台，提供 Windows 便携版和 Android 手机 APK。
 
-当前版本：**4.4.3** · 2026-11-10 · Windows x64 / Android
+当前版本：**4.4.7** · 2026-11-11 · Windows x64 / Android
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows EXE / Android APK](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-4.4.3.md) · [安卓安装说明](docs/android-install.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-4.4.7.md) · [安卓安装说明](docs/android-install.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
-1. 电脑下载 [Windows 便携版 EXE](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/download/v4.4.3/lianhua-video-director-4.4.3-windows-x64-portable.exe)，放在可写入的文件夹里双击运行；安卓手机下载 [Android APK](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/download/v4.4.3/lianhua-video-director-4.4.3-android.apk) 后安装。普通使用者无需安装开发环境。
+1. 电脑下载 [Windows 便携版 EXE](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/download/v4.4.7/lianhua-video-director-4.4.7-windows-x64-portable.exe)，放在可写入的文件夹里双击运行；安卓手机下载 [Android APK](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/download/v4.4.7/lianhua-video-director-4.4.7-android.apk) 后安装。普通使用者无需安装开发环境。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
 3. 导入 TXT / Markdown 分章原文或手动新建章节，选择章节后解析剧情，再进入导演台生成、编辑和导出提示词。导入不会自动调用 API 批量解析全书。
 
@@ -20,7 +20,7 @@
 
 更新前请先保存项目并退出旧版，保留 EXE 旁的“莲华视频导演台数据”文件夹。 自 1.5.2 起项目与素材分文件保存，移动或备份时请保留整个数据文件夹；不要单独把新存档索引交给旧版打开。详见[保存与恢复说明](docs/releases/发布说明-1.5.2.md)。
 
-安卓更新直接覆盖安装同签名新版 APK，保留应用数据；卸载或清除数据前先导出带素材的 `.lhvd` 项目包。电脑和手机通过项目包互相转移，API 密钥在各设备重新配置。安卓基础能力与既有测试边界见 [3.9.7 能力与验证记录](docs/releases/能力与验证记录-3.9.7.md)。本版 APK 已完成正式签名核对，尚无本版 Android 设备安装与原生功能实测记录。
+安卓更新直接覆盖安装同签名新版 APK，保留应用数据；卸载或清除数据前先导出带素材的 `.lhvd` 项目包。电脑和手机通过项目包互相转移，API 密钥在各设备重新配置。本版构建、签名和界面检查结果见 [4.4.7 能力与验证记录](docs/releases/能力与验证记录-4.4.7.md)。安卓基础能力边界见 [3.9.7 记录](docs/releases/能力与验证记录-3.9.7.md)；本版未运行 Android 实机安装测试，未发起付费模型请求。
 
 ## 使用与引用说明
 
@@ -42,17 +42,26 @@
 - **图像与视频任务**：配置对应服务后提交任务，管理参考图、首尾帧、批量任务与结果，查看图片任务实际使用的生图规则与分类预设。
 - **RunningHub 云端图片**：图片 API 可独立保存云端应用，导入 cURL、请求 JSON 或完整 API 说明，绑定提示词、尺寸和参考图片槽；查询生成状态并保存图片到资产库。
 - **自定义生图+反推图片提示词**：输入要求生成图片，或复用上传/资产库参考图，通过视觉 API 反推可复制的提示词与人物、物品、场景、风格详情。反推同步显示在聊天和资料任务，支持后台执行、停止、重试及项目保存恢复；原有生图支持原文直发或规则转换，结果自动入库。
+- **自定义生视频**：在视频导演台的第三个模式页签自己选图、填写原文提示词，选择视频 API、RunningHub 云端、已适配网页或 ComfyUI 工作流；草稿独立保存，结果全部入库。
 - **项目与资产管理**：管理图片、视频和音频，保存项目包、备份资料并导出提示词。
 
-## 最新更新 · v4.4.3
+## 最新更新 · v4.4.7
 
-- 选择比例时，先把目标项滚进打开的下拉列表再点。
-- 点不上时不再停在提交中断。
-- 已有任务不自动重投。
+- 自定义生视频历史按提示词气泡、生成状态和结果视频分组显示。
+- 底部输入区与自定义生图保持一致，支持参考图附件、原文提示词和渠道选择。
+- 图片用途、H3 模式、音视频参考和生成参数收进折叠设置，桌面和手机布局保持可用。
 
 本次没有新增运行时校验、拦截、重试、按钮或模型请求。后续常规版本持续双端交付；仅某一端独立 UI 调整使用明确单端参数。已有提示词和成片保持原样。
 
-[查看本版完整说明](docs/releases/发布说明-4.4.3.md) · [历史版本归档](docs/releases/README.md)
+[查看本版完整说明](docs/releases/发布说明-4.4.7.md) · [历史版本归档](docs/releases/README.md)
+
+## 更早一版更新 · v4.4.5
+
+- 比例下拉只使用页面上真正可见的那一个列表。
+- 藏在页面里的空列表不再把提交拖到超时。
+- 已经停住的任务不会自动重投。
+
+[查看上一版完整说明](docs/releases/发布说明-4.4.5.md) · [历史版本归档](docs/releases/README.md)
 
 ## 从源码运行
 

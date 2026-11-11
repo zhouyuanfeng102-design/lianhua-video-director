@@ -289,7 +289,9 @@ test('following behind uses the back of the leader, and face-to-face speech stay
   });
   assert.match(rendered.prompt, /玉小刚跟在比比东身后/u);
   assert.doesNotMatch(rendered.prompt, /比比东的脸朝向一个方向/u);
-  assert.match(H3_PERFORMANCE_DELIVERY_RULE, /接触的那一头朝相反方向/u);
+  assert.match(H3_PERFORMANCE_DELIVERY_RULE, /他留在她身后，胸口对着她的背/u);
+  assert.match(H3_PERFORMANCE_DELIVERY_RULE, /她的头留在她的脖子上/u);
+  assert.doesNotMatch(H3_PERFORMANCE_DELIVERY_RULE, /髋朝向这头并对准|不写从肩到髋都能看见/u);
   const reversedRoster: H3PerformancePlan = {
     version: 1, timeBase: 'clip', descriptionLanguage: 'zh',
     characters: [

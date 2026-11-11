@@ -3010,6 +3010,7 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
 .asset-video-source-image img { width:80px; height:64px; object-fit:contain; }
 @media(max-width:1039px) {
   body:has(.video-director-view, .assets-view, .video-generation-settings) { min-width:760px; }
+  body:has(.app-shell.mobile-shell):has(.video-director-view, .assets-view, .video-generation-settings) { width:100%; min-width:0; overflow-x:hidden; }
   body:has(.video-director-view, .assets-view, .video-generation-settings) .topbar { flex-wrap:wrap; height:auto; min-height:64px; gap:6px; }
   body:has(.video-director-view, .assets-view, .video-generation-settings) .topbar .row { flex-wrap:wrap; }
   .assets-view .row-between { flex-wrap:wrap; gap:8px; }

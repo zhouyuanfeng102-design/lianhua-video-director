@@ -20,9 +20,12 @@ export const videoAudioMappedFields = (api: AudioApi) => api?.provider === 'runn
   ? (Array.isArray(api.runningHubMappedFields) ? api.runningHubMappedFields : []).filter((field) => field?.kind === 'audio'
     && typeof field.nodeId === 'string' && field.nodeId.trim() && typeof field.fieldName === 'string' && field.fieldName.trim()
     && Number.isSafeInteger(field.audioIndex) && field.audioIndex! >= 0).sort((a, b) => a.audioIndex! - b.audioIndex!) : [];
-export const videoAudioSlotCount = (api: AudioApi): number => videoAudioMappedFields(api)
-  .reduce((count, field) => Math.max(count, (field.audioIndex || 0) + 1), 0);
+export const videoAudioSlotCount = (api: AudioApi): number => api?.provider === 'minimax_h3' ? 3
+  : api?.provider === 'rh_web' ? (api.rhWebFields || []).filter((field) => field.bind === 'audio').length
+    : videoAudioMappedFields(api).reduce((count, field) => Math.max(count, (field.audioIndex || 0) + 1), 0);
 export const videoAudioBindingId = (api: AudioApi, slotIndex: number): string => {
+  if (api?.provider === 'minimax_h3') return `minimax-h3-audio-${slotIndex + 1}`;
+  if (api?.provider === 'rh_web') return `rh-web-audio-${slotIndex + 1}`;
   const field = videoAudioMappedFields(api).find((entry) => entry.audioIndex === slotIndex);
   return field ? JSON.stringify([field.nodeId, field.fieldName]) : `unmapped-audio-${slotIndex + 1}`;
 };
@@ -136,6 +139,7 @@ export const videoAudioSpeakingCharacterIds = (project: Project, draft: VideoGen
 
 export const resolveVideoAudioReferences = (project: Project, draft: VideoGenerationDraft, api: AudioApi): VideoAudioReference[] => {
   if (draft.audioSelectionMode === 'none') return [];
+  if (draft.origin === 'custom' && draft.promptMode === 'raw') return structuredClone(draft.audioReferences || []);
   if (draft.reuseTaskId || draft.audioSelectionMode === 'override' || !draft.audioSelectionMode && draft.audioReferences?.length) return structuredClone(draft.audioReferences || []);
   if (!videoAudioSlotCount(api)) return [];
   const presets = project.voicePresets;
@@ -219,6 +223,9 @@ const audioLiteral = (text: string): string => text.replace(/[\r\n\t]+/gu, ' ').
 /** Image serialization runs first; this renderer changes only the submitted draft. */
 export const prepareVideoAudioDraft = (project: Project, draft: VideoGenerationDraft, api: AudioApi): VideoGenerationDraft => {
   if (draft.reuseTaskId) return draft;
+  if (draft.origin === 'custom' && draft.promptMode === 'raw') {
+    return { ...draft, audioReferences: resolveVideoAudioReferences(project, draft, api), audioReferenceBinding: undefined };
+  }
   const references = resolveVideoAudioReferences(project, draft, api);
   return renderVideoAudioDraft(project, { ...draft, audioReferences: references }, api);
 };
@@ -226,6 +233,7 @@ export const prepareVideoAudioDraft = (project: Project, draft: VideoGenerationD
 /** Re-render a frozen selection after image rebinding; never resolve current project presets. */
 export const renderVideoAudioDraft = (project: Project, draft: VideoGenerationDraft, _api?: AudioApi): VideoGenerationDraft => {
   if (draft.reuseTaskId) return draft;
+  if (draft.origin === 'custom' && draft.promptMode === 'raw') return { ...draft, audioReferenceBinding: undefined };
   const references = draft.audioReferences || [];
   const previous = draft.audioReferenceBinding;
   const basePrompt = stripVideoAudioPromptBinding(draft.prompt, previous);

@@ -121,6 +121,8 @@ main:has(> .workspace.view-video) > .chapter-toolbar svg { width: 13px; height: 
 .video-director-view [hidden] { display: none !important; }
 .vd-mode-tabs { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
 .vd-generation-mode { margin: 0 0 10px; flex: 0 0 auto; }
+.video-director-view > .section-heading > .vd-generation-mode { margin: 0; }
+.video-director-view > .section-heading > .vd-toolbar { margin-left: auto; }
 .video-director-view[data-mode="batch"] { height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 0; }
 .video-director-view[data-mode="batch"] > .section-heading { flex: 0 0 auto; justify-content: flex-start; align-items: center; gap: 8px 12px; margin-bottom: 6px; }
 .video-director-view[data-mode="batch"] > .section-heading p { display: none; }

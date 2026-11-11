@@ -223,8 +223,12 @@ const choose = async (trigger, value) => {
   }, 8000);
   option.click();
 };
-const openDropdowns = () => [...document.querySelectorAll('.ant-select-dropdown:not(.ant-select-dropdown-hidden)')]
-  .filter(node => node.getClientRects().length > 0);
+const openDropdowns = () => [...document.querySelectorAll('.ant-select-dropdown')].filter((node) => {
+  const style = getComputedStyle(node);
+  if (style.display === 'none' || style.visibility === 'hidden') return false;
+  const rect = node.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+});
 const afterDropdownRender = () => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
 async function readOpenOptions() {
   const dropdown = openDropdowns().at(-1);

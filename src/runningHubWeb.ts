@@ -294,6 +294,10 @@ export const buildRhWebBody = (
   }
   let instance = config.rhWebInstance || 'Plus';
   const assignments = fields.map((item) => {
+    if (draft.origin === 'custom' && draft.promptMode === 'raw'
+      && item.label === '自动提示词' && item.kind === 'boolean') {
+      return { key: item.key, label: item.label, kind: item.kind, value: false };
+    }
     if (item.bind === 'image') {
       const index = imageFields.findIndex((candidate) => candidate.key === item.key);
       const referenceIndex = draft.references.findIndex((reference, referenceOrder) => slotOf(reference, referenceOrder) === index);
@@ -305,6 +309,9 @@ export const buildRhWebBody = (
       return { key: item.key, label: item.label, kind: item.kind, value: referenceIndex >= 0 ? audios[referenceIndex] : '' };
     }
     if (item.label === '提示词' || item.bind === 'prompt' || item.bind === 'idea') {
+      if (draft.origin === 'custom' && draft.promptMode === 'raw') {
+        return { key: item.key, label: item.label, kind: item.kind, value: draft.prompt };
+      }
       const idea = item.bind === 'idea' ? parameterValue(draft.parameters, 'idea') : undefined;
       const explicit = typeof idea === 'string' ? idea.trim() : '';
       const chosen = item.bind === 'idea'

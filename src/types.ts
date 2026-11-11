@@ -3,7 +3,7 @@ import type {
   NsfwBodyAnchors,
   NsfwShotContinuityState,
 } from './continuity';
-import type { ComfyVideoConfig, VideoApiProfile, VideoGenerationJob, VideoGenerationBackend } from './videoGenerationTypes';
+import type { ComfyVideoConfig, CustomVideoDraft, VideoApiProfile, VideoGenerationJob, VideoGenerationBackend } from './videoGenerationTypes';
 import type { VideoGenerationSource } from './videoGenerationTypes';
 import type { RunningHubVideoConfig, RunningHubVideoFieldControl, RunningHubVideoWorkflow } from './runningHubVideoTypes';
 import type { RunningHubWebConfig, RunningHubWebField } from './runningHubWeb';
@@ -1336,6 +1336,8 @@ export interface Project {
   generationTasks: GenerationTask[];
   /** Project-owned custom-image composer draft; no image pixels or API credentials. */
   customImageDraft?: CustomImageDraft;
+  /** Independent custom-video composer state, isolated from chapter director drafts. */
+  customVideoDraft?: CustomVideoDraft;
   /** Independent local post-production; does not enter the paid generation queue. */
   videoWorkbench?: VideoWorkbenchState;
   createdAt: number;
@@ -1643,7 +1645,7 @@ export interface VideoTaskApiConfig {
   taskIdPath: string;
   statusPath: string;
   resultUrlPath: string;
-  provider?: 'generic' | 'minimax' | 'runninghub' | 'rhtv_web' | 'rh_web';
+  provider?: 'generic' | 'minimax' | 'minimax_h3' | 'runninghub' | 'rhtv_web' | 'rh_web';
   rhtvMode?: 'text' | 'first' | 'first_last' | 'reference';
   rhtvDuration?: number;
   rhtvResolution?: string;

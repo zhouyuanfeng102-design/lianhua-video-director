@@ -47,6 +47,7 @@ export const availableVideoParameterKeys = (
     return [...new Set(fields.flatMap((field) => field.bind === 'duration' || field.bind === 'aspect_ratio' || field.bind === 'megapixels' || field.bind === 'idea' ? [field.bind] : []))];
   }
   if (source === 'api' && api?.provider === 'rhtv_web') return ['duration', 'resolution'];
+  if (source === 'api' && api?.provider === 'minimax_h3') return ['duration', 'aspect_ratio', 'resolution'];
   if (source === 'api' && api && isLaoliVideoBuiltinProtocol({ ...api, endpoint: api.endpoint || '' })) return ['duration', 'aspect_ratio', 'resolution'];
   if (source === 'runninghub' || api?.provider === 'runninghub' && Array.isArray(api.runningHubMappedFields)) return [...new Set(
     (api?.runningHubMappedFields || []).flatMap((field) => field.kind === 'parameter' && field.parameter ? [field.parameter] : []),
@@ -98,6 +99,12 @@ export const videoOutputParameterPresentation = (
   const controls: Record<string, VideoOutputParameterControl> = { ...api?.runningHubParameterControls };
   const defaultValues: Record<string, unknown> = {};
   const upstreamParameters = Boolean(api) && (!api?.provider || api.provider === 'generic') && !api?.runningHubMappedFields;
+  if (api?.provider === 'minimax_h3') {
+    controls.duration = { kind: 'number', min: api.model === 'MiniMax-H3-Max' ? 5 : 4, max: 15, step: 1 };
+    controls.resolution = { kind: 'select', options: api.model === 'MiniMax-H3' || !api.model ? ['768P', '2K'] : ['480P', '768P'] };
+    controls.aspect_ratio = { kind: 'select', options: ['adaptive', '16:9', '9:16', '1:1', '4:3', '3:4', '21:9'] };
+    Object.assign(defaultValues, { duration: 5, resolution: '768P', aspect_ratio: '16:9' });
+  }
   if (upstreamParameters && api) {
     const capabilities = getVideoApiModelParameterCapabilities(api);
     Object.assign(controls, capabilities?.controls);

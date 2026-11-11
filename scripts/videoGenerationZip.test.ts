@@ -91,7 +91,7 @@ const createHarness = (overrides: Partial<VideoTaskApiConfig> = {}) => {
   assert.deepEqual(task.videoJob?.resultAssetIds, [task.resultAssetId]); assert.equal(task.videoJob?.resultSelectionRequired, false);
   assert.equal(h.state().project.assets.length, 1); assert.equal(h.state().project.assets[0].mediaType, 'video');
   assert.equal(h.state().project.assets[0].videoSourceTask?.remoteTaskId, 'original-remote');
-  assert.ok(h.persists() > 0); assert.equal(h.checkpoints.get(task.id)?.resultAssetId, task.resultAssetId);
+  assert.ok(h.checkpoints.has(task.id)); assert.equal(h.checkpoints.get(task.id)?.resultAssetId, task.resultAssetId);
   await h.engine.recoverResult(task.id); assert.equal(h.downloads.length, 1, 'saved results never redownload');
   h.engine.dispose();
 }
@@ -165,6 +165,7 @@ for (const location of ['cache', 'query'] as const) {
   await assert.rejects(h.engine.selectResultVideo('legacy-zip', 'not-owned'), /不属于/u);
   const ids = h.task().videoJob!.resultAssetIds!;
   await h.engine.selectResultVideo('legacy-zip', ids[1]);
+  await settle();
   assert.equal(h.task().resultAssetId, ids[1]); assert.equal(h.task().videoJob?.resultSelectionRequired, false);
   assert.equal(h.checkpoints.get('legacy-zip')?.resultAssetId, ids[1]);
   await assert.rejects(h.engine.selectResultVideo('legacy-zip', ids[2]), /不能更换/u);
@@ -194,12 +195,15 @@ for (const action of ['cancel', 'remove'] as const) {
   assert.equal(h.state().project.assets.length, 0); assert.equal(h.state().projects.find((project) => project.id === owner)?.assets.length, 2); h.engine.dispose();
 }
 
-// Persist failure never redownloads already-saved videos. Retry only flushes
+// Checkpoint failure never redownloads already-saved videos. Retry only flushes
 // the exact result list and then permits selection.
 {
   const h = createHarness(); h.seed(); let fail = true;
   h.desktop.downloadGeneratedMedia = async (input) => { h.downloads.push(input); return { ...media('persist-A'), additionalVideos: [media('persist-B')], archiveFileName: 'persist.zip' }; };
-  h.options.persistState = async () => { if (fail) throw new Error('disk full'); };
+  h.desktop.saveVideoTaskCheckpoint = async (task) => {
+    if (fail) return { persisted: false };
+    h.checkpoints.set(task.id, structuredClone(task)); return { persisted: true };
+  };
   await h.engine.recoverResult('legacy-zip'); await settle();
   assert.ok(h.task().videoJob?.downloadError); assert.equal(h.state().project.assets.length, 2);
   fail = false; await h.engine.retryDownload('legacy-zip');
@@ -215,6 +219,7 @@ for (const action of ['cancel', 'remove'] as const) {
   h.desktop.downloadGeneratedMedia = async (input) => { h.downloads.push(input); return { ...media('restart-A'), additionalVideos: [media('restart-B')], archiveFileName: 'restart.zip' }; };
   await h.engine.recoverResult('legacy-zip'); const oldState = structuredClone(h.state());
   const chosen = h.task().videoJob!.resultAssetIds![1]; await h.engine.selectResultVideo('legacy-zip', chosen);
+  await settle();
   h.engine.dispose(); h.set(() => oldState);
   const restarted = new VideoGenerationEngine(h.options); restarted.reconcile();
   await waitFor(() => h.task().resultAssetId === chosen, 'newer journal selection was not recovered');
