@@ -15,6 +15,15 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "4.5.6",
+    releasedAt: "2026-11-12",
+    title: "注册可领 1000 RH币",
+    highlights: [
+      "RunningHub 云端连接标题旁保留邀请注册。",
+      "旁边写明现在注册可领 1000 RH币，免费生成图片和视频。",
+    ],
+  },
+  {
     version: "4.5.5",
     releasedAt: "2026-11-11",
     title: "第二件事用剩下的那只手",
