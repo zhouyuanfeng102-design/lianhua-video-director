@@ -94,7 +94,7 @@ export interface RenderH3PerformancePlanInput {
   characterPictures?: ReadonlyMap<string, readonly number[]>;
   /** Only explicitly authored audio references, independent of picture slots. */
   characterAudio?: ReadonlyMap<string, readonly number[]>;
-  pictureUses?: readonly { number: number; role: string }[];
+  pictureUses?: readonly { number: number; role: string; text?: string }[];
   /** Keep a score only when this request asked for one, or a repair must
    * retain a score already confirmed in the source prompt. */
   keepScore?: boolean;
@@ -459,11 +459,14 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
   for (const use of input.pictureUses || []) {
     const role = pictureRoles[use.role];
     const declared = new RegExp(`^<Picture ${use.number}>\\s+(?:is\\b|用于|是|为)`, 'mu').test(definitions.join('\n'));
-    if (role && !declared) definitions.push(sentence(`<Picture ${use.number}> ${en ? 'is the' : '用于'} ${role}`, language));
+    if (use.text && !declared) definitions.push(sentence(`<Picture ${use.number}> ${use.text}`, language));
+    else if (role && !declared) definitions.push(sentence(`<Picture ${use.number}> ${en ? 'is the' : '用于'} ${role}`, language));
   }
   const summary = (input.summary ?? plan.summary)?.trim() || (en ? 'The authored scene unfolds in the following shots.' : '按下列镜头展开已确认的场景表演。');
-  const retention = (input.retentionAnalysis ?? plan.retentionAnalysis)?.trim() || (en
-    ? 'Keep the referenced identities and the authored scene relationships.' : '保留参考身份与已确认的场景关系。');
+  const partRetention = (input.pictureUses || []).flatMap((use) => use.text ? [`<Picture ${use.number}>: ${use.text}`] : []);
+  const retention = [((input.retentionAnalysis ?? plan.retentionAnalysis)?.trim() || (en
+    ? 'Keep the referenced identities and the authored scene relationships.' : '保留参考身份与已确认的场景关系。')),
+  ...partRetention].filter(Boolean).join('\n');
   const duration = Number.isFinite(input.durationSec) ? Math.max(0, input.durationSec || 0)
     : Math.max(0, ...plan.shots.map((shot) => shot.startSec), ...plan.shots.flatMap((shot) => shot.events.map((event) => event.endSec ?? event.startSec ?? 0)));
   const firstFrame = (input.pictureUses || []).find((use) => use.role === 'first-frame');

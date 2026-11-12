@@ -71,7 +71,7 @@ const unwrapError = (input: string): string => {
 
 const referenceRoleLabels: Readonly<Record<string, string>> = {
   'first-frame': '首帧', 'last-frame': '尾帧', composition: '构图参考',
-  character: '人物参考', subject: '主体参考', general: '通用参考', unknown: '未分类',
+  character: '人物参考', 'private-part': '私密部位', subject: '主体参考', general: '通用参考', unknown: '未分类',
   scene: '场景参考', prop: '道具参考', style: '风格参考', motion: '动作参考',
   camera: '摄影参考', audio: '声音参考', dialogue: '对白参考',
   'clay-render': '白模参考', creative: '创意参考',
@@ -83,7 +83,7 @@ const translations: ReadonlyArray<readonly [RegExp, string | ((...matches: strin
   // These are local slot/selection enum values, not untranslated provider prose.
   // Limit the translation to the explicit labels; do not whitelist these common
   // English words globally or hide an unrelated upstream error after the token.
-  [/((?:图片槽|所选|选图|不能接收)用途为\s*)(first-frame|last-frame|composition|character|subject|general|unknown|scene|prop|style|motion|camera|audio|dialogue|clay-render|creative)(?![A-Za-z0-9_.-])/giu,
+  [/((?:图片槽|所选|选图|不能接收)用途为\s*)(first-frame|last-frame|composition|character|private-part|subject|general|unknown|scene|prop|style|motion|camera|audio|dialogue|clay-render|creative)(?![A-Za-z0-9_.-])/giu,
     (_whole, label, role) => `${label}${referenceRoleLabels[role.toLowerCase()]}`],
   // This old message came from a local source-ID coverage heuristic, not the
   // provider. Preserve its cause even when viewing logs saved by older builds.

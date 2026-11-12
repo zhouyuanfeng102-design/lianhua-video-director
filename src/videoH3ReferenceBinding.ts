@@ -5,6 +5,7 @@ import { videoMiddleFrameOrdinal, videoReferenceSlotIndex } from './videoReferen
 import { getH3IdentityBindingIssues, normalizeH3IdentityBindings, type H3IdentityBindingIssue } from './h3IdentityBindings';
 import { officialH3ContextForStoryboard } from './officialH3Context';
 import { characterParticipationAliases, resolvePromptCharacterParticipation, resolveStoryboardCharacterParticipation } from './characterParticipation';
+import { privatePartReferenceDuty } from './nsfwPrivateAssets';
 import { videoReferenceCharacterOwners, videoReferenceCharacterBindingWarning, type VideoCharacterReferenceState } from './videoReferenceCharacters';
 import { maskVideoPictureReferenceLiterals as maskReferenceLiterals, videoPictureReferencePattern as pictureReferencePattern } from './videoPictureReferences';
 import { prepareVideoSeedanceReferenceDraft } from './videoSeedanceReferenceBinding';
@@ -329,6 +330,12 @@ const videoH3ReferenceUses = (project: Project, draft: VideoGenerationDraft): Vi
   const board = project.storyboards.find((entry) => entry.id === draft.source?.storyboardId);
   return draft.references.map((reference): VideoH3ReferenceUse => {
     const asset = project.assets.find((entry) => entry.id === reference.assetId);
+    if (reference.role === 'private-part') {
+      const owners = asset ? videoReferenceCharacterOwners(project, asset, reference) : [];
+      const owner = owners.length === 1 ? owners[0] : undefined;
+      const name = owners.length > 1 ? owners.map((entry) => entry.name).join('、') : owner?.name;
+      return { role: 'private-part', description: privatePartReferenceDuty(asset || {}, name, owner?.gender) };
+    }
     const boundary = reference.role === 'first-frame'
       ? board?.firstFrameAssetId === reference.assetId || draft.automaticStoryboardFrames?.firstFrameAssetId === reference.assetId
       : reference.role === 'last-frame'
@@ -661,7 +668,8 @@ const prepareVideoH3ReferenceDraftInternal = (
     ? renderH3ReferenceExecution({ prompt, identities: executionIdentities, characterPictures,
       mode: executionMode === 'full-reference' ? 'full-reference' : 'integrated',
       language: binding.sourceLanguage || draft.source?.language,
-      pictureUses: referenceUses.map((use, index) => ({ number: plan.numbers![index], role: use.role })) }) : undefined;
+      pictureUses: referenceUses.map((use, index) => ({ number: plan.numbers![index], role: use.role,
+        ...(use.description ? { text: use.description[language === 'en' ? 1 : 0] } : {}) })) }) : undefined;
   if (execution) prompt = execution.prompt;
   // Serialize uses after any existing execution rendering, so a saved
   // performance plan cannot discard this request's image responsibilities.

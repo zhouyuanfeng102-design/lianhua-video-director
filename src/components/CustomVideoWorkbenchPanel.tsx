@@ -22,7 +22,7 @@ import '../customVideoWorkbench.css';
 
 const imageRoles: Array<{ value: ReferenceRole; label: string }> = [
   { value: 'first-frame', label: '首帧' }, { value: 'last-frame', label: '尾帧' },
-  { value: 'character', label: '人物参考' }, { value: 'scene', label: '场景参考' },
+  { value: 'character', label: '人物参考' }, { value: 'private-part', label: '私密部位' }, { value: 'scene', label: '场景参考' },
   { value: 'prop', label: '道具参考' }, { value: 'style', label: '风格参考' },
   { value: 'motion', label: '动作参考' }, { value: 'composition', label: '构图参考' },
   { value: 'general', label: '通用参考' },

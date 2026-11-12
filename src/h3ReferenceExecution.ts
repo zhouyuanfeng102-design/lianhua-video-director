@@ -25,7 +25,7 @@ export interface H3ReferenceExecutionInput {
   prompt: string;
   identities: H3IdentityBindings;
   characterPictures: ReadonlyMap<string, readonly number[]>;
-  pictureUses?: ReadonlyArray<{ number: number; role: ReferenceRole }>;
+  pictureUses?: ReadonlyArray<{ number: number; role: ReferenceRole; text?: string }>;
   language?: 'zh' | 'en';
   mode?: 'integrated' | 'full-reference';
 }
@@ -272,7 +272,7 @@ export const renderH3ReferenceExecution = (input: H3ReferenceExecutionInput): H3
       if (identities.characters.some((entry) => entry.subjectToken
         ? line.trimStart().startsWith(`${entry.subjectToken} `)
         : entry.referenceAnchor && line.includes(entry.referenceAnchor))) return false;
-      const picture = /^\s*<Picture\s+(\d+)>\s+(?:is the|用于)\s/u.exec(line);
+      const picture = /^\s*<Picture\s+(\d+)>\s+(?:is\b|用于|是|为)/u.exec(line);
       return !picture || !uses.has(Number(picture[1]));
     }).join('\n').trim();
     const rendered = renderH3PerformancePlan({ plan: identities.performance, characters: identities.characters,
@@ -406,16 +406,18 @@ export const renderH3ReferenceExecution = (input: H3ReferenceExecutionInput): H3
     'middle-frame': 'intermediate composition and continuity reference' };
   for (const use of input.pictureUses || []) {
     const purpose = uses[use.role];
-    if (!purpose || !Number.isSafeInteger(use.number) || use.number < 1
+    if ((!purpose && !use.text) || !Number.isSafeInteger(use.number) || use.number < 1
       || new RegExp(`^<Picture ${use.number}>[ \\t]+(?:is|是|为)\\b`, 'mu').test(mask(definitionBody))) continue;
-    definitionBody += `\n<Picture ${use.number}> is the ${purpose}.`;
+    definitionBody += use.text ? `\n<Picture ${use.number}> ${use.text}` : `\n<Picture ${use.number}> is the ${purpose}.`;
   }
   const summary = sections.find((section) => section.name === 'summary');
   const retention = sections.find((section) => section.name === 'retention_analysis');
   const labels = characters.map((entry) => entry.subjectToken).join(', ');
   const authoredSummary = summary?.body.trim() || (input.language === 'en' ? `Referenced characters: ${labels}.` : `本段人物身份沿用 ${labels}。`);
   const summaryBody = /^\[reference generation(?:[^\]]*)\]/u.test(authoredSummary) ? authoredSummary : `[reference generation] ${authoredSummary}`;
-  const retentionBody = renderRetention(retention?.body || '', characters);
+  const partRetention = (input.pictureUses || []).flatMap((use) => use.role === 'private-part' && use.text
+    ? [`<Picture ${use.number}>: ${use.text}`] : []);
+  const retentionBody = [renderRetention(retention?.body || '', characters), ...partRetention].filter(Boolean).join('\n');
   const bodyTail = /[\r\n]$/u.test(body) ? body : `${body}\n`;
   // Missing legacy sound sections do not mean the shot's existing sounds are
   // muted. Summarize their existing scope without introducing a global bed.

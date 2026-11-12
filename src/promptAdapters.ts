@@ -245,6 +245,7 @@ function normalizeRole(input: PromptReferenceInput, mediaType: ReferenceMediaTyp
 function defaultResponsibility(role: ReferenceRole, mediaType: ReferenceMediaType): string {
   const labels: Partial<Record<ReferenceRole, string>> = {
     character: '锁定角色外观、服装和身份',
+    'private-part': '只提供已绑定人物这一部位的形状、颜色和纹理',
     scene: '锁定场景空间、材质和环境',
     prop: '锁定道具形态与状态',
     style: '参考整体视觉风格与色彩',

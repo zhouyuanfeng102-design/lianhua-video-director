@@ -68,7 +68,7 @@ export const videoReferenceUsage = (
 };
 
 const slotRoleNames: Record<ReferenceRole, string> = {
-  'first-frame': '首帧', 'middle-frame': '中间帧', 'last-frame': '尾帧', character: '人物', subject: '主体', scene: '场景',
+  'first-frame': '首帧', 'middle-frame': '中间帧', 'last-frame': '尾帧', character: '人物', subject: '主体', 'private-part': '私密部位', scene: '场景',
   prop: '道具', style: '风格', motion: '动作', composition: '构图', camera: '摄影', audio: '音频',
   dialogue: '对白', 'clay-render': 'Clay Render', creative: '创意', general: '通用参考', unknown: '未指定参考',
 };

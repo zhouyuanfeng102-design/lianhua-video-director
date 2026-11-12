@@ -195,10 +195,55 @@ export const canUseNsfwPrivateProfileAssetForStoryboardShot = (
   nsfwPrivateAssetContextForStoryboardShot(storyboard, shot, characters),
 );
 
+const privatePartEnglish: Readonly<Record<NsfwPrivatePart, string>> = {
+  'full-body': 'private full body',
+  breasts: 'chest',
+  vulva: 'vulva',
+  anus: 'anus',
+  penis: 'penis',
+  scrotum: 'scrotum',
+};
+
+export const privateReferencePronoun = (gender: string | undefined): '她' | '他' | '这个人' => {
+  const value = gender || '';
+  if (/女|female|woman/iu.test(value)) return '她';
+  if (/男|male|\bman\b/iu.test(value)) return '他';
+  return '这个人';
+};
+
+/** Picture duty for one selected private image. The shot action stays the model's text. */
+export const privatePartReferenceDuty = (
+  asset: Pick<ReferenceAsset, 'nsfwPrivatePart' | 'imageVariant'>,
+  ownerName?: string,
+  gender?: string,
+): readonly [string, string] => {
+  const named = Boolean(ownerName?.trim()) && ownerName?.trim() !== '本槽已选人物';
+  const name = named ? ownerName!.trim() : '本槽已选人物';
+  const enName = named ? ownerName!.trim() : 'the person selected for this slot';
+  const several = named && name.includes('、');
+  const pronoun = named && !several ? privateReferencePronoun(gender) : '这个人';
+  const person = !named ? '这个人仍用人物参考'
+    : several ? `${name}仍用各自的人物参考`
+    : `${name}这个人仍用${pronoun}的人物参考`;
+  const enPerson = !named ? 'That person remains the person in the character reference'
+    : several ? `${enName} remain the people in their character references`
+    : `${enName} remains the person in the character reference`;
+  const sheet = asset.imageVariant === 'private-four-in-one';
+  const part = nsfwPrivatePartForAsset(asset);
+  const label = part ? privatePartLabels[part] : '私密部位';
+  const enLabel = part ? privatePartEnglish[part] : 'private part';
+  if (sheet) {
+    return [
+      `是${name}的私密资料板。只取正文已经写到的那一格的形状、颜色和纹理。分格版式留在资料里。${person}。正文已经呈现对应部位时，形状、颜色和纹理沿用那一格；这一镜的衣着和遮挡仍按该镜原文。这张图留在部位参考，不占开场画面`,
+      `is ${enName}'s private reference sheet. Use only the panel for the part this shot already writes, and keep its shape, color and texture. The grid stays in the sheet. ${enPerson}. When the written shot shows that part, its shape, color and texture remain those in that panel, and the clothes in that shot remain as written. This picture stays a part reference and remains out of the opening frame`,
+    ];
+  }
+  return [
+    `是${name}的${label}，提供这一部位的形状、颜色和纹理。${person}。正文已经呈现这个部位时，形状、颜色和纹理沿用这张图；这一镜的衣着和遮挡仍按该镜原文。这张图留在部位参考，不占开场画面`,
+    `is ${enName}'s ${enLabel} and supplies that part's shape, color and texture. ${enPerson}. When the written shot shows this part, its shape, color and texture remain those in this picture, and the clothes in that shot remain as written. This picture stays a part reference and remains out of the opening frame`,
+  ];
+};
+
 export const nsfwPrivateReferenceResponsibility = (
   asset: Pick<ReferenceAsset, 'nsfwPrivatePart' | 'imageVariant'>,
-): string => {
-  const part = nsfwPrivatePartForAsset(asset);
-  const label = part ? privatePartLabels[part] : '私密身体';
-  return `${label}稳定外貌参考；适用条件：当前镜头处于 NSFW 状态、该人物实际出镜、该部位明确呈现；当前衣物与裸露状态优先承接，穿衣镜头保持当前衣物`;
-};
+): string => privatePartReferenceDuty(asset)[0];

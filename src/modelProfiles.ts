@@ -11,6 +11,7 @@ export type ReferenceMediaType = 'image' | 'video' | 'audio' | 'clay-render';
 
 export type ReferenceRole =
   | 'character'
+  | 'private-part'
   | 'scene'
   | 'prop'
   | 'style'
@@ -96,7 +97,7 @@ export type TargetProfile = ModelProfile;
 export type TargetCapabilities = ModelCapabilities;
 
 const allRoles: readonly ReferenceRole[] = [
-  'character', 'scene', 'prop', 'style', 'motion', 'composition', 'camera',
+  'character', 'private-part', 'scene', 'prop', 'style', 'motion', 'composition', 'camera',
   'audio', 'dialogue', 'first-frame', 'middle-frame', 'last-frame', 'clay-render', 'creative', 'general'
 ];
 

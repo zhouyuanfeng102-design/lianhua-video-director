@@ -15,6 +15,26 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "4.5.5",
+    releasedAt: "2026-11-11",
+    title: "第二件事用剩下的那只手",
+    highlights: [
+      "一个人只有两条手臂。第二件事用剩下的那一只手。",
+      "前臂从肩连到这只掌。近景里手仍沿手臂回到肩。",
+      "已保存的成片要重新生成提示词才会改。",
+    ],
+  },
+  {
+    version: "4.5.4",
+    releasedAt: "2026-11-11",
+    title: "本段用途增加私密部位",
+    highlights: [
+      "选图时可以把私密资料图的本段用途设为私密部位。",
+      "这张图只提供已绑定人物该部位的形状、颜色和纹理。",
+      "人物参考仍管脸和衣服。已保存的成片要更新本次参考才会改。",
+    ],
+  },
+  {
     version: "4.5.3",
     releasedAt: "2026-11-11",
     title: "第一句先写人和身后",

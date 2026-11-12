@@ -194,8 +194,8 @@ assert.equal(canUseNsfwPrivateProfileAssetForStoryboardShot(
 ), true, 'age metadata is not part of private-reference routing');
 
 const responsibility = nsfwPrivateReferenceResponsibility(privateFullBody);
-assert.match(responsibility, /人物实际出镜.*部位明确呈现/u);
-assert.match(responsibility, /当前衣物与裸露状态优先/u);
+assert.match(responsibility, /正文已经呈现这个部位/u);
+assert.match(responsibility, /衣着和遮挡仍按该镜原文/u);
 assert.doesNotMatch(responsibility, /(?:成人|18\+|年龄|不得|禁止|不要)/u);
 
 const scopeCharacter = {

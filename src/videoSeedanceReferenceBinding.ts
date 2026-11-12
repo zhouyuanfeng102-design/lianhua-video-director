@@ -77,12 +77,12 @@ const roleResponsibility = (role: ReferenceRole, language: 'zh' | 'en', middleFr
     ? `Intermediate frame ${middleFrameOrdinal || 1}: action progression and continuity reference`
     : `中间帧 ${middleFrameOrdinal || 1}：过程画面与连续性参考`;
   const chinese: Partial<Record<ReferenceRole, string>> = {
-    character: '人物身份与外观参考', subject: '主体身份与外观参考', scene: '场景空间与环境参考',
+    character: '人物身份与外观参考', subject: '主体身份与外观参考', 'private-part': '已绑定人物这一部位的形状、颜色和纹理', scene: '场景空间与环境参考',
     'first-frame': '开场画面与连续性参考', 'last-frame': '结束画面与连续性参考', prop: '道具外观参考',
     style: '视觉风格参考', composition: '构图参考', camera: '摄影参考', motion: '已有动作的视觉参考',
   };
   const english: Partial<Record<ReferenceRole, string>> = {
-    character: 'Character identity and appearance reference', subject: 'Subject identity and appearance reference', scene: 'Scene layout and environment reference',
+    character: 'Character identity and appearance reference', subject: 'Subject identity and appearance reference', 'private-part': 'Shape, color and texture of this bound person\'s recorded part', scene: 'Scene layout and environment reference',
     'first-frame': 'Opening frame and continuity reference', 'last-frame': 'Ending frame and continuity reference', prop: 'Prop appearance reference',
     style: 'Visual style reference', composition: 'Composition reference', camera: 'Cinematography reference', motion: 'Visual reference for the existing action',
   };

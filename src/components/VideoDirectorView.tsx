@@ -192,7 +192,7 @@ function VideoH3MediaModeNotice({ draft, onRefresh, onUpdated, onBusy, disabled 
 }
 
 const imageRoles: Array<[ReferenceRole, string]> = [
-  ['general', '通用参考'], ['character', '人物参考'], ['subject', '主体参考'], ['scene', '场景参考'],
+  ['general', '通用参考'], ['character', '人物参考'], ['private-part', '私密部位'], ['subject', '主体参考'], ['scene', '场景参考'],
   ['composition', '构图参考'], ['first-frame', '首帧'], ['middle-frame', '中间帧'], ['last-frame', '尾帧'], ['style', '风格参考'],
   ['prop', '道具参考'], ['camera', '摄影参考'], ['motion', '动作参考'], ['clay-render', 'Clay Render'], ['creative', '创意参考'],
 ];
@@ -488,6 +488,7 @@ function VideoReferenceSlotUsageEditor({
           {asset ? <button type="button" className="vd-reference-thumb" onClick={() => onPreview(asset)} aria-label={`预览 ${asset.name}`}><img src={assetPreviewUrl(asset)} alt={asset.name} /></button> : <span className="vd-reference-thumb vd-slot-placeholder">未选图</span>}
           <div className="vd-reference-info"><strong>{reference ? <ReferenceImageName name={asset?.name || reference.assetId} /> : `图片槽 ${physicalSlot + 1}（未选择）`}</strong>{reference && <small className="vd-image-slot-badge">{labels[index]}</small>}
             <label className="field"><span>本段用途</span><select aria-label={`${segmentLabel || '本段'}图片槽 ${physicalSlot + 1} 用途`} value={role} onChange={(event) => onRoleChange(physicalSlot, event.target.value as ReferenceRole)}>{imageRoles.map(([value, label]) => <option key={value} value={value}>{value === 'middle-frame' ? `${label} ${videoMiddleFrameOrdinal(selection.references, relativeSlot, selection.referenceSlotRoles)}` : label}</option>)}</select></label>
+            {role === 'private-part' && <small className="field-hint">这张图只提供该人物这一部位的形状、颜色和纹理。脸、头发和衣服仍用人物参考。这张图不占开场画面。</small>}
             {characterBindingWarning && <small className="vd-reference-usage-warning">{characterBindingWarning}</small>}
             {reference && asset && project && onCharacterChange && <details className="vd-details"><summary>对应人物／形态：{characterOwners.map((character) => character.name).join('、') || '未绑定（不阻止生成）'}</summary><p className="field-hint">只影响本段图片身份引用；合照可选多人，同一人物可对应多张图。不改台词、不调用 AI。</p>{project.characters.map((character) => {
               return <label className="check-row" key={character.id}><input type="checkbox" checked={characterIds.includes(character.id)} onChange={(event) => onCharacterChange(reference.assetId, event.target.checked ? [...characterIds, character.id] : characterIds.filter((id) => id !== character.id))} />{character.name}</label>;

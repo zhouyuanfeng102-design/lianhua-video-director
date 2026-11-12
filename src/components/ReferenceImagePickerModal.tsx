@@ -59,6 +59,7 @@ const ASSET_ROLE_LABELS: Record<AssetRole, string> = {
 const REFERENCE_ROLE_LABELS: Record<ReferenceRole, string> = {
   subject: '主体身份',
   character: '角色身份',
+  'private-part': '私密部位',
   scene: '场景空间',
   prop: '道具状态',
   style: '视觉风格',

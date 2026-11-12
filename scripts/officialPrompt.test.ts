@@ -670,7 +670,7 @@ assert.equal(
   'the backwards-compatible overload without character evidence must fail closed for private references',
 );
 const mixedPrivatePrompt = compileOfficialH3Prompt(mixedPrivateBoard, mixedPrivateContext).output.prompt;
-assert.match(mixedPrivatePrompt, /当前衣物与裸露状态优先/u);
+assert.match(mixedPrivatePrompt, /衣着和遮挡仍按该镜原文/u);
 assert.doesNotMatch(mixedPrivatePrompt, /错误旧锚点/u);
 assert.doesNotMatch(mixedPrivatePrompt, /服装：深青长袍/u, 'private references must not defeat dynamic-clothing subject rules');
 
