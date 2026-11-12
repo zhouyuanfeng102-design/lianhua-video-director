@@ -15,6 +15,25 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "4.5.8",
+    releasedAt: "2026-11-12",
+    title: "云端选项改成下拉",
+    highlights: [
+      "读取云端节点时，带选项的字段会记下每个选项。",
+      "其它参数和节点参数里，这些字段改成下拉选择。",
+      "已保存的工作流要点一次读取云端节点才会出现选项。",
+    ],
+  },
+  {
+    version: "4.5.7",
+    releasedAt: "2026-11-12",
+    title: "1000 RH币也是一颗按钮",
+    highlights: [
+      "「现在注册可领 1000 RH币」与左边的邀请注册使用同一套按钮。",
+      "1000 RH币仍加粗。点击后打开同一条邀请链接。",
+    ],
+  },
+  {
     version: "4.5.6",
     releasedAt: "2026-11-12",
     title: "注册可领 1000 RH币",

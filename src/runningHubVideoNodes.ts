@@ -38,6 +38,23 @@ export const normalizeRunningHubVideoFieldControl = (value: unknown): RunningHub
   return control;
 };
 
+/** RunningHub LIST entries submit `index` and show `description` or `name`. */
+const runningHubListChoices = (items: readonly unknown[]): { options: string[]; optionLabels?: Record<string, string> } | undefined => {
+  const options: string[] = [];
+  const optionLabels: Record<string, string> = {};
+  for (const item of items) {
+    if (!record(item) || (!('index' in item) && !('name' in item))) continue;
+    const value = scalar(item.index) ? String(item.index) : scalar(item.name) ? String(item.name) : '';
+    if (!value.trim() || options.includes(value)) continue;
+    options.push(value);
+    const description = typeof item.description === 'string' ? item.description.trim() : '';
+    const name = scalar(item.name) ? String(item.name).trim() : '';
+    const label = description && description !== '忽略' ? description : name;
+    if (label && label !== value) optionLabels[value] = label;
+  }
+  return options.length ? { options, ...(Object.keys(optionLabels).length ? { optionLabels } : {}) } : undefined;
+};
+
 /** RunningHub publishes fieldData as JSON text such as ["FLOAT", {min,max,step}]. */
 export const parseRunningHubVideoFieldData = (value: unknown): RunningHubVideoFieldControl | undefined => {
   let data = value;
@@ -47,6 +64,8 @@ export const parseRunningHubVideoFieldData = (value: unknown): RunningHubVideoFi
   if (!Array.isArray(data) || !data.length) return undefined;
   const details = record(data[1]) ? data[1] : {};
   const type = typeof data[0] === 'string' ? data[0].toUpperCase() : '';
+  const listed = runningHubListChoices(data);
+  if (listed) return normalizeRunningHubVideoFieldControl({ kind: 'select', ...listed });
   if (type === 'COMBO' || Array.isArray(data[0])) return normalizeRunningHubVideoFieldControl({ kind: 'select', options: Array.isArray(data[0]) ? data[0] : details.options });
   if (['FLOAT', 'NUMBER', 'INT', 'INTEGER'].includes(type)) {
     const bounds: Record<string, number> = {};

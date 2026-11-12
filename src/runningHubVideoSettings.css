@@ -1,12 +1,8 @@
 .runninghub-video-settings .vgs-card-title h3 { display: flex; align-items: center; gap: 7px; }
 .runninghub-video-settings .rhv-connection-title { flex-wrap: wrap; gap: 6px 12px; }
 .rhv-connection-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; min-width: 0; }
-.runninghub-video-settings .rhv-invite-note { color: #5c6b7e; font-size: calc(12px * var(--ui-font-scale, 1)); line-height: 1.35; text-decoration: none; }
-.runninghub-video-settings .rhv-invite-note strong { color: #c2185b; font-size: 1.2em; font-weight: 750; }
-.runninghub-video-settings .rhv-invite-note:hover { color: #3e4c5e; }
-.runninghub-video-settings .rhv-invite-note:hover strong { color: #a01448; }
-.runninghub-video-settings .rhv-invite-note:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; border-radius: 4px; }
 .runninghub-video-settings .rhv-invite-link { min-height: 28px; text-decoration: none; color: #b73f78; border-color: #efbed4; background: #fff4f8; white-space: nowrap; }
+.runninghub-video-settings .rhv-invite-link strong { font-weight: 750; }
 .runninghub-video-settings .rhv-invite-link:hover { color: #a22e65; border-color: #dc8caf; background: #ffebf3; }
 .runninghub-video-settings .rhv-invite-link:focus-visible { outline: 2px solid var(--pink); outline-offset: 2px; }
 .rhv-connection-title > .rhv-enable { margin-left: auto; }

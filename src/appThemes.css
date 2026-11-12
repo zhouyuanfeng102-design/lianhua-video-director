@@ -301,9 +301,7 @@
 :root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(.runninghub-video-settings .rhv-invite-link,
   .runninghub-video-settings .rhv-invite-link:hover,
   .vwb-source-selection .vwb-add-selected) { color: var(--accent); background: var(--accent-soft); border-color: var(--accent-line); }
-:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .runninghub-video-settings .rhv-invite-note,
-:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .runninghub-video-settings .rhv-invite-note:hover { color: var(--muted); background: transparent; }
-:root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) .runninghub-video-settings .rhv-invite-note strong { color: var(--accent); }
+
 
 /* Semantic hints retain their purpose in every color theme. */
 :root[data-color-mode]:where(:not([data-color-theme="classic"][data-color-mode="light"])) :is(.hint-box, .recommendation-strip, .sequence-analysis-row,

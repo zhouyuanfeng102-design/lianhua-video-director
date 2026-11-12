@@ -182,7 +182,11 @@ export function RunningHubGenerationExtras({ section, workflow, nodeEdits, onDef
           if (next !== customOption) onDefaultChange(binding, next);
         }}>
           {!options.includes(value) && <option value={value}>当前值：{value || '空'}</option>}
-          {options.map((option) => <option key={option} value={option}>{option}{control.optionLabels?.[option] ? `（${control.optionLabels[option]}）` : ''}</option>)}
+          {options.map((option) => {
+            const label = control.optionLabels?.[option];
+            const text = label && label !== option ? (/^\d+$/u.test(option) ? label : `${option}（${label}）`) : option;
+            return <option key={option} value={option}>{text}</option>;
+          })}
           <option value={customOption}>输入其他值…</option>
         </select> : <input aria-label={`${title} ${bindingText(binding)}`} type={numeric ? 'number' : 'text'} inputMode={numeric ? 'decimal' : 'text'} step={numeric ? control.step ?? 'any' : undefined}
           value={value} onChange={(event) => onDefaultChange(binding, event.target.value)} placeholder={forceNumber ? '填写实际强度值' : '填写云端实际文件名或值'} />}</label>

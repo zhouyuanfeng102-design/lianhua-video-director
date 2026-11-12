@@ -44,7 +44,7 @@ export function RunningHubVideoSettings({ config, getCurrentConfig, onChange }: 
               try { await openExternal(RUNNINGHUB_INVITATION_URL); }
               catch { setError('无法打开 RunningHub 邀请链接，请复制链接地址后在浏览器访问。'); }
             }}><ExternalLink size={14} aria-hidden="true" />邀请注册</a>
-          <a className="rhv-invite-note" href={RUNNINGHUB_INVITATION_URL} target="_blank" rel="noopener noreferrer"
+          <a className="btn small rhv-invite-link" href={RUNNINGHUB_INVITATION_URL} target="_blank" rel="noopener noreferrer"
             aria-label="用邀请链接注册，领取 1000 RH币"
             onClick={async (event) => {
               const openExternal = typeof window !== 'undefined' ? window.lianhuaDesktop?.openExternal : undefined;
@@ -52,7 +52,7 @@ export function RunningHubVideoSettings({ config, getCurrentConfig, onChange }: 
               event.preventDefault();
               try { await openExternal(RUNNINGHUB_INVITATION_URL); }
               catch { setError('无法打开 RunningHub 邀请链接，请复制链接地址后在浏览器访问。'); }
-            }}>现在注册可领 <strong>1000 RH币</strong>，免费生成图片和视频</a>
+            }}><ExternalLink size={14} aria-hidden="true" />现在注册可领 <strong>1000 RH币</strong>，免费生成图片和视频</a>
         </div>
         <label className="rhv-enable"><input type="checkbox" aria-label="启用 RunningHub 云端视频" checked={config.enabled} onChange={(event) => patch({ enabled: event.target.checked })} />启用云端视频</label>
       </div>

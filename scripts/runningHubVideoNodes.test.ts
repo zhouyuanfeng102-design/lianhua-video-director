@@ -151,6 +151,11 @@ check('cloud FLOAT/COMBO fieldData becomes display metadata without retaining ar
   assert.deepEqual(result.nodes[0].control, { kind: 'number', min: 0.2, max: 1, step: 0.01 });
   assert.equal(result.nodes[0].fieldValue, '0.5', 'schema default never replaces saved cloud request value');
   assert.deepEqual(result.nodes[1].control, { kind: 'select', options: ['1:1', '16:9'] });
+  assert.deepEqual(parseRunningHubVideoFieldData(JSON.stringify([
+    { name: '(付费, 破限) deepseek', index: '1', description: '(付费, 破限) deepseek' },
+    { name: '默认模型', index: '2', description: '默认模型' },
+    { default: '1', description: '忽略' },
+  ])), { kind: 'select', options: ['1', '2'], optionLabels: { '1': '(付费, 破限) deepseek', '2': '默认模型' } }, 'LIST entries keep the submitted index and show the cloud label');
   assert.equal(result.nodes[2].control, undefined);
   assert.doesNotMatch(JSON.stringify(result), /privateExtra|discard-me|fieldData/u);
   assert.deepEqual(parseRunningHubVideoFieldData(['INT', { min: '1', max: '20', step: '1' }]), { kind: 'number', min: 1, max: 20, step: 1 });
