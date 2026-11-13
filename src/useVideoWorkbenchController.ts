@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { AppState, Project, ReferenceAsset } from './types';
 import { applyOwnedProjectUpdate } from './appEffects';
 import { saveStateAsync } from './storage';
-import { buildWorkbenchRenderRequest, createWorkbenchClip, emptyVideoWorkbenchDraft, frameWorkbenchAsset, renderedWorkbenchAsset,
+import { buildWorkbenchRenderRequest, createWorkbenchClip, emptyVideoWorkbenchDraft, frameWorkbenchAsset, isCoverImageFile, renderedWorkbenchAsset,
   insertWorkbenchClip, replaceWorkbenchClipRange, sequenceWorkbenchAssets, workbenchId, workbenchSource, workbenchVideoAsset,
   type VideoWorkbenchClip, type VideoWorkbenchDraft, type VideoWorkbenchFrameOptions, type VideoWorkbenchJob } from './videoWorkbench';
 import type { VideoWorkbenchInsertPosition } from './videoWorkbench';
@@ -37,6 +37,8 @@ export interface VideoWorkbenchController {
   canRedoDraft: boolean;
   probeAsset: (assetId: string) => Promise<WorkbenchVideoProbe>;
   importFiles: (files: File[]) => Promise<void>;
+  importCoverImage: (file: File) => Promise<void>;
+  captureCoverFrame: (assetId: string, timeSec: number) => Promise<void>;
   addAssets: (assetIds: string[]) => Promise<void>;
   loadSequence: (planId: string) => Promise<void>;
   extractFrames: (assetId: string, options: VideoWorkbenchFrameOptions) => Promise<string[]>;
@@ -191,6 +193,24 @@ export class VideoWorkbenchEngine {
         this.patch(projectId, (project) => ({ ...project, assets: [...project.assets, asset] }));
         if (workbenchVideoAsset(asset)) await this.probeAsset(projectId, asset.id);
       }
+    });
+  }
+  async importCoverImage(projectId: string, file: File) {
+    const extension = file.name.match(/\.([a-z0-9]+)$/iu)?.[1]?.toLowerCase() || '';
+    if (!['png', 'jpg', 'jpeg', 'webp'].includes(extension)) throw new Error('封面只接受 PNG、JPEG 或 WebP。');
+    return this.setup(async (check) => {
+      if (!this.owner(projectId)) throw new Error('导入所属项目已不存在。');
+      const managed = await this.bridge().importMedia(file);
+      check();
+      if (!managed || managed.mediaType !== 'image' || !isCoverImageFile(managed.relativePath)) throw new Error('封面只接受 PNG、JPEG 或 WebP。');
+      const now = Date.now();
+      const asset: ReferenceAsset = {
+        ...managed, id: workbenchId('cover'), name: file.name.replace(/\.[^.]+$/u, '') || '成片封面',
+        type: 'reference', role: 'composition', mediaType: 'image', referenceRole: 'composition',
+        source: 'upload', tags: ['成片封面'], createdAt: now, updatedAt: now,
+      };
+      this.patch(projectId, (project) => ({ ...project, assets: [...project.assets, asset] }));
+      this.updateDraft(projectId, (draft) => ({ ...draft, cover: { assetId: asset.id, checksum: asset.checksum, origin: 'upload' } }));
     });
   }
   async addAssets(projectId: string, ids: string[]) {
@@ -370,13 +390,26 @@ export class VideoWorkbenchEngine {
       return result.frames.map((frame) => frameWorkbenchAsset(frame, asset!, run.job));
     });
   }
+  async captureCoverFrame(projectId: string, assetId: string, timeSec: number): Promise<void> {
+    if (!Number.isFinite(timeSec) || timeSec < 0) throw new Error('当前画面时间无效。');
+    const ids = await this.extractFrames(projectId, assetId, { mode: 'time', timeSec, fileName: '成片封面' });
+    const frameAsset = this.owner(projectId)?.assets.find((item) => item.id === ids[0]);
+    if (!frameAsset) throw new Error('封面画面没有写入资产库。');
+    this.updateDraft(projectId, (draft) => ({
+      ...draft,
+      cover: {
+        assetId: frameAsset.id, checksum: frameAsset.checksum, origin: 'frame', sourceVideoAssetId: assetId,
+        sourceTimeSec: frameAsset.sourceTimeSec, sourceFrameIndex: frameAsset.sourceFrameIndex,
+      },
+    }));
+  }
   async extractBoundaries(projectId: string, draft = this.draft(projectId)): Promise<string[]> {
     const owner = this.owner(projectId); if (!owner) throw new Error('项目已不存在。');
     const frozenDraft = structuredClone(draft);
     // Boundary extraction depends only on source/ranges. BGM, output size and
     // transitions belong to rendering and must not block independent frames.
     const extractionDefaults = emptyVideoWorkbenchDraft(projectId);
-    buildWorkbenchRenderRequest(owner, { ...frozenDraft, output: extractionDefaults.output,
+    buildWorkbenchRenderRequest(owner, { ...frozenDraft, cover: undefined, output: extractionDefaults.output,
       audio: { ...extractionDefaults.audio, fadeInSec: 0, fadeOutSec: 0 },
       clips: frozenDraft.clips.map((clip) => ({ ...clip, volume: 1, transitionAfter: { type: 'cut', durationSec: 0 } })) }, 'preflight');
     const sources = frozenDraft.clips.map((clip) => structuredClone(owner.assets.find((asset) => asset.id === clip.sourceAssetId)!));
@@ -403,6 +436,10 @@ export class VideoWorkbenchEngine {
     const owner = this.owner(projectId); if (!owner) throw new Error('项目已不存在。');
     const frozenDraft = structuredClone(draft);
     if (frozenDraft.audio.bgmAssetId && !frozenDraft.audio.bgmChecksum) frozenDraft.audio.bgmChecksum = owner.assets.find((asset) => asset.id === frozenDraft.audio.bgmAssetId)?.checksum;
+    if (frozenDraft.cover?.assetId && !frozenDraft.cover.checksum) {
+      const coverAsset = owner.assets.find((asset) => asset.id === frozenDraft.cover?.assetId);
+      if (coverAsset?.checksum) frozenDraft.cover = { ...frozenDraft.cover, checksum: coverAsset.checksum };
+    }
     const request = buildWorkbenchRenderRequest(owner, frozenDraft, 'preflight');
     const ids = await this.run(projectId, { kind: 'render', name: draft.name, draft: frozenDraft }, async (run) => {
       const result = await this.bridge().renderWorkbenchTimeline({ ...request, jobId: run.requestId }); this.assertActive(run);
@@ -450,6 +487,7 @@ export function useVideoWorkbenchController({ state, getCurrentState, setState, 
     status: engine.current?.status, busy: engine.current?.busy || false, error: engine.current?.error || '', progress: engine.current?.progress,
     probes: engine.current?.probesFor(projectId) || {}, refreshStatus: () => get().refreshStatus(),
     updateDraft: (update) => get().updateDraft(projectId, update), probeAsset: (id) => get().probeAsset(projectId, id), importFiles: (files) => get().importFiles(projectId, files),
+    importCoverImage: (file) => get().importCoverImage(projectId, file), captureCoverFrame: (id, timeSec) => get().captureCoverFrame(projectId, id, timeSec),
     insertAssetAt: (id, index) => get().insertAssetAt(projectId, id, index), replaceClip: (clipId, id) => get().replaceClip(projectId, clipId, id),
     replaceClipRange: (clipId, range, id) => get().replaceClipRange(projectId, clipId, range, id),
     undoDraft: () => { get().undoDraft(projectId); }, redoDraft: () => { get().redoDraft(projectId); },

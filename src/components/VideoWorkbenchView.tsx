@@ -2,14 +2,15 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ChangeEvent
 import { ArrowDown, ArrowUp, CheckCircle2, ChevronLeft, ChevronRight, Film, FolderOpen, GripVertical, Image as ImageIcon, Layers, Link2, Music2, Pause, Play, Plus, Redo2, RefreshCw, Scissors, Trash2, Undo2, Upload, X } from 'lucide-react';
 import { assetPreviewUrl } from '../media';
 import { chapterIdForAsset } from '../chapters';
+import { ReferenceImagePickerModal } from './ReferenceImagePickerModal';
 import type { Project, ReferenceAsset } from '../types';
 import type { VideoDirectorLaunchRequest } from '../videoDirectorDraft';
 import type { VideoWorkbenchController } from '../useVideoWorkbenchController';
 import type { WorkbenchFrameMode } from '../videoWorkbenchTypes';
 import { useWorkbenchNamePages } from '../useWorkbenchNamePages';
 import {
-  appendWorkbenchVideoSelection, deleteWorkbenchClipRange, normalizeWorkbenchVideoSelection, orderedWorkbenchSelection, selectableWorkbenchVideo,
-  selectWorkbenchVideoResults, workbenchAudioAsset as isAudio, workbenchVideoAsset as isVideo, workbenchId,
+  appendWorkbenchVideoSelection, deleteWorkbenchClipRange, isCoverImageFile, normalizeWorkbenchVideoSelection, orderedWorkbenchSelection, selectableWorkbenchVideo,
+  selectWorkbenchVideoResults, workbenchAudioAsset as isAudio, workbenchImageAsset, workbenchVideoAsset as isVideo, workbenchId,
   type WorkbenchVideoSelection,
 } from '../videoWorkbench';
 import type { VideoWorkbenchInsertPosition } from '../videoWorkbench';
@@ -110,13 +111,17 @@ function messagePages(text: string) {
 }
 
 /** Always visible beneath the timeline: compact real controls, not a scaled screenshot or another tab. */
-function WorkbenchOutputSettings({ draft, controller, busy, audioAssets, onOpenAssets, onHelp }: {
+function WorkbenchOutputSettings({ draft, controller, busy, audioAssets, imageAssets = [], onOpenAssets, onOpenCover, onHelp }: {
   draft: VideoWorkbenchController['draft']; controller: VideoWorkbenchController; busy: boolean;
   audioAssets: ReferenceAsset[];
-  onOpenAssets: VideoWorkbenchViewProps['onOpenAssets']; onHelp: () => void;
+  imageAssets?: ReferenceAsset[];
+  onOpenAssets: VideoWorkbenchViewProps['onOpenAssets']; onOpenCover?: () => void; onHelp: () => void;
 }) {
+  const coverAsset = imageAssets.find((asset) => asset.id === draft.cover?.assetId);
+  const coverExtension = coverAsset?.relativePath?.match(/\.([a-z0-9]+)$/iu)?.[1]?.toLowerCase() || '';
+  const coverBroken = Boolean(draft.cover) && (!coverAsset || coverAsset.missing || !coverAsset.relativePath || !['png', 'jpg', 'jpeg', 'webp'].includes(coverExtension) || Boolean(draft.cover?.checksum && coverAsset.checksum !== draft.cover.checksum));
   return <section className="vwb-inline-output" aria-label="输出与声音">
-    <div className="vwb-panel-heading"><h3><Music2 size={13} />输出与声音</h3><div className="vwb-actions"><button type="button" className="vwb-help-button" onClick={() => onOpenAssets('audio')}>音频资产库</button><button type="button" className="vwb-help-button" onClick={onHelp}>输出说明</button></div></div>
+    <div className="vwb-panel-heading"><h3><Music2 size={13} />输出与声音</h3><div className="vwb-actions"><button type="button" className={'vwb-help-button vwb-cover-button' + (coverBroken ? ' missing' : '')} disabled={busy} aria-label={draft.cover ? '封面已设置，点击更换' : undefined} onClick={onOpenCover}>{coverAsset && !coverAsset.missing ? <img className="vwb-cover-thumb" src={assetPreviewUrl(coverAsset)} alt="" /> : null}封面</button><button type="button" className="vwb-help-button" onClick={() => onOpenAssets('audio')}>音频资产库</button><button type="button" className="vwb-help-button" onClick={onHelp}>输出说明</button></div></div>
     <div className="vwb-output-columns">
       <section className="vwb-setting-group" aria-label="画面输出设置">
         <label className="vwb-label">输出文件名<input value={draft.output.fileName} disabled={busy} placeholder="剪辑成片.mp4" onChange={(event) => controller.updateDraft((current) => ({ ...current, output: { ...current.output, fileName: event.target.value } }))} /></label>
@@ -141,6 +146,8 @@ export function VideoWorkbenchView({ project, controller, onOpenVideoDirector, o
   const [videoSelection, setVideoSelection] = useState<WorkbenchVideoSelection>(() => ({ projectId: project.id, assetIds: [] }));
   const videos = useMemo(() => project.assets.filter(isVideo).sort((a, b) => b.createdAt - a.createdAt), [project.assets]);
   const audioAssets = useMemo(() => project.assets.filter(isAudio), [project.assets]);
+  const coverImageAssets = useMemo(() => project.assets.filter(workbenchImageAsset), [project.assets]);
+  const coverLibraryImages = useMemo(() => coverImageAssets.filter((asset) => !asset.missing && isCoverImageFile(asset.relativePath)), [coverImageAssets]);
   const [sourceId, setSourceId] = useState('');
   const [selectedClipId, setSelectedClipId] = useState('');
   const [search, setSearch] = useState('');
@@ -169,7 +176,10 @@ export function VideoWorkbenchView({ project, controller, onOpenVideoDirector, o
   const [activeTab, setActiveTab] = useState<WorkbenchTab>('edit');
   const [messageDialog, setMessageDialog] = useState<{ title: string; text: string }>();
   const [messagePage, setMessagePage] = useState(0);
+  const [coverOpen, setCoverOpen] = useState(false);
+  const [coverPicker, setCoverPicker] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  const coverFileInput = useRef<HTMLInputElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const advancing = useRef(false);
   const dialogCloseRef = useRef<HTMLButtonElement>(null);
@@ -262,11 +272,14 @@ export function VideoWorkbenchView({ project, controller, onOpenVideoDirector, o
     }
   }, [previewClip?.id, timelinePreview]);
   useEffect(() => {
-    if (!framePreview && !messageDialog) return;
+    if (!framePreview && !messageDialog && !coverOpen) return;
     const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     dialogCloseRef.current?.focus();
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { setFramePreview(undefined); setMessageDialog(undefined); }
+      if (event.key === 'Escape') {
+        if (coverPicker) return;
+        setFramePreview(undefined); setMessageDialog(undefined); setCoverOpen(false);
+      }
       if (event.key === 'Tab') {
         const controls = [...(dialogRef.current?.querySelectorAll<HTMLElement>('button:not(:disabled), select:not(:disabled), [href], [tabindex="0"]') || [])];
         const first = controls[0]; const last = controls[controls.length - 1];
@@ -276,7 +289,7 @@ export function VideoWorkbenchView({ project, controller, onOpenVideoDirector, o
     };
     document.addEventListener('keydown', onKey);
     return () => { document.removeEventListener('keydown', onKey); previous?.focus(); };
-  }, [framePreview, messageDialog]);
+  }, [coverOpen, coverPicker, framePreview, messageDialog]);
 
   const showMessage = (title: string, text: string) => { setMessagePage(0); setMessageDialog({ title, text }); };
 
@@ -415,6 +428,10 @@ export function VideoWorkbenchView({ project, controller, onOpenVideoDirector, o
   const importFiles = (event: ChangeEvent<HTMLInputElement>) => {
     const files = [...(event.target.files || [])]; event.target.value = '';
     if (files.length) void runAction(() => controller.importFiles(files));
+  };
+  const importCoverFile = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0]; event.target.value = '';
+    if (file) void runAction(() => controller.importCoverImage(file));
   };
   const extract = () => {
     if (!source) return;
@@ -601,8 +618,8 @@ export function VideoWorkbenchView({ project, controller, onOpenVideoDirector, o
             {clipError && <button type="button" className="vwb-inline-error vwb-help-button" title={clipError} onClick={() => showMessage('片段需要修正', clipError)}>{clipError}</button>}
           </> : <div className="vwb-empty vwb-select-hint"><span>点击上方片段设置裁剪、音量和转场；输出与声音在下方直接调整。</span></div>}
         </section>
-        <WorkbenchOutputSettings draft={draft} controller={controller} busy={busy} audioAssets={audioAssets} onOpenAssets={onOpenAssets}
-          onHelp={() => showMessage('输出与声音说明', '导出新的 MP4 / H.264 / AAC 文件，原视频保持不变。音频统一为 48 kHz；画面等比缩放并按需加边，不拉伸。\nBGM 不足会循环播放；建议原声 100%、BGM 12%，启用“原声优先”可在对白等原声出现时自动压低背景音乐。画面和声音淡入淡出独立设置。')} />
+        <WorkbenchOutputSettings draft={draft} controller={controller} busy={busy} audioAssets={audioAssets} imageAssets={coverImageAssets} onOpenAssets={onOpenAssets} onOpenCover={() => setCoverOpen(true)}
+          onHelp={() => showMessage('输出与声音说明', '导出新的 MP4 / H.264 / AAC 文件，原视频保持不变。音频统一为 48 kHz；画面等比缩放并按需加边，不拉伸。\nBGM 不足会循环播放；建议原声 100%、BGM 12%，启用“原声优先”可在对白等原声出现时自动压低背景音乐。画面和声音淡入淡出独立设置。\n封面是成片第 1 帧，原片不变。')} />
       </section>}
 
       {activeTab === 'frames' && <section className="vwb-panel vwb-tab-pane vwb-frames-pane" id="vwb-pane-frames" role="tabpanel" aria-labelledby="vwb-tab-frames" tabIndex={0}>
@@ -684,6 +701,8 @@ export function VideoWorkbenchView({ project, controller, onOpenVideoDirector, o
     </footer>
 
     {framePreview && <div className="vwb-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setFramePreview(undefined); }}><div ref={dialogRef} className="vwb-modal vwb-frame-modal" role="dialog" aria-modal="true" aria-label={'抽帧预览 ' + framePreview.name}><div className="vwb-row"><strong title={framePreview.name}>{framePreview.name}</strong><button ref={dialogCloseRef} type="button" className="btn small" onClick={() => setFramePreview(undefined)}>关闭</button></div><img src={assetPreviewUrl(framePreview)} alt={framePreview.name} /><p className="vwb-help">来源时间 {formatTime(framePreview.sourceTimeSec)} · {framePreview.width || '?'} × {framePreview.height || '?'}</p></div></div>}
+    {coverOpen && !coverPicker && <div className="vwb-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setCoverOpen(false); }}><div ref={dialogRef} className="vwb-modal vwb-cover-modal" role="dialog" aria-modal="true" aria-label="成片封面（导出后的第 1 帧）"><div className="vwb-row"><strong>成片封面（导出后的第 1 帧）</strong><button ref={dialogCloseRef} type="button" className="btn small" onClick={() => setCoverOpen(false)}>关闭</button></div><p className="vwb-help">只影响这次导出的 MP4。按当前输出尺寸等比加边。画面淡入从第 2 帧开始，封面保持完整亮度。</p><div className="vwb-cover-preview" style={{ aspectRatio: draft.output.width + ' / ' + draft.output.height }}>{(() => { const coverAsset = coverImageAssets.find((asset) => asset.id === draft.cover?.assetId); const preview = coverAsset && !coverAsset.missing ? assetPreviewUrl(coverAsset) : ''; return preview ? <img src={preview} alt="封面预览" /> : <span>{draft.cover ? '封面图片缺失' : '未设置封面'}</span>; })()}</div><div className="vwb-cover-actions"><button type="button" className="btn small" disabled={busy} onClick={() => coverFileInput.current?.click()}><Upload size={12} />上传图片</button><button type="button" className="btn small" disabled={busy} onClick={() => setCoverPicker(true)}>从资产库选择</button><button type="button" className="btn small" disabled={busy || !available || !previewSource || previewSource.missing} onClick={() => { if (previewSource) void runAction(() => controller.captureCoverFrame(previewSource.id, currentTime)); }}>用当前画面</button><button type="button" className="btn small ghost" disabled={busy || !draft.cover} onClick={() => controller.updateDraft((current) => { const next = { ...current }; delete next.cover; return next; })}>清除封面</button></div><input ref={coverFileInput} className="vwb-cover-file" type="file" accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp" onChange={importCoverFile} /></div></div>}
+    {coverPicker && <ReferenceImagePickerModal open assets={coverLibraryImages} selectedAssetId={draft.cover?.assetId || ''} title="从资产库选择封面" hint="只列出当前项目里有本地文件的图片，包括抽帧图。" confirmLabel="用作封面" onClose={() => setCoverPicker(false)} onConfirm={(asset) => { controller.updateDraft((current) => ({ ...current, cover: { assetId: asset.id, checksum: asset.checksum, origin: 'library' } })); setCoverPicker(false); }} />}
     {messageDialog && <div className="vwb-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget) setMessageDialog(undefined); }}><div ref={dialogRef} className="vwb-modal vwb-message-modal" role="dialog" aria-modal="true" aria-label={messageDialog.title}><div className="vwb-row"><strong title={messageDialog.title}>{messageDialog.title}</strong><button ref={dialogCloseRef} type="button" className="btn small" onClick={() => setMessageDialog(undefined)}>关闭</button></div><div className="vwb-message-text">{detailPages[messagePage] || detailPages[0]}</div><Pagination label="消息详情" total={detailPages.length} page={Math.min(messagePage, detailPages.length - 1)} pageCount={detailPages.length} onPage={setMessagePage} /></div></div>}
   </div>;
 }

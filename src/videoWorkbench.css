@@ -57,6 +57,15 @@
 .vwb-check input { margin: 0; flex: 0 0 auto; width: 13px; height: 13px; }
 .vwb-help { margin: 0; min-width: 0; color: var(--faint); font-size: calc(10px * var(--ui-font-scale, 1)); line-height: 1.45; }
 .vwb-help-button { display: inline-block; min-width: 0; padding: 0; border: 0; background: none; color: #5f7796; font-size: calc(10px * var(--ui-font-scale, 1)) !important; line-height: 1.4; text-align: left; }
+.vwb-cover-button { display: inline-flex; align-items: center; gap: 4px; }
+.vwb-cover-button.missing { color: #a1263a; }
+.vwb-cover-thumb { width: 18px; height: 18px; object-fit: cover; border-radius: 2px; background: #111; }
+.vwb-cover-modal { width: min(560px, 94vw); height: auto; max-height: calc(100dvh - 40px); grid-template-rows: auto auto auto auto; }
+.vwb-cover-preview { width: min(100%, 420px); max-height: 240px; margin: 0 auto; background: #000; display: grid; place-items: center; overflow: hidden; }
+.vwb-cover-preview img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.vwb-cover-preview span { color: #d5d5d5; font-size: calc(11px * var(--ui-font-scale, 1)); }
+.vwb-cover-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.vwb-cover-file { display: none; }
 .vwb-empty { flex: 1 1 auto; display: grid; place-content: center; justify-items: center; gap: 7px; min-height: 0; min-width: 0; padding: 6px; color: var(--muted); text-align: center; font-size: calc(11px * var(--ui-font-scale, 1)); line-height: 1.5; }
 .vwb-empty svg { color: #a3afbd; }
 .vwb-panel.vwb-sources { display: grid; grid-template-rows: auto auto auto minmax(0, 1fr) auto; gap: 3px; padding: 5px; }

@@ -18869,9 +18869,11 @@ function ImageWorkbenchView(ctx: AppContext) {
     if (assetKind === "grid") return;
     const kindLabel = assetKind === "character" ? "角色" : assetKind === "location" ? "场景" : "物品";
     const keptName = (assetForm.name || "").trim();
+    const keptStyle = (assetForm.style || "").trim() || inheritedImageVisualStyle;
     const clearedForm: Record<string, string> = {
       ...createInheritedAssetForm(),
       name: keptName,
+      style: keptStyle,
       gender: "",
       morphology: "",
       bodyPlan: "",
@@ -18900,10 +18902,8 @@ function ImageWorkbenchView(ctx: AppContext) {
       material: "",
       effect: "",
       stateRules: "",
-      style: "",
     };
     setAssetForm(clearedForm);
-    setAssetFormStyleSource("manual");
     autofillTargetEpochRef.current += 1;
     if (autofillRequestBasisRef.current) autofillRequestBasisRef.current.invalidated = true;
     clearImageGenerationOutputs();
@@ -21261,7 +21261,7 @@ function ImageWorkbenchView(ctx: AppContext) {
                         icon={<Eraser size={14} />}
                         onClick={clearSelectedEntityProfile}
                         disabled={busy || autofillBusy}
-                        title="清空当前人物、场景或物品已填写的资料，保留名称"
+                        title="清空当前人物、场景或物品已填写的资料，保留名称和视觉风格"
                       >
                         清空
                       </Button>

@@ -4,6 +4,8 @@ import ts from 'typescript';
 import * as entities from '../src/chapterEntities';
 import * as effects from '../src/appEffects';
 import * as chapters from '../src/chapters';
+import * as storyReferences from '../src/storyReferences';
+import { matchingStoryVisualConversion } from '../src/storyVisualConversion';
 import { createInitialState } from '../src/storage';
 import { sourceContentHash } from '../src/sourceIntegrity';
 import { requestStoryAnalysis } from '../src/services/llm';
@@ -42,6 +44,23 @@ assert.ok(entities.matchChapterEntity({ ...form, existingEntityId: 'lin' }, cata
 const resolved = entities.resolveChapterAnalysisEntities({ characters: [{ name: '阿林', existingEntityId: 'lin' }], scenes: [{ content: '阿林进门。', characters: ['阿林'] }] }, shared);
 assert.equal(resolved.analysis.characters?.[0] && (resolved.analysis.characters[0] as { name: string }).name, '林舟');
 assert.equal((resolved.analysis.scenes[0].characters?.[0] as { name: string }).name, '林舟');
+const invented = entities.resolveChapterAnalysisEntities({
+  characters: [{ name: '比比东', existingEntityId: 'bibidong', baseCharacterId: 'qianxunji' }, { name: '千寻疾', existingEntityId: 'qianxunji' }],
+  scenes: [{ content: '比比东看见千寻疾。', characters: ['比比东', { name: '千寻疾', existingEntityId: 'qianxunji' }] }],
+}, { characters: [], locations: [], props: [] });
+assert.equal(invented.conflicts.length, 0, 'a scene-local id is not a missing project dossier');
+assert.equal((invented.analysis.characters?.[0] as { existingEntityId?: string }).existingEntityId, undefined);
+assert.equal((invented.analysis.characters?.[0] as { baseCharacterId?: string }).baseCharacterId, undefined);
+assert.equal((invented.analysis.scenes[0].characters?.[1] as { existingEntityId?: string }).existingEntityId, undefined);
+const linked = entities.resolveChapterAnalysisEntities({
+  characters: [{ name: '比比东', existingEntityId: 'bibidong' }],
+  scenes: [{ content: '比比东进门。', characters: [{ name: '比比东', existingEntityId: 'bibidong' }] }],
+}, { characters: [character('bibi', '比比东')], locations: [], props: [] });
+assert.equal(linked.conflicts.length, 0);
+assert.equal((linked.analysis.characters?.[0] as { existingEntityId?: string }).existingEntityId, 'bibi');
+assert.equal((linked.analysis.scenes[0].characters?.[0] as { existingEntityId?: string }).existingEntityId, 'bibi');
+const stillAmbiguous = entities.matchChapterEntity({ name: '林师兄', existingEntityId: 'made-up' }, [...catalog.characters, { id: 'other', name: '别的人', aliases: ['林师兄'] }], 'character');
+assert.deepEqual(stillAmbiguous.conflict?.candidateIds, ['lin', 'other']);
 
 const longSource = ('林舟走进院子。\r\n' + '山路。'.repeat(640) + '🌲\n').repeat(17);
 const chunks = entities.splitChapterAnalysisSource(longSource);
@@ -95,11 +114,12 @@ const fixture = () => {
   let release!: () => void;
   const gate = new Promise<void>((resolve) => { release = resolve; });
   const noop = () => {};
-  const dependencies = { ...effects, ...entities, ...chapters, sourceContentHash, busy: false, storyInput: content, storyName: '第一章',
+  const dependencies = { ...effects, ...entities, ...chapters, ...storyReferences, matchingStoryVisualConversion, sourceContentHash,
+    textApiForProject: (api: TextApiConfig) => api, busy: false, storyInput: content, storyName: '第一章',
     stateRef, workspaceEpochRef: { current: 1 }, storyAnalysisOperationRef: { current: 0 }, storyAnalysisAbortRef: { current: null },
     storyAnalysisIdentityRef: { current: '' }, storyAnalysisRequestIdentityRef: { current: '' }, storyExpansionAbortRef: { current: null },
     storyDraftRef, storyDraftOwnerRef: { current: state.project.id }, storyImportOperationRef: { current: 0 },
-    storyAnalysisChapterRef: { current: null }, backgroundTextOwnerRef: { current: null },
+    storyAnalysisChapterRef: { current: null }, backgroundTextOwnerRef: { current: null }, comicGenerationRef: { current: null },
     setBusy: noop, setView: noop, setActiveSceneId: noop, setSelectedDirectorSceneIds: noop,
     setStoryInputInternal: noop, setStoryNameInternal: noop, notify: (message: string) => notices.push(message),
     reportRuntimeError: (_kind: string, error: unknown) => { throw error; }, isAbortError: () => false,

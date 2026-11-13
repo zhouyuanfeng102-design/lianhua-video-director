@@ -26,7 +26,8 @@ final class NativeMedia {
   final Handler main=new Handler(Looper.getMainLooper());
   final Map<String,Transformer> renders=new ConcurrentHashMap<>();final Set<String> cancelled=ConcurrentHashMap.newKeySet();
   NativeMedia(Context c,NativeFiles f,NativeTransport.Events e){context=c;files=f;events=e;}
-  File source(JSONObject p)throws Exception {File f=files.managed(p.getString("relativePath"));String expected=p.optString("expectedChecksum");if(!expected.isEmpty()&&!NativeStore.shaFile(f).equals(expected))throw new IOException("源视频内容已变化，请重新选择");return f;}
+  File source(JSONObject p)throws Exception {return source(p,"源视频内容已变化，请重新选择");}
+  File source(JSONObject p,String checksumError)throws Exception {File f=files.managed(p.getString("relativePath"));String expected=p.optString("expectedChecksum");if(!expected.isEmpty()&&!NativeStore.shaFile(f).equals(expected))throw new IOException(checksumError);return f;}
   JSONObject probe(JSONObject p)throws Exception {
     MediaMetadataRetriever r=new MediaMetadataRetriever();try{File f=source(p);r.setDataSource(f.getAbsolutePath());return enrich(probe(r),f);}finally{r.release();}
   }
@@ -87,6 +88,8 @@ final class NativeMedia {
       List<Effect> video=new ArrayList<>();if(output!=null&&output.optInt("height")>0&&output.optInt("width")>0)video.add(Presentation.createForWidthAndHeight(output.getInt("width"),output.getInt("height"),Presentation.LAYOUT_SCALE_TO_FIT));
       EditedMediaItem.Builder edited=new EditedMediaItem.Builder(item).setRemoveAudio(gain==0).setEffects(new Effects(audio,video));if(output!=null&&output.optInt("fps")>0)edited.setFrameRate(output.getInt("fps"));items.add(edited.build());
     }
+    JSONObject cover=p.optJSONObject("cover");
+    if(cover!=null){File image=source(cover,"封面图片内容已改变，请重新选择");String lower=image.getName().toLowerCase(Locale.ROOT);if(!(lower.endsWith(".png")||lower.endsWith(".jpg")||lower.endsWith(".jpeg")||lower.endsWith(".webp")))throw new IOException("封面只支持 PNG、JPEG 或 WebP");String mime=lower.endsWith(".png")?MimeTypes.IMAGE_PNG:lower.endsWith(".webp")?MimeTypes.IMAGE_WEBP:MimeTypes.IMAGE_JPEG;int fps=output!=null&&output.optInt("fps")>0?output.getInt("fps"):30;long durationMs=Math.max(1L,(long)Math.ceil(1000.0/fps));MediaItem still=new MediaItem.Builder().setUri(Uri.fromFile(image)).setMimeType(mime).setImageDurationMs(durationMs).build();List<Effect> stillVideo=new ArrayList<>();if(output!=null&&output.optInt("width")>0&&output.optInt("height")>0)stillVideo.add(Presentation.createForWidthAndHeight(output.getInt("width"),output.getInt("height"),Presentation.LAYOUT_SCALE_TO_FIT));items.add(0,new EditedMediaItem.Builder(still).setFrameRate(fps).setEffects(new Effects(Collections.emptyList(),stillVideo)).build());}
     if(output!=null&&(output.optDouble("fadeInSec")>0||output.optDouble("fadeOutSec")>0))throw new IOException("安卓原生合成当前不支持视频淡入淡出，请在电脑版导出此特效");
     List<EditedMediaItemSequence> sequences=new ArrayList<>();sequences.add(EditedMediaItemSequence.withAudioAndVideoFrom(items));JSONObject audio=p.optJSONObject("audio");
     if(audio!=null&&audio.optJSONObject("bgm")!=null){File bgm=source(audio.getJSONObject("bgm"));

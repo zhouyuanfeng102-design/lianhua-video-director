@@ -10,12 +10,22 @@ export interface VideoWorkbenchClip {
   volume: number;
   transitionAfter: { type: 'cut' | 'crossfade'; durationSec: number };
 }
+export interface VideoWorkbenchCover {
+  assetId: string;
+  checksum?: string;
+  origin: 'upload' | 'library' | 'frame';
+  sourceVideoAssetId?: string;
+  sourceTimeSec?: number;
+  sourceFrameIndex?: number;
+}
 export interface VideoWorkbenchDraft {
   id: string;
   name: string;
   clips: VideoWorkbenchClip[];
   output: Required<NonNullable<WorkbenchRenderRequest['output']>>;
   audio: { bgmAssetId?: string; bgmChecksum?: string; bgmVolume: number; ducking: boolean; fadeInSec: number; fadeOutSec: number };
+  /** Still image written as frame 1 of the next export. Absent on old drafts. */
+  cover?: VideoWorkbenchCover;
   sequencePlanId?: string;
   createdAt: number;
   updatedAt: number;
@@ -48,6 +58,20 @@ export const emptyVideoWorkbenchDraft = (projectId = '', now = Date.now()): Vide
 const object = (value: unknown): value is Record<string, unknown> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 const number = (value: unknown, fallback: number): number => typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 const string = (value: unknown, fallback = ''): string => typeof value === 'string' ? value : fallback;
+const optionalNumber = (value: unknown): number | undefined => typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+const normalizeCover = (value: unknown): VideoWorkbenchCover | undefined => {
+  if (!object(value) || !['upload', 'library', 'frame'].includes(string(value.origin)) || !string(value.assetId)) return undefined;
+  const cover: VideoWorkbenchCover = { assetId: string(value.assetId), origin: value.origin as VideoWorkbenchCover['origin'] };
+  const checksum = string(value.checksum);
+  const sourceVideoAssetId = string(value.sourceVideoAssetId);
+  const sourceTimeSec = optionalNumber(value.sourceTimeSec);
+  const sourceFrameIndex = optionalNumber(value.sourceFrameIndex);
+  if (checksum) cover.checksum = checksum;
+  if (sourceVideoAssetId) cover.sourceVideoAssetId = sourceVideoAssetId;
+  if (sourceTimeSec !== undefined) cover.sourceTimeSec = sourceTimeSec;
+  if (sourceFrameIndex !== undefined) cover.sourceFrameIndex = sourceFrameIndex;
+  return cover;
+};
 
 /** New fields are optional for old projects. Never rewrite media or existing prompts. */
 export const normalizeVideoWorkbenchState = (value: unknown, projectId: string): VideoWorkbenchState | undefined => {
@@ -62,9 +86,11 @@ export const normalizeVideoWorkbenchState = (value: unknown, projectId: string):
       inSec: number(clip.inSec, 0), outSec: number(clip.outSec, 0), volume: number(clip.volume, 1),
       transitionAfter: { type: transition.type === 'crossfade' ? 'crossfade' : 'cut', durationSec: number(transition.durationSec, 0.3) } };
   });
+  const cover = normalizeCover(raw.cover);
   const draft: VideoWorkbenchDraft = { id: string(raw.id, fallback.id), name: string(raw.name, fallback.name), clips,
     output: { width: number(output.width, 1920), height: number(output.height, 1080), fps: number(output.fps, 30), fileName: string(output.fileName, '长剧情成片'), fadeInSec: number(output.fadeInSec, 0), fadeOutSec: number(output.fadeOutSec, 0) },
     audio: { bgmAssetId: string(audio.bgmAssetId) || undefined, bgmChecksum: string(audio.bgmChecksum) || undefined, bgmVolume: number(audio.bgmVolume, 0.12), ducking: audio.ducking !== false, fadeInSec: number(audio.fadeInSec, 0.12), fadeOutSec: number(audio.fadeOutSec, 0.12) },
+    ...(cover ? { cover } : {}),
     sequencePlanId: string(raw.sequencePlanId) || undefined, createdAt: number(raw.createdAt, 0), updatedAt: number(raw.updatedAt, 0) };
   const jobs = (Array.isArray(value.jobs) ? value.jobs : []).filter((job): job is Record<string, unknown> => object(job) && typeof job.id === 'string'
     && ['extract', 'render', 'boundaries'].includes(string(job.kind))).map((job) => ({
@@ -83,6 +109,12 @@ export const normalizeVideoWorkbenchState = (value: unknown, projectId: string):
 };
 export const workbenchVideoAsset = (asset: ReferenceAsset): boolean => asset.mediaType === 'video' || asset.type === 'video' || Boolean(asset.mimeType?.startsWith('video/'));
 export const workbenchAudioAsset = (asset: ReferenceAsset): boolean => asset.mediaType === 'audio' || asset.type === 'audio' || Boolean(asset.mimeType?.startsWith('audio/'));
+export const workbenchImageAsset = (asset: ReferenceAsset): boolean => (
+  asset.type !== 'video' && asset.type !== 'audio'
+  && asset.mediaType !== 'video' && asset.mediaType !== 'audio'
+  && !asset.mimeType?.startsWith('video/') && !asset.mimeType?.startsWith('audio/')
+);
+export const isCoverImageFile = (relativePath: string | undefined): boolean => ['png', 'jpg', 'jpeg', 'webp'].includes(relativePath?.match(/\.([a-z0-9]+)$/iu)?.[1]?.toLowerCase() || '');
 /** Selection is metadata-only. Actual file/checksum/codec validation still runs before append. */
 export const selectableWorkbenchVideo = (asset: ReferenceAsset): boolean => workbenchVideoAsset(asset) && !asset.missing && Boolean(asset.relativePath?.trim());
 export interface WorkbenchVideoSelection { projectId: string; assetIds: string[] }
@@ -360,9 +392,19 @@ export const buildWorkbenchRenderRequest = (project: Project, draft: VideoWorkbe
   const bgm = draft.audio.bgmAssetId ? project.assets.find((asset) => asset.id === draft.audio.bgmAssetId) : undefined;
   if (draft.audio.bgmAssetId && (!bgm || !workbenchAudioAsset(bgm))) throw new Error('背景音乐素材缺失或不是音频。');
   if (draft.audio.bgmChecksum && bgm?.checksum !== draft.audio.bgmChecksum) throw new Error('原背景音乐内容已改变，请重新选择后生成新任务。');
+  let cover: WorkbenchMediaSource | undefined;
+  if (draft.cover) {
+    const image = project.assets.find((asset) => asset.id === draft.cover?.assetId);
+    if (!image || image.missing) throw new Error('封面图片缺失，请重新选择。');
+    if (!workbenchImageAsset(image)) throw new Error('封面素材不是图片，请重新选择。');
+    if (!isCoverImageFile(image.relativePath)) throw new Error('封面只支持 PNG、JPEG 或 WebP。');
+    if (draft.cover.checksum && image.checksum !== draft.cover.checksum) throw new Error('封面图片内容已改变，请重新选择。');
+    cover = workbenchSource(image);
+  }
   return { jobId, projectId: project.id, clips, output: { ...draft.output, fileName: draft.output.fileName.trim() || draft.name || '剪辑成片' },
     audio: { bgm: bgm ? workbenchSource(bgm) : undefined, bgmVolume: draft.audio.bgmVolume, ducking: draft.audio.ducking,
-      fadeInSec: draft.audio.fadeInSec, fadeOutSec: draft.audio.fadeOutSec } };
+      fadeInSec: draft.audio.fadeInSec, fadeOutSec: draft.audio.fadeOutSec },
+    ...(cover ? { cover } : {}) };
 };
 
 /** Select one take for each segment. Never silently borrow a different segment or project. */

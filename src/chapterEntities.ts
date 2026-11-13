@@ -101,9 +101,9 @@ export const matchChapterEntity = (
   const explicitId = text(incoming.existingEntityId);
   if (explicitId) {
     const match = entries.find((entry) => entry.id === explicitId);
+    // A string that is not in this catalog is a scene-local label, not a project link.
     if (match && !(kind === 'character' && incoming.formLabel && incoming.formLabel !== match.formLabel)) return { match };
     if (match) return { conflict: { kind, name, candidateIds: [match.id], reason: '本章形态与已有资料不同，请指定独立形态资料，或为新形态命名。' } };
-    return { conflict: { kind, name, candidateIds: [], reason: 'AI 引用了项目中不存在的资料 ID，请重新指定资料。' } };
   }
   const names = new Set([name, ...strings(incoming.aliases)]);
   // A form label identifies a different drawable state; a base-name alias must
@@ -126,17 +126,27 @@ export const resolveChapterAnalysisEntities = (
   const catalog = buildChapterEntityCatalog(projectOrCatalog);
   const conflicts: ChapterEntityConflict[] = [];
   const maps = new Map<ChapterEntityKind, Map<string, Record<string, unknown>>>();
+  const knownId = (id: unknown, entries: readonly ChapterEntityCatalogEntry[]): boolean => {
+    const value = text(id);
+    return Boolean(value && entries.some((entry) => entry.id === value));
+  };
+  const dropUnknownIdentity = (record: Record<string, unknown>, kind: ChapterEntityKind): Record<string, unknown> => {
+    const next = { ...record };
+    if (!knownId(next.existingEntityId, catalog[catalogKey(kind)])) delete next.existingEntityId;
+    if (!knownId(next.baseCharacterId, catalog.characters)) delete next.baseCharacterId;
+    return next;
+  };
   const normalize = (value: unknown, kind: ChapterEntityKind): Record<string, unknown> => {
     const raw: Record<string, unknown> = typeof value === 'string' ? { name: value } : { ...(value as Record<string, unknown>) };
     const originalName = canonicalName(raw, kind);
     const result = matchChapterEntity(raw, catalog[catalogKey(kind)], kind);
     if (result.conflict && !conflicts.some((item) => item.kind === kind && item.name === result.conflict!.name)) conflicts.push(result.conflict);
-    if (!result.match) return { ...raw, name: originalName };
-    return {
+    if (!result.match) return dropUnknownIdentity({ ...raw, name: originalName }, kind);
+    return dropUnknownIdentity({
       ...raw, name: result.match.name, existingEntityId: result.match.id,
       aliases: strings([...strings(raw.aliases), ...result.match.aliases, originalName !== result.match.name ? originalName : '']),
       ...(result.match.baseCharacterId ? { baseCharacterId: result.match.baseCharacterId } : {}),
-    };
+    }, kind);
   };
   const normalizeTop = (kind: ChapterEntityKind): Record<string, unknown>[] => {
     const references = new Map<string, Record<string, unknown>>();
@@ -154,10 +164,15 @@ export const resolveChapterAnalysisEntities = (
   const props = normalizeTop('prop');
   const reference = (raw: unknown, kind: ChapterEntityKind) => {
     const known = maps.get(kind)?.get(canonicalName(raw, kind));
-    return known ? { ...(typeof raw === 'object' ? raw : {}), name: known.name,
-      ...(known.existingEntityId ? { existingEntityId: known.existingEntityId } : {}),
+    if (!known) return normalize(raw, kind);
+    const next: Record<string, unknown> = { ...(typeof raw === 'object' ? raw : {}), name: known.name,
       ...(known.formLabel ? { formLabel: known.formLabel, baseName: known.baseName } : {}),
-    } : normalize(raw, kind);
+    };
+    if (known.existingEntityId) next.existingEntityId = known.existingEntityId;
+    else delete next.existingEntityId;
+    if (known.baseCharacterId) next.baseCharacterId = known.baseCharacterId;
+    else delete next.baseCharacterId;
+    return next;
   };
   return { conflicts, analysis: {
     characters, locations, props,

@@ -99,6 +99,17 @@ test('workbench normalization supplies finite defaults without repairing prompts
   assert.equal(normalized.draft.clips[0].volume, 0);
   assert.equal(normalized.draft.audio.ducking, false);
   assert.equal(normalized.draft.audio.bgmVolume, 0);
+  assert.equal(normalized.draft.cover, undefined);
+});
+
+test('cover settings survive normalization and unknown cover values stay absent', () => {
+  const kept = normalizeVideoWorkbenchState({ draft: { cover: { assetId: 'img', checksum: 'abc', origin: 'library', sourceTimeSec: 1.25, sourceFrameIndex: 4, ignored: true } }, jobs: [{ id: 'job', kind: 'render', draft: { cover: { assetId: 'shot', origin: 'frame', sourceVideoAssetId: 'video' } } }] }, 'owner')!;
+  assert.deepEqual(kept.draft.cover, { assetId: 'img', checksum: 'abc', origin: 'library', sourceTimeSec: 1.25, sourceFrameIndex: 4 });
+  assert.deepEqual(kept.jobs[0].draft?.cover, { assetId: 'shot', origin: 'frame', sourceVideoAssetId: 'video' });
+  const dropped = normalizeVideoWorkbenchState({ draft: { cover: { assetId: 'img', origin: 'poster' } }, jobs: [] }, 'owner')!;
+  assert.equal(dropped.draft.cover, undefined);
+  const roundTrip = normalizeVideoWorkbenchState(JSON.parse(JSON.stringify(kept)), 'owner')!;
+  assert.deepEqual(roundTrip.draft.cover, kept.draft.cover);
 });
 
 test('persisted job display fields and nested retry snapshots are normalized before rendering', () => {
@@ -172,6 +183,44 @@ test('BGM is validated independently as a managed audio asset with bounded loudn
   assert.throws(() => buildWorkbenchRenderRequest(project, draft, 'j'), /背景音乐音量/u);
   draft.audio.bgmVolume = 0.12; draft.audio.bgmAssetId = 'p-source';
   assert.throws(() => buildWorkbenchRenderRequest(project, draft, 'j'), /不是音频/u);
+});
+
+test('cover is optional and must be a local png, jpeg or webp whose checksum still matches', () => {
+  const project = createProject('p'); const draft = editDraft(project);
+  const bare = buildWorkbenchRenderRequest(project, draft, 'j');
+  assert.equal(bare.cover, undefined);
+  const image = video('cover', { type: 'reference', mediaType: 'image', role: 'composition', referenceRole: 'composition', relativePath: 'image/cover.png', checksum: checksum('c') });
+  project.assets.push(image);
+  draft.cover = { assetId: 'cover', checksum: checksum('c'), origin: 'upload' };
+  assert.equal(buildWorkbenchRenderRequest(project, draft, 'j').cover?.relativePath, 'image/cover.png');
+  draft.cover = { assetId: 'cover', checksum: checksum('d'), origin: 'library' };
+  assert.throws(() => buildWorkbenchRenderRequest(project, draft, 'j'), /内容已改变/u);
+  draft.cover = { assetId: 'missing-cover', origin: 'library' };
+  assert.throws(() => buildWorkbenchRenderRequest(project, draft, 'j'), /缺失/u);
+  draft.cover = { assetId: project.assets[0].id, origin: 'library' };
+  assert.throws(() => buildWorkbenchRenderRequest(project, draft, 'j'), /不是图片/u);
+  project.assets.push(video('gif', { type: 'reference', mediaType: 'image', role: 'composition', referenceRole: 'composition', relativePath: 'image/cover.gif' }));
+  draft.cover = { assetId: 'gif', origin: 'library' };
+  assert.throws(() => buildWorkbenchRenderRequest(project, draft, 'j'), /PNG、JPEG 或 WebP/u);
+});
+
+test('cover upload and the current preview frame both write the draft without changing timeline clips', async () => {
+  const managed = { fileName: '海报.png', relativePath: 'image/cover.png', checksum: checksum('c'), sizeBytes: 12, mediaType: 'image' as const, mimeType: 'image/png', managed: true, missing: false, url: 'lianhua-asset://image/cover.png' };
+  const h = harness({ importMedia: async () => managed });
+  await h.engine.importCoverImage('project-a', { name: '海报.png' } as File);
+  const uploaded = h.owner().assets.find((asset) => asset.tags.includes('成片封面'));
+  assert.equal(uploaded?.mediaType, 'image');
+  assert.deepEqual(h.owner().videoWorkbench?.draft.cover, { assetId: uploaded?.id, checksum: checksum('c'), origin: 'upload' });
+  await assert.rejects(h.engine.importCoverImage('project-a', { name: '海报.gif' } as File), /PNG、JPEG 或 WebP/u);
+  await h.engine.captureCoverFrame('project-a', 'project-a-source', 1.25);
+  const cover = h.owner().videoWorkbench?.draft.cover;
+  assert.equal(cover?.origin, 'frame');
+  assert.equal(cover?.sourceVideoAssetId, 'project-a-source');
+  assert.equal(cover?.sourceTimeSec, 14.966666667);
+  assert.equal(cover?.sourceFrameIndex, 449);
+  assert.equal(h.calls.extract[0].mode, 'time');
+  assert.equal(h.calls.extract[0].timeSec, 1.25);
+  assert.deepEqual(h.owner().videoWorkbench?.draft.clips, []);
 });
 
 test('long-story loading follows explicit segment indices even if the saved array is shuffled', () => {

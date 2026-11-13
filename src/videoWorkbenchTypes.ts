@@ -91,6 +91,8 @@ export interface WorkbenchRenderRequest {
     fadeInSec?: number;
     fadeOutSec?: number;
   };
+  /** One still image encoded as the exported file's first frame. */
+  cover?: WorkbenchMediaSource;
 }
 
 export interface WorkbenchRenderResult extends ManagedMediaResult {

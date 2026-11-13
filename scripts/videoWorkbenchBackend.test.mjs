@@ -74,6 +74,17 @@ const videoFixture = async (assetRoot, name, color, audio = true, duration = 1.2
   return { assetId: name, relativePath: `video/${name}.mp4`, expectedChecksum: createHash('sha256').update(fs.readFileSync(filePath)).digest('hex') };
 };
 
+test('managed source resolver accepts a local cover image and rejects other picture types', async (t) => {
+  const { assetRoot } = withFixture(t);
+  fs.mkdirSync(path.join(assetRoot, 'image'), { recursive: true });
+  fs.writeFileSync(path.join(assetRoot, 'image', 'cover.png'), 'png');
+  fs.writeFileSync(path.join(assetRoot, 'image', 'cover.gif'), 'gif');
+  const image = await resolveManagedSource(assetRoot, { assetId: 'cover', relativePath: 'image/cover.png' }, 'image');
+  assert.equal(image.format, 'image2');
+  await assert.rejects(resolveManagedSource(assetRoot, { assetId: 'cover', relativePath: 'image/cover.gif' }, 'image'), /PNG、JPEG 或 WebP/u);
+  await assert.rejects(resolveManagedSource(assetRoot, { assetId: 'cover', relativePath: 'image/missing.png' }, 'image'), /封面图片已丢失/u);
+});
+
 test('managed source resolver rejects traversal, remote inputs and changed originals', async (t) => {
   const { assetRoot } = withFixture(t);
   fs.writeFileSync(path.join(assetRoot, 'video', 'source.mp4'), 'video');
@@ -116,6 +127,16 @@ test('render plan quantizes frame ranges and bounds transitions / music volume',
   assert.throws(() => buildRenderPlan({ clips: [clip, clip], audio: { bgmVolume: 0.9 } }, [source, source]), /背景音乐音量/u);
   assert.throws(() => buildRenderPlan({ clips: [{ ...clip, outSec: 0.2 }, clip] }, [source, source]), /转场过长/u);
   assert.throws(() => buildRenderPlan({ clips: [{ ...clip, inSec: 2, outSec: 1 }] }, [source]), /不足一帧/u);
+  const plain = buildRenderPlan({ clips: [{ ...clip, transitionAfter: { type: 'cut', durationSec: 0 }, outSec: 2 }], output: { fps: 10, fadeInSec: 0.2 }, audio: { fadeInSec: 0.2 } }, [source]);
+  assert.equal(plain.coverLeadSec, 0);
+  assert.equal(plain.pieces.some((piece) => piece.type === 'cover'), false);
+  assert.equal(plain.videoFadeIn, 0.2);
+  const covered = buildRenderPlan({ clips: [{ ...clip, transitionAfter: { type: 'cut', durationSec: 0 }, outSec: 2 }], cover: { assetId: 'cover', relativePath: 'image/cover.png' }, output: { fps: 10, fadeInSec: 0.2 }, audio: { fadeInSec: 0.2 } }, [source]);
+  assert.equal(covered.pieces[0].type, 'cover');
+  assert.equal(covered.pieces[0].duration, 0.1);
+  assert.equal(covered.coverLeadSec, 0.1);
+  assert.ok(Math.abs(covered.durationSec - (plain.durationSec + 0.1)) < 0.00001);
+  assert.equal(covered.pieces.some((piece) => piece.type === 'crossfade'), false);
 });
 
 test('missing media tools report a usable error without silent success', async (t) => {
@@ -243,6 +264,29 @@ test('real media: repeated short edits do not accumulate audio/video timestamp d
   assert.ok(Math.abs(Number(video.duration) - 2.4) < 0.05, `video duration drifted: ${video.duration}`);
   assert.ok(Math.abs(Number(audio.duration) - Number(video.duration)) < 0.05, `audio duration ${audio.duration} differs from video ${video.duration}`);
   assert.equal(Number(video.nb_frames), 72);
+});
+
+test('real media: a cover still is exactly frame 1 and stays full brightness when the picture fades in', { skip: !ffmpegPath || !ffprobePath }, async (t) => {
+  const { assetRoot, service } = withFixture(t);
+  fs.mkdirSync(path.join(assetRoot, 'image'), { recursive: true });
+  const coverPath = path.join(assetRoot, 'image', 'cover.png');
+  await run(ffmpegPath, ['-v', 'error', '-y', '-f', 'lavfi', '-i', 'color=c=cyan:s=80x40:d=0.1', '-frames:v', '1', coverPath]);
+  const cover = { assetId: 'cover', relativePath: 'image/cover.png', expectedChecksum: createHash('sha256').update(fs.readFileSync(coverPath)).digest('hex') };
+  const red = await videoFixture(assetRoot, 'red', 'red', true, 1.2, '160x96', 10);
+  const before = fs.readFileSync(path.join(assetRoot, red.relativePath));
+  const result = await service.renderTimeline({ projectId: 'p', jobId: 'cover', clips: [{ source: red, inSec: 0, outSec: 1 }], cover, output: { width: 160, height: 96, fps: 10, fadeInSec: 0.2, fileName: '封面成片.mp4' }, audio: { fadeInSec: 0.2 } }, 1);
+  assert.ok(Math.abs(result.probe.durationSec - 1.1) < 0.15, `covered duration: ${result.probe.durationSec}`);
+  const pixel = async (index) => [...await runBytes(ffmpegPath, ['-v', 'error', '-i', path.join(assetRoot, result.relativePath), '-vf', `select=eq(n\\,${index}),scale=1:1`, '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-'])];
+  const first = await pixel(0);
+  const second = await pixel(1);
+  const later = await pixel(5);
+  assert.ok(first[1] > 180 && first[2] > 180 && first[0] < 40, `cover frame must stay cyan at full brightness, got ${first}`);
+  assert.ok(second[0] < first[1], `frame 2 is the faded original picture, got ${second}`);
+  assert.ok(later[0] > later[1] * 3 && later[0] > 180, `content after the fade must stay red, got ${later}`);
+  const opening = await runBytes(ffmpegPath, ['-v', 'error', '-ss', '0', '-i', path.join(assetRoot, result.relativePath), '-t', '0.08', '-vn', '-ac', '1', '-ar', '48000', '-f', 'f32le', '-']);
+  const dialogue = await runBytes(ffmpegPath, ['-v', 'error', '-ss', '0.2', '-i', path.join(assetRoot, result.relativePath), '-t', '0.3', '-vn', '-ac', '1', '-ar', '48000', '-f', 'f32le', '-']);
+  assert.ok(frequencyAmplitude(opening, 440) < frequencyAmplitude(dialogue, 440) * 0.25, 'original audio starts after the silent cover frame');
+  assert.deepEqual(fs.readFileSync(path.join(assetRoot, red.relativePath)), before);
 });
 
 test('real media: cancellation is owner-scoped and leaves no half-export or temp directory', { skip: !ffmpegPath || !ffprobePath }, async (t) => {

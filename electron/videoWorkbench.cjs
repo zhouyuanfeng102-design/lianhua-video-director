@@ -5,6 +5,7 @@ const { spawn } = require('node:child_process');
 
 const VIDEO_FORMATS = { '.mp4': 'mov', '.mov': 'mov', '.webm': 'matroska', '.mkv': 'matroska' };
 const AUDIO_FORMATS = { '.mp3': 'mp3', '.wav': 'wav', '.m4a': 'mov', '.aac': 'aac', '.ogg': 'ogg', '.flac': 'flac' };
+const IMAGE_FORMATS = { '.png': 'image2', '.jpg': 'image2', '.jpeg': 'image2', '.webp': 'webp' };
 const MAX_DURATION_SEC = 24 * 60 * 60;
 const MAX_FRAME_SCAN = 2_000_000;
 const DEFAULT_BGM_VOLUME = 0.16;
@@ -40,12 +41,13 @@ const resolveManagedSource = async (assetRoot, source, kind = 'video', job) => {
   if (typeof relative !== 'string' || !relative || relative.length > 1024 || /[:\u0000-\u001f]/u.test(relative) || path.isAbsolute(relative)) throw new Error('只允许读取资产库中的媒体文件');
   const segments = relative.replace(/\\/gu, '/').split('/');
   if (segments.some((part) => !part || part === '.' || part === '..')) throw new Error('资产路径越界');
-  const format = (kind === 'video' ? VIDEO_FORMATS : { ...VIDEO_FORMATS, ...AUDIO_FORMATS })[path.extname(relative).toLowerCase()];
-  if (!format) throw new Error(kind === 'video' ? '不支持的视频格式，请使用 MP4、MOV、WebM 或 MKV' : '不支持的背景音乐格式');
+  const extension = path.extname(relative).toLowerCase();
+  const format = (kind === 'image' ? IMAGE_FORMATS : kind === 'video' ? VIDEO_FORMATS : { ...VIDEO_FORMATS, ...AUDIO_FORMATS })[extension];
+  if (!format) throw new Error(kind === 'image' ? '封面只支持 PNG、JPEG 或 WebP' : kind === 'video' ? '不支持的视频格式，请使用 MP4、MOV、WebM 或 MKV' : '不支持的背景音乐格式');
   const root = await fs.promises.realpath(assetRoot);
   let actual;
   try { actual = await fs.promises.realpath(path.resolve(root, ...segments)); }
-  catch (error) { if (error.code === 'ENOENT') throw new Error('视频或音频素材已丢失，请在资产库重新定位'); throw error; }
+  catch (error) { if (error.code === 'ENOENT') throw new Error(kind === 'image' ? '封面图片已丢失，请重新选择' : '视频或音频素材已丢失，请在资产库重新定位'); throw error; }
   if (!inside(root, actual)) throw new Error('资产路径越界（不允许链接到资产库外部）');
   const stat = await fs.promises.stat(actual);
   if (!stat.isFile() || !stat.size) throw new Error('媒体素材为空或不是普通文件');
@@ -163,6 +165,13 @@ const buildRenderPlan = (request, sources) => {
     if (bodyDuration >= 1 / fps - 0.000001) pieces.push({ type: 'body', duration: bodyDuration, inputs: [{ ...clip, seek: clip.start + incoming }] });
     if (clip.outgoing) pieces.push({ type: 'crossfade', duration: clip.outgoing, inputs: [{ ...clip, seek: clip.end - clip.outgoing }, { ...clips[index + 1], seek: clips[index + 1].start }] });
   });
+  let coverLeadSec = 0;
+  if (request.cover) {
+    if (!request.cover.assetId || !request.cover.relativePath) throw new Error('封面图片无效');
+    coverLeadSec = quantize(1 / fps);
+    if (coverLeadSec < 1 / fps - 0.000001) throw new Error('封面帧时长无效');
+    pieces.unshift({ type: 'cover', duration: coverLeadSec, cover: request.cover });
+  }
   const durationSec = pieces.reduce((sum, piece) => sum + piece.duration, 0);
   if (!durationSec || durationSec > MAX_DURATION_SEC) throw new Error('成片时长必须大于零且不超过 24 小时');
   const maxFade = Math.min(30, durationSec / 2);
@@ -171,7 +180,7 @@ const buildRenderPlan = (request, sources) => {
   const audioFadeIn = request.audio?.fadeInSec === undefined ? 0 : finite(request.audio.fadeInSec, 0, maxFade, '音频淡入时长');
   const audioFadeOut = request.audio?.fadeOutSec === undefined ? 0 : finite(request.audio.fadeOutSec, 0, maxFade, '音频淡出时长');
   const bgmVolume = request.audio?.bgmVolume === undefined ? DEFAULT_BGM_VOLUME : finite(request.audio.bgmVolume, 0, 0.5, '背景音乐音量');
-  return { width, height, fps, pieces, durationSec, videoFadeIn, videoFadeOut, audioFadeIn, audioFadeOut, bgmVolume, ducking: request.audio?.ducking !== false };
+  return { width, height, fps, pieces, durationSec, coverLeadSec, videoFadeIn, videoFadeOut, audioFadeIn, audioFadeOut, bgmVolume, ducking: request.audio?.ducking !== false };
 };
 
 // Shared with the lightweight thumbnail worker; both use the same bundled tools.
@@ -467,6 +476,27 @@ const createVideoWorkbench = (options) => {
     await ffmpeg(args, job, binaries, piece.duration, startPercent, endPercent, piece.type === 'crossfade' ? '正在合成交叉溶解与音频转场…' : '正在裁剪并统一画面、帧率与音轨…');
   };
 
+  const renderCover = async (piece, plan, output, job, binaries, startPercent, endPercent) => {
+    const image = await resolveManagedSource(assetRoot, piece.cover, 'image', job);
+    let inputPath = image.path;
+    let inputFormat = image.format;
+    if (image.format === 'webp') {
+      const decoded = path.join(job.directory, 'cover-decoded.png');
+      await ffmpeg(['-protocol_whitelist', 'file,pipe', '-f', 'webp', '-i', image.path, '-frames:v', '1', decoded], job, binaries, 0.2, startPercent, startPercent, '正在解码封面图片…');
+      inputPath = decoded;
+      inputFormat = 'image2';
+    }
+    const vf = `scale=${plan.width}:${plan.height}:force_original_aspect_ratio=decrease,pad=${plan.width}:${plan.height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${seconds(plan.fps)},format=yuv420p,settb=AVTB`;
+    const args = [
+      '-loop', '1', '-framerate', seconds(plan.fps), '-protocol_whitelist', 'file,pipe', '-f', inputFormat, '-i', inputPath,
+      '-f', 'lavfi', '-i', 'anullsrc=r=48000:cl=stereo',
+      '-vf', vf, '-map', '0:v:0', '-map', '1:a:0',
+      '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '18', '-bf', '0', '-pix_fmt', 'yuv420p', '-threads', '2', '-r', seconds(plan.fps),
+      '-c:a', 'pcm_s16le', '-ar', '48000', '-ac', '2', '-frames:v', '1', '-t', seconds(piece.duration), '-f', 'nut', output,
+    ];
+    await ffmpeg(args, job, binaries, piece.duration, startPercent, endPercent, '正在写入成片封面帧…');
+  };
+
   const renderTimeline = (request, ownerId, notify) => withJob(request, 'render', ownerId, notify, async (job, binaries) => {
     if (!Array.isArray(request.clips) || request.clips.length < 1 || request.clips.length > 200) throw new Error('时间线必须包含 1–200 个视频片段');
     const sources = [];
@@ -494,7 +524,10 @@ const createVideoWorkbench = (options) => {
     for (const [index, piece] of plan.pieces.entries()) {
       const fileName = `part-${String(index).padStart(4, '0')}.nut`;
       const output = path.join(job.directory, fileName);
-      await renderPiece(piece, plan, output, job, binaries, 2 + elapsed / plan.durationSec * 83, 2 + (elapsed + piece.duration) / plan.durationSec * 83);
+      const startPercent = 2 + elapsed / plan.durationSec * 83;
+      const endPercent = 2 + (elapsed + piece.duration) / plan.durationSec * 83;
+      if (piece.type === 'cover') await renderCover(piece, plan, output, job, binaries, startPercent, endPercent);
+      else await renderPiece(piece, plan, output, job, binaries, startPercent, endPercent);
       elapsed += piece.duration;
       piecePaths.push(fileName);
     }
@@ -513,12 +546,13 @@ const createVideoWorkbench = (options) => {
         filters.push('[original][quietbgm]amix=inputs=2:duration=first:normalize=0[mixed]');
       } else filters.push('[0:a:0][bgm]amix=inputs=2:duration=first:normalize=0[mixed]');
     }
+    const fadeIn = (lead, duration) => lead ? `st=${seconds(lead)}:d=${seconds(duration)}:enable='gte(t,${seconds(lead)})'` : `st=0:d=${seconds(duration)}`;
     const audioFilters = ['alimiter=limit=0.98:level=0:latency=1'];
-    if (plan.audioFadeIn) audioFilters.push(`afade=t=in:st=0:d=${seconds(plan.audioFadeIn)}`);
+    if (plan.audioFadeIn) audioFilters.push(`afade=t=in:${fadeIn(plan.coverLeadSec, plan.audioFadeIn)}`);
     if (plan.audioFadeOut) audioFilters.push(`afade=t=out:st=${seconds(plan.durationSec - plan.audioFadeOut)}:d=${seconds(plan.audioFadeOut)}`);
     filters.push(`${bgm ? '[mixed]' : '[0:a:0]'}${audioFilters.join(',')}[audioout]`);
     const videoFilters = [];
-    if (plan.videoFadeIn) videoFilters.push(`fade=t=in:st=0:d=${seconds(plan.videoFadeIn)}`);
+    if (plan.videoFadeIn) videoFilters.push(`fade=t=in:${fadeIn(plan.coverLeadSec, plan.videoFadeIn)}`);
     if (plan.videoFadeOut) videoFilters.push(`fade=t=out:st=${seconds(plan.durationSec - plan.videoFadeOut)}:d=${seconds(plan.videoFadeOut)}`);
     if (videoFilters.length) filters.push(`[0:v:0]${videoFilters.join(',')}[videoout]`);
     args.push('-filter_complex', filters.join(';'), '-map', videoFilters.length ? '[videoout]' : '0:v:0', '-map', '[audioout]');

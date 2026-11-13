@@ -409,7 +409,8 @@ export const applyStoryReferenceBindings = (project: Project, chapterId: string,
     for (const subject of subjects.filter((item) => item.kind === kind && item.entityId)) append(subject.entityId!, subject);
     for (const raw of analysis[key] ?? []) {
       const item = typeof raw === 'string' ? { name: raw } : raw;
-      const candidates = next[key].filter((entity) => item.existingEntityId ? entity.id === item.existingEntityId : entity.name === item.name);
+      const idHit = item.existingEntityId ? next[key].filter((entity) => entity.id === item.existingEntityId) : [];
+      const candidates = idHit.length === 1 ? idHit : next[key].filter((entity) => entity.name === item.name);
       if (candidates.length !== 1) continue;
       for (const link of item.storyReferenceBindings ?? []) {
         const subject = subjects.find((entry) => entry.kind === kind && entry.referenceId === link.referenceId && entry.subjectId === link.subjectId);
