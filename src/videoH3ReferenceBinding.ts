@@ -15,6 +15,7 @@ import { sourceContentHash } from './sourceContentHash';
 import { videoH3MediaModeContract, videoH3MediaModeIssue } from './videoH3MediaMode';
 import { assetReferenceLocationOwners } from './assetCharacterBinding';
 import { renderH3ReferenceExecution, type H3ReferenceExecutionCharacter } from './h3ReferenceExecution';
+import { h3CompositionAnchorRole, h3PictureCitedInSubject, h3TraitPictureLines } from './h3TraitPictures';
 import { videoMotionReferenceNumbers } from './videoMotionReferences';
 import { resolveRunningHubH3PictureNumbers } from './runningHubH3ReferenceImages';
 import { resolveComfyH3PictureNumbers } from './h3ReferenceImageOrder';
@@ -360,36 +361,41 @@ const videoH3ReferenceUses = (project: Project, draft: VideoGenerationDraft): Vi
 };
 
 /** Describe an explicitly selected image's use, never infer its subjects or
- * rewrite shot actions. These are composition references in multi-image
- * requests: a picker label does not prove first/last-frame conditioning in
- * the remote workflow. Existing authored Picture uses remain authoritative. */
+ * rewrite shot actions. A standalone Picture line is only a composition
+ * anchor. Scene, prop and style plates are cited inside Subject when this
+ * prompt already has that section; otherwise the reference-uses sentence
+ * states the trait duty. A picker label does not prove first/last-frame
+ * conditioning in the remote workflow. Existing authored Picture uses remain
+ * authoritative. */
 const videoH3ReferenceUsageEdit = (
   prompt: string, references: readonly VideoImageReference[], numbers: readonly number[],
   language: 'zh' | 'en', authoredPictureNumbers: ReadonlySet<number>,
   rememberedRoles?: readonly ReferenceRole[], multiViewNumbers: readonly number[] = [],
   referenceUses: readonly VideoH3ReferenceUse[] = [],
 ): VideoPictureReferenceEdit | undefined => {
+  const en = language === 'en';
   const uses: Partial<Record<ReferenceRole, readonly [string, string]>> = {
     'first-frame': ['开场构图参考', 'opening composition reference'],
     'last-frame': ['结束构图参考', 'ending composition reference'],
-    scene: ['场景空间与光照参考', 'environment layout and lighting reference'],
-    prop: ['道具外观参考', 'prop appearance reference'],
-    style: ['视觉风格参考', 'visual style reference'],
-    motion: ['动作姿态参考', 'action pose reference'],
+    'middle-frame': ['中间构图与衔接参考', 'intermediate composition and continuity reference'],
     composition: ['画面构图参考', 'composition reference'],
     camera: ['摄影构图参考', 'camera composition reference'],
-    'clay-render': ['形体与空间结构参考', 'form and spatial structure reference'],
-    creative: ['视觉创意参考', 'visual concept reference'],
-    general: ['通用视觉参考', 'general visual reference'],
   };
   const selectedUses = references.flatMap((reference, index) => {
     const number = numbers[index];
+    if (!number || authoredPictureNumbers.has(number)) return [];
     const ordinal = reference.role === 'middle-frame'
       ? videoMiddleFrameOrdinal(references, videoReferenceSlotIndex(reference, index), rememberedRoles) : undefined;
-    const use = referenceUses[index]?.description || (ordinal ? [`中间帧 ${ordinal} 的过程构图与连续性参考`, `intermediate frame ${ordinal} progression composition and continuity reference`]
-      : uses[reference.role]);
-    return number && use && !authoredPictureNumbers.has(number)
-      ? [`<Picture ${number}> ${use[language === 'zh' ? 0 : 1]}`] : [];
+    const described = referenceUses[index]?.description;
+    if (described || ordinal || h3CompositionAnchorRole(reference.role)) {
+      const use = described || (ordinal
+        ? [`中间帧 ${ordinal} 的过程构图与连续性参考`, `intermediate frame ${ordinal} progression composition and continuity reference`] as const
+        : uses[reference.role]);
+      return use ? [`<Picture ${number}> ${use[en ? 1 : 0]}`] : [];
+    }
+    const trait = h3TraitPictureLines(reference.role, en);
+    if (!trait || h3PictureCitedInSubject(prompt, number)) return [];
+    return [trait.inline(number)];
   });
   if (!selectedUses.length && !multiViewNumbers.length) return undefined;
   const { sectionStart, shots } = videoH3ReferenceProseRanges(prompt);
@@ -399,8 +405,8 @@ const videoH3ReferenceUsageEdit = (
   const multiViewPictures = unique(multiViewNumbers).map((number) => `<Picture ${number}>`).join(language === 'zh' ? '、' : ', ');
   const text = [
     selectedUses.length ? language === 'zh'
-      ? `本段参考图用途：${selectedUses.join('；')}。人物朝向与动作时序按正文推进，静态姿态不延长动作。正面身份图只锁五官和衣服，不把参考图的正脸贴到后脑上。`
-      : `Reference uses for this clip: ${selectedUses.join('; ')}. Facing and action timing follow the written sequence; still poses do not prolong actions. A front identity image locks features and clothes only and does not place that front face on the back of the head.` : '',
+      ? `本段参考图用途：${selectedUses.join('；')}。人物朝向与动作时序按正文推进，静态姿态不延长动作。正面身份图只锁五官和衣服。锁住的衣服是这张图里已经穿的那一套。扯开或滑落的是这一套。不把参考图的正脸贴到后脑上。`
+      : `Reference uses for this clip: ${selectedUses.join('; ')}. Facing and action timing follow the written sequence; still poses do not prolong actions. A front identity image locks features and the clothes already in that picture. Fabric that is pulled or slid remains those same clothes. It does not place that front face on the back of the head.` : '',
     multiViewPictures ? language === 'zh'
       ? `多视图身份参考：${multiViewPictures} 各自展示其已关联的同一个人物的多个角度，仅参考身份与外观；图内不同视角不是同时入画的多个人，实际人数、站位、朝向与动作沿用本镜正文。正面参考不把正脸贴到后脑。`
       : `Multi-view identity references: ${multiViewPictures} each show multiple angles of their respective single bound character, for identity and appearance only; the views are not multiple people entering the frame. Character count, placement, facing and action follow the current shot. A front view does not place that face on the back of the head.` : '',

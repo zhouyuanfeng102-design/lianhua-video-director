@@ -18,6 +18,8 @@ import {
 } from '../src/videoConversionRules';
 import type { Character, ConverterPreset, ReferenceAsset, Storyboard, VideoShot } from '../src/types';
 
+assert.match(VIDEO_WARDROBE_SCOPE_RULE, /脱、扯、解、滑落作用在这个人此刻已经穿着的那一件上/u);
+
 const character = (id: string, name: string, gender: string, outfit: string): Character => ({
   id, name, gender, apparentAge: '成年', race: '人类', appearance: `${name}身份面容`,
   outfit, signatureProps: '', personality: '沉着', motionHabits: '沿山道稳步上行',

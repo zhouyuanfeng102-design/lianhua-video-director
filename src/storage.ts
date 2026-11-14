@@ -843,7 +843,7 @@ export const LEGACY_STORY_EXPANSION_GENERAL_V1_5_0: StoryExpansionPreset = {
   updatedAt: 0,
 };
 
-export const defaultStoryExpansionPresets: StoryExpansionPreset[] = [{
+export const LEGACY_STORY_EXPANSION_GENERAL_V1_5_1: StoryExpansionPreset = {
   ...LEGACY_STORY_EXPANSION_GENERAL_V1_5_0,
   systemPrompt: LEGACY_STORY_EXPANSION_GENERAL_V1_5_0.systemPrompt
     .replace(
@@ -855,6 +855,47 @@ export const defaultStoryExpansionPresets: StoryExpansionPreset[] = [{
       '不机械走满固定步骤或为了加长反复同一动作。已经进入且双方还连着时，补上的连续过程只用那句缓慢起伏，不补成一下一下的抽送。',
     ),
   version: '1.5.1',
+  updatedAt: 0,
+};
+
+export const LEGACY_STORY_EXPANSION_GENERAL_V1_5_2: StoryExpansionPreset = {
+  ...LEGACY_STORY_EXPANSION_GENERAL_V1_5_1,
+  systemPrompt: LEGACY_STORY_EXPANSION_GENERAL_V1_5_1.systemPrompt
+    .replace(
+      '已经进入且双方还连着的成人身体接触，不按打斗的发力、路径和每一击展开，连续过程只用髋和腰贴着对方的缓慢、小幅度、温柔的连续起伏，相接处一直贴着，这串起伏从头到尾保持缓慢，两套句子不并列。',
+      '已经进入且双方还连着的成人身体接触，不按打斗的发力、路径和每一击展开。原文已经在进出时写成这一次：肉棒沿阴道进出：进到他的腹股沟贴上她的骨盆，退时龟头仍留在阴道口里面，再进到贴上。髋带着这一次进出，动作缓慢，人还留在里面。整根离开只在原文写了退出时写一次。原文已经把肉棒送进嘴里时，嘴唇从龟头沿着肉棒含到他的腹股沟，龟头留在她喉咙里，舌面留在肉棒下面；头再退到只含住龟头，然后再含进喉咙。原文只亲到龟头、没有送进嘴里时，嘴唇留在龟头那一截。手指、揉握和研磨仍是那只手沿着原文写出的那一部位移动。',
+    )
+    .replace(
+      '已经进入且双方还连着时，补上的连续过程只用那句缓慢起伏，不补成一下一下的抽送。',
+      '已经进入或含入、原文省掉了这一次时，补上这一次进出或这一次含入，不补高潮、射精或原文没有的人。进入了、抽插和含住写成这一次可见的进出。',
+    ),
+  version: '1.5.2',
+  updatedAt: 0,
+};
+
+export const LEGACY_STORY_EXPANSION_GENERAL_V1_5_3: StoryExpansionPreset = {
+  ...LEGACY_STORY_EXPANSION_GENERAL_V1_5_2,
+  systemPrompt: LEGACY_STORY_EXPANSION_GENERAL_V1_5_2.systemPrompt
+    .replace(
+      '肉棒沿阴道进出：进到他的腹股沟贴上她的骨盆，退时龟头仍留在阴道口里面，再进到贴上。',
+      '肉棒沿阴道进出：进的时候龟头朝她骨盆里面走，根留在他的腹股沟，进到他的腹股沟贴上她的骨盆；退时龟头仍留在阴道口里面，并且仍朝她骨盆里面；再进到贴上，龟头仍朝她骨盆里面。',
+    )
+    .replace(
+      '原文已经把肉棒送进嘴里时，嘴唇从龟头沿着肉棒含到他的腹股沟，龟头留在她喉咙里，舌面留在肉棒下面；头再退到只含住龟头，然后再含进喉咙。原文只亲到龟头、没有送进嘴里时，嘴唇留在龟头那一截。',
+      '原文已经把肉棒送进嘴里时，茎身从他的腹股沟伸到她的嘴唇，龟头是伸进嘴里的那一端，指向她的口腔，根留在他的腹股沟。嘴唇从龟头沿着肉棒含到他的腹股沟，龟头留在她喉咙里，舌面留在肉棒下面；头再退到只含住龟头，然后再含进喉咙。这一镜看见这段茎身。原文只亲到龟头、没有送进嘴里时，嘴唇留在龟头那一截，龟头仍指向她的嘴唇，根仍留在他的腹股沟。',
+    ),
+  version: '1.5.3',
+  updatedAt: 0,
+};
+
+export const defaultStoryExpansionPresets: StoryExpansionPreset[] = [{
+  ...LEGACY_STORY_EXPANSION_GENERAL_V1_5_3,
+  systemPrompt: LEGACY_STORY_EXPANSION_GENERAL_V1_5_3.systemPrompt
+    .replace(
+      '肉棒沿阴道进出：进的时候龟头朝她骨盆里面走，根留在他的腹股沟，进到他的腹股沟贴上她的骨盆；退时龟头仍留在阴道口里面，并且仍朝她骨盆里面；再进到贴上，龟头仍朝她骨盆里面。',
+      '肉棒沿阴道进出：进的时候龟头穿过她两腿之间的阴唇，留在阴道里面，指向阴道深处，根留在他的腹股沟，进到阴唇贴上他的腹股沟；退时龟头仍留在阴道里面，并且仍指向阴道深处；再进到阴唇贴上他的腹股沟，龟头仍留在阴道里面。茎身从他的腹股沟穿过阴道口，连到留在阴道里面的龟头。露在体外的只有腹股沟到阴唇这一截。',
+    ),
+  version: '1.5.4',
   updatedAt: now(),
 }];
 
@@ -1151,6 +1192,15 @@ const isUntouchedLegacyStoryExpansionPreset = (candidate: unknown, includeV100: 
   if (LEGACY_STORY_EXPANSION_SEMANTIC_FIELDS.every(
     (field) => candidate[field] === LEGACY_STORY_EXPANSION_GENERAL_V1_5_0[field],
   )) return true;
+  if (LEGACY_STORY_EXPANSION_SEMANTIC_FIELDS.every(
+    (field) => candidate[field] === LEGACY_STORY_EXPANSION_GENERAL_V1_5_1[field],
+  )) return true;
+  if (LEGACY_STORY_EXPANSION_SEMANTIC_FIELDS.every(
+    (field) => candidate[field] === LEGACY_STORY_EXPANSION_GENERAL_V1_5_2[field],
+  )) return true;
+  if (LEGACY_STORY_EXPANSION_SEMANTIC_FIELDS.every(
+    (field) => candidate[field] === LEGACY_STORY_EXPANSION_GENERAL_V1_5_3[field],
+  )) return true;
   if (
     candidate.id === DEFAULT_STORY_EXPANSION_PRESET_ID
     && candidate.name === LEGACY_STORY_EXPANSION_GENERAL_V1_3_0.name
@@ -1165,7 +1215,7 @@ const isUntouchedLegacyStoryExpansionPreset = (candidate: unknown, includeV100: 
 };
 
 /**
- * Untouched v1.1.0/v1.2.0/v1.3.0/v1.4.0/v1.5.0 defaults gain the current video-story template
+ * Untouched v1.1.0/v1.2.0/v1.3.0/v1.4.0/v1.5.0/v1.5.1/v1.5.2/v1.5.3 defaults gain the current video-story template
  * even in schema-21 saves. Keep the existing pre-schema-13 v1.0.0 upgrade path;
  * a later user-restored v1.0.0 remains authoritative. No collection reset or
  * schema bump is needed, and all user edits/custom metadata remain untouched.

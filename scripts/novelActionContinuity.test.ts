@@ -83,7 +83,26 @@ const system = (request: RequestBody) => request.messages.find((message) => mess
 const data = (request: RequestBody): Record<string, any> => {
   const message = request.messages.find((item) => item.role === 'user')!.content;
   assert.ok(message.startsWith('semantic_sequence_input='), 'these fixtures use only the first planning request');
-  return JSON.parse(message.slice(message.indexOf('=') + 1));
+  const payload = message.slice('semantic_sequence_input='.length);
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+  for (let index = 0; index < payload.length; index += 1) {
+    const char = payload[index];
+    if (inString) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === '"') inString = false;
+      continue;
+    }
+    if (char === '"') inString = true;
+    else if (char === '{') depth += 1;
+    else if (char === '}') {
+      depth -= 1;
+      if (depth === 0) return JSON.parse(payload.slice(0, index + 1));
+    }
+  }
+  return JSON.parse(payload);
 };
 
 try {
@@ -97,8 +116,10 @@ try {
       assert.equal(system(request).split('NOVEL_ACTION_SOURCE_V1').length - 1, 1);
       assert.equal(system(request).split('NOVEL_ACTION_CONTINUITY_V1').length - 1, 1);
       assert.match(system(request), /直接输入小说时，在这一次请求内/u);
-      assert.match(system(request), /用户明确的剧情修改、分段边界与固定时长优先/u);
+      assert.match(system(request), /用户明确指定的剧情修改、分段边界与固定时长优先/u);
       assert.match(system(request), /原文允许同时发生的行走、取放、观察、倾听与现场信息可以和发话并行/u);
+      assert.match(system(request), /已经落锁、已经关上是完成状态/u);
+      assert.match(system(request), /几步之外或已停在面前/u);
       assert.equal(data(request).story, story);
       assert.deepEqual(data(request).characterContinuity, input.characterContinuity);
       return { status: 200, body: JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify(reply) } }] }) };
@@ -128,7 +149,9 @@ try {
     requestedTotalDurationSec: 60, originalSourceContext });
   const adoptedPlan = await requestSemanticSequencePlan(config, adoptedInput, undefined, { planId: 'adopted-action-plan', now: () => 2 });
   assert.equal(requests.length, 2, 'each user generation uses one model call');
-  assert.equal(data(requests[1]).requiredSegmentCount, 4);
+  assert.equal(data(requests[1]).requestedTotalDurationSec, 60);
+  assert.equal(data(requests[1]).requiredSegmentCount, undefined);
+  assert.match(system(requests[1]), /目标段数4仅供参考/u);
   assert.equal(adoptedPlan.totalDurationSec, 60);
   assert.deepEqual(data(requests[1]).originalSourceContext.actionPlan.sceneStaging, staging);
   assert.deepEqual(adoptedPlan.semanticPlanningSnapshot?.originalSourceContext, originalSourceContext);

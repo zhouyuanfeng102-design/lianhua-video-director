@@ -235,7 +235,7 @@ export const VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE = [
 export const VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE = [
   'VIDEO_ACTION_CHOREOGRAPHY_TRANSLATE_V1：以当前已采用中文sourcePrompt为唯一执行稿，英文翻译及格式修复只保真，不重新导演，不从原小说、旧shots或档案补写当前正文未采用的动作。',
   NOVEL_ACTION_DELIVERY_RULE,
-  '准确表达已发生、尝试、中断与否定，reaches but withdraws不变成grabs，holds不等于takes again。保留具名对象、支撑/发力肢体、接触至受力反应和释放、物体归属与并行关系；手扫脚踝仍是hand sweep，不能在声音中变成leg sweep。被击退不是自主退步，限力或点到为止不是slow motion；按压致下沉后挣脱不能译成stopping on contact。普通高速动作不是high-speed photography。既定静止、明确慢动作、强度与幻想能力保持，不用英文例词补细节；镜界不改变事件速度，同一次跨镜行动只续当前进度。',
+  '准确表达已发生、尝试、中断与否定，reaches but withdraws不变成grabs，holds不等于takes again。保留具名对象、支撑/发力肢体、接触至受力反应和释放、物体归属与并行关系；手扫脚踝仍是hand sweep，不能在声音中变成leg sweep。已经落下的锁译成门保持关闭，并可有一声轻响。中文稿写了谁的手或谁的魂力，英文保留这个施事者。门闩不译成自己滑动的主体。被击退不是自主退步，限力或点到为止不是slow motion；按压致下沉后挣脱不能译成stopping on contact。普通高速动作不是high-speed photography。既定静止、明确慢动作、强度与幻想能力保持，不用英文例词补细节；镜界不改变事件速度，同一次跨镜行动只续当前进度。',
   '保持普通六字段、H3三字段或full-reference六字段、原section顺序、[Shot N]、首镜无At、全部At切点、镜内动作时间、Subject/Picture/Video/Audio、S声源、<d>、原语言和逐字对白。参考身份和静态构图不替代动作，不虚构素材，不新增动作schema、规则附录、审核、调用、拦截或重试。',
 ].join('\n\n');
 

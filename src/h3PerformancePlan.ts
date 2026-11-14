@@ -3,6 +3,7 @@ import type {
   H3PerformanceReaction, H3PerformanceVoiceEvent,
 } from './types';
 import { H3_EXISTING_SOUND_SUMMARY_EN, H3_EXISTING_SOUND_SUMMARY_ZH, renderH3DeliverySections } from './h3DeliverySections';
+import { h3TraitPictureLines } from './h3TraitPictures';
 
 const object = (value: unknown): value is Record<string, unknown> => value !== null
   && typeof value === 'object' && !Array.isArray(value);
@@ -364,7 +365,24 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
       return sentence(`${en ? 'Voice identity' : '声音身份'}: ${name(entry.characterId)}${audio.length ? `${en ? ', referenced from ' : '，声音参考为'}${audio.map((number) => `<Audio ${number}>`).join(', ')}` : ''}`, language);
     });
   const preamble = authored(plan.preamble?.trim() || '');
-  const integratedOpening = !fullReference ? [...renderedCharacters.map((entry) => entry.referenceAnchor), ...voiceOnlyDefinitions, preamble].filter(Boolean).join('\n') : '';
+  const personVisibleInShot = (shot: H3PerformancePlan['shots'][number], characterId: string, personName: string): boolean => {
+    if (descriptions.get(characterId)?.presence === 'offscreen') return false;
+    if (personName && shot.visualDescription.includes(personName)) return true;
+    return shot.events.some((event) => {
+      if (event.kind === 'visual') return (event.silentCharacterIds || []).includes(characterId)
+        || Boolean(personName && event.description.includes(personName));
+      if (event.channel === 'off-screen' || event.channel === 'voiceover' || event.channel === 'inner-voice') return false;
+      if (event.speakerCharacterIds.includes(characterId)) return true;
+      return (event.reactions || []).some((reaction) => reaction.characterId === characterId && reaction.presence !== 'offscreen');
+    });
+  };
+  const identityShotIndex = new Map<string, number>();
+  if (!fullReference) {
+    for (const entry of renderedCharacters) {
+      const found = plan.shots.findIndex((shot) => personVisibleInShot(shot, entry.characterId, entry.name));
+      identityShotIndex.set(entry.characterId, found >= 0 ? found : 0);
+    }
+  }
   plan.shots.forEach((shot, index) => {
     const windowStart = shot.startSec;
     const windowEnd = plan.shots[index + 1]?.startSec;
@@ -436,37 +454,53 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
   const shots = plan.shots.map((shot, index) => {
     const marker = `[Shot ${shot.shotIndex}]${index ? ` At ${cutTime(shot.startSec)}` : ''}`;
     const visual = quoteVisibleText(shot.visualDescription);
-    return [marker, !index ? integratedOpening : '', visual ? sentence(authored(visual), language) : '',
+    const identitiesHere = fullReference ? '' : renderedCharacters
+      .filter((entry) => identityShotIndex.get(entry.characterId) === index)
+      .map((entry) => entry.referenceAnchor).join('\n');
+    const openingExtras = !fullReference && !index ? [...voiceOnlyDefinitions, preamble].filter(Boolean).join('\n') : '';
+    return [marker, identitiesHere, openingExtras, visual ? sentence(authored(visual), language) : '',
       ...shot.events.map((event) => renderEvent(event, shot))].filter(Boolean).join('\n');
   });
   const body = normalizeH3DialogueLanguageTags([fullReference ? preamble : '', ...shots]
     .filter(Boolean).join('\n\n'));
   const definitions = [...renderedCharacters.map((entry) => entry.referenceAnchor), ...voiceOnlyDefinitions];
   if (input.subjectDefinitions?.trim()) definitions.push(input.subjectDefinitions.trim());
-  const pictureRoles: Record<string, string> = {
+  const compositionRoles: Record<string, string> = {
     'first-frame': en ? 'opening composition reference' : '开场构图参考',
     'last-frame': en ? 'ending composition reference' : '结尾构图参考',
     'middle-frame': en ? 'intermediate composition and continuity reference' : '中间构图与衔接参考',
-    scene: en ? 'environment layout and lighting reference' : '环境布局与光影参考',
-    prop: en ? 'prop appearance reference' : '道具外观参考',
-    style: en ? 'visual style reference' : '视觉风格参考',
-    motion: en ? 'action pose reference' : '动作姿态参考',
     composition: en ? 'composition reference' : '构图参考',
     camera: en ? 'camera composition reference' : '镜头构图参考',
-    'clay-render': en ? 'form and spatial structure reference' : '形体与空间结构参考',
-    creative: en ? 'visual concept reference' : '视觉概念参考',
+  };
+  const traitRetention: string[] = [];
+  const nextTraitSubject = (): string => {
+    let number = 1;
+    while (usedSubjects.has(number)) number += 1;
+    usedSubjects.add(number);
+    return `<Subject ${number}>`;
   };
   for (const use of input.pictureUses || []) {
-    const role = pictureRoles[use.role];
-    const declared = new RegExp(`^<Picture ${use.number}>\\s+(?:is\\b|用于|是|为)`, 'mu').test(definitions.join('\n'));
-    if (use.text && !declared) definitions.push(sentence(`<Picture ${use.number}> ${use.text}`, language));
-    else if (role && !declared) definitions.push(sentence(`<Picture ${use.number}> ${en ? 'is the' : '用于'} ${role}`, language));
+    const written = definitions.join('\n');
+    const declared = new RegExp(`^<Picture ${use.number}>\\s+(?:is\\b|用于|是|为)`, 'mu').test(written)
+      || new RegExp(`<Subject\\s+\\d+>[^\\n]*<Picture\\s+${use.number}>(?![0-9])`, 'u').test(written);
+    if (declared) continue;
+    const trait = h3TraitPictureLines(use.role, en);
+    const composition = compositionRoles[use.role];
+    if (trait) {
+      const subject = nextTraitSubject();
+      definitions.push(trait.definition(subject, use.number));
+      traitRetention.push(trait.retention(subject));
+      continue;
+    }
+    if (use.text) definitions.push(sentence(`<Picture ${use.number}> ${use.text}`, language));
+    else if (composition) definitions.push(sentence(`<Picture ${use.number}> ${en ? 'is the' : '用于'} ${composition}`, language));
   }
   const summary = (input.summary ?? plan.summary)?.trim() || (en ? 'The authored scene unfolds in the following shots.' : '按下列镜头展开已确认的场景表演。');
-  const partRetention = (input.pictureUses || []).flatMap((use) => use.text ? [`<Picture ${use.number}>: ${use.text}`] : []);
+  const partRetention = (input.pictureUses || []).flatMap((use) => use.text && !h3TraitPictureLines(use.role, en)
+    ? [`<Picture ${use.number}>: ${use.text}`] : []);
   const retention = [((input.retentionAnalysis ?? plan.retentionAnalysis)?.trim() || (en
     ? 'Keep the referenced identities and the authored scene relationships.' : '保留参考身份与已确认的场景关系。')),
-  ...partRetention].filter(Boolean).join('\n');
+  ...partRetention, ...traitRetention].filter(Boolean).join('\n');
   const duration = Number.isFinite(input.durationSec) ? Math.max(0, input.durationSec || 0)
     : Math.max(0, ...plan.shots.map((shot) => shot.startSec), ...plan.shots.flatMap((shot) => shot.events.map((event) => event.endSec ?? event.startSec ?? 0)));
   const firstFrame = (input.pictureUses || []).find((use) => use.role === 'first-frame');

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { h3PerformanceSpeakerTokens, normalizeH3DialogueLanguageTags, normalizeH3PerformancePlan, parseH3PerformancePlan, renderH3PerformancePlan } from '../src/h3PerformancePlan';
 import { H3_EXISTING_SOUND_SUMMARY_ZH } from '../src/h3DeliverySections';
-import { H3_PERFORMANCE_DELIVERY_RULE } from '../src/h3IdentityBindings';
+import { H3_IDENTITY_BINDINGS_RULE, H3_PERFORMANCE_DELIVERY_RULE } from '../src/h3IdentityBindings';
 import { DIALOGUE_PERFORMANCE_TIMING_RULE } from '../src/audioPromptPolicy';
 import { readH3PromptProtocol } from '../src/h3PromptProtocol';
 import type { H3IdentityBindings, H3PerformancePlan } from '../src/types';
@@ -51,6 +51,9 @@ const test = (name: string, run: () => void): void => { run(); console.log(`PASS
 
 assert.match(H3_PERFORMANCE_DELIVERY_RULE, /后出现于本段的事件继续写在后镜/u);
 assert.match(H3_PERFORMANCE_DELIVERY_RULE, /最后一镜在本段已确认的事件窗口内写出最后一个已分配事件的当前结果/u);
+assert.match(H3_PERFORMANCE_DELIVERY_RULE, /人已经靠着家具时，第一句用身体写出接触高度：后腰抵着的边留在腰的高度/u);
+assert.match(H3_PERFORMANCE_DELIVERY_RULE, /手里的衣领是这一套的衣领/u);
+assert.match(H3_IDENTITY_BINDINGS_RULE, /写上的是已经穿在身上的那一套/u);
 
 test('segment 4 converts the declared shot clock once and never voices the source observation', () => {
   const untouched = JSON.stringify(segment4);
@@ -596,6 +599,33 @@ test('a selected picture style is written once, a sign keeps its words, and a fi
   });
   assert.match(custom.prompt, /画面风格：3D电影CG写实。/u);
   assert.doesNotMatch(custom.prompt, /For the target video/u);
+});
+
+test('identity stays on the shot where the person is visible, and a location plate is not an opening composition', () => {
+  const plan: H3PerformancePlan = {
+    version: 1, timeBase: 'clip', descriptionLanguage: 'zh',
+    shots: [
+      { shotIndex: 1, startSec: 0, visualDescription: '厚重的门保持关闭，门闩留在门槽里，有一声轻响。', events: [] },
+      { shotIndex: 2, startSec: 6, visualDescription: '千仞雪站在玉台旁。', events: [] },
+    ],
+    overallSoundscape: 'N/A', nonDiegeticMusic: 'N/A',
+  };
+  const integrated = renderH3PerformancePlan({
+    plan, characters: [{ characterId: 'qian', name: '千仞雪', referenceAnchor: '千仞雪' }], language: 'zh',
+  });
+  const shot1 = integrated.prompt.split('[Shot 2]')[0] || '';
+  assert.doesNotMatch(shot1, /人物身份: 千仞雪/u);
+  assert.match(integrated.prompt, /\[Shot 2\] At 00:06\.000\n人物身份: 千仞雪/u);
+  const referenced = renderH3PerformancePlan({
+    plan, characters: [{ characterId: 'qian', name: '千仞雪', referenceAnchor: '千仞雪' }], language: 'en', mode: 'full-reference',
+    pictureUses: [{ number: 2, role: 'scene' }, { number: 1, role: 'first-frame' }, { number: 3, role: 'prop' }],
+  });
+  assert.match(referenced.prompt, /<Picture 1> is the opening composition reference/u);
+  assert.match(referenced.prompt, /<Subject \d+> is the place, referenced from <Picture 2>/u);
+  assert.match(referenced.prompt, /partially_preserved - architecture, fixed furnishings, and light only\. People appear where the shot places them\. Furnishings remain in their own material and structure\. Size follows the people in this shot\. A platform edge against a lower back remains about waist high\. A mark on a wall or base remains smaller than that person's head/u);
+  assert.match(referenced.prompt, /<Subject \d+> is the prop, referenced from <Picture 3>/u);
+  assert.match(referenced.prompt, /A mark that fills its reference picture remains only the drawing of that mark/u);
+  assert.doesNotMatch(referenced.prompt, /environment layout and lighting reference/u);
 });
 
 console.log(`h3PerformancePlan: ${groups} groups passed`);

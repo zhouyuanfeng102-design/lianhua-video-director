@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { assertH3DescriptionLanguage } from './fixtures/h3LanguageContract';
 import { DIALOGUE_VOICE_IDENTITY_RULE, NO_DIALOGUE_PERFORMANCE_RULE, VISUAL_IDENTITY_SPEECH_SCOPE_RULE } from '../src/audioPromptPolicy';
 import { SPOKEN_CUE_CONTENT_RULE } from '../src/videoInteractionRules';
+import { VIDEO_WARDROBE_SCOPE_RULE } from '../src/videoConversionRules';
 import {
   H3_DIALOGUE_FORMAT_RULE,
   H3_FINAL_BODY_FORMAT_RULE,
@@ -454,9 +455,22 @@ for (const required of [
   'overall_soundscape只写整段简短的全局声学概括',
   '具体对白原字、说话人/声源ID、某一镜无对白',
   '不得新增negative_prompt、negative、反向提示词或其它section',
+  '后腰抵着的边留在腰的高度',
+  'A platform edge against the lower back remains about waist high',
+  'A mark on a wall or base remains smaller than the head of that person',
+  '手里的衣领是这一套的衣领',
+  'The collar in his hand remains the collar of the garment already on her',
 ]) {
   assert.equal(H3_FINAL_BODY_FORMAT_RULE.includes(required), true,
     `final H3 body rule mentions ${required}`);
 }
+const chineseBodyRule = omitCopiedEnglishExamples(H3_FINAL_BODY_FORMAT_RULE);
+assert.match(chineseBodyRule, /手里的衣领是这一套的衣领/u);
+assert.match(chineseBodyRule, /场景、服装、道具和风格图写进对应 Subject/u);
+assert.match(chineseBodyRule, /后腰抵着的边留在腰的高度/u);
+assert.doesNotMatch(chineseBodyRule, /The collar in his hand/u);
+assert.doesNotMatch(chineseBodyRule, /waist high/u);
+assert.match(VIDEO_WARDROBE_SCOPE_RULE, /脱、扯、解、滑落作用在这个人此刻已经穿着的那一件上/u);
+assert.match(VIDEO_WARDROBE_SCOPE_RULE, /原文明确先穿上、披上某件资料里没有的衣服时，那件从穿上的动作出现，之后才能被脱掉/u);
 
 console.log('H3 prompt protocol parser and final-body contract checks passed');

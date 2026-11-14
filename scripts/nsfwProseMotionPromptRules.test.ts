@@ -4,6 +4,9 @@ import { frameNsfwTextRequest, LIANHUA_NSFW_CREATIVE_GUIDANCE, NSFW_PROSE_JOINED
 import {
   defaultStoryExpansionPresets,
   LEGACY_STORY_EXPANSION_GENERAL_V1_5_0,
+  LEGACY_STORY_EXPANSION_GENERAL_V1_5_1,
+  LEGACY_STORY_EXPANSION_GENERAL_V1_5_2,
+  LEGACY_STORY_EXPANSION_GENERAL_V1_5_3,
   normalizeState,
 } from '../src/storage';
 import { legacyStoryPreparationV130 } from './fixtures/storyPreparationLegacyPresets';
@@ -29,7 +32,10 @@ const capture = (content: string): CapturedStoryRequest[] => {
 
 const joined = (request: CapturedStoryRequest): string => request.messages.map((message) => message.content).join('\n');
 
-assert.match(LIANHUA_NSFW_CREATIVE_GUIDANCE, /跟这串缓慢起伏连在一起/u);
+assert.match(LIANHUA_NSFW_CREATIVE_GUIDANCE, /跟这一次进出连在一起/u);
+assert.match(NSFW_PROSE_JOINED_MOTION_RULE, /进的时候龟头穿过她两腿之间的阴唇，留在阴道里面/u);
+assert.match(NSFW_PROSE_JOINED_MOTION_RULE, /龟头是伸进嘴里的那一端，指向她的口腔/u);
+assert.match(NSFW_PROSE_JOINED_MOTION_RULE, /嘴唇从龟头沿着肉棒含到他的腹股沟/u);
 assert.doesNotMatch(LIANHUA_NSFW_CREATIVE_GUIDANCE, /跟这一下对齐/u);
 assert.match(NSFW_PROSE_JOINED_MOTION_RULE, /甲的手握住乙的肉棒/u);
 assert.match(NSFW_PROSE_JOINED_MOTION_RULE, /两套句子不并列/u);
@@ -60,7 +66,8 @@ const expandRequests = capture('扩写后的正文。');
 await requestStoryExpansion(config, adultSource);
 const expandPrompt = joined(expandRequests[0]);
 assert.match(expandPrompt, /甲的手握住乙的肉棒/u);
-assert.match(expandPrompt, /不另写一套加快或抽送/u);
+assert.match(expandPrompt, /不另写一套加快或猛插/u);
+assert.match(expandPrompt, /肉棒沿阴道进出/u);
 assert.match(expandPrompt, /踢、扔、躲、挡/u);
 assert.equal(expandPrompt.includes('NSFW 视频动作细化规则'), false);
 const ordinaryRequests = capture('扩写后的正文。');
@@ -97,16 +104,35 @@ assert.match(understanding, /evidence 仍逐字摘录原文/u);
 assert.match(writing, /不把这一段写成每一击的执行路径/u);
 
 const current = defaultStoryExpansionPresets[0];
-assert.equal(current.version, '1.5.1');
+assert.equal(current.version, '1.5.4');
+assert.match(current.systemPrompt, /龟头是伸进嘴里的那一端/u);
+assert.match(current.systemPrompt, /阴唇贴上他的腹股沟/u);
+assert.match(current.systemPrompt, /留在阴道里面/u);
 assert.match(current.systemPrompt, /不按打斗的发力、路径和每一击展开/u);
-assert.match(current.systemPrompt, /不补成一下一下的抽送/u);
+assert.match(current.systemPrompt, /补上这一次进出或这一次含入/u);
+assert.match(current.systemPrompt, /肉棒沿阴道进出/u);
 const upgraded = normalizeState({ storyExpansionPresets: [{ ...LEGACY_STORY_EXPANSION_GENERAL_V1_5_0, updatedAt: 42 }] });
-assert.equal(upgraded.storyExpansionPresets[0].version, '1.5.1');
+assert.equal(upgraded.storyExpansionPresets[0].version, '1.5.4');
 assert.equal(upgraded.storyExpansionPresets[0].systemPrompt, current.systemPrompt);
+const from151 = normalizeState({ storyExpansionPresets: [{ ...LEGACY_STORY_EXPANSION_GENERAL_V1_5_1, updatedAt: 7 }] });
+assert.equal(from151.storyExpansionPresets[0].version, '1.5.4');
+assert.equal(from151.storyExpansionPresets[0].systemPrompt, current.systemPrompt);
+const from152 = normalizeState({ storyExpansionPresets: [{ ...LEGACY_STORY_EXPANSION_GENERAL_V1_5_2, updatedAt: 7 }] });
+assert.equal(from152.storyExpansionPresets[0].version, '1.5.4');
+assert.equal(from152.storyExpansionPresets[0].systemPrompt, current.systemPrompt);
+const from153 = normalizeState({ storyExpansionPresets: [{ ...LEGACY_STORY_EXPANSION_GENERAL_V1_5_3, updatedAt: 7 }] });
+assert.equal(from153.storyExpansionPresets[0].version, '1.5.4');
+assert.equal(from153.storyExpansionPresets[0].systemPrompt, current.systemPrompt);
+const edited153 = { ...LEGACY_STORY_EXPANSION_GENERAL_V1_5_3, systemPrompt: `${LEGACY_STORY_EXPANSION_GENERAL_V1_5_3.systemPrompt}\n用户自定。` };
+assert.deepEqual(normalizeState({ storyExpansionPresets: [edited153] }).storyExpansionPresets, [edited153]);
+const edited152 = { ...LEGACY_STORY_EXPANSION_GENERAL_V1_5_2, systemPrompt: `${LEGACY_STORY_EXPANSION_GENERAL_V1_5_2.systemPrompt}\n用户自定。` };
+assert.deepEqual(normalizeState({ storyExpansionPresets: [edited152] }).storyExpansionPresets, [edited152]);
+const edited151 = { ...LEGACY_STORY_EXPANSION_GENERAL_V1_5_1, systemPrompt: `${LEGACY_STORY_EXPANSION_GENERAL_V1_5_1.systemPrompt}\n用户自定。` };
+assert.deepEqual(normalizeState({ storyExpansionPresets: [edited151] }).storyExpansionPresets, [edited151]);
 const edited = { ...LEGACY_STORY_EXPANSION_GENERAL_V1_5_0, systemPrompt: `${LEGACY_STORY_EXPANSION_GENERAL_V1_5_0.systemPrompt}\n用户自定。` };
 assert.deepEqual(normalizeState({ storyExpansionPresets: [edited] }).storyExpansionPresets, [edited]);
 const from130 = normalizeState({ storyExpansionPresets: [legacyStoryPreparationV130] });
-assert.equal(from130.storyExpansionPresets[0].version, '1.5.1');
+assert.equal(from130.storyExpansionPresets[0].version, '1.5.4');
 assert.equal(from130.storyExpansionPresets[0].systemPrompt, current.systemPrompt);
 
 console.log('NSFW prose motion prompt rule checks passed');

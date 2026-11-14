@@ -2,6 +2,7 @@ import type { H3IdentityBindings, ReferenceRole } from './types';
 import { buildPromptTranslationDocument } from './promptTranslationDocument';
 import { maskVideoPictureReferenceLiterals } from './videoPictureReferences';
 import { h3KeepsScore, renderH3PerformancePlan } from './h3PerformancePlan';
+import { h3TraitPictureLines } from './h3TraitPictures';
 import { H3_EXISTING_SOUND_SUMMARY_EN, H3_EXISTING_SOUND_SUMMARY_ZH } from './h3DeliverySections';
 
 type Identity = H3IdentityBindings['characters'][number];
@@ -400,14 +401,38 @@ export const renderH3ReferenceExecution = (input: H3ReferenceExecutionInput): H3
   }
   body = restoreSpeakerLabels(renderNames(renderVoiceTokens(applyEdits(body, legacyEdits), voiceTokens), characters), speakerLabels.labels);
   let definitionBody = [applyEdits(originalDefinitions, definitionEdits).trim(), ...extraDefinitions].filter(Boolean).join('\n');
-  const uses: Partial<Record<ReferenceRole, string>> = { 'first-frame': 'opening composition reference', 'last-frame': 'ending composition reference',
-    scene: 'environment layout and lighting reference', prop: 'prop appearance reference', style: 'visual style reference', motion: 'action pose reference',
-    composition: 'composition reference', camera: 'camera composition reference', 'clay-render': 'form and spatial structure reference', creative: 'visual concept reference',
-    'middle-frame': 'intermediate composition and continuity reference' };
+  const uses: Partial<Record<ReferenceRole, string>> = {
+    'first-frame': 'opening composition reference', 'last-frame': 'ending composition reference',
+    'middle-frame': 'intermediate composition and continuity reference',
+    composition: 'composition reference', camera: 'camera composition reference',
+  };
+  const en = input.language === 'en';
+  const usedTraitSubjects = new Set([...definitionBody.matchAll(/<Subject\s+(\d+)>/gu)].map((match) => Number(match[1])));
+  for (const character of characters) {
+    const number = character.subjectToken.match(/<Subject\s+(\d+)>/u)?.[1];
+    if (number) usedTraitSubjects.add(Number(number));
+  }
+  const nextTraitSubject = (): string => {
+    let number = 1;
+    while (usedTraitSubjects.has(number)) number += 1;
+    usedTraitSubjects.add(number);
+    return `<Subject ${number}>`;
+  };
+  const traitRetention: string[] = [];
   for (const use of input.pictureUses || []) {
+    if (!Number.isSafeInteger(use.number) || use.number < 1) continue;
+    if (new RegExp(`^<Picture ${use.number}>[ \\t]+(?:is|是|为)\\b`, 'mu').test(mask(definitionBody))) continue;
+    if (new RegExp(`<Subject\\s+\\d+>[^\\n]*<Picture\\s+${use.number}>(?![0-9])`, 'u').test(definitionBody)) continue;
+    if (new RegExp(`<Picture\\s+${use.number}>(?![0-9])`, 'u').test(mask(prompt))) continue;
+    const trait = h3TraitPictureLines(use.role, en);
     const purpose = uses[use.role];
-    if ((!purpose && !use.text) || !Number.isSafeInteger(use.number) || use.number < 1
-      || new RegExp(`^<Picture ${use.number}>[ \\t]+(?:is|是|为)\\b`, 'mu').test(mask(definitionBody))) continue;
+    if (trait) {
+      const subject = nextTraitSubject();
+      definitionBody += `\n${trait.definition(subject, use.number)}`;
+      traitRetention.push(trait.retention(subject));
+      continue;
+    }
+    if (!purpose && !use.text) continue;
     definitionBody += use.text ? `\n<Picture ${use.number}> ${use.text}` : `\n<Picture ${use.number}> is the ${purpose}.`;
   }
   const summary = sections.find((section) => section.name === 'summary');
@@ -417,7 +442,7 @@ export const renderH3ReferenceExecution = (input: H3ReferenceExecutionInput): H3
   const summaryBody = /^\[reference generation(?:[^\]]*)\]/u.test(authoredSummary) ? authoredSummary : `[reference generation] ${authoredSummary}`;
   const partRetention = (input.pictureUses || []).flatMap((use) => use.role === 'private-part' && use.text
     ? [`<Picture ${use.number}>: ${use.text}`] : []);
-  const retentionBody = [renderRetention(retention?.body || '', characters), ...partRetention].filter(Boolean).join('\n');
+  const retentionBody = [renderRetention(retention?.body || '', characters), ...partRetention, ...traitRetention].filter(Boolean).join('\n');
   const bodyTail = /[\r\n]$/u.test(body) ? body : `${body}\n`;
   // Missing legacy sound sections do not mean the shot's existing sounds are
   // muted. Summarize their existing scope without introducing a global bed.

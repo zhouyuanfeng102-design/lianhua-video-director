@@ -49,6 +49,9 @@ assert.match(SCENE_STAGING_GENERATION_RULE, /主观视点、正脸、反打和�
 assert.match(SCENE_STAGING_GENERATION_RULE, /头留在胸口朝向的这一侧，可以在肩线内看向当前对象，不能转到胸口的反面/u);
 assert.match(SCENE_STAGING_GENERATION_RULE, /对话中人物停步偏头看向同伴时[\s\S]*不把它扩写成身体转身或掉头/u);
 assert.match(SCENE_STAGING_GENERATION_RULE, /原文明确已转身面对同伴[\s\S]*重新面向路线前方、沿同一方向继续/u);
+assert.match(SCENE_STAGING_GENERATION_RULE, /本段正文已经写这个人站在房间里时，startState 写他已经在的位置，不写“未入画”/u);
+assert.match(SCENE_STAGING_GENERATION_RULE, /人已经靠着家具时，第一句用身体写出接触高度：后腰抵着的边留在腰的高度/u);
+assert.match(SCENE_STAGING_GENERATION_RULE, /参考图的取景，以及它在那张图里看起来多大，不是它在这一镜里的尺寸/u);
 assert.match(VIDEO_WORLD_SPACE_CAMERA_RULE, /cameraTarget[\s\S]*bodyFacing、gazeTarget及actionTarget分开/u);
 assert.match(VIDEO_WORLD_SPACE_CAMERA_RULE, /worldRelations、participants[\s\S]*具名人物实例[\s\S]*同一时刻唯一的画面位置与可见范围/u);
 assert.match(VIDEO_WORLD_SPACE_CAMERA_RULE, /越肩的肩、后脑与背部属于该具名人物的同一个身体[\s\S]*不再另置一份在中景或背景/u);

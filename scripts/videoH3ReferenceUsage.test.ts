@@ -78,7 +78,18 @@ test('空manifest五图的用途与人物身份到达实际RunningHub提示词�
     assert.equal(result.draft.h3ReferenceBinding?.basePrompt, input.draft.prompt);
     assert.match(result.draft.prompt, language === 'en' ? /<Picture 1> opening composition reference/u : /<Picture 1> 开场构图参考/u);
     assert.match(result.draft.prompt, language === 'en' ? /<Picture 2> ending composition reference/u : /<Picture 2> 结束构图参考/u);
-    assert.match(result.draft.prompt, language === 'en' ? /<Picture 3> environment layout and lighting reference/u : /<Picture 3> 场景空间与光照参考/u);
+    assert.match(result.draft.prompt, language === 'en'
+      ? /<Subject \d+> is the place, referenced from <Picture 3>/u
+      : /<Subject \d+> 是这处空间，视觉参考为 <Picture 3>/u);
+    assert.match(result.draft.prompt, /partially_preserved/u);
+    assert.match(result.draft.prompt, language === 'zh'
+      ? /锁住的衣服是这张图里已经穿的那一套/u
+      : /locks features and the clothes already in that picture/u);
+    if (language === 'en') assert.match(result.draft.prompt, /Fabric that is pulled or slid remains those same clothes/u);
+    assert.match(result.draft.prompt, language === 'zh'
+      ? /不把参考图的正脸贴到后脑上/u
+      : /does not place that front face on the back of the head/u);
+    assert.doesNotMatch(result.draft.prompt, /environment layout and lighting reference|场景空间与光照参考/u);
     assert.match(result.draft.prompt, /<Subject 1> is 马雷 referenced from <Picture 4>/u);
     assert.match(result.draft.prompt, /<Subject 2> is 绝死绝命 referenced from <Picture 5>/u);
     assert.equal(withoutSubjectTokens(result.draft.prompt).split(input.action).length, 3, 'the authored actions are unchanged');
@@ -99,13 +110,15 @@ test('取消只清空实际输入槽，Picture编号按模型仍接收的图片�
   const input = fixture(); const initial = prepare(input).draft;
   const removed = prepare(input, { ...initial, ...removeVideoReference(initial, 'opening') }).draft;
   assert.match(removed.prompt, /<Picture 1> ending composition reference/u);
-  assert.match(removed.prompt, /<Picture 2> environment layout and lighting reference/u);
+  assert.match(removed.prompt, /<Subject \d+> is the place, referenced from <Picture 2>/u);
+  assert.doesNotMatch(removed.prompt, /environment layout and lighting reference/u);
   const nodes = nodesFor(removed);
   assert.equal(nodes.get('141'), ''); assert.equal(nodes.get('142'), 'uploaded/ending.png');
   assert.equal(nodes.get('143'), 'uploaded/hall.png'); assert.equal(nodes.get('150'), removed.prompt);
   const dense = prepare(input, removed, { ...api, provider: 'generic', requestTemplate: undefined }).draft;
   assert.match(dense.prompt, /<Picture 1> ending composition reference/u);
-  assert.match(dense.prompt, /<Picture 2> environment layout and lighting reference/u);
+  assert.match(dense.prompt, /<Subject \d+> is the place, referenced from <Picture 2>/u);
+  assert.doesNotMatch(dense.prompt, /environment layout and lighting reference/u);
   const swapped = prepare(input, { ...initial, ...videoReferenceSelection(moveVideoReference(initial.references, 0, 1)) }).draft;
   assert.match(swapped.prompt, /<Picture 1> ending composition reference/u);
   assert.match(swapped.prompt, /<Picture 2> opening composition reference/u);
@@ -139,7 +152,10 @@ test('手改、冻结重试、无来源及未声明图片槽顺序继续保留�
   assert.equal(prepare(input, frozen).draft, frozen);
   const noSource = { ...input.draft, source: undefined };
   assert.equal(prepare(input, noSource).draft.prompt, noSource.prompt);
-  assert.equal(prepare(input, input.draft, { ...api, runningHubH3ReferenceImages: undefined }).draft.prompt, input.draft.prompt);
+  const mappedOnly = prepare(input, input.draft, { ...api, runningHubH3ReferenceImages: undefined }).draft;
+  assert.match(mappedOnly.prompt, /<Subject \d+> is the place, referenced from <Picture 3>/u);
+  assert.match(mappedOnly.prompt, /partially_preserved/u);
+  assert.equal(prepare(input, input.draft, { ...api, runningHubH3ReferenceImages: undefined, runningHubMappedFields: undefined }).draft.prompt, input.draft.prompt);
 });
 
 test('六字段稿保持首镜与At切点，新增用途不污染对白或声音字面量', () => {
@@ -153,8 +169,9 @@ test('六字段稿保持首镜与At切点，新增用途不污染对白或声音
   const draft = { ...prepared, prompt: original, h3ReferenceBinding: { ...prepared.h3ReferenceBinding!, basePrompt: original, renderedPrompt: original } };
   const result = prepare(input, draft).draft;
   assert.equal(getH3PromptProtocolIssue(result.prompt, original, [
-    ...[1, 2, 3, 4, 5].map((n) => `<Picture ${n}>`), '<Subject 1>', '<Subject 2>',
+    ...[1, 2, 3, 4, 5].map((n) => `<Picture ${n}>`), '<Subject 1>', '<Subject 2>', '<Subject 3>',
   ]), undefined);
+  assert.match(result.prompt, /<Subject 3> 是这处空间，视觉参考为 <Picture 3>/u);
   assert.match(result.prompt, /<Picture 2> 结束构图参考/u, 'a protected literal is not an existing image binding');
   assert.match(result.prompt, /<sound>原样<Picture 2>撞击声<\/sound>/u);
   assert.deepEqual(readH3PromptProtocol(result.prompt)?.sections, readH3PromptProtocol(original)?.sections);
@@ -180,7 +197,8 @@ test('实际消费顺序同时驱动人物编号与图像用途，保持上传�
   const result = prepare(input, input.draft, reordered).draft;
   assert.match(result.prompt, /<Picture 4> opening composition reference/u);
   assert.match(result.prompt, /<Picture 5> ending composition reference/u);
-  assert.match(result.prompt, /<Picture 3> environment layout and lighting reference/u);
+  assert.match(result.prompt, /<Subject \d+> is the place, referenced from <Picture 3>/u);
+  assert.doesNotMatch(result.prompt, /environment layout and lighting reference/u);
   assert.match(result.prompt, /<Subject 1> is 马雷 referenced from <Picture 1>/u);
   assert.match(result.prompt, /<Subject 2> is 绝死绝命 referenced from <Picture 2>/u);
   const body = buildVideoApiBody(reordered, result, result.references.map((reference) => `uploaded/${reference.assetId}.png`));
@@ -211,7 +229,7 @@ test('3.5/8.5/13.5秒分镜图片按已有阶段与镜号描述，不再由槽�
         ? `<Picture ${index + 1}> 本段 ${time} 秒、第 ${index + 1} 镜对应动作阶段的构图与空间参考`
         : `<Picture ${index + 1}> composition and spatial reference for the action phase at ${time}s in this clip (Shot ${index + 1})`));
     }
-    assert.doesNotMatch(result.prompt, /opening composition|ending composition|开场构图|结束构图|intermediate frame 1 progression/u);
+    assert.doesNotMatch(result.prompt, /<(?:Picture|Subject) \d+>[^\n]*(?:opening composition|ending composition|开场构图|结束构图|intermediate frame 1 progression)/u);
     assert.equal(withoutSubjectTokens(result.prompt).split(input.action).length, 3);
     assert.deepEqual(readH3PromptProtocol(result.prompt)?.shots, readH3PromptProtocol(input.draft.prompt)?.shots);
     assert.equal(prepare(input, result).draft.prompt, result.prompt);

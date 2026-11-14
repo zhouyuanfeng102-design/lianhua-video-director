@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { defaultStoryExpansionPresets, normalizeState } from '../src/storage';
+import { normalizeState } from '../src/storage';
 import { normalizeStoryVisualConversionSnapshot } from '../src/semanticSequencePlan';
 import { matchingStoryVisualConversion, rememberStoryVisualConversion, storyVisualPreparationFingerprint } from '../src/storyVisualConversion';
 import { STORY_VISUAL_ENGINE_VERSION, type StoryVisualActionPlan, type StoryVisualParagraph } from '../src/storyVisualAction';
@@ -47,8 +47,8 @@ assert.equal(oldSnapshot.actionPlan, undefined, 'old projects remain readable wi
 
 const legacy = JSON.parse(readFileSync(new URL('./fixtures/storyExpansionV144.json', import.meta.url), 'utf8'));
 const migrated = normalizeState({ ...initial, storyExpansionPresets: [legacy] });
-assert.equal(migrated.storyExpansionPresets[0].version, '1.5.0');
-assert.equal(migrated.storyExpansionPresets[0].systemPrompt, defaultStoryExpansionPresets[0].systemPrompt);
+assert.equal(migrated.storyExpansionPresets[0].version, legacy.version);
+assert.equal(migrated.storyExpansionPresets[0].systemPrompt, legacy.systemPrompt);
 for (const edit of [{ name: '我的规则' }, { enabled: false }, { systemPrompt: `${legacy.systemPrompt}\n我的补充` }, { custom: '用户字段' }]) {
   const custom = { ...legacy, ...edit };
   assert.deepEqual(normalizeState({ ...initial, storyExpansionPresets: [custom] }).storyExpansionPresets[0], custom,
