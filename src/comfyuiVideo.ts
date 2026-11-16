@@ -1,6 +1,8 @@
 import type { ComfyVideoInputBinding, ComfyVideoMapping, ComfyVideoWorkflowPreset, VideoGenerationRuntime, VideoImageReference } from './videoGenerationTypes';
 import type { VideoGenerationTask } from './types';
 import { assertVideoReferenceSlots, videoReferenceSlotIndex } from './videoReferenceSlots';
+import { convertComfyUICanvasWorkflow, isComfyUICanvasWorkflow } from './comfyuiCanvas';
+import { readH3ReferenceImageOrders } from './h3ReferenceImageOrder';
 
 type Node = { class_type: string; inputs: Record<string, unknown>; _meta?: { title?: string } };
 export type ComfyVideoNodeMap = Record<string, Node>;
@@ -35,12 +37,20 @@ export const parseComfyVideoWorkflow = (text: string): ComfyVideoNodeMap => {
   let parsed: unknown;
   try { parsed = JSON.parse(text); } catch { throw new Error('视频工作流不是有效 JSON。'); }
   if (!record(parsed)) throw new Error('视频工作流必须是 API 节点对象。');
-  const raw = record(parsed.prompt) ? parsed.prompt : parsed;
-  if (Array.isArray(raw.nodes) || Array.isArray(raw.links)) throw new Error('请从 ComfyUI 导出 API 格式工作流；画布文件不能直接执行。');
+  const document = record(parsed.prompt) ? parsed.prompt : parsed;
+  const raw = isComfyUICanvasWorkflow(document) ? convertComfyUICanvasWorkflow(document) : document;
   if (!Object.values(raw).every((item) => record(item) && typeof item.class_type === 'string' && record(item.inputs))) {
     throw new Error('视频工作流包含无效的 API 节点。');
   }
   return raw as ComfyVideoNodeMap;
+};
+
+/** Import/save boundary only: executable API documents retain their original
+ * text so unrelated large integer literals and formatting are not rewritten. */
+export const normalizeComfyVideoWorkflowJson = (text: string): string => {
+  const parsed: unknown = JSON.parse(text);
+  const document = record(parsed) && record(parsed.prompt) ? parsed.prompt : parsed;
+  return isComfyUICanvasWorkflow(document) ? JSON.stringify(convertComfyUICanvasWorkflow(document), null, 2) : text;
 };
 
 const ancestors = (nodes: ComfyVideoNodeMap, outputId: string): Set<string> => {
@@ -144,8 +154,23 @@ export const importComfyVideoWorkflow = (text: string): { workflowJson: string; 
   if (!prompt.length) Object.entries(nodes).filter(([id]) => included.has(id)).forEach(([id, node]) => {
     if (/prompt|提示词|输入文本/iu.test(node._meta?.title || '') && typeof node.inputs.value === 'string') pushText(id, 'value');
   });
-  const images = Object.entries(nodes).filter(([id, node]) => included.has(id) && /^LoadImage$/iu.test(node.class_type) && typeof node.inputs.image === 'string')
+  const imageInputs = Object.entries(nodes).filter(([id, node]) => included.has(id) && /^LoadImage$/iu.test(node.class_type) && typeof node.inputs.image === 'string')
     .map(([nodeId]) => ({ nodeId, inputName: 'image' }));
+  // H3 dynamic inputs have an explicit physical order independent of node IDs.
+  // Reuse the same graph evidence as Picture numbering; never rename existing
+  // task mappings or saved presets as a side effect of this new import.
+  const promptFields = new Set(prompt.map((binding) => JSON.stringify(binding)));
+  const orderedImages = readH3ReferenceImageOrders(nodes)
+    .filter((order) => included.has(order.consumerNodeId)
+      && order.prompt.some((binding) => promptFields.has(JSON.stringify(binding))))
+    .flatMap((order) => order.images.flatMap((image) => image.source ? [image.source] : []));
+  const imageByField = new Map(imageInputs.map((binding) => [JSON.stringify(binding), binding]));
+  const seenImages = new Set<string>();
+  const images = [...orderedImages, ...imageInputs].flatMap((binding) => {
+    const key = JSON.stringify(binding);
+    if (seenImages.has(key) || !imageByField.has(key)) return [];
+    seenImages.add(key); return [imageByField.get(key)!];
+  });
   const parameters: Record<string, ComfyVideoInputBinding> = {};
   const candidates: Record<string, string[]> = { seed: ['noise_seed', 'seed'], steps: ['steps'], cfg: ['cfg'], width: ['width'], height: ['height'], fps: ['frame_rate', 'fps'] };
   for (const [name, fields] of Object.entries(candidates)) {
@@ -154,7 +179,12 @@ export const importComfyVideoWorkflow = (text: string): { workflowJson: string; 
       if (inputName) { parameters[name] = { nodeId, inputName }; break; }
     }
   }
-  return { workflowJson: text, mapping: { prompt, images, parameters, outputNodeId: preferred?.[0] } };
+  const document: unknown = JSON.parse(text);
+  const raw = record(document) && record(document.prompt) ? document.prompt : document;
+  // Store the converted executable graph once. Existing API JSON stays byte
+  // for byte intact, including literals not bound by this importer.
+  const workflowJson = isComfyUICanvasWorkflow(raw) ? JSON.stringify(nodes, null, 2) : text;
+  return { workflowJson, mapping: { prompt, images, parameters, outputNodeId: preferred?.[0] } };
 };
 
 export const bindComfyVideoWorkflow = (

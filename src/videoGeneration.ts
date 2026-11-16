@@ -11,6 +11,7 @@ import { formatVideoHttpError } from './videoHttpError';
 import { formatVideoImageSize, videoImageDataSize } from './videoReferenceCompression';
 import { hasObsoleteVideoFileMapping, videoApiFileQueryEndpoint } from './videoApiLegacyConfig';
 import { defaultComfyVideoConfig } from './videoGenerationTypes';
+import { resolveComfyVideoWorkflow } from './videoWorkflowSelection';
 import { defaultRhTvApi, RHTV_ORIGIN } from './rhtvBridge';
 import { RHWEB_ORIGIN } from './runningHubWeb';
 import { findProjectVideoTask, snapshotVideoAssetSourceTask } from './videoProvenance';
@@ -1609,7 +1610,11 @@ export class VideoGenerationEngine {
     const comfy: ComfyVideoConfig = reuse?.connection.comfyui
       ? { ...reuse.connection.comfyui, apiKey: await this.key(reusedTask!), workflows: reuse.connection.workflow ? [reuse.connection.workflow] : [] }
       : state.settings.comfyuiVideo || defaultComfyVideoConfig;
-    const workflow = reuse?.connection.workflow || comfy.workflows.find((entry) => entry.id === (draft.workflowId || comfy.activeWorkflowId));
+    const workflow = reuse?.connection.workflow || resolveComfyVideoWorkflow(comfy, draft.workflowId);
+    if (!reuse && draft.backend === 'comfyui' && workflow) {
+      draft.workflowId = workflow.id;
+      validationDraft.workflowId = workflow.id;
+    }
     validationDraft.references = videoReferenceUsage(validationDraft.references, { backend: draft.backend, workflow, api: config,
       slotRoles: validationDraft.referenceSlotRoles ?? (draft.origin === 'custom' && draft.promptMode === 'raw' ? [] : undefined) });
     if (requestedTail) {
@@ -1638,7 +1643,11 @@ export class VideoGenerationEngine {
       throw new Error(`批量第 ${index + 1} 项无法提交：${config?.provider === 'runninghub' ? '请先启用 RunningHub，并选择已填写云端 ID 的工作流。' : '请先启用并设置视频 API。'}`);
     }
     this.requireRunningHubCredential(config, config?.apiKey);
-    if (draft.backend === 'comfyui' && (!comfy.enabled || !comfy.baseUrl.trim() || !workflow)) throw new Error(`批量第 ${index + 1} 项无法提交：请先启用 ComfyUI 视频并选择工作流。`);
+    if (draft.backend === 'comfyui') {
+      if (!comfy.enabled) throw new Error(`批量第 ${index + 1} 项无法提交：请先启用 ComfyUI 视频。`);
+      if (!comfy.baseUrl.trim()) throw new Error(`批量第 ${index + 1} 项无法提交：请先填写 ComfyUI 视频地址。`);
+      if (!workflow) throw new Error(`批量第 ${index + 1} 项无法提交：${draft.workflowId ? '原选 ComfyUI 视频工作流已不存在，请重新选择工作流。' : '请选择 ComfyUI 视频工作流。'}`);
+    }
     if (requestedTail?.placement.mode === 'replace-all' && !getVideoTailReferencePlacements({
       backend: draft.backend, workflow, api: config, references: draft.references,
     }).options.some((placement) => placement.mode === 'replace-all' && placement.role === requestedTail.placement.role)) {
@@ -2113,7 +2122,8 @@ export class VideoGenerationEngine {
     const config: VideoTaskApiConfig | undefined = reuse?.connection.api ? migrateRunningHubVideoApiImageProtocol({ ...reuse.connection.api, apiKey: await this.recoverCredential(reusedTask!) })
       : draft.backend === 'api' ? resolveConfiguredVideoApi(state.settings, draft) : undefined;
     const comfy = reuse?.connection.comfyui ? { ...reuse.connection.comfyui, apiKey: await this.key(reusedTask!), workflows: reuse.connection.workflow ? [reuse.connection.workflow] : [] } : state.settings.comfyuiVideo || defaultComfyVideoConfig;
-    const workflow = reuse?.connection.workflow || comfy.workflows.find((item) => item.id === (draft.workflowId || comfy.activeWorkflowId));
+    const workflow = reuse?.connection.workflow || resolveComfyVideoWorkflow(comfy, draft.workflowId);
+    if (!reuse && draft.backend === 'comfyui' && workflow) draft.workflowId = workflow.id;
     draft.references = videoReferenceUsage(draft.references, { backend: draft.backend, workflow, api: config,
       slotRoles: draft.referenceSlotRoles ?? (draft.origin === 'custom' && draft.promptMode === 'raw' ? [] : undefined) });
     const boundDraft = this.prepareReferenceDraft(project, draft, { backend: draft.backend, workflow, api: config });
@@ -2132,7 +2142,11 @@ export class VideoGenerationEngine {
       throw new Error(config?.provider === 'runninghub' ? '请先启用 RunningHub，并选择已填写云端 ID 的工作流。' : '请先启用并设置视频 API 提交端点。');
     }
     this.requireRunningHubCredential(config, config?.apiKey);
-    if (draft.backend === 'comfyui' && (!comfy.enabled || !comfy.baseUrl.trim() || !workflow)) throw new Error('请先启用 ComfyUI 视频并选择视频工作流。');
+    if (draft.backend === 'comfyui') {
+      if (!comfy.enabled) throw new Error('请先启用 ComfyUI 视频。');
+      if (!comfy.baseUrl.trim()) throw new Error('请先填写 ComfyUI 视频地址。');
+      if (!workflow) throw new Error(draft.workflowId ? '原选 ComfyUI 视频工作流已不存在，请重新选择工作流。' : '请选择 ComfyUI 视频工作流。');
+    }
     assertNoEmbeddedVideoCredentials(draft.parameters, '视频参数');
     if (draft.backend === 'api' && config?.requestTemplate?.trim()) {
       let template: unknown;

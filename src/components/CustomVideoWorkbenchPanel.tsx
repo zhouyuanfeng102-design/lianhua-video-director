@@ -5,6 +5,7 @@ import type { CustomVideoDraft, VideoGenerationController, VideoGenerationDraft,
 import { assetPreviewUrl } from '../media';
 import { isVideoGenerationTask } from '../generationTasks';
 import { videoConfiguredApiState, videoDraftSource, videoParameterConnectionKey, videoSourceDraftPatch } from '../videoGenerationSource';
+import { resolveComfyVideoWorkflow, restoreComfyVideoWorkflowId } from '../videoWorkflowSelection';
 import { availableVideoParameterKeys, changeVideoParameterText, readVideoParameterText, videoOutputParameterPresentation } from '../videoOutputParameters';
 import { VideoOutputParameters } from './VideoOutputParameters';
 import { videoAudioBindingId, isVideoDirectorAudio } from '../videoAudioReferences';
@@ -76,7 +77,8 @@ export function CustomVideoWorkbenchPanel({ project, settings, controller, draft
   const source = videoDraftSource(draft);
   const apiState = useMemo(() => videoConfiguredApiState(settings, { ...draft, parameters: draft.parameters || {} }), [settings, draft]);
   const api = apiState.api;
-  const workflow = settings.comfyuiVideo?.workflows.find((item) => item.id === draft.workflowId);
+  const workflowId = draft.reuseTaskId ? draft.workflowId : restoreComfyVideoWorkflowId(settings.comfyuiVideo, draft.workflowId);
+  const workflow = resolveComfyVideoWorkflow(settings.comfyuiVideo, workflowId);
   const parameterPresentation = videoOutputParameterPresentation(api, draft.parameters);
   const parameterKeys = availableVideoParameterKeys(source, api, workflow);
   const imageAssets = project.assets.filter((asset) => !asset.missing && asset.mediaType !== 'video' && asset.mediaType !== 'audio'
@@ -172,6 +174,10 @@ export function CustomVideoWorkbenchPanel({ project, settings, controller, draft
     const parsed = readVideoParameterText(nextParameterText);
     saveDraft({ ...nextDraft, parameters: parsed.issue ? {} : parsed.value }, nextParameterText, drafts);
   };
+  useEffect(() => {
+    if (source !== 'comfyui' || draft.reuseTaskId || busy || draft.workflowId === workflowId) return;
+    chooseConnection(workflowId || '');
+  }, [source, draft.reuseTaskId, draft.workflowId, workflowId, busy]);
 
   const updateParameter = (key: string, value: string) => {
     const changed = changeVideoParameterText(parameterText, key, value);
@@ -232,7 +238,7 @@ export function CustomVideoWorkbenchPanel({ project, settings, controller, draft
     if (parameters.issue) { setIssue(parameters.issue); return; }
     setBusy(true); setIssue(''); setNotice('');
     try {
-      await controller.start({ ...draft, origin: 'custom', promptMode: 'raw', source: undefined,
+      await controller.start({ ...draft, ...(source === 'comfyui' ? { workflowId } : {}), origin: 'custom', promptMode: 'raw', source: undefined,
         parameters: parameters.value,
         audioSelectionMode: draft.audioReferences?.length ? 'override' : 'none', reuseTaskId: undefined });
       setNotice('已提交自定义视频任务。');
@@ -315,7 +321,10 @@ export function CustomVideoWorkbenchPanel({ project, settings, controller, draft
           ])}
           {source === 'runninghub' && selectItems('RunningHub 工作流', draft.runningHubWorkflowId || '', (settings.runningHubVideo?.workflows || []).map((item) => ({ id: item.id, label: item.name })))}
           {source === 'runninghub-web' && selectItems('RH 网页应用', draft.runningHubWebAppId || '', (settings.runningHubWeb?.apps || []).map((item) => ({ id: item.id, label: `${item.name} · ${item.site === 'cn' ? '国内站' : '国际站'}`, disabled: !isRunningHubWebAppReady(item) })))}
-          {source === 'comfyui' && selectItems('ComfyUI 工作流', draft.workflowId || '', (settings.comfyuiVideo?.workflows || []).map((item) => ({ id: item.id, label: `${item.name} · ${item.mapping.images.length} 个图槽` })))}
+          {source === 'comfyui' && selectItems('ComfyUI 工作流', workflowId || '', [
+            ...(workflowId && !workflow ? [{ id: workflowId, label: '原选工作流已不存在，请重新选择', disabled: true }] : []),
+            ...(settings.comfyuiVideo?.workflows || []).map((item) => ({ id: item.id, label: `${item.name} · ${item.mapping.images.length} 个图槽` })),
+          ])}
         </div>
         <button type="button" className="btn primary custom-video-submit" disabled={busy || uploadBusy || !draft.prompt.trim()} onClick={() => void submit()}><Send size={15} />{busy ? '提交中' : '生成视频'}</button>
       </div>

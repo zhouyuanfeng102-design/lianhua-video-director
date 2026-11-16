@@ -2,9 +2,16 @@
 
 [返回项目首页](../../README.md) · [下载 Windows EXE / Android APK](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-当前版本：[4.6.9](发布说明-4.6.9.md)。
+当前版本：[4.7.0](发布说明-4.7.0.md)。
 
 历史发布说明按版本归档，原文件名、版本号和正文内容均保留。以下按数字版本倒序排列。
+
+<details>
+<summary>4.7.x（1 份）</summary>
+
+- [4.7.0](发布说明-4.7.0.md)
+
+</details>
 
 <details>
 <summary>4.6.x（10 份）</summary>

@@ -15,6 +15,17 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "4.7.0",
+    releasedAt: "2026-11-16",
+    title: "ComfyUI 视频画布与工作流选择修复",
+    highlights: [
+      "视频工作流支持画布 JSON 导入，复用生图已有转换器，按明确参数、连线和旁路状态生成执行图。",
+      "H3 参考图片按实际输入连线排列，避免按节点编号排序导致图片槽错位。",
+      "单段、批量和自定义视频恢复有效工作流，选择框、图片槽、连接摘要与提交目标保持一致。",
+      "保留各连接参数草稿和历史任务冻结快照；未新增按钮、运行时校验、自动重试或模型请求。",
+    ],
+  },
+  {
     version: "4.6.9",
     releasedAt: "2026-11-16",
     title: "视频导演台交互性能优化",

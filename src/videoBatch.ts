@@ -4,6 +4,7 @@ import { videoTaskIsClearedStoppedHistory } from './videoTaskDeletionSafety';
 import { sourceContentHash } from './sourceIntegrity';
 import { resolveConfiguredVideoApi } from './runningHubVideo';
 import { videoConfiguredApiState } from './videoGenerationSource';
+import { resolveComfyVideoWorkflow } from './videoWorkflowSelection';
 import { offsetVideoReferenceSlotRoles, videoReferenceUsage, type VideoReferenceUsageContext } from './videoReferenceUsage';
 import { assertVideoReferenceSlots, videoReferenceSlotIndex } from './videoReferenceSlots';
 import { prepareVideoH3ReferenceDraft, type VideoH3ReferenceContext } from './videoH3ReferenceBinding';
@@ -408,12 +409,7 @@ export const videoBatchReferenceFingerprint = (
 const selectedComfyVideoWorkflow = (
   settings: AppSettings,
   workflowId: string | undefined,
-) => {
-  const comfyui = settings.comfyuiVideo;
-  if (!comfyui) return undefined;
-  return comfyui.workflows.find((item) => item.id === (workflowId || comfyui.activeWorkflowId))
-    || (!workflowId ? comfyui.workflows[0] : undefined);
-};
+) => resolveComfyVideoWorkflow(settings.comfyuiVideo, workflowId);
 
 /** H3 picture order needs the saved workflow JSON. The request fingerprint keeps using the reduced connection identity. */
 export const videoBatchH3ReferenceContext = (

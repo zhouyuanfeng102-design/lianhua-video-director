@@ -125,6 +125,8 @@ for (const document of ['project-guide.md', 'github-publishing.md', 'android-ins
 }
 const imageRulesResearch = path.join('docs', 'research', 'google-grok-image-rules-2026-10-09.md');
 if (fs.existsSync(path.join(root, imageRulesResearch))) files.push(imageRulesResearch);
+const comfyVideoResearch = path.join('docs', 'research', 'comfyui-video-canvas-and-selection-fix-2026-11-16.md');
+if (fs.existsSync(path.join(root, comfyVideoResearch))) files.push(comfyVideoResearch);
 const releaseNotesDirectory = path.join(root, 'docs', 'releases');
 if (fs.existsSync(releaseNotesDirectory)) {
   for (const entry of fs.readdirSync(releaseNotesDirectory, { withFileTypes: true })) {

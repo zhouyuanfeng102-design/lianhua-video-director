@@ -157,7 +157,7 @@ const activated = activateVideoWorkflowPreset({ ...config, workflows: [custom, s
 assert.equal(activated.activeWorkflowId, second.id);
 assert.equal(activated.enabled, false, 'selecting a workflow never switches on disabled API access');
 
-assert.throws(() => importVideoWorkflowPreset('{"nodes":[],"links":[]}', 'canvas.json', []), /API 格式/u);
+assert.throws(() => importVideoWorkflowPreset('{"nodes":[],"links":[]}', 'canvas.json', []), /没有可执行节点/u);
 assert.throws(() => importVideoWorkflowPreset('not JSON', 'bad.json', []), /有效 JSON/u);
 assert.throws(() => importVideoWorkflowPreset('{"prompt":{},"headers":{"Authorization":"secret"}}', 'unsafe.json', []), /内嵌凭据/u);
 assert.throws(() => importVideoWorkflowPreset(JSON.stringify({ '1': { class_type: 'Custom', inputs: { api_key: 'secret' } } }), 'unsafe.json', []), /密钥只能/u);

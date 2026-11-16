@@ -1,4 +1,4 @@
-import { importComfyVideoWorkflow, parseComfyVideoWorkflow } from './comfyuiVideo';
+import { importComfyVideoWorkflow, normalizeComfyVideoWorkflowJson, parseComfyVideoWorkflow } from './comfyuiVideo';
 import { assertNoEmbeddedVideoCredentials } from './videoGenerationApi';
 import type { ComfyVideoConfig, ComfyVideoInputBinding, ComfyVideoWorkflowPreset } from './videoGenerationTypes';
 
@@ -73,6 +73,7 @@ const jsonPropertyValueSpan = (text: string, path: string[]): [number, number] |
 /** Edit one graph literal, not a task override. Preserve its actual JSON type. */
 export const updateVideoWorkflowInput = (text: string, binding: ComfyVideoInputBinding, nextText: string): string => {
   assertSafeVideoWorkflowJson(text);
+  text = normalizeComfyVideoWorkflowJson(text);
   const previous = readVideoWorkflowInput(text, binding);
   let value: string | number | boolean;
   if (typeof previous === 'string') value = nextText;
@@ -160,7 +161,7 @@ export const copyVideoWorkflowPreset = (source: ComfyVideoWorkflowPreset, workfl
 export const saveVideoWorkflowPreset = (config: ComfyVideoConfig, draft: ComfyVideoWorkflowPreset, now = Date.now()): ComfyVideoConfig => {
   if (!draft.name.trim()) throw new Error('请填写工作流名称后再保存。');
   assertSafeVideoWorkflowJson(draft.workflowJson);
-  const saved = { ...clone(draft), name: draft.name.trim(), updatedAt: now };
+  const saved = { ...clone(draft), workflowJson: normalizeComfyVideoWorkflowJson(draft.workflowJson), name: draft.name.trim(), updatedAt: now };
   const existing = config.workflows.find((item) => item.id === draft.id);
   if (existing && config.activeWorkflowId === draft.id && !isVideoWorkflowReady(saved)) {
     throw new Error('当前正在使用的工作流不能保存为未配置状态。请补全映射，或复制为新的草稿；原工作流未改动。');
@@ -190,11 +191,12 @@ export const deleteVideoWorkflowPreset = (config: ComfyVideoConfig, id: string):
 /** Export only the API document, never the connection object or its key. */
 export const exportVideoWorkflowJson = (workflow: ComfyVideoWorkflowPreset): string => {
   assertSafeVideoWorkflowJson(workflow.workflowJson);
-  return workflow.workflowJson;
+  return normalizeComfyVideoWorkflowJson(workflow.workflowJson);
 };
 
 export const formatVideoWorkflowJson = (text: string): string => {
   assertSafeVideoWorkflowJson(text);
+  text = normalizeComfyVideoWorkflowJson(text);
   const value: unknown = JSON.parse(text);
   const check = (part: unknown): void => {
     if (typeof part === 'number' && (!Number.isFinite(part) || (Number.isInteger(part) && !Number.isSafeInteger(part)))) {

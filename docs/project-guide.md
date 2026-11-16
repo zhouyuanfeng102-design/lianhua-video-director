@@ -2,13 +2,13 @@
 
 莲华视频导演台提供 Windows 便携 EXE 与 Android 手机 APK，把一句话、小说片段、场景资料和参考图整理成可编辑的结构化视频时间轴。
 
-当前版本：**4.4.4** · 2026-11-11。更新与实际交付状态见 [发布说明-4.4.4.md](releases/发布说明-4.4.4.md)。
+当前版本：**4.7.0** · 2026-11-16。更新与实际交付状态见 [发布说明-4.7.0.md](releases/发布说明-4.7.0.md)。
 
 ## 下载 Windows / Android
 
 **[下载最新便携版](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)**
 
-打开下载页，在 Assets（附件）中选择对应客户端：Windows x64 使用 `莲华视频导演台-4.4.4-便携版.exe`；Android 使用 `莲华视频导演台-4.4.4-安卓版.apk`。普通使用者无需安装开发环境。外部 AI 服务需在软件内填写自己的账号和 API 配置。更新前请保存项目并保留原有数据。安卓覆盖安装、备份与跨设备项目包导入见 [安卓安装说明](android-install.md)，开发与签名见 [安卓构建说明](android-build.md)。
+打开下载页，在 Assets（附件）中选择对应客户端：Windows x64 使用 `lianhua-video-director-4.7.0-windows-x64-portable.exe`；Android 使用 `lianhua-video-director-4.7.0-android.apk`。普通使用者无需安装开发环境。外部 AI 服务需在软件内填写自己的账号和 API 配置。更新前请保存项目并保留原有数据。安卓覆盖安装、备份与跨设备项目包导入见 [安卓安装说明](android-install.md)，开发与签名见 [安卓构建说明](android-build.md)。
 
 页面自动生成的 Source code ZIP/TAR 是开发源码；使用软件请下载 EXE 或 APK。手机使用底部导航与纵向内容，不再将整套桌面界面缩小显示；具体平台能力和已执行检查以同版能力与验证记录为准。
 
@@ -79,7 +79,9 @@ npm run desktop
 
 也可以直接双击目录里的 `启动莲华视频导演台.bat`；开发调试使用 `启动开发模式.bat`。
 
-当前版本（3.7.5）：同一人已有两份形态时，不再另存一条没有外观的原名卡。便携包为 `莲华视频导演台-3.7.5-便携版.exe`，交付命令为 `npm run deliver:3.7.5`；详见 [发布说明-3.7.5.md](releases/发布说明-3.7.5.md)。
+当前开发版（4.7.0）：视频工作流支持画布 JSON 与 API 节点 JSON，H3 参考图片按实际连线排列。普通草稿恢复有效的当前工作流，单段、批量和自定义生成的下拉、槽数、摘要与提交目标保持一致；各连接参数和历史任务冻结快照保留。构建命令为 `npm run pack:all`，交付命令为 `npm run deliver:4.7.0`，便携包为 `lianhua-video-director-4.7.0-windows-x64-portable.exe`，安卓包为 `lianhua-video-director-4.7.0-android.apk`。详见 [发布说明-4.7.0.md](releases/发布说明-4.7.0.md)。
+
+历史版本（3.7.5）：同一人已有两份形态时，不再另存一条没有外观的原名卡。便携包为 `莲华视频导演台-3.7.5-便携版.exe`，交付命令为 `npm run deliver:3.7.5`；详见 [发布说明-3.7.5.md](releases/发布说明-3.7.5.md)。
 
 历史版本（3.7.4）：窗口比 1280×800 小时，整页缩进窗口。详见 [发布说明-3.7.4.md](releases/发布说明-3.7.4.md)。
 

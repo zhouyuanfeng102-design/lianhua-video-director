@@ -78,6 +78,9 @@ const STOCK_WIDGET_LAYOUTS: Record<string, readonly (readonly string[])[]> = {
   PreviewImage: [[]],
   VAEEncode: [[]],
   VAEDecode: [[]],
+  // This group-control node has an empty backend INPUT_TYPES schema; its
+  // saved guhai_ig widget is UI state, while persisted node modes do the work.
+  忽略多组孤海: [[]],
 };
 
 const inputEntries = (node: CanvasNode): CanvasInput[] => {
@@ -103,7 +106,7 @@ const widgetInputName = (input: CanvasInput, node: CanvasNode): string => {
 
 const isFrontendWidget = (input: CanvasInput): boolean => (
   FRONTEND_WIDGET_NAMES.has(input.name)
-  || normalizedType(input.type) === 'button'
+  || ['button', 'audioui', 'resolutionpreview'].includes(normalizedType(input.type))
   || isObject(input.widget) && normalizedType(input.widget.type) === 'button'
 );
 
@@ -114,8 +117,8 @@ const apiWidgetInputs = (node: CanvasNode, inputs: CanvasInput[]): JsonObject =>
   const stockNames = layouts ? [...new Set(layouts.flat())] : [];
   const names = [...new Set([...declared, ...stockNames])].filter((name) => !FRONTEND_WIDGET_NAMES.has(name));
   const values = node.widgets_values;
-  const named = isObject(node.widgets_values_named) ? node.widgets_values_named : null;
-  if (node.widgets_values_named !== undefined && !named) throw nodeError(node, '的 widgets_values_named 不是对象');
+  const named = isObject(node.widgets_values_named) ? node.widgets_values_named : isObject(values) ? values : null;
+  if (node.widgets_values_named !== undefined && !isObject(node.widgets_values_named)) throw nodeError(node, '的 widgets_values_named 不是对象');
   if (!layouts && !declared.length && (named && Object.keys(named).length || Array.isArray(values) && values.length)) {
     throw nodeError(node, '缺少能确认参数名称的 input.widget 映射');
   }
@@ -202,6 +205,13 @@ export const convertComfyUICanvasWorkflow = (canvas: JsonObject): JsonObject => 
     }
     return link;
   };
+  // KJNodes Set/Get are virtual graph links. Their saved Constant widget is
+  // the exact lookup key used by the frontend, rather than a server input.
+  const constantName = (node: CanvasNode): string => {
+    const value = isObject(node.widgets_values_named) && own(node.widgets_values_named, 'Constant')
+      ? node.widgets_values_named.Constant : Array.isArray(node.widgets_values) ? node.widgets_values[0] : undefined;
+    return typeof value === 'string' ? value : '';
+  };
   const resolve = (sourceId: string, sourceSlot: number, visited: Set<string>): ResolvedInput => {
     const node = nodes.get(sourceId);
     if (!node) throw new Error(`ComfyUI 画布链接引用了不存在的节点 ${sourceId}。`);
@@ -211,6 +221,16 @@ export const convertComfyUICanvasWorkflow = (canvas: JsonObject): JsonObject => 
     const key = `${sourceId}:${sourceSlot}`;
     if (visited.has(key)) throw nodeError(node, '的旁路或转接链接存在循环');
     const nextVisited = new Set(visited).add(key);
+    if (type === 'getnode' || type === 'setnode') {
+      const name = constantName(node);
+      const setter = type === 'setnode' ? node : name
+        ? [...nodes.values()].find((entry) => normalizedType(entry.type) === 'setnode' && constantName(entry) === name) : undefined;
+      if (!setter || Number(setter.mode || 0) === 2) return undefined;
+      const inputs = inputEntries(setter);
+      const input = inputs[sourceSlot];
+      const link = input ? getLink(setter, input, sourceSlot) : undefined;
+      return link ? resolve(link.originId, link.originSlot, nextVisited) : undefined;
+    }
     if (type === 'primitivenode') {
       const values = node.widgets_values;
       if (sourceSlot !== 0 || !Array.isArray(values) || ![1, 2].includes(values.length)
@@ -241,7 +261,7 @@ export const convertComfyUICanvasWorkflow = (canvas: JsonObject): JsonObject => 
   const result: JsonObject = Object.create(null) as JsonObject;
   for (const [id, node] of nodes) {
     const type = normalizedType(node.type);
-    if (Number(node.mode || 0) !== 0 || FRONTEND_ONLY_TYPES.has(type) || ['reroute', 'primitivenode'].includes(type)) continue;
+    if (Number(node.mode || 0) !== 0 || FRONTEND_ONLY_TYPES.has(type) || ['reroute', 'primitivenode', 'setnode', 'getnode'].includes(type)) continue;
     const inputs = inputEntries(node);
     const apiInputs = apiWidgetInputs(node, inputs);
     inputs.forEach((input, index) => {
