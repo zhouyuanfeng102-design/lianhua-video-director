@@ -1002,11 +1002,17 @@ export const fetchAvailableModels = async (
   throw new Error(`获取模型列表失败：${lastDetail || '接口没有返回可用模型'}`);
 };
 
+const isThoughtContentPart = (item: unknown): boolean => {
+  if (!item || typeof item !== 'object') return false;
+  const part = item as { thought?: unknown; type?: unknown };
+  return part.thought === true || /^(?:reasoning|thinking|thought|redacted_thinking)$/u.test(String(part.type ?? ''));
+};
+
 const extractText = (payload: any): string => {
   const content = payload?.choices?.[0]?.message?.content ?? payload?.choices?.[0]?.text ?? payload?.output_text;
   if (typeof content === 'string') return content.trim();
   if (Array.isArray(content)) {
-    return content.map((item) => typeof item === 'string' ? item : item?.text || '').join('').trim();
+    return content.filter((item) => !isThoughtContentPart(item)).map((item) => typeof item === 'string' ? item : item?.text || '').join('').trim();
   }
   return '';
 };
@@ -1109,6 +1115,13 @@ export const requestTextModel = async (
       || /deepseek/i.test(config.model)
     )
   );
+  const geminiLowReasoningEffort = Boolean(
+    options?.disableThinking
+    && !isClaude
+    && !shouldDisableThinking
+    && !/flash-lite/i.test(config.model)
+    && /gemini[^a-z0-9]*[34](?:\D|$)/i.test(config.model)
+  );
   const requestedSystemLayers = Array.isArray(options?.systemPromptLayers)
     ? options.systemPromptLayers.map((item) => item.trim()).filter(Boolean)
     : [];
@@ -1165,6 +1178,7 @@ export const requestTextModel = async (
           { role: 'user', content: userContent },
         ],
         ...(shouldDisableThinking ? { thinking: { type: 'disabled' } } : {}),
+        ...(geminiLowReasoningEffort ? { reasoning_effort: 'low' } : {}),
         ...(options?.jsonSchema
           ? { response_format: { type: 'json_schema', json_schema: {
               name: options.jsonSchema.name,
@@ -1227,9 +1241,7 @@ export const requestTextModel = async (
   }
   const hasReasoning = [message?.reasoning_content, message?.reasoning].some((value) => (
     typeof value === 'string' && Boolean(value.trim())
-  )) || (isClaude && Array.isArray(content) && content.some((item: any) => (
-    item?.type === 'thinking' || item?.type === 'redacted_thinking'
-  )));
+  )) || (Array.isArray(content) && content.some((item: unknown) => isThoughtContentPart(item)));
   if (finishReason === 'length' || (isClaude && finishReason === 'max_tokens')) {
     throw new TextModelResponseError('length', !text && hasReasoning
       ? '文本模型达到最大输出额度，只返回了思考内容，没有返回正文；不会自动进行 JSON 格式重试。'

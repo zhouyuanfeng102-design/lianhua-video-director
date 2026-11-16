@@ -12,7 +12,7 @@ import type { TextApiConfig } from '../src/types';
 type HttpPayload = { url: string; headers?: Record<string, string>; body?: string };
 type HttpResult = { status: number; body: string };
 type RequestBody = {
-  model?: string; temperature?: number; max_tokens?: number;
+  model?: string; temperature?: number; max_tokens?: number; reasoning_effort?: string;
   thinking?: { type: string }; response_format?: { type: string; json_schema?: { name: string; strict?: boolean; schema?: Record<string, unknown> } };
 };
 const tests: Array<{ name: string; run: () => void | Promise<void> }> = [];
@@ -78,6 +78,8 @@ const assertFixedDurationRequest = (payload: HttpPayload): void => {
   assert.equal(data.durationAdjustmentPolicy, 'fixed-total-duration');
   const system = prompt(payload, 'system');
   assert.match(system, /T=90秒/u);
+  assert.match(system, /令segments为空数组/u);
+  assert.equal(system.includes('segments=[]'), false);
   assert.match(system, /目标段数6仅供参考/u);
   assert.match(system, /实际段数N不预先锁死/u);
   assert.doesNotMatch(system, /成功结果的segments数组必须实际完整输出6项|T、D、N均固定/u);
@@ -292,26 +294,63 @@ test('Gemini semantic requests constrain the required nested source object witho
   const format = wire(requests[0]).response_format;
   assert.equal(format?.type, 'json_schema');
   assert.equal(format?.json_schema?.name, 'semantic_sequence_plan');
-  assert.equal(format?.json_schema?.strict, false);
+  assert.equal(format?.json_schema?.strict, true);
   assert.deepEqual(format?.json_schema?.schema, SEMANTIC_SEQUENCE_RESPONSE_SCHEMA);
+  assert.equal(wire(requests[0]).reasoning_effort, 'low');
+  assert.equal(wire(requests[0]).thinking, undefined);
+  assert.equal(wire(requests[0]).max_tokens, selected.maxTokens);
   const schema = format?.json_schema?.schema as Record<string, any>;
+  assert.equal(schema.additionalProperties, false);
   assert.deepEqual(schema.required, ['reason', 'fitStatus', 'segments']);
+  assert.equal(schema.properties.segments.items.additionalProperties, false);
   assert.deepEqual(schema.properties.segments.items.required, [
     'title', 'content', 'summary', 'narrativePurpose', 'entryState', 'exitState', 'transitionHint', 'boundaryReason', 'continuityPack', 'semanticSource',
   ]);
-  assert.deepEqual(schema.properties.segments.items.properties.semanticSource.required, ['sourceEvidence', 'events', 'dialogues']);
-  const semanticSource = schema.properties.segments.items.properties.semanticSource.properties;
+  const semanticSourceSchema = schema.properties.segments.items.properties.semanticSource;
+  assert.equal(semanticSourceSchema.additionalProperties, false);
+  assert.deepEqual(semanticSourceSchema.required, ['sourceEvidence', 'events', 'dialogues']);
+  const semanticSource = semanticSourceSchema.properties;
   assert.deepEqual(semanticSource.sourceEvidence.items.required, ['text']);
   assert.deepEqual(semanticSource.sourceEvidence.items.properties, { text: { type: 'string' } });
   assert.equal(semanticSource.sourceEvidence.items.additionalProperties, false);
+  assert.deepEqual(Object.keys(semanticSource.events.items.properties), ['id', 'description']);
+  assert.equal(Object.hasOwn(semanticSource.events.items.properties, 'causality'), false);
+  assert.equal(Object.hasOwn(semanticSource.events.items.properties, 'phase'), false);
   assert.deepEqual(semanticSource.dialogues.items.required, ['id', 'speaker', 'text']);
-  assert.equal(semanticSource.dialogues.items.properties.text.type, 'string');
-  assert.equal(Object.hasOwn(semanticSource.dialogues.items.properties, 'sourceStart'), false);
-  assert.equal(Object.hasOwn(semanticSource.dialogues.items.properties, 'sourceEnd'), false);
+  assert.deepEqual(Object.keys(semanticSource.dialogues.items.properties), ['id', 'speaker', 'text']);
   assert.equal(semanticSource.dialogues.items.additionalProperties, false);
   const system = prompt(requests[0], 'system');
   assert.match(system, /sourceEvidence只写本段依据在完整story中的逐字连续原文摘录text/u);
   assert.match(system, /不要输出sourceStart\/sourceEnd或任何字符偏移/u);
+  assert.equal(system.includes('segments=[]'), false);
+});
+
+test('Gemini 3 and 4 use low reasoning effort and thought parts stay out of the answer', async () => {
+  const lite = { ...config(), model: 'pg-gemini-3.5-flash-lite' };
+  const liteRequests = install(() => textReply('lite body'));
+  assert.equal(await requestTextModel(lite, 'synthetic system', 'synthetic user', undefined, { disableThinking: true }), 'lite body');
+  assert.equal(wire(liteRequests[0]).reasoning_effort, undefined);
+  const older = { ...config(), model: 'gemini-2.5-flash' };
+  const olderRequests = install(() => textReply('older body'));
+  assert.equal(await requestTextModel(older, 'synthetic system', 'synthetic user', undefined, { disableThinking: true }), 'older body');
+  assert.equal(wire(olderRequests[0]).reasoning_effort, undefined);
+  const flash = { ...config(), model: 'pg-抗截断-gemini-3.8-flash' };
+  const mixed = install(() => ({ status: 200, body: JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: [
+    { type: 'thinking', text: 'PRIVATE_THOUGHT' },
+    { thought: true, type: 'text', text: 'PRIVATE_SHELL' },
+    { type: 'text', text: '{"kept":true}' },
+  ] } }] }) }));
+  assert.equal(await requestTextModel(flash, 'synthetic system', 'synthetic user', undefined, { disableThinking: true }), '{"kept":true}');
+  assert.equal(wire(mixed[0]).reasoning_effort, 'low');
+  assert.equal(wire(mixed[0]).thinking, undefined);
+  const onlyThought = install(() => ({ status: 200, body: JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: [
+    { type: 'reasoning', text: 'PRIVATE_THOUGHT' },
+  ] } }] }) }));
+  await assert.rejects(
+    () => requestTextModel(flash, 'synthetic system', 'synthetic user', undefined, { disableThinking: true }),
+    (error: unknown) => error instanceof TextModelResponseError && error.code === 'reasoning_only' && !String(error.message).includes('PRIVATE_THOUGHT'),
+  );
+  assert.equal(onlyThought.length, 1);
 });
 
 test('JSON mode remains opt-in for ordinary text requests and is never sent to native Claude', async () => {

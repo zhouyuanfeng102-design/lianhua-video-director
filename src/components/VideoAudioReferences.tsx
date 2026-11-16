@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { Project, ReferenceAsset, VideoTaskApiConfig } from '../types';
 import type { VideoGenerationDraft } from '../videoGenerationTypes';
 import type { AudioRetainMode, FrozenVideoAudioReference, ProjectVoicePresets, VideoAudioReference, VideoAudioTarget, VideoVoicePreset } from '../videoAudioTypes';
@@ -66,15 +66,17 @@ export interface VideoAudioReferenceEditorProps {
 /** Viewing the collapsed editor never changes project inheritance or task provenance. */
 export function VideoAudioReferenceEditor({ project, draft, api, scope, disabled = false, frozenAudios, onChange, onImportAudio }: VideoAudioReferenceEditorProps) {
   const selectedApi = draft.backend === 'api' ? api : undefined;
-  const capability = videoAudioCapability(selectedApi, draft.backend);
+  const capability = useMemo(() => videoAudioCapability(selectedApi, draft.backend), [selectedApi, draft.backend]);
   const capacity = capability.capacity;
-  const references = resolveVideoAudioReferences(project, draft, selectedApi);
-  const assets = project.assets.filter(isVideoDirectorAudio);
+  const hasSamples = useMemo(() => project.characters.some((character) => Boolean(videoAudioCharacterPreset(project, character.id))), [project.characters, project.voicePresets]);
+  const speakingIds = useMemo(() => capacity || hasSamples ? videoAudioSpeakingCharacterIds(project, draft) : [], [project, draft, capacity, hasSamples]);
+  const references = useMemo(() => resolveVideoAudioReferences(project, draft, selectedApi, speakingIds), [project, draft, selectedApi, speakingIds]);
+  const assets = useMemo(() => project.assets.filter(isVideoDirectorAudio), [project.assets]);
   const mode = draft.audioSelectionMode || (draft.audioReferences?.length || draft.reuseTaskId ? 'override' : 'project');
   const activeFrozen = draft.reuseTaskId ? frozenAudios : undefined;
-  const textConstraints = videoAudioTextConstraintState(draft.prompt);
-  const inheritedSamples = videoAudioSpeakingCharacterIds(project, draft).filter((id) => Boolean(videoAudioCharacterPreset(project, id))).length;
-  const issues = validateVideoAudioReferences(project, { ...draft, audioReferences: references }, selectedApi, activeFrozen);
+  const textConstraints = useMemo(() => videoAudioTextConstraintState(draft.prompt), [draft.prompt]);
+  const inheritedSamples = useMemo(() => speakingIds.filter((id) => Boolean(videoAudioCharacterPreset(project, id))).length, [project, speakingIds]);
+  const issues = useMemo(() => validateVideoAudioReferences(project, { ...draft, audioReferences: references }, selectedApi, activeFrozen), [project, draft, references, selectedApi, activeFrozen]);
   const { importing, importError, importAudio } = useAudioImport(onImportAudio);
   const patchReferences = (next: VideoAudioReference[]) => onChange({ audioSelectionMode: 'override', audioReferences: next, reuseTaskId: undefined });
   const changeMode = (next: 'project' | 'override' | 'none') => onChange({

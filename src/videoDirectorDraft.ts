@@ -157,9 +157,9 @@ export const videoImageRole = (asset: ReferenceAsset): ReferenceRole => {
   return 'general';
 };
 
-export const videoPromptChoices = (project: Project, chapterId?: string, promptFormat?: VideoPromptFormat): VideoPromptChoice[] => (
+export const videoPromptChoices = (project: Project, chapterId?: string, promptFormat?: VideoPromptFormat, storyboardIds?: ReadonlySet<string>): VideoPromptChoice[] => (
   [...(chapterId ? chapterBoards(project, chapterId) : project.storyboards)]
-  .filter((board) => !board.sourceStale && !project.sequencePlans.find((plan) => plan.id === board.sequencePlanId)?.sourceStale)
+  .filter((board) => (!storyboardIds || storyboardIds.has(board.id)) && !board.sourceStale && !project.sequencePlans.find((plan) => plan.id === board.sequencePlanId)?.sourceStale)
   .sort((left, right) => right.updatedAt - left.updatedAt).flatMap((board) => {
     const label = board.sourceStoryTitle || project.scenes.find((scene) => scene.id === board.sceneId)?.title || '未命名剧情';
     const revision = board.revisions?.find((item) => item.id === board.activeRevisionId);

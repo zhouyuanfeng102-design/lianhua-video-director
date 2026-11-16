@@ -1,4 +1,7 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { VideoDirectorImageGrid } from './VideoDirectorImageGrid';
+import { ReferenceImageThumbnail } from './ReferenceImageThumbnail';
+import { createVideoDirectorProjectSelector, rememberVideoRow, type VideoRowMemo } from '../videoDirectorState';
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode, type SyntheticEvent } from 'react';
 import { assetPreviewUrl } from '../media';
 import { PhoneVideoComposer } from './mobile/PhoneVideoComposer';
 import { CustomVideoWorkbenchPanel, defaultCustomVideoDraft } from './CustomVideoWorkbenchPanel';
@@ -37,7 +40,7 @@ import {
   type VideoDirectorLaunchRequest, type VideoDirectorChapterDraft, type VideoDirectorBatchDraft, type VideoPromptReferencePreview, videoImageRole,
 } from '../videoDirectorDraft';
 import {
-  allVideoBatchChoiceKeys, buildVideoBatchRows, findVideoBatchDuplicate, toggleVideoBatchChoice,
+  allVideoBatchChoiceKeys, buildVideoBatchRows, createVideoBatchRowCache, findVideoBatchDuplicate, toggleVideoBatchChoice,
   ungeneratedVideoBatchChoiceKeys, videoBatchTailReferences, videoBatchReferenceFingerprint, videoBatchRequestFingerprint, videoBatchConnectionIdentity, videoPromptChoiceKey, videoTaskRequestFingerprint,
   type VideoBatchChoiceCandidate, type VideoBatchRow, type VideoPromptChoiceKey,
 } from '../videoBatch';
@@ -530,7 +533,7 @@ function VideoReferencePickerPanels({ images, slots }: { images: ReactNode; slot
     </div>
     {panels.map(([panel]) => <section key={panel} role="tabpanel" className="vd-reference-picker-panel"
       id={`${id}-${panel}-panel`} aria-labelledby={`${id}-${panel}-tab`} hidden={activePanel !== panel}>
-      {panel === 'images' ? images : slots}
+      {activePanel === panel ? panel === 'images' ? images : slots : null}
     </section>)}
   </>;
 }
@@ -581,6 +584,11 @@ function VideoSegmentCharacterHint({ hint, states, promptFormat }: { hint: Video
   </div>;
 }
 
+const VideoBatchImageCard = memo(function VideoBatchImageCard({ asset, render }: {
+  asset: ReferenceAsset; reference?: VideoImageReference; slot?: number; label?: string; busy: boolean; size?: number;
+  render: (asset: ReferenceAsset) => ReactNode;
+}) { return render(asset); });
+
 function VideoBatchImagePicker({ row, draft, references, referenceSlotRoles, images, workflow, usageContext, slotOffset = 0, onApply, onClose, project, settings, onVideoApiParametersChange }: {
   row: VideoBatchRow;
   draft: VideoGenerationDraft;
@@ -596,6 +604,7 @@ function VideoBatchImagePicker({ row, draft, references, referenceSlotRoles, ima
   settings: AppSettings;
   onVideoApiParametersChange?: VideoApiParameterReaderProps['onChange'];
 }) {
+  const imageScrollPosition = useRef(0);
   const [selection, setSelection] = useState(() => videoReferenceSelection(references, referenceSlotRoles));
   const selected = selection.references;
   const [query, setQuery] = useState('');
@@ -642,7 +651,23 @@ function VideoBatchImagePicker({ row, draft, references, referenceSlotRoles, ima
     ));
     return { references, referenceSlotRoles: roles };
   });
-  const visible = images.filter((asset) => `${asset.name} ${asset.fileName || ''} ${asset.tags.join(' ')}`.toLocaleLowerCase('zh-CN').includes(query.trim().toLocaleLowerCase('zh-CN')));
+  const renderImageCard = useVideoDirectorEvent((asset: ReferenceAsset) => {
+            const index = selected.findIndex((reference) => reference.assetId === asset.id);
+            const displayAsset = compression.displayAsset(asset);
+            return <div key={asset.id} className={`vd-image-choice ${index >= 0 ? 'selected' : ''}`}>
+              <button type="button" className="vd-image-pick" aria-pressed={index >= 0} aria-label={`${index >= 0 ? '取消选择' : '选择'}图片 ${asset.name}`} disabled={Boolean(asset.missing && index < 0)} onClick={() => setSelection((current) => index >= 0 ? removeVideoReference(current, asset.id, effectiveReferences[index]?.role) : addVideoReference(current, { assetId: asset.id, role: videoImageRole(asset) }))}>
+                <ReferenceImageThumbnail asset={displayAsset} scrollRootSelector=".vd-batch-dialog-body" />
+                <ReferenceImageName name={asset.name} /><span>{index >= 0 ? `已选 · 图片槽 ${videoReferenceSlotIndex(selected[index], index) + slotOffset + 1}` : asset.missing ? '原文件缺失' : `${asset.width || '?'} × ${asset.height || '?'}`}</span>
+                {index >= 0 && <span className="vd-image-slot-badge" aria-label={`图片 ${asset.name} 占用槽位`}>{slotLabels[index]}</span>}
+              </button>
+              <div className="vd-image-choice-tools">{compression.cardControls(asset)}
+              <button type="button" className="btn small ghost" onClick={() => setPreview(compression.displayAsset(asset))}>放大预览</button>
+              </div>
+            </div>;
+
+  });
+  const visible = useMemo(() => images.filter((asset) => `${asset.name} ${asset.fileName || ''} ${asset.tags.join(' ')}`.toLocaleLowerCase('zh-CN').includes(query.trim().toLocaleLowerCase('zh-CN'))), [images, query]);
+  const gridRevision = useMemo(() => ({}), [selection, compression.busy, compression.cardSizes, slotOffset]);
   return <>
     <VideoPickerDialog title={`第 ${row.segmentIndex} 段 · 选择参考图`} className="vd-batch-image-dialog" onClose={onClose} headerContent={<VideoSegmentCharacterHint hint={characterHints} states={characterStates} promptFormat={draft.source?.promptFormat} />}>
       {usageContext.backend === 'api' && (!usageContext.api?.provider || usageContext.api.provider === 'generic') && <>
@@ -658,22 +683,11 @@ function VideoBatchImagePicker({ row, draft, references, referenceSlotRoles, ima
       {slotOffset > 0 ? <p className="vd-reference-usage-hint">槽1由本地真实末帧占用；槽2起默认选择人物参考图，也可自由选择场景、道具或其它参考图，并在“图片槽位用途”栏修改用途。图片类型不匹配仅提示，不阻止生成。保存后保留组合模式和其它图片顺序，仅同步本次参考说明；剧情、对白和镜头时间保留，不调用文本或视觉 AI。</p> : boundarySummary && <p className="vd-reference-usage-hint">{boundarySummary}。这些槽可选任意可用图片，不要求素材原本标为首帧或尾帧；仅改变本次用途，不改原素材分类。</p>}
       {runningHubSlots !== undefined && <p className="vd-reference-usage-hint">最多 {runningHubSlots} 张图片，各段可按需要选择不同数量，不必选满。未用槽明确清空，不补图、不沿用工作流旧图；是否支持空槽由云端工作流决定。</p>}
       <VideoReferenceVacancies selection={selection} usageContext={pickerUsageContext} offset={slotOffset} />
-        <div className="vd-image-picker-grid vd-batch-image-grid">
-          {visible.map((asset) => {
-            const index = selected.findIndex((reference) => reference.assetId === asset.id);
-            return <div key={asset.id} className={`vd-image-choice ${index >= 0 ? 'selected' : ''}`}>
-              <button type="button" className="vd-image-pick" aria-pressed={index >= 0} aria-label={`${index >= 0 ? '取消选择' : '选择'}图片 ${asset.name}`} disabled={Boolean(asset.missing && index < 0)} onClick={() => setSelection((current) => index >= 0 ? removeVideoReference(current, asset.id, effectiveReferences[index]?.role) : addVideoReference(current, { assetId: asset.id, role: videoImageRole(asset) }))}>
-                {assetPreviewUrl(compression.displayAsset(asset)) ? <img src={assetPreviewUrl(compression.displayAsset(asset))} alt={asset.name} loading="lazy" /> : <span>无预览</span>}
-                <ReferenceImageName name={asset.name} /><span>{index >= 0 ? `已选 · 图片槽 ${videoReferenceSlotIndex(selected[index], index) + slotOffset + 1}` : asset.missing ? '原文件缺失' : `${asset.width || '?'} × ${asset.height || '?'}`}</span>
-                {index >= 0 && <span className="vd-image-slot-badge" aria-label={`图片 ${asset.name} 占用槽位`}>{slotLabels[index]}</span>}
-              </button>
-              <div className="vd-image-choice-tools">{compression.cardControls(asset)}
-              <button type="button" className="btn small ghost" onClick={() => setPreview(compression.displayAsset(asset))}>放大预览</button>
-              </div>
-            </div>;
-          })}
-          {!visible.length && <div className="vd-empty">没有匹配的图片，可先在图片资产库导入。</div>}
-        </div>
+        <VideoDirectorImageGrid assets={visible} query={query} revision={gridRevision} scrollPosition={imageScrollPosition} render={(asset) => {
+          const index = selected.findIndex((reference) => reference.assetId === asset.id);
+          return <VideoBatchImageCard key={asset.id} asset={asset} reference={selected[index]} slot={index >= 0 ? videoReferenceSlotIndex(selected[index], index) + slotOffset : undefined}
+            label={index >= 0 ? slotLabels[index] : undefined} busy={compression.busy} size={compression.cardSizes[asset.id]} render={renderImageCard} />;
+        }} />
       </div>
       </>} slots={<div className="vd-batch-dialog-body">
         <VideoReferenceSlotUsageEditor selection={selection} images={images} slotOffset={slotOffset} usageContext={usageContext} workflow={workflow} segmentLabel={`第 ${row.segmentIndex} 段`} project={project} onCharacterChange={(assetId, characterIds) => setSelection((current) => ({ ...current, references: current.references.map((reference) => reference.assetId === assetId ? { ...reference, characterIds } : reference) }))} onRoleChange={changeSlotRole} onRemove={(assetId, role) => setSelection((current) => removeVideoReference(current, assetId, role))} onPreview={setPreview} />
@@ -825,7 +839,39 @@ function useOneClickVideoTail(input: {
   return { busy, select, cancel: stop };
 }
 
-function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, settings, controller, tailFrameTools, initialDraft, initialParameterText, retryTaskIds, onOpenSettings, onOpenJobs, onOpenPrompt, onSubmittingChange, onRepairIdentityBindings, onRefreshH3References, onImportAudio, onVideoApiParametersChange }: {
+function useVideoDirectorEvent<A extends unknown[], R>(callback: (...args: A) => R): (...args: A) => R {
+  const latest = useRef(callback);
+  latest.current = callback;
+  return useCallback((...args: A) => latest.current(...args), []);
+}
+
+interface VideoBatchRowItemProps {
+  row: VideoBatchRow;
+  candidate?: VideoBatchChoiceCandidate;
+  previousChoice?: VideoBatchChoiceCandidate;
+  language: 'zh' | 'en';
+  selected: boolean;
+  previewing: boolean;
+  automatic?: AutomaticVideoTailConfiguration;
+  characterMode?: VideoDirectorBatchDraft['tailCharacterModes'][string];
+  zhPreview?: VideoPromptReferencePreview;
+  enPreview?: VideoPromptReferencePreview;
+  format?: VideoPromptFormat;
+  environment: object;
+  tailSelection?: string;
+  render: (row: VideoBatchRow, settingsMounted: boolean, onToggle: (event: SyntheticEvent<HTMLDetailsElement>) => void) => ReactNode;
+}
+
+const VideoBatchRowItem = memo(function VideoBatchRowItem({ row, render }: VideoBatchRowItemProps) {
+  const [settingsMounted, setSettingsMounted] = useState(false);
+  // Keep an opened editor alive so collapsing never cancels an import or loses local controls.
+  const onToggle = useCallback((event: SyntheticEvent<HTMLDetailsElement>) => {
+    if (event.currentTarget.open) setSettingsMounted(true);
+  }, []);
+  return render(row, settingsMounted, onToggle);
+});
+
+function VideoBatchPanel({ project: ownerProject, chapterId, savedBatch, onBatchDraftChange, settings, controller, tailFrameTools, initialDraft, initialParameterText, retryTaskIds, onOpenSettings, onOpenJobs, onOpenPrompt, onSubmittingChange, onRepairIdentityBindings, onRefreshH3References, onImportAudio, onVideoApiParametersChange }: {
   project: Project;
   chapterId?: string;
   savedBatch?: VideoDirectorBatchDraft;
@@ -845,12 +891,18 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
   onImportAudio?: () => void;
   onVideoApiParametersChange?: VideoApiParameterReaderProps['onChange'];
 }) {
-  const plans = useMemo(() => [...(chapterId ? chapterPlans(project, chapterId) : project.sequencePlans)].filter((plan) => plan.segments.length).sort((left, right) => right.updatedAt - left.updatedAt), [project, chapterId]);
+  const projectSelector = useRef(createVideoDirectorProjectSelector());
+  const project = projectSelector.current(ownerProject);
+  const batchRowsCache = useRef(createVideoBatchRowCache());
+  const plans = useMemo(() => [...(chapterId ? chapterPlans(project, chapterId) : project.sequencePlans)].filter((plan) => plan.segments.length).sort((left, right) => right.updatedAt - left.updatedAt), [project.sequencePlans, project.storyboards, project.sourceDocuments, chapterId]);
   const retryEntries = useMemo(() => videoBatchRetryEntries(project, retryTaskIds).filter((entry) => plans.some((plan) => plan.id === entry.planId)), [project, retryTaskIds, plans]);
   const retryPrimary = retryEntries[0];
   const initialBatch = !retryPrimary ? savedBatch : undefined;
   const retryParameterBaselineText = retryPrimary ? JSON.stringify(retryPrimary.draft.parameters, null, 2) : '';
   const [planId, setPlanId] = useState(() => retryPrimary?.planId || initialBatch?.planId || initialDraft.source?.sequencePlanId || plans.find((plan) => !plan.sourceStale)?.id || plans[0]?.id || '');
+  const reviewRowsCache = useMemo<VideoRowMemo<VideoBatchRow>>(() => new Map(), [project.id, planId]);
+  const decoratedRowsCache = useMemo<VideoRowMemo<VideoBatchRow>>(() => new Map(), [project.id, planId]);
+  const tailDraftsCache = useMemo<VideoRowMemo<ReturnType<typeof prepareVideoTailCharacterDraft>>>(() => new Map(), [project.id, planId]);
   const [backend, setBackend] = useState(retryPrimary?.draft.backend || initialBatch?.backend || initialDraft.backend);
   const [workflowId, setWorkflowId] = useState(() => retryPrimary
     ? retryPrimary.draft.workflowId || ''
@@ -927,7 +979,7 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
   const openPlanPrompt = () => {
     if (planPromptBoard) onOpenPrompt?.(planPromptBoard.id, { chapterId, sequencePlanId: plan?.id, segmentId: planPromptBoard.segmentId, language: 'zh', promptFormat });
   };
-  const sequenceFingerprint = videoTailSequenceFingerprint(project, planId);
+  const sequenceFingerprint = useMemo(() => videoTailSequenceFingerprint(project, planId), [project.sequencePlans, planId]);
   const images = useMemo(() => project.assets.filter(isVideoDirectorImage), [project.assets]);
   const retryConnectionActive = Boolean(retryPrimary
     && retryPrimary.draft.backend === backend
@@ -948,10 +1000,11 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
     return { ...base, slotRoles: draft.referenceSlotRoles };
   };
   const parameterKeys = availableVideoParameterKeys(sourceKind, api, workflow);
-  const connectionScope = JSON.stringify({ backend, workflowId, apiProfileId, runningHubWorkflowId, runningHubWebAppId, workflow,
+  const connectionScope = useMemo(() => JSON.stringify({ backend, workflowId, apiProfileId, runningHubWorkflowId, runningHubWebAppId, workflow,
     comfyBaseUrl: retryConnection?.comfyui?.baseUrl || settings.comfyuiVideo?.baseUrl,
     api: api ? { provider: api.provider, baseUrl: api.baseUrl, endpoint: api.endpoint, model: api.model, requestTemplate: api.requestTemplate,
-      runningHubImageRoles: api.runningHubImageRoles, runningHubMappedFields: api.runningHubMappedFields } : undefined });
+      runningHubImageRoles: api.runningHubImageRoles, runningHubMappedFields: api.runningHubMappedFields } : undefined }),
+    [backend, workflowId, apiProfileId, runningHubWorkflowId, runningHubWebAppId, workflow, retryConnection, settings.comfyuiVideo?.baseUrl, api]);
   const connectionScopeRef = useRef(connectionScope);
   useEffect(() => {
     if (connectionScopeRef.current === connectionScope) return;
@@ -988,8 +1041,10 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
     const built = buildVideoBatchRows(project, plan, settings, {
       backend, workflowId: workflowId || undefined, apiProfileId, runningHubWorkflowId, runningHubWebAppId, parameters: parameters.value, referenceOverrides: overridesByChoice,
       promptFormat: reviewLegacyDraft ? undefined : promptFormat, promptFormats: reviewLegacyDraft ? undefined : promptFormats,
-    });
-    return built.map((row): VideoBatchRow => {
+    }, batchRowsCache.current);
+    return built.map((row) => rememberVideoRow(reviewRowsCache, row.segmentId, [row, referenceRoleOverrides[row.segmentId],
+      retryEntriesBySegment.get(row.segmentId), reviewFrozenFormats, plan.sourceStale, backend, workflowId, apiProfileId, runningHubWorkflowId, runningHubWebAppId,
+      referenceOverrides[row.segmentId], parameters.value, parameterText, retryParameterBaselineText], (): VideoBatchRow => {
       const roles = referenceRoleOverrides[row.segmentId];
       if (roles) row = { ...row,
         zh: row.zh && { ...row.zh, draft: { ...row.zh.draft, referenceSlotRoles: [...roles] } },
@@ -1062,20 +1117,21 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
         promptFingerprint: base?.promptFingerprint || `retry-prompt:${retry.task.id}`,
         referenceFingerprint: base?.referenceFingerprint || `retry-references:${retry.task.id}`,
         requestFingerprint,
-        duplicate: storedFingerprint ? findVideoBatchDuplicate(project, storedFingerprint) : undefined,
+        duplicate: storedFingerprint ? findVideoBatchDuplicate(project, storedFingerprint, batchRowsCache.current) : undefined,
       };
       return retry.language === 'zh'
         ? { ...row, durationSec: choice.durationSec, zh: candidate }
         : { ...row, durationSec: choice.durationSec, en: candidate };
-    });
-  }, [plan, project, settings, backend, workflowId, apiProfileId, runningHubWorkflowId, runningHubWebAppId, parameters.value, parameterText, retryParameterBaselineText, overridesByChoice, referenceOverrides, referenceRoleOverrides, retryEntriesBySegment, promptFormat, promptFormats, reviewFrozenFormats, reviewLegacyDraft]);
+    }));
+  }, [plan, project, settings, backend, workflowId, apiProfileId, runningHubWorkflowId, runningHubWebAppId, parameters.value, parameterText, retryParameterBaselineText, overridesByChoice, referenceOverrides, referenceRoleOverrides, retryEntriesBySegment, promptFormat, promptFormats, reviewFrozenFormats, reviewLegacyDraft, reviewRowsCache]);
+  const batchSourceProject = batchRowsCache.current.sourceProject || project;
   // Automatic defaults are only for untouched rows. An explicitly empty
   // selection is intentional too; never restore deselected identity images.
   const hasEditedTailReferences = (segmentId: string): boolean => Boolean(tailCharacterModes[segmentId]?.editedReferences)
     || Object.prototype.hasOwnProperty.call(referenceOverrides, segmentId);
   const characterDrafts = useMemo(() => new Map(baseRows.filter((row) => tailCharacterModes[row.segmentId]).flatMap((row) => [row.zh, row.en]
     .filter((candidate): candidate is VideoBatchChoiceCandidate => Boolean(candidate))
-    .map((candidate) => [candidate.key, prepareVideoTailCharacterDraft(project, candidate.draft, { preserveSlots: hasEditedTailReferences(candidate.segmentId) })] as const))), [baseRows, project, tailCharacterModes, referenceOverrides]);
+    .map((candidate) => [candidate.key, rememberVideoRow(tailDraftsCache, candidate.key, [batchRowsCache.current.sourceProject, candidate.draft, hasEditedTailReferences(candidate.segmentId)], () => prepareVideoTailCharacterDraft(project, candidate.draft, { preserveSlots: hasEditedTailReferences(candidate.segmentId) }))] as const))), [baseRows, project, tailCharacterModes, referenceOverrides]);
   const prepareCharacterCandidate = (candidate: VideoBatchChoiceCandidate) => {
     const cached = characterDrafts.get(candidate.key);
     if (cached) return cached;
@@ -1101,7 +1157,11 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
     const selectedApi = videoConfiguredApiState(settings, draft, frozen?.backend === 'api' ? frozen.api : undefined).api;
     return videoOutputParameterSummary(draft.parameters, selectedApi);
   };
-  const rows = useMemo(() => baseRows.map((row): VideoBatchRow => {
+  const rows = useMemo(() => baseRows.map((row) => rememberVideoRow(decoratedRowsCache, row.segmentId,
+    [row, batchRowsCache.current.sourceProject, settings, referenceUsageContext, audioOverrides[row.segmentId], videoOverrides[row.segmentId],
+      row.zh && h3ReferenceUpdates[row.zh.key], row.en && h3ReferenceUpdates[row.en.key], automaticTails[row.segmentId], tailCharacterModes[row.segmentId],
+      row.zh && characterDrafts.get(row.zh.key), row.en && characterDrafts.get(row.en.key), referenceRoleOverrides[row.segmentId],
+      retryEntriesBySegment.get(row.segmentId), reviewFrozenFormats, retryConnection], (): VideoBatchRow => {
       const mode = tailCharacterModes[row.segmentId];
       const automatic = automaticTails[row.segmentId];
       const decorate = (candidate?: VideoBatchChoiceCandidate): VideoBatchChoiceCandidate | undefined => {
@@ -1149,12 +1209,17 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
           draft = prepareVideoAudioDraft(project, draft, audioApi);
         }
         draft = draft.reuseTaskId ? renderVideoMotionDraft(project, draft, usageContextForDraft(draft)) : prepareVideoMotionDraft(project, draft, usageContextForDraft(draft));
-        const referenceFingerprint = videoBatchReferenceFingerprint(draft, project.assets);
+        const unchangedIdentity = !automatic && !mode && !referenceRoleOverrides[row.segmentId]
+          && draft.prompt === candidate.draft.prompt
+          && JSON.stringify(draft.references) === JSON.stringify(candidate.draft.references)
+          && JSON.stringify(draft.audioReferences || []) === JSON.stringify(candidate.draft.audioReferences || [])
+          && JSON.stringify(draft.videoReferences || []) === JSON.stringify(candidate.draft.videoReferences || []);
+        const referenceFingerprint = unchangedIdentity ? candidate.referenceFingerprint : videoBatchReferenceFingerprint(draft, project.assets, batchRowsCache.current.assetIndex);
         if (!automatic && !mode) {
-          const requestFingerprint = videoBatchRequestFingerprint(draft, project.assets,
-            frozenConnectionForDraft(draft) || videoBatchConnectionIdentity(settings, draft));
+          const requestFingerprint = unchangedIdentity ? candidate.requestFingerprint : videoBatchRequestFingerprint(draft, project.assets,
+            frozenConnectionForDraft(draft) || videoBatchConnectionIdentity(settings, draft), 0, batchRowsCache.current.assetIndex);
           return { ...candidate, draft, referenceFingerprint, requestFingerprint,
-            duplicate: findVideoBatchDuplicate(project, requestFingerprint) };
+            duplicate: unchangedIdentity ? candidate.duplicate : findVideoBatchDuplicate(project, requestFingerprint, batchRowsCache.current) };
         }
         return { ...candidate, draft, referenceFingerprint,
           // The engine computes the durable dependency-aware fingerprint before
@@ -1165,9 +1230,9 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
         };
       };
       return { ...row, zh: decorate(row.zh), en: decorate(row.en) };
-    }), [baseRows, audioOverrides, videoOverrides, h3ReferenceUpdates, automaticTails, tailCharacterModes, characterDrafts, project, referenceUsageContext, referenceRoleOverrides, retryEntriesBySegment, reviewFrozenFormats, retryConnection, settings]);
+    })), [baseRows, audioOverrides, videoOverrides, h3ReferenceUpdates, automaticTails, tailCharacterModes, characterDrafts, project, referenceUsageContext, referenceRoleOverrides, retryEntriesBySegment, reviewFrozenFormats, retryConnection, settings, decoratedRowsCache]);
   const referencePreviews = useMemo(() => reviewLegacyDraft || promptFormat === 'h3' || Object.values(promptFormats).includes('h3')
-    ? videoPromptReferencePreviews(project, chapterId) : [], [project, chapterId, reviewLegacyDraft, promptFormat, promptFormats]);
+    ? videoPromptReferencePreviews(batchSourceProject, chapterId) : [], [batchSourceProject, chapterId, reviewLegacyDraft, promptFormat, promptFormats]);
   const rowReferencePreview = (row: VideoBatchRow, language: 'zh' | 'en') => (reviewLegacyDraft || (promptFormats[row.segmentId] || promptFormat) === 'h3')
     ? referencePreviews.find((entry) => entry.storyboardId === row.storyboardId && entry.language === language) : undefined;
   const rowLanguage = (row: VideoBatchRow): 'zh' | 'en' => languages[row.segmentId] || (row.zh || rowReferencePreview(row, 'zh') ? 'zh' : 'en');
@@ -1365,12 +1430,13 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
     return JSON.stringify([project.characters, project.assets.filter((asset) => ids.has(asset.id))
       .map((asset) => ({ ...asset, dataUrl: asset.checksum ? undefined : asset.dataUrl }))]);
   }, [project.characters, project.storyboards, project.assets]);
-  const manualTail = useOneClickVideoTail({
-    project, tools: tailFrameTools,
-    scopeKey: JSON.stringify([project.id, planId, sequenceFingerprint, connectionScope, parameterText, languages,
+  const manualTailScopeKey = useMemo(() => JSON.stringify([project.id, planId, sequenceFingerprint, connectionScope, parameterText, languages,
       [...selectedKeys].sort(), rows.map((row) => [row.segmentId, row.zh?.draft, row.en?.draft,
         row.zh?.referenceFingerprint, row.en?.referenceFingerprint]), automaticTails, tailCharacterModes,
       tailIdentitySourceFingerprint]),
+    [project.id, planId, sequenceFingerprint, connectionScope, parameterText, languages, selectedKeys, rows, automaticTails, tailCharacterModes, tailIdentitySourceFingerprint]);
+  const manualTail = useOneClickVideoTail({
+    project, tools: tailFrameTools, scopeKey: manualTailScopeKey,
     onBusyChange: setTailSelecting, onNotice: setNotice, onError: setError,
     onApply: (references, context) => {
       copyReferences(context.segmentId, references);
@@ -1524,6 +1590,64 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
     } catch (cause) { if (mountedRef.current) { setConfirmation(undefined); setError(formatUserFacingError(cause)); } }
     finally { submittingRef.current = false; if (mountedRef.current) setSubmitting(false); }
   };
+  const rowEnvironment = useMemo(() => ({}), [batchSourceProject, settings, backend, workflow, referenceUsageContext, submitting, interactionLocked,
+    hasAutomaticSelection, regenerateSucceeded, sourceIssue, sequenceFingerprint, connectionScope, tailFrameTools?.available, Boolean(onOpenPrompt), Boolean(onImportAudio)]);
+  const renderBatchRow = useVideoDirectorEvent((row: VideoBatchRow, settingsMounted: boolean, onSettingsToggle: (event: SyntheticEvent<HTMLDetailsElement>) => void) => {
+          const candidate = rowChoice(row); const selectedRow = Boolean(candidate && selectedKeys.has(candidate.key));
+          const automatic = automaticTails[row.segmentId];
+          const characterMode = tailCharacterModes[row.segmentId];
+          const previousRow = rows[rows.indexOf(row) - 1]; const previousChoice = previousRow && rowChoice(previousRow);
+          const savedPreview = !candidate ? rowReferencePreview(row, rowLanguage(row)) : undefined;
+          const issue = candidate ? referenceIssue(candidate) : plan?.sourceStale ? '原文已变化，需更新本段提示词后才能生成' : savedPreview?.referenceNotice || '当前语言尚无可用提示词';
+          const rowPromptFormat = candidate ? candidate.choice.promptFormat : promptFormats[row.segmentId] || promptFormat;
+          const referenceCount = candidate ? intendedReferenceCount(candidate) : 0;
+          const outputSummary = settingsMounted && candidate ? outputSummaryForDraft(candidate.draft) : '';
+          return <article className={`vd-batch-row ${selectedRow ? 'selected' : ''} ${previewRow?.segmentId === row.segmentId ? 'previewing' : ''}`} key={row.segmentId} data-segment-id={row.segmentId}>
+            <label className="vd-batch-check"><input type="checkbox" aria-label={`选择第 ${row.segmentIndex} 段`} checked={selectedRow} disabled={!candidate || submitting} onChange={() => { if (!candidate) return; setSelectedKeys((current) => { const next = new Set(current); const other = row[candidate.language === 'zh' ? 'en' : 'zh']; if (other) next.delete(other.key); return toggleVideoBatchChoice(next, candidate.key); }); }} /></label>
+            <div className="vd-batch-row-main">
+              <strong title={row.title}>第 {row.segmentIndex} 段 · {row.title}</strong>
+              <span className="vd-batch-row-status">{plan?.segments.find((segment) => segment.id === row.segmentId)?.durationSec ?? row.durationSec} 秒 · {automatic ? '等待上段衔接帧后生成' : candidate?.duplicate && hasAutomaticSelection && selectedRow && !shouldRegenerate(candidate) ? '存在相同任务，待整链核对' : candidate?.duplicate?.kind === 'in-flight' ? '已在队列，将跳过' : candidate?.duplicate?.kind === 'succeeded' ? regenerateSucceeded ? '已生成，将重新生成' : '已生成，将跳过' : candidate?.draft.reuseTaskId ? '失败任务快照，待复核' : '尚未生成'}</span>
+              {issue && <small className="vd-error">{issue}</small>}
+            </div>
+            <div className="vd-batch-row-quick-actions">
+              <button type="button" className="btn small ghost" title="查看本次实际提示词和参考图片" onClick={() => { setPreviewSegmentId(row.segmentId); setCompactPane('preview'); }}>预览</button>
+              <button type="button" className="btn small" aria-label={`第 ${row.segmentIndex} 段选择参考图`} title={savedPreview ? '回提示词导演台更新原稿的参考图引用' : '选择本段图片和槽位用途，同步本次参考说明；保留剧情，不调用 AI'} disabled={(!candidate && !(savedPreview && onOpenPrompt)) || interactionLocked} onClick={() => { if (savedPreview) onOpenPrompt?.(savedPreview.storyboardId, { storyboardId: savedPreview.storyboardId, language: savedPreview.language }); else setImageSegmentId(row.segmentId); }}>{savedPreview ? '更新参考图' : '选择参考图'}</button>
+            </div>
+            <details className="vd-batch-row-settings" onToggle={onSettingsToggle}>
+              <summary>
+                <span className="vd-batch-row-brief">
+                  <span>{videoPromptFormatLabel(rowPromptFormat)} · {rowLanguage(row) === 'zh' ? '中文' : '英文'}</span>
+                  <span>{automatic ? '最终参考图' : '参考图'} {referenceCount} 张{backend === 'comfyui' ? ` / ${workflow?.mapping.images.length || 0} 个槽` : ''}</span>
+                  {candidate && <span>参考音频 {candidate.draft.audioReferences?.length || 0} / {videoAudioSlotCount(usageContextForDraft(candidate.draft).api)}</span>}
+                  {automatic && <span className="vd-batch-row-tail-brief">衔接第 {automatic.predecessorSegmentIndex} 段{automatic.selectionMode === 'ai-assisted' ? '选帧' : '末帧'}</span>}
+                  {!automatic && characterMode && <span className="vd-batch-row-tail-brief">本地末帧＋参考图</span>}
+                </span>
+                <span className="vd-batch-row-settings-label">分段设置 <span aria-hidden="true">▾</span></span>
+              </summary>
+              {settingsMounted && <div className="vd-batch-row-editor">
+                <div className="vd-batch-row-format">
+                  <label className="field"><span>提示词格式</span><select aria-label={`第 ${row.segmentIndex} 段提示词格式`} value={candidate && !candidate.choice.promptFormat ? 'legacy' : candidate?.choice.promptFormat || promptFormats[row.segmentId] || promptFormat} disabled={interactionLocked} onChange={(event) => changePromptFormat(event.target.value as VideoPromptFormat, row.segmentId)}>{candidate && !candidate.choice.promptFormat && <option value="legacy" disabled>历史稿（保留正文）</option>}<option value="h3">H3</option><option value="seedance">Seedance</option><option value="ordinary">普通稿</option></select></label>
+                  <div className="vd-batch-row-language-field"><span>稿件语言</span><div className="vd-batch-language" role="group" aria-label={`第 ${row.segmentIndex} 段稿件语言`}>{(['zh', 'en'] as const).map((language) => <button type="button" key={language} className={`btn small ${rowLanguage(row) === language ? 'primary' : ''}`} title={row[language] ? '只切换已保存的稿件，不翻译或重新生成提示词' : rowReferencePreview(row, language) ? '查看保存的原稿；参考图待更新，尚不能提交' : '尚无此语言的已保存稿件，不会自动生成'} aria-pressed={rowLanguage(row) === language} disabled={(!row[language] && !rowReferencePreview(row, language)) || interactionLocked} onClick={() => selectLanguage(row, language)}>{language === 'zh' ? '中文' : '英文'}</button>)}</div></div>
+                </div>
+                <div className="vd-batch-row-tools">
+                  <span className="vd-batch-row-tools-label">画面衔接</span>
+                  {row.segmentIndex <= 1 ? <span className="vd-batch-row-tools-hint">首段无需衔接上一段</span> : <div className="vd-batch-row-tools-actions">
+                  <button type="button" className="btn small ghost" aria-label={`第 ${row.segmentIndex} 段复制上一段参考图`} title="仅复制上一段已选择的图片，不抽取视频尾帧，不重新生成提示词" disabled={!candidate || !previousChoice || interactionLocked} onClick={() => { if (previousChoice) { copyReferences(row.segmentId, referencesForCopy(previousChoice), previousChoice.draft.referenceSlotRoles); setNotice(`已将第 ${previousRow.segmentIndex} 段的图片顺序与用途复制到第 ${row.segmentIndex} 段；未提取视频尾帧，不重新生成提示词。${automatic ? '本段自动衔接已取消。' : ''}`); } }}>复制上段选图</button>
+                  <button type="button" className="btn small vd-tail-entry" aria-label={`第 ${row.segmentIndex} 段用上段尾帧`} title={row.segmentIndex <= 1 ? '第一段没有上一段视频' : '本地提取真实最后一帧：前段在本批次时先配置衔接；否则直接提取前段最新成片的末帧。不调用文本或视觉AI，不重新生成提示词，不弹出设置画面。'} disabled={!candidate || row.segmentIndex <= 1 || interactionLocked} onClick={() => { if (candidate) usePreviousTail(row, candidate); }}>{automatic ? '已启用本地末帧' : '用上段尾帧'}</button>
+                  <button type="button" className={`btn small vd-tail-entry ${characterMode ? 'primary' : ''}`} aria-label={`第 ${row.segmentIndex} 段本地末帧加参考图`} aria-pressed={Boolean(characterMode)} title={row.segmentIndex <= 1 ? '第一段没有上一段视频' : '第1槽放本地真实最后一帧，第2槽起默认人物参考，可选场景或其它参考图；已手动选图保留。仅同步图片引用编号，不重新生成视频提示词，不调用文本或视觉AI，不提交视频。'} disabled={!candidate || row.segmentIndex <= 1 || interactionLocked} onClick={() => { if (candidate) useTailWithCharacters(row, candidate); }}>本地末帧＋参考图</button>
+                  {characterMode ? <button type="button" className="btn small ghost" aria-label={`第 ${row.segmentIndex} 段取消尾帧加参考图`} disabled={interactionLocked} onClick={() => { clearAutomaticTails([row.segmentId]); setNotice(`第 ${row.segmentIndex} 段已取消组合参考，恢复原选图和原提示词；已保存的尾帧素材保留。`); }}>恢复原选图</button> : automatic && <button type="button" className="btn small ghost" aria-label={`第 ${row.segmentIndex} 段取消自动衔接`} disabled={interactionLocked} onClick={() => { clearAutomaticTails([row.segmentId]); setNotice(`第 ${row.segmentIndex} 段已取消自动衔接，恢复使用本段原选图。`); }}>取消自动衔接</button>}
+                  </div>}
+                </div>
+                {characterMode && <small className="vd-tail-character-summary">图片1：{characterMode.kind === 'automatic' ? '待本地提取末帧' : '本地真实末帧'}定画面 · 图片2起：默认人物参考，可选场景／其它参考图</small>}
+                {automatic && <small className="vd-auto-tail-badge">自动衔接：第 {automatic.predecessorSegmentIndex} 段 → {automatic.selectionMode === 'ai-assisted' ? 'AI 辅助选帧 → ' : '本地末帧 → '}图片槽 {automatic.placement.index + 1} · {automatic.placement.semantics === 'first-frame' ? '首帧输入' : '普通衔接参考（不保证严格首帧）'}</small>}
+                {outputSummary && <small className="vop-request-summary">{outputSummary}</small>}
+                {candidate && <VideoAudioReferenceEditor project={project} draft={candidate.draft} api={usageContextForDraft(candidate.draft).api} scope={`第 ${row.segmentIndex} 段`} disabled={interactionLocked} frozenAudios={candidate.draft.reuseTaskId ? findReusableVideoTask(project, candidate.draft.reuseTaskId)?.videoJob?.snapshot.audios : undefined} onImportAudio={onImportAudio} onChange={(patch) => { setAudioOverrides((current) => ({ ...current, [row.segmentId]: { mode: patch.audioSelectionMode || 'override', references: structuredClone(patch.audioReferences || []) } })); setConfirmation(undefined); }} />}
+                {candidate && <VideoMotionReferenceEditor project={project} draft={candidate.draft} api={usageContextForDraft(candidate.draft).api} workflow={usageContextForDraft(candidate.draft).workflow} scope={`第 ${row.segmentIndex} 段`} disabled={interactionLocked} frozenVideos={candidate.draft.reuseTaskId ? findReusableVideoTask(project, candidate.draft.reuseTaskId)?.videoJob?.snapshot.videos : undefined} onChange={(patch) => { setVideoOverrides((current) => ({ ...current, [row.segmentId]: structuredClone(patch.videoReferences || []) })); setConfirmation(undefined); }} />}
+              </div>}
+            </details>
+          </article>;
+
+  });
   return <section className="vd-batch-panel" aria-label="长剧情批量视频">
     <div className="vd-batch-settings-header">
       <button type="button" className="vd-batch-settings-toggle" aria-label={settingsCollapsed ? '展开批量设置' : '收起批量设置'} aria-expanded={!settingsCollapsed} aria-controls="vd-batch-settings-content" onClick={() => setSettingsCollapsed((current) => !current)}>
@@ -1568,60 +1692,15 @@ function VideoBatchPanel({ project, chapterId, savedBatch, onBatchDraftChange, s
     <div className="vd-batch-columns" data-pane={compactPane}>
       <div className="vd-batch-list" aria-label="批量分段清单">
         {visibleRows.map((row) => {
-          const candidate = rowChoice(row); const selectedRow = Boolean(candidate && selectedKeys.has(candidate.key));
-          const automatic = automaticTails[row.segmentId];
-          const characterMode = tailCharacterModes[row.segmentId];
-          const previousRow = rows[rows.indexOf(row) - 1]; const previousChoice = previousRow && rowChoice(previousRow);
-          const savedPreview = !candidate ? rowReferencePreview(row, rowLanguage(row)) : undefined;
-          const issue = candidate ? referenceIssue(candidate) : plan?.sourceStale ? '原文已变化，需更新本段提示词后才能生成' : savedPreview?.referenceNotice || '当前语言尚无可用提示词';
-          const rowPromptFormat = candidate ? candidate.choice.promptFormat : promptFormats[row.segmentId] || promptFormat;
-          const referenceCount = candidate ? intendedReferenceCount(candidate) : 0;
-          return <article className={`vd-batch-row ${selectedRow ? 'selected' : ''} ${previewRow?.segmentId === row.segmentId ? 'previewing' : ''}`} key={row.segmentId} data-segment-id={row.segmentId}>
-            <label className="vd-batch-check"><input type="checkbox" aria-label={`选择第 ${row.segmentIndex} 段`} checked={selectedRow} disabled={!candidate || submitting} onChange={() => { if (!candidate) return; setSelectedKeys((current) => { const next = new Set(current); const other = row[candidate.language === 'zh' ? 'en' : 'zh']; if (other) next.delete(other.key); return toggleVideoBatchChoice(next, candidate.key); }); }} /></label>
-            <div className="vd-batch-row-main">
-              <strong title={row.title}>第 {row.segmentIndex} 段 · {row.title}</strong>
-              <span className="vd-batch-row-status">{plan?.segments.find((segment) => segment.id === row.segmentId)?.durationSec ?? row.durationSec} 秒 · {automatic ? '等待上段衔接帧后生成' : candidate?.duplicate && hasAutomaticSelection && selectedRow && !shouldRegenerate(candidate) ? '存在相同任务，待整链核对' : candidate?.duplicate?.kind === 'in-flight' ? '已在队列，将跳过' : candidate?.duplicate?.kind === 'succeeded' ? regenerateSucceeded ? '已生成，将重新生成' : '已生成，将跳过' : candidate?.draft.reuseTaskId ? '失败任务快照，待复核' : '尚未生成'}</span>
-              {issue && <small className="vd-error">{issue}</small>}
-            </div>
-            <div className="vd-batch-row-quick-actions">
-              <button type="button" className="btn small ghost" title="查看本次实际提示词和参考图片" onClick={() => { setPreviewSegmentId(row.segmentId); setCompactPane('preview'); }}>预览</button>
-              <button type="button" className="btn small" aria-label={`第 ${row.segmentIndex} 段选择参考图`} title={savedPreview ? '回提示词导演台更新原稿的参考图引用' : '选择本段图片和槽位用途，同步本次参考说明；保留剧情，不调用 AI'} disabled={(!candidate && !(savedPreview && onOpenPrompt)) || interactionLocked} onClick={() => { if (savedPreview) onOpenPrompt?.(savedPreview.storyboardId, { storyboardId: savedPreview.storyboardId, language: savedPreview.language }); else setImageSegmentId(row.segmentId); }}>{savedPreview ? '更新参考图' : '选择参考图'}</button>
-            </div>
-            <details className="vd-batch-row-settings">
-              <summary>
-                <span className="vd-batch-row-brief">
-                  <span>{videoPromptFormatLabel(rowPromptFormat)} · {rowLanguage(row) === 'zh' ? '中文' : '英文'}</span>
-                  <span>{automatic ? '最终参考图' : '参考图'} {referenceCount} 张{backend === 'comfyui' ? ` / ${workflow?.mapping.images.length || 0} 个槽` : ''}</span>
-                  {candidate && <span>参考音频 {candidate.draft.audioReferences?.length || 0} / {videoAudioSlotCount(usageContextForDraft(candidate.draft).api)}</span>}
-                  {automatic && <span className="vd-batch-row-tail-brief">衔接第 {automatic.predecessorSegmentIndex} 段{automatic.selectionMode === 'ai-assisted' ? '选帧' : '末帧'}</span>}
-                  {!automatic && characterMode && <span className="vd-batch-row-tail-brief">本地末帧＋参考图</span>}
-                </span>
-                <span className="vd-batch-row-settings-label">分段设置 <span aria-hidden="true">▾</span></span>
-              </summary>
-              <div className="vd-batch-row-editor">
-                <div className="vd-batch-row-format">
-                  <label className="field"><span>提示词格式</span><select aria-label={`第 ${row.segmentIndex} 段提示词格式`} value={candidate && !candidate.choice.promptFormat ? 'legacy' : candidate?.choice.promptFormat || promptFormats[row.segmentId] || promptFormat} disabled={interactionLocked} onChange={(event) => changePromptFormat(event.target.value as VideoPromptFormat, row.segmentId)}>{candidate && !candidate.choice.promptFormat && <option value="legacy" disabled>历史稿（保留正文）</option>}<option value="h3">H3</option><option value="seedance">Seedance</option><option value="ordinary">普通稿</option></select></label>
-                  <div className="vd-batch-row-language-field"><span>稿件语言</span><div className="vd-batch-language" role="group" aria-label={`第 ${row.segmentIndex} 段稿件语言`}>{(['zh', 'en'] as const).map((language) => <button type="button" key={language} className={`btn small ${rowLanguage(row) === language ? 'primary' : ''}`} title={row[language] ? '只切换已保存的稿件，不翻译或重新生成提示词' : rowReferencePreview(row, language) ? '查看保存的原稿；参考图待更新，尚不能提交' : '尚无此语言的已保存稿件，不会自动生成'} aria-pressed={rowLanguage(row) === language} disabled={(!row[language] && !rowReferencePreview(row, language)) || interactionLocked} onClick={() => selectLanguage(row, language)}>{language === 'zh' ? '中文' : '英文'}</button>)}</div></div>
-                </div>
-                <div className="vd-batch-row-tools">
-                  <span className="vd-batch-row-tools-label">画面衔接</span>
-                  {row.segmentIndex <= 1 ? <span className="vd-batch-row-tools-hint">首段无需衔接上一段</span> : <div className="vd-batch-row-tools-actions">
-                  <button type="button" className="btn small ghost" aria-label={`第 ${row.segmentIndex} 段复制上一段参考图`} title="仅复制上一段已选择的图片，不抽取视频尾帧，不重新生成提示词" disabled={!candidate || !previousChoice || interactionLocked} onClick={() => { if (previousChoice) { copyReferences(row.segmentId, referencesForCopy(previousChoice), previousChoice.draft.referenceSlotRoles); setNotice(`已将第 ${previousRow.segmentIndex} 段的图片顺序与用途复制到第 ${row.segmentIndex} 段；未提取视频尾帧，不重新生成提示词。${automatic ? '本段自动衔接已取消。' : ''}`); } }}>复制上段选图</button>
-                  <button type="button" className="btn small vd-tail-entry" aria-label={`第 ${row.segmentIndex} 段用上段尾帧`} title={row.segmentIndex <= 1 ? '第一段没有上一段视频' : '本地提取真实最后一帧：前段在本批次时先配置衔接；否则直接提取前段最新成片的末帧。不调用文本或视觉AI，不重新生成提示词，不弹出设置画面。'} disabled={!candidate || row.segmentIndex <= 1 || interactionLocked} onClick={() => { if (candidate) usePreviousTail(row, candidate); }}>{automatic ? '已启用本地末帧' : '用上段尾帧'}</button>
-                  <button type="button" className={`btn small vd-tail-entry ${characterMode ? 'primary' : ''}`} aria-label={`第 ${row.segmentIndex} 段本地末帧加参考图`} aria-pressed={Boolean(characterMode)} title={row.segmentIndex <= 1 ? '第一段没有上一段视频' : '第1槽放本地真实最后一帧，第2槽起默认人物参考，可选场景或其它参考图；已手动选图保留。仅同步图片引用编号，不重新生成视频提示词，不调用文本或视觉AI，不提交视频。'} disabled={!candidate || row.segmentIndex <= 1 || interactionLocked} onClick={() => { if (candidate) useTailWithCharacters(row, candidate); }}>本地末帧＋参考图</button>
-                  {characterMode ? <button type="button" className="btn small ghost" aria-label={`第 ${row.segmentIndex} 段取消尾帧加参考图`} disabled={interactionLocked} onClick={() => { clearAutomaticTails([row.segmentId]); setNotice(`第 ${row.segmentIndex} 段已取消组合参考，恢复原选图和原提示词；已保存的尾帧素材保留。`); }}>恢复原选图</button> : automatic && <button type="button" className="btn small ghost" aria-label={`第 ${row.segmentIndex} 段取消自动衔接`} disabled={interactionLocked} onClick={() => { clearAutomaticTails([row.segmentId]); setNotice(`第 ${row.segmentIndex} 段已取消自动衔接，恢复使用本段原选图。`); }}>取消自动衔接</button>}
-                  </div>}
-                </div>
-                {characterMode && <small className="vd-tail-character-summary">图片1：{characterMode.kind === 'automatic' ? '待本地提取末帧' : '本地真实末帧'}定画面 · 图片2起：默认人物参考，可选场景／其它参考图</small>}
-                {automatic && <small className="vd-auto-tail-badge">自动衔接：第 {automatic.predecessorSegmentIndex} 段 → {automatic.selectionMode === 'ai-assisted' ? 'AI 辅助选帧 → ' : '本地末帧 → '}图片槽 {automatic.placement.index + 1} · {automatic.placement.semantics === 'first-frame' ? '首帧输入' : '普通衔接参考（不保证严格首帧）'}</small>}
-                {candidate && outputSummaryForDraft(candidate.draft) && <small className="vop-request-summary">{outputSummaryForDraft(candidate.draft)}</small>}
-                {candidate && <VideoAudioReferenceEditor project={project} draft={candidate.draft} api={usageContextForDraft(candidate.draft).api} scope={`第 ${row.segmentIndex} 段`} disabled={interactionLocked} frozenAudios={candidate.draft.reuseTaskId ? findReusableVideoTask(project, candidate.draft.reuseTaskId)?.videoJob?.snapshot.audios : undefined} onImportAudio={onImportAudio} onChange={(patch) => { setAudioOverrides((current) => ({ ...current, [row.segmentId]: { mode: patch.audioSelectionMode || 'override', references: structuredClone(patch.audioReferences || []) } })); setConfirmation(undefined); }} />}
-                {candidate && <VideoMotionReferenceEditor project={project} draft={candidate.draft} api={usageContextForDraft(candidate.draft).api} workflow={usageContextForDraft(candidate.draft).workflow} scope={`第 ${row.segmentIndex} 段`} disabled={interactionLocked} frozenVideos={candidate.draft.reuseTaskId ? findReusableVideoTask(project, candidate.draft.reuseTaskId)?.videoJob?.snapshot.videos : undefined} onChange={(patch) => { setVideoOverrides((current) => ({ ...current, [row.segmentId]: structuredClone(patch.videoReferences || []) })); setConfirmation(undefined); }} />}
-              </div>
-            </details>
-          </article>;
-        })}
-        {!visibleRows.length && <div className="vd-empty">{rows.length ? '没有匹配的分段；已有选择仍保留。' : plans.length ? '正在同步当前全片计划，请稍候。' : '当前章节尚无已分段计划，请先在提示词导演台完成本章长剧情分段，并生成各段提示词。全片母版不会作为单段视频提交。'}</div>}
+          const candidate = rowChoice(row);
+          const previous = rows[rows.indexOf(row) - 1];
+          return <VideoBatchRowItem key={row.segmentId} row={row} candidate={candidate} language={rowLanguage(row)}
+            selected={Boolean(candidate && selectedKeys.has(candidate.key))} previewing={previewRow?.segmentId === row.segmentId}
+            previousChoice={previous && rowChoice(previous)} automatic={automaticTails[row.segmentId]} characterMode={tailCharacterModes[row.segmentId]}
+            zhPreview={rowReferencePreview(row, 'zh')} enPreview={rowReferencePreview(row, 'en')}
+            format={promptFormats[row.segmentId] || promptFormat} environment={rowEnvironment}
+            tailSelection={automaticTails[row.segmentId] ? selectedSignature : undefined} render={renderBatchRow} />;
+        })}        {!visibleRows.length && <div className="vd-empty">{rows.length ? '没有匹配的分段；已有选择仍保留。' : plans.length ? '正在同步当前全片计划，请稍候。' : '当前章节尚无已分段计划，请先在提示词导演台完成本章长剧情分段，并生成各段提示词。全片母版不会作为单段视频提交。'}</div>}
       </div>
       <aside className="vd-batch-preview" aria-label="所选段预览">
         <div className="vd-batch-preview-head">
@@ -1845,12 +1924,8 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
   };
   const draftChangeRef = useRef(onChapterDraftChange);
   draftChangeRef.current = onChapterDraftChange;
-  const persistedSignature = useRef('');
   useEffect(() => {
     const next: VideoDirectorChapterDraft = { draft, parameterText, parameterDrafts: [...parameterDrafts.current], generationMode: generationMode === 'batch' ? 'batch' : 'single', batch: batchDraft };
-    const signature = JSON.stringify(next);
-    if (signature === persistedSignature.current) return;
-    persistedSignature.current = signature;
     draftCache.set(draftScope, next);
     if (chapterId) draftChangeRef.current?.(project.id, chapterId, next);
   }, [draftScope, project.id, chapterId, draft, parameterText, generationMode, batchDraft]);

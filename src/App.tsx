@@ -1,3 +1,4 @@
+import { updateVideoDirectorChapterDraft, withCurrentVideoDirectorDrafts } from './videoDirectorState';
 import { askChapterEntityResolutions, applyChapterEntityResolutions } from "./components/ChapterEntityConflictDialog";
 import { chapterContentForEntity } from "./chapters";
 import { imageTaskRuleMetadata } from "./imageTaskRuleMetadata";
@@ -2018,6 +2019,7 @@ export default function App() {
   const commitState = useCallback((
     update: React.SetStateAction<AppState>,
     recordHistory: boolean,
+    replayBackground = true,
   ) => {
     const reduceState = (source: AppState) => {
       const candidate = typeof update === "function"
@@ -2034,7 +2036,7 @@ export default function App() {
       redoStack.current,
       recordHistory,
       50,
-      !recordHistory && typeof update === "function" ? reduceState : undefined,
+      !recordHistory && replayBackground && typeof update === "function" ? reduceState : undefined,
     );
     if (!transition.changed) return;
     stateRef.current = transition.current;
@@ -2048,6 +2050,10 @@ export default function App() {
   );
   const setBackgroundState = useCallback<BackgroundStateDispatch>(
     (update) => commitState(update, false),
+    [commitState],
+  );
+  const setVideoDraftState = useCallback<BackgroundStateDispatch>(
+    (update) => commitState(update, false, false),
     [commitState],
   );
   const getCurrentProjectId = useCallback(() => stateRef.current.project.id, []);
@@ -3120,6 +3126,7 @@ export default function App() {
       redoStack.current,
     );
     if (!step.changed) return;
+    step.current = withCurrentVideoDirectorDrafts(step.current, stateRef.current);
     workspaceEpochRef.current += 1;
     storyboardImageBatchLifecycleRef.current?.invalidateBindings();
     storyboardImageBatchLifecycleRef.current?.revokeMissingSubmissions((taskId) => isImageTaskActiveInWorkspace(step.current, taskId));
@@ -3147,6 +3154,7 @@ export default function App() {
       undoStack.current,
     );
     if (!step.changed) return;
+    step.current = withCurrentVideoDirectorDrafts(step.current, stateRef.current);
     workspaceEpochRef.current += 1;
     storyboardImageBatchLifecycleRef.current?.invalidateBindings();
     storyboardImageBatchLifecycleRef.current?.revokeMissingSubmissions((taskId) => isImageTaskActiveInWorkspace(step.current, taskId));
@@ -10343,7 +10351,7 @@ export default function App() {
           })}
           controller={videoController} launchRequest={videoLaunchRequest}
           customVideoDraft={state.project.customVideoDraft}
-          onCustomVideoDraftChange={(draft) => setBackgroundState((current) => {
+          onCustomVideoDraftChange={(draft) => setVideoDraftState((current) => {
             const owner = current.project.id === state.project.id ? current.project : current.projects.find((project) => project.id === state.project.id);
             if (!owner || JSON.stringify(owner.customVideoDraft) === JSON.stringify(draft)) return current;
             const updated = { ...owner, customVideoDraft: draft, updatedAt: Date.now() };
@@ -10351,13 +10359,8 @@ export default function App() {
               projects: current.projects.map((project) => project.id === owner.id ? updated : project) };
           })}
           onImportCustomVideoImages={handleCustomVideoImageFilesImport}
-          onChapterDraftChange={(projectId, chapterId, draft) => setBackgroundState((current) => {
-            const owner = current.project.id === projectId ? current.project : current.projects.find((project) => project.id === projectId);
-            if (!owner || JSON.stringify(chapterWorkspace(owner, chapterId).videoDirector) === JSON.stringify(draft)) return current;
-            const updated = withChapterWorkspace(owner, { videoDirector: draft }, chapterId);
-            return { ...current, project: current.project.id === projectId ? updated : current.project,
-              projects: current.projects.map((project) => project.id === projectId ? updated : project) };
-          })}
+          onChapterDraftChange={(projectId, chapterId, draft) => setVideoDraftState((current) =>
+            updateVideoDirectorChapterDraft(current, projectId, chapterId, draft))}
           tailFrameTools={{ available: Boolean(videoWorkbenchController.status?.available), busy: videoWorkbenchController.busy || Boolean(tailFrameAiProgress), progress: tailFrameAiProgress || videoWorkbenchController.progress, extract: extractPreviousVideoTail, selectFrame: selectPreviousVideoFrame, cancel: cancelPreviousVideoTail }}
           onOpenSettings={() => { setOpenVideoSettings(true); setView("settings"); }}
           onOpenPrompt={openPromptSource}

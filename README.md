@@ -4,15 +4,15 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的工作台，提供 Windows 便携版和 Android 手机 APK。
 
-当前版本：**4.6.7** · 2026-11-15 · Windows x64 / Android
+当前版本：**4.6.9** · 2026-11-16 · Windows x64 / Android
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows EXE / Android APK](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-4.6.7.md) · [安卓安装说明](docs/android-install.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-4.6.9.md) · [安卓安装说明](docs/android-install.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
-1. 电脑下载 [Windows 便携版 EXE](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/download/v4.6.7/lianhua-video-director-4.6.7-windows-x64-portable.exe)，放在可写入的文件夹里双击运行；安卓手机下载 [Android APK](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/download/v4.6.7/lianhua-video-director-4.6.7-android.apk) 后安装。普通使用者无需安装开发环境。
+1. 电脑下载 [Windows 便携版 EXE](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/download/v4.6.9/lianhua-video-director-4.6.9-windows-x64-portable.exe)，放在可写入的文件夹里双击运行；安卓手机下载 [Android APK](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/download/v4.6.9/lianhua-video-director-4.6.9-android.apk) 后安装。普通使用者无需安装开发环境。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
 3. 导入 TXT / Markdown 分章原文或手动新建章节，选择章节后解析剧情，再进入导演台生成、编辑和导出提示词。导入不会自动调用 API 批量解析全书。
 
@@ -20,7 +20,7 @@
 
 更新前请先保存项目并退出旧版，保留 EXE 旁的“莲华视频导演台数据”文件夹。 自 1.5.2 起项目与素材分文件保存，移动或备份时请保留整个数据文件夹；不要单独把新存档索引交给旧版打开。详见[保存与恢复说明](docs/releases/发布说明-1.5.2.md)。
 
-安卓更新直接覆盖安装同签名新版 APK，保留应用数据；卸载或清除数据前先导出带素材的 `.lhvd` 项目包。电脑和手机通过项目包互相转移，API 密钥在各设备重新配置。安卓实际能力与已执行检查见交付文件中的同版“能力与验证记录”。
+安卓更新直接覆盖安装同签名新版 APK，保留应用数据；卸载或清除数据前先导出带素材的 `.lhvd` 项目包。电脑和手机通过项目包互相转移，API 密钥在各设备重新配置。本版构建、签名和检查范围见 [4.6.9 能力与验证记录](docs/releases/能力与验证记录-4.6.9.md)，Android 真机安装与覆盖升级尚未验证。
 
 ## 使用与引用说明
 
@@ -45,13 +45,15 @@
 - **自定义生视频**：在视频导演台的第三个模式页签自己选图、填写原文提示词，选择视频 API、RunningHub 云端、已适配网页或 ComfyUI 工作流；草稿独立保存，结果全部入库。
 - **项目与资产管理**：管理图片、视频和音频，保存项目包、备份资料并导出提示词。
 
-## 最新更新 · v4.6.7
+## 最新更新 · v4.6.9
 
-- H3 提示词明确写出进入时的身体状态，并在抽送时保持这一终态。
-- 镜头按实际接触动作选择斜侧面中景或含入画面范围。
-- 已保存的成片、分镜、章节和提示词不改写；新句子在后续相关生成中使用。
+- 视频导演台复用未改变的分段候选和索引，减少切换语言、勾选及预览时的重复渲染。
+- 分段编辑器按需创建，图片弹窗按可见范围显示卡片，保留全部图片的搜索、选择和滚动访问。
+- 视频草稿走独立更新路径，撤销其他编辑时保留当前草稿，减少任务协调和整份状态序列化。
 
-[查看本版完整说明](docs/releases/发布说明-4.6.7.md) · [历史版本归档](docs/releases/README.md)
+性能数据来自隔离合成数据诊断，不代表真实用户项目或 Android 真机性能。已保存的分段、任务快照和成片不改写。
+
+[查看本版完整说明](docs/releases/发布说明-4.6.9.md) · [历史版本归档](docs/releases/README.md)
 
 ## 从源码运行
 

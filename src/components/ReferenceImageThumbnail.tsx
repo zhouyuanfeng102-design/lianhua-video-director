@@ -65,7 +65,7 @@ interface ThumbnailState {
 }
 
 /** Only visible picker cards request pixels; desktop cards never fall back after a thumbnail error. */
-export const ReferenceImageThumbnail = memo(function ReferenceImageThumbnail({ asset }: { asset: ReferenceAsset }) {
+export const ReferenceImageThumbnail = memo(function ReferenceImageThumbnail({ asset, scrollRootSelector = '.reference-image-picker-list' }: { asset: ReferenceAsset; scrollRootSelector?: string }) {
   const hostRef = useRef<HTMLSpanElement>(null);
   const relativePath = managedImagePath(asset);
   const desktop = typeof window === 'undefined' ? undefined : window.lianhuaDesktop;
@@ -83,7 +83,7 @@ export const ReferenceImageThumbnail = memo(function ReferenceImageThumbnail({ a
   useEffect(() => {
     const host = hostRef.current;
     if (!host || !source) return;
-    const root = host.closest('.reference-image-picker-list');
+    const root = host.closest(scrollRootSelector);
     if (typeof IntersectionObserver !== 'undefined') {
       const observer = new IntersectionObserver((entries) => {
         if (!entries.some((entry) => entry.isIntersecting)) return;
@@ -107,7 +107,7 @@ export const ReferenceImageThumbnail = memo(function ReferenceImageThumbnail({ a
       root?.removeEventListener('scroll', revealIfVisible);
       window.removeEventListener('resize', revealIfVisible);
     };
-  }, [source]);
+  }, [source, scrollRootSelector]);
 
   useEffect(() => {
     if (!visible) return;

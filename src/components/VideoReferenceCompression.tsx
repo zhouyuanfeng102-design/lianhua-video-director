@@ -168,5 +168,5 @@ export function useVideoReferenceCompression({ assets, selection, onChange, acti
     {error && <p className="vd-error" role="alert">{error}</p>}{work && <p role="status">{work}</p>}
     <div className="vd-modal-footer"><button type="button" className="btn" onClick={closeReview}>保留当前选图</button><button type="button" className="btn primary" disabled={Boolean(work) || !chosen.length} onClick={() => { void apply(); }}>{candidates.length === 1 ? '使用压缩副本' : `使用 ${chosen.length} 张压缩副本`}</button></div>
   </div> } : undefined;
-  return { cardControls, summary, review, displayAsset, busy: Boolean(work) };
+  return { cardControls, summary, review, displayAsset, cardSizes: sizes, busy: Boolean(work) };
 }

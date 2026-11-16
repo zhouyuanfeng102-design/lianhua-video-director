@@ -57,9 +57,9 @@ try {
     await capture('default');
     if (device.mobile) await page.getByRole('navigation', { name: '手机主导航' }).getByRole('button', { name: '素材', exact: true }).click();
     else await page.locator('.sidebar').getByRole('button', { name: '资产库', exact: true }).click();
-    await page.locator('.assets-view').waitFor();
+    await page.locator(device.mobile ? '.phone-assets' : '.assets-view').waitFor();
     await capture('assets');
-    if (device.mobile) await page.getByRole('button', { name: '打开 API 设置', exact: true }).click();
+    if (device.mobile) { await page.locator('.mobile-header').getByRole('button', { name: '更多', exact: true }).first().click(); await page.getByRole('dialog', { name: '更多', exact: true }).getByRole('button', { name: 'API 设置', exact: true }).click(); }
     else await page.locator('.sidebar').getByRole('button', { name: 'API 设置', exact: true }).click();
     await page.locator('.settings-api-tabs').waitFor();
     await capture('api');

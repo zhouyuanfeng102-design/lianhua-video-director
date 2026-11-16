@@ -540,3 +540,16 @@ main:has(> .workspace.view-video) > .chapter-toolbar svg { width: 13px; height: 
   padding: 10px 12px;
   overflow-wrap: anywhere;
 }
+
+/* Director cards use the shared visible-only thumbnail, inside their own scroll root. */
+.vd-batch-image-grid .vd-image-pick > .reference-image-picker-thumb {
+  width: 100%;
+  height: 132px;
+  grid-row: auto;
+}
+.vd-batch-image-grid .reference-image-picker-thumb img { height: 100%; object-fit: contain; }
+.vd-batch-image-grid .vd-image-pick > .reference-image-picker-thumb { grid-column: 1 / -1; }
+.vd-reference-picker-panel .vd-windowed-image-grid { --vd-image-card-min-width: 140px; --vd-image-grid-gap: 10px; display: block; padding: 2px; }
+.vd-windowed-image-row { display: grid; gap: var(--vd-image-grid-gap); align-items: stretch; }
+.vd-windowed-image-cell { display: flex; min-width: 0; }
+.vd-windowed-image-cell > .vd-image-choice { flex: 1; }

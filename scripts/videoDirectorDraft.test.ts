@@ -199,7 +199,7 @@ const privateBreastAsset = asset('private-breasts', {
 assert.equal(isVideoDirectorImage(privateBreastAsset), true, 'manual video image pickers include every image asset from the library');
 assert.deepEqual(
   addVideoDraftAssets(empty, [privateBreastAsset.id], [privateBreastAsset]).references,
-  [{ assetId: privateBreastAsset.id, role: 'character' }],
+  [{ assetId: privateBreastAsset.id, role: 'private-part' }],
   'a manual launch request may use an explicitly selected library image',
 );
 
@@ -249,7 +249,7 @@ assert.deepEqual(
 );
 assert.deepEqual(
   applyVideoPromptChoice(empty, privateChoice, privateProject, true).references,
-  [{ assetId: privateBreastAsset.id, role: 'character' }],
+  [{ assetId: privateBreastAsset.id, role: 'private-part' }],
   'an explicitly adult, same-character, body-part-matched shot may opt in its private reference',
 );
 assert.deepEqual(
@@ -269,7 +269,7 @@ assert.deepEqual(
     characters: [...project.characters, { ...adultCharacter, apparentAge: '' }],
     storyboards: [{ ...privateBoard, sourceStoryContent: '阿莲上身裸露，镜头明确表现她的胸部与乳头。' }],
   }, true).references,
-  [{ assetId: privateBreastAsset.id, role: 'character' }],
+  [{ assetId: privateBreastAsset.id, role: 'private-part' }],
   'private-reference routing must not depend on age metadata',
 );
 assert.deepEqual(

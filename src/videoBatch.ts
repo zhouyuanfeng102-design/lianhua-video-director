@@ -1,3 +1,4 @@
+import { createVideoDirectorProjectSelector, rememberVideoRow, type VideoRowMemo } from './videoDirectorState';
 import { isVideoGenerationTask } from './generationTasks';
 import { videoTaskIsClearedStoppedHistory } from './videoTaskDeletionSafety';
 import { sourceContentHash } from './sourceIntegrity';
@@ -299,11 +300,14 @@ const assetContentIdentity = (asset: FingerprintAsset | undefined, assetId: stri
   return `unreadable:${assetId}@${asset.updatedAt || 0}`;
 };
 
+type VideoBatchAssetIndex = ReadonlyMap<string, FingerprintAsset>;
+
 const referenceManifest = (
   references: VideoGenerationDraft['references'],
   assets: readonly FingerprintAsset[],
+  index?: VideoBatchAssetIndex,
 ): Array<{ assetId: string; role: string; content: string; slotIndex?: number }> => {
-  const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
+  const assetsById = index || new Map(assets.map((asset) => [asset.id, asset]));
   return references.map((reference, index) => ({
     assetId: reference.assetId,
     role: reference.role,
@@ -347,8 +351,9 @@ const snapshotReferenceManifest = (
 const audioReferenceManifest = (
   references: readonly VideoAudioReference[],
   assets: readonly FingerprintAsset[],
+  index?: VideoBatchAssetIndex,
 ) => {
-  const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
+  const assetsById = index || new Map(assets.map((asset) => [asset.id, asset]));
   return references.map((reference) => ({
     assetId: reference.assetId,
     bindingId: reference.bindingId,
@@ -360,8 +365,8 @@ const audioReferenceManifest = (
   })).sort((left, right) => left.slotIndex - right.slotIndex || left.bindingId.localeCompare(right.bindingId));
 };
 
-const motionReferenceManifest = (references: readonly VideoMotionReference[], assets: readonly FingerprintAsset[]) => {
-  const byId = new Map(assets.map((asset) => [asset.id, asset]));
+const motionReferenceManifest = (references: readonly VideoMotionReference[], assets: readonly FingerprintAsset[], index?: VideoBatchAssetIndex) => {
+  const byId = index || new Map(assets.map((asset) => [asset.id, asset]));
   return references.map((reference) => ({ ...reference, content: assetContentIdentity(byId.get(reference.assetId), reference.assetId) }))
     .sort((left, right) => left.slotIndex - right.slotIndex || left.bindingId.localeCompare(right.bindingId));
 };
@@ -393,11 +398,12 @@ export const videoBatchPromptFingerprint = (
 export const videoBatchReferenceFingerprint = (
   draft: Pick<VideoGenerationDraft, 'references' | 'audioReferences' | 'videoReferences'>,
   assets: readonly ReferenceAsset[],
+  assetIndex?: VideoBatchAssetIndex,
 ): string => fingerprint('video-reference', draft.audioReferences?.length || draft.videoReferences?.length
-  ? { images: referenceManifest(draft.references, assets),
-    ...(draft.audioReferences?.length ? { audios: audioReferenceManifest(draft.audioReferences, assets) } : {}),
-    ...(draft.videoReferences?.length ? { videos: motionReferenceManifest(draft.videoReferences, assets) } : {}) }
-  : referenceManifest(draft.references, assets));
+  ? { images: referenceManifest(draft.references, assets, assetIndex),
+    ...(draft.audioReferences?.length ? { audios: audioReferenceManifest(draft.audioReferences, assets, assetIndex) } : {}),
+    ...(draft.videoReferences?.length ? { videos: motionReferenceManifest(draft.videoReferences, assets, assetIndex) } : {}) }
+  : referenceManifest(draft.references, assets, assetIndex));
 
 const selectedComfyVideoWorkflow = (
   settings: AppSettings,
@@ -455,15 +461,16 @@ export const videoBatchRequestFingerprint = (
   assets: readonly ReferenceAsset[],
   connectionIdentity: unknown,
   referenceOffset = 0,
+  assetIndex?: VideoBatchAssetIndex,
 ): string => fingerprint('video-request', {
   sourceKey: draft.source?.storyboardId
     ? videoPromptChoiceKey(draft.source.storyboardId, draft.source.language || 'zh', draft.source.promptFormat)
     : undefined,
   language: draft.source?.language || 'zh',
   prompt: draft.prompt,
-  references: referenceManifest(referenceUsageForConnection(draft, connectionIdentity, referenceOffset), assets),
-  ...(draft.audioReferences?.length ? { audios: audioReferenceManifest(draft.audioReferences, assets) } : {}),
-  ...(draft.videoReferences?.length ? { videos: motionReferenceManifest(draft.videoReferences, assets) } : {}),
+  references: referenceManifest(referenceUsageForConnection(draft, connectionIdentity, referenceOffset), assets, assetIndex),
+  ...(draft.audioReferences?.length ? { audios: audioReferenceManifest(draft.audioReferences, assets, assetIndex) } : {}),
+  ...(draft.videoReferences?.length ? { videos: motionReferenceManifest(draft.videoReferences, assets, assetIndex) } : {}),
   backend: draft.backend,
   connection: semanticConnection(connectionIdentity),
   parameters: draft.parameters,
@@ -643,7 +650,9 @@ const inFlightVideoTask = (task: VideoGenerationTask): boolean => {
 export const findVideoBatchDuplicate = (
   project: Pick<Project, 'generationTasks'>,
   requestFingerprint: string,
+  cache?: VideoBatchRowCache,
 ): VideoBatchDuplicateMatch | undefined => {
+  if (cache && cache.duplicateTasks === project.generationTasks) return cache.duplicates.get(requestFingerprint);
   let succeeded: VideoBatchDuplicateMatch | undefined;
   for (const item of project.generationTasks) {
     if (!isVideoGenerationTask(item)) continue;
@@ -656,6 +665,28 @@ export const findVideoBatchDuplicate = (
     }
   }
   return succeeded;
+};
+
+/** Same priority and legacy aliases as findVideoBatchDuplicate, indexed once per task collection. */
+const videoBatchDuplicateIndex = (project: Pick<Project, 'generationTasks'>): Map<string, VideoBatchDuplicateMatch | undefined> => {
+  const index = new Map<string, VideoBatchDuplicateMatch>();
+  for (const task of project.generationTasks) {
+    if (!isVideoGenerationTask(task)) continue;
+    const kind = inFlightVideoTask(task) ? 'in-flight' : task.status === 'succeeded' ? 'succeeded' : undefined;
+    if (!kind) continue;
+    const primary = videoTaskRequestFingerprint(task);
+    const keys = primary ? [primary] : [];
+    const snapshot = task.videoJob?.snapshot;
+    if (snapshot?.draft.prompt.trim() && !snapshot.previousTail && !snapshot.batchPredecessorTaskId) {
+      const usage = videoReferenceUsage(snapshot.draft.references, { ...snapshot.connection, slotRoles: snapshot.draft.referenceSlotRoles });
+      if (usage.some((reference, position) => reference.role !== snapshot.draft.references[position].role)) keys.push(snapshotRequestFingerprint(snapshot));
+    }
+    for (const key of keys) {
+      const previous = index.get(key);
+      if (!previous || previous.kind === 'succeeded' && kind === 'in-flight') index.set(key, { kind, taskId: task.id, status: task.status });
+    }
+  }
+  return index;
 };
 
 const isolatedDraft = (
@@ -694,6 +725,8 @@ const buildChoiceCandidate = (
   choice: VideoPromptChoice,
   settings: AppSettings,
   options: VideoBatchBuildOptions,
+  associateTasks = true,
+  assetIndex?: VideoBatchAssetIndex,
 ): VideoBatchChoiceCandidate => {
   let draft = applyVideoPromptChoice(
     isolatedDraft(settings, options),
@@ -724,11 +757,12 @@ const buildChoiceCandidate = (
   }
   draft = prepareVideoH3ReferenceDraft(project, draft, videoBatchH3ReferenceContext(settings, draft)).draft;
   const promptFingerprint = videoBatchPromptFingerprint(choice);
-  const referenceFingerprint = videoBatchReferenceFingerprint(draft, project.assets);
+  const referenceFingerprint = videoBatchReferenceFingerprint(draft, project.assets, assetIndex);
   const requestFingerprint = videoBatchRequestFingerprint(
     draft,
     project.assets,
     videoBatchConnectionIdentity(settings, draft),
+    0, assetIndex,
   );
   return {
     key: videoPromptChoiceKey(choice.storyboardId, choice.language, choice.promptFormat),
@@ -742,63 +776,107 @@ const buildChoiceCandidate = (
     promptFingerprint,
     referenceFingerprint,
     requestFingerprint,
-    duplicate: findVideoBatchDuplicate(project, requestFingerprint),
+    duplicate: associateTasks ? findVideoBatchDuplicate(project, requestFingerprint) : undefined,
   };
 };
 
 /** Build one row per real sequence segment. Only the storyboard currently linked
  * by that segment is eligible; the master and orphaned historical boards never
  * enter the batch. Each language starts from its own empty draft. */
+export interface VideoBatchRowCache {
+  selectSource: ReturnType<typeof createVideoDirectorProjectSelector>;
+  taskCollection?: Project['generationTasks'];
+  imageTasks: Project['generationTasks'];
+  sourceProject?: Project;
+  assetCollection?: Project['assets'];
+  assetIndex?: VideoBatchAssetIndex;
+  choiceSource?: Project;
+  choicePlan?: VideoSequencePlan;
+  choices: Map<VideoPromptFormat | undefined, Map<VideoPromptChoiceKey, VideoPromptChoice>>;
+  rows: VideoRowMemo<VideoBatchRow>;
+  associated: WeakMap<VideoBatchChoiceCandidate, VideoBatchChoiceCandidate>;
+  duplicateTasks?: Project['generationTasks'];
+  duplicates: Map<string, VideoBatchDuplicateMatch | undefined>;
+}
+
+/** View-owned bounded caches; execution callers keep using the uncached builder. */
+export const createVideoBatchRowCache = (): VideoBatchRowCache => ({
+  selectSource: createVideoDirectorProjectSelector(), imageTasks: [], choices: new Map(), rows: new Map(),
+  associated: new WeakMap(), duplicates: new Map(),
+});
+
 export const buildVideoBatchRows = (
   project: Project,
   plan: VideoSequencePlan,
   settings: AppSettings,
   options: VideoBatchBuildOptions = {},
+  cache?: VideoBatchRowCache,
 ): VideoBatchRow[] => {
+  let source = project;
+  if (cache) {
+    if (cache.taskCollection !== project.generationTasks) {
+      const images = project.generationTasks.filter((task) => task.kind === 'image');
+      if (images.length !== cache.imageTasks.length || images.some((task, index) => task !== cache.imageTasks[index])) cache.imageTasks = images;
+      cache.taskCollection = project.generationTasks;
+    }
+    source = cache.selectSource({ ...project, generationTasks: cache.imageTasks });
+    cache.sourceProject = source;
+    if (cache.assetCollection !== project.assets) { cache.assetCollection = project.assets; cache.assetIndex = new Map(project.assets.map((asset) => [asset.id, asset])); }
+    if (cache.choiceSource !== source || cache.choicePlan !== plan) {
+      cache.choices.clear(); cache.rows.clear();
+      cache.choiceSource = source; cache.choicePlan = plan;
+    }
+    if (cache.duplicateTasks !== project.generationTasks) { cache.duplicates = videoBatchDuplicateIndex(project); cache.duplicateTasks = project.generationTasks; }
+  }
+  const ids = cache ? new Set(plan.segments.flatMap((segment) => segment.storyboardId ? [segment.storyboardId] : [])) : undefined;
   const selectedFormats = new Set<VideoPromptFormat | undefined>([options.promptFormat, ...Object.values(options.promptFormats || {})]);
-  const choices = [...selectedFormats].flatMap((format) => videoPromptChoices(project, undefined, format));
-  const choicesByKey = new Map(choices.map((choice) => [
-    videoPromptChoiceKey(choice.storyboardId, choice.language, choice.promptFormat),
-    choice,
-  ]));
-  const storyboardsById = new Map(project.storyboards.map((board) => [board.id, board]));
-  return plan.segments
-    .map((segment, originalIndex) => ({ segment, originalIndex }))
-    .sort((left, right) => left.segment.index - right.segment.index
-      || left.originalIndex - right.originalIndex)
+  const choicesByKey = new Map<VideoPromptChoiceKey, VideoPromptChoice>();
+  for (const format of selectedFormats) {
+    let choices = cache?.choices.get(format);
+    if (!choices) {
+      choices = new Map(videoPromptChoices(source, undefined, format, ids).map((choice) => [videoPromptChoiceKey(choice.storyboardId, choice.language, choice.promptFormat), choice]));
+      cache?.choices.set(format, choices);
+    }
+    for (const [key, choice] of choices) choicesByKey.set(key, choice);
+  }
+  const storyboardsById = new Map(source.storyboards.map((board) => [board.id, board]));
+  const associate = (candidate?: VideoBatchChoiceCandidate): VideoBatchChoiceCandidate | undefined => {
+    if (!candidate || !cache) return candidate;
+    const duplicate = cache.duplicates.get(candidate.requestFingerprint);
+    const prior = cache.associated.get(candidate);
+    if (prior && prior.duplicate?.kind === duplicate?.kind && prior.duplicate?.taskId === duplicate?.taskId && prior.duplicate?.status === duplicate?.status) return prior;
+    const next = duplicate ? { ...candidate, duplicate } : candidate;
+    cache.associated.set(candidate, next);
+    return next;
+  };
+  const live = new Set<string>();
+  const result = plan.segments.map((segment, originalIndex) => ({ segment, originalIndex }))
+    .sort((left, right) => left.segment.index - right.segment.index || left.originalIndex - right.originalIndex)
     .map(({ segment }) => {
-      const storyboard = segment.storyboardId
-        ? storyboardsById.get(segment.storyboardId)
-        : undefined;
-      const validStoryboard = storyboard
-        && storyboard.id !== plan.masterStoryboardId
+      live.add(segment.id);
+      const storyboard = segment.storyboardId ? storyboardsById.get(segment.storyboardId) : undefined;
+      const valid = storyboard && storyboard.id !== plan.masterStoryboardId
         && (!storyboard.sequencePlanId || storyboard.sequencePlanId === plan.id)
-        && (!storyboard.segmentId || storyboard.segmentId === segment.id)
-        ? storyboard
-        : undefined;
-      const zhChoice = validStoryboard
-        ? choicesByKey.get(videoPromptChoiceKey(validStoryboard.id, 'zh', options.promptFormats?.[segment.id] || options.promptFormat))
-        : undefined;
-      const enChoice = validStoryboard
-        ? choicesByKey.get(videoPromptChoiceKey(validStoryboard.id, 'en', options.promptFormats?.[segment.id] || options.promptFormat))
-        : undefined;
-      return {
-        id: segment.id,
-        sequencePlanId: plan.id,
-        segmentId: segment.id,
-        index: segment.index,
-        segmentIndex: segment.index,
-        title: segment.title,
-        durationSec: segment.durationSec,
-        storyboardId: validStoryboard?.id,
-        zh: zhChoice
-          ? buildChoiceCandidate(project, plan, segment, zhChoice, settings, options)
-          : undefined,
-        en: enChoice
-          ? buildChoiceCandidate(project, plan, segment, enChoice, settings, options)
-          : undefined,
-      };
+        && (!storyboard.segmentId || storyboard.segmentId === segment.id) ? storyboard : undefined;
+      const format = options.promptFormats?.[segment.id] || options.promptFormat;
+      const zh = valid ? choicesByKey.get(videoPromptChoiceKey(valid.id, 'zh', format)) : undefined;
+      const en = valid ? choicesByKey.get(videoPromptChoiceKey(valid.id, 'en', format)) : undefined;
+      const build = (): VideoBatchRow => ({
+        id: segment.id, sequencePlanId: plan.id, segmentId: segment.id, index: segment.index, segmentIndex: segment.index,
+        title: segment.title, durationSec: segment.durationSec, storyboardId: valid?.id,
+        zh: zh ? buildChoiceCandidate(source, plan, segment, zh, settings, options, !cache, cache?.assetIndex) : undefined,
+        en: en ? buildChoiceCandidate(source, plan, segment, en, settings, options, !cache, cache?.assetIndex) : undefined,
+      });
+      const row = cache ? rememberVideoRow(cache.rows, segment.id, [source, plan, segment, settings, zh, en, options.backend, options.workflowId,
+        options.apiProfileId, options.runningHubWorkflowId, options.runningHubWebAppId, options.parameters, options.includeStoryboardReferences,
+        zh && options.referenceOverrides?.[zh.id as VideoPromptChoiceKey], en && options.referenceOverrides?.[en.id as VideoPromptChoiceKey]], build) : build();
+      const associatedZh = associate(row.zh), associatedEn = associate(row.en);
+      if (associatedZh === row.zh && associatedEn === row.en) return row;
+      return cache ? rememberVideoRow(cache.rows, 'associated:'+segment.id, [row, associatedZh, associatedEn], () => ({ ...row, zh: associatedZh, en: associatedEn }))
+        : { ...row, zh: associatedZh, en: associatedEn };
     });
+  if (cache) for (const key of cache.rows.keys()) if (!live.has(key.startsWith('associated:') ? key.slice(11) : key)) cache.rows.delete(key);
+  return result;
 };
 
 const choicesForLanguage = (

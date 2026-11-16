@@ -137,7 +137,7 @@ export const videoAudioSpeakingCharacterIds = (project: Project, draft: VideoGen
   return project.characters.filter((character) => (directIds.size ? directIds : ids).has(character.id)).map((character) => character.id);
 };
 
-export const resolveVideoAudioReferences = (project: Project, draft: VideoGenerationDraft, api: AudioApi): VideoAudioReference[] => {
+export const resolveVideoAudioReferences = (project: Project, draft: VideoGenerationDraft, api: AudioApi, speakingCharacterIds?: readonly string[]): VideoAudioReference[] => {
   if (draft.audioSelectionMode === 'none') return [];
   if (draft.origin === 'custom' && draft.promptMode === 'raw') return structuredClone(draft.audioReferences || []);
   if (draft.reuseTaskId || draft.audioSelectionMode === 'override' || !draft.audioSelectionMode && draft.audioReferences?.length) return structuredClone(draft.audioReferences || []);
@@ -148,7 +148,7 @@ export const resolveVideoAudioReferences = (project: Project, draft: VideoGenera
     const slotIndex = references.length;
     references.push({ bindingId: videoAudioBindingId(api, slotIndex), slotIndex, assetId, target, retainMode, ...(notes ? { notes } : {}) });
   };
-  for (const id of videoAudioSpeakingCharacterIds(project, draft)) {
+  for (const id of speakingCharacterIds || videoAudioSpeakingCharacterIds(project, draft)) {
     const preset = videoAudioCharacterPreset(project, id);
     if (preset) add(preset.assetId, { kind: 'character', characterId: id }, preset.retainMode, preset.notes);
   }

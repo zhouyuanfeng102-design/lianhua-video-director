@@ -40,68 +40,51 @@ export interface SemanticSequencePlannerOptions {
 
 export const SEMANTIC_SEQUENCE_PLANNING_TAG = 'RAW_STORY_SEMANTIC_SEQUENCE_PLANNING_V1';
 
+/** A closed object whose every listed field is required. Optional causality,
+ * character ids and staging stay out so a long plan can still be compiled. */
+const strictSchemaObject = (properties: Record<string, unknown>, required: readonly string[]): Record<string, unknown> => ({
+  type: 'object', properties, required: [...required], additionalProperties: false,
+});
+
 /**
- * Gemini JSON mode only constrains syntax. Keep the wire schema focused on the
- * fields that the existing parser needs, while leaving adopted staging and
- * future metadata extensible.
+ * strict JSON Schema is the decoding grammar. A property name can only be
+ * followed by an ASCII colon. The parser still accepts causality, character
+ * ids and staging when a host returns them.
  */
-export const SEMANTIC_SEQUENCE_RESPONSE_SCHEMA: Record<string, unknown> = {
-  type: 'object',
-  properties: {
-    reason: { type: 'string' },
-    fitStatus: { type: 'string', enum: ['comfortable', 'balanced', 'compressed', 'insufficient'] },
-    segments: {
-      type: 'array',
-      items: {
-        type: 'object',
-        properties: {
-          title: { type: 'string' },
-          content: { type: 'string' },
-          summary: { type: 'string' },
-          narrativePurpose: { type: 'string' },
-          entryState: { type: 'string' },
-          exitState: { type: 'string' },
-          transitionHint: { type: 'string' },
-          boundaryReason: { type: 'string' },
-          continuityPack: { type: 'string' },
-          semanticSource: {
-            type: 'object',
-            properties: {
-              sourceEvidence: {
-                type: 'array',
-                items: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false },
-              },
-              events: {
-                type: 'array',
-                items: { type: 'object', properties: {
-                  id: { type: 'string' }, description: { type: 'string' }, phase: { type: 'string' },
-                  causality: { type: 'object', properties: {
-                    actor: { type: 'string' }, target: { type: 'string' }, action: { type: 'string' }, result: { type: 'string' }, evidence: { type: 'string' },
-                    certainty: { type: 'string', enum: ['explicit', 'context-supported', 'unknown'] },
-                    actorCharacterId: { type: 'string' }, targetCharacterId: { type: 'string' },
-                    targetCharacterIds: { type: 'array', items: { type: 'string' } },
-                  }, required: ['actor', 'target', 'action', 'result', 'evidence', 'certainty'] },
-                }, required: ['id', 'description'] },
-              },
-              dialogues: {
-                type: 'array',
-                items: { type: 'object', properties: {
-                  id: { type: 'string' }, speaker: { type: 'string' }, text: { type: 'string' },
-                  speakerCharacterId: { type: 'string' }, listenerCharacterIds: { type: 'array', items: { type: 'string' } },
-                  addressedCharacterIds: { type: 'array', items: { type: 'string' } }, language: { type: 'string' }, continuation: { type: 'string' },
-                }, required: ['id', 'speaker', 'text'], additionalProperties: false },
-              },
-            },
-            required: ['sourceEvidence', 'events', 'dialogues'],
-            additionalProperties: true,
-          },
+export const SEMANTIC_SEQUENCE_RESPONSE_SCHEMA: Record<string, unknown> = strictSchemaObject({
+  reason: { type: 'string' },
+  fitStatus: { type: 'string', enum: ['comfortable', 'balanced', 'compressed', 'insufficient'] },
+  segments: {
+    type: 'array',
+    items: strictSchemaObject({
+      title: { type: 'string' },
+      content: { type: 'string' },
+      summary: { type: 'string' },
+      narrativePurpose: { type: 'string' },
+      entryState: { type: 'string' },
+      exitState: { type: 'string' },
+      transitionHint: { type: 'string' },
+      boundaryReason: { type: 'string' },
+      continuityPack: { type: 'string' },
+      semanticSource: strictSchemaObject({
+        sourceEvidence: {
+          type: 'array',
+          items: strictSchemaObject({ text: { type: 'string' } }, ['text']),
         },
-        required: ['title', 'content', 'summary', 'narrativePurpose', 'entryState', 'exitState', 'transitionHint', 'boundaryReason', 'continuityPack', 'semanticSource'],
-      },
-    },
+        events: {
+          type: 'array',
+          items: strictSchemaObject({ id: { type: 'string' }, description: { type: 'string' } }, ['id', 'description']),
+        },
+        dialogues: {
+          type: 'array',
+          items: strictSchemaObject({
+            id: { type: 'string' }, speaker: { type: 'string' }, text: { type: 'string' },
+          }, ['id', 'speaker', 'text']),
+        },
+      }, ['sourceEvidence', 'events', 'dialogues']),
+    }, ['title', 'content', 'summary', 'narrativePurpose', 'entryState', 'exitState', 'transitionHint', 'boundaryReason', 'continuityPack', 'semanticSource']),
   },
-  required: ['reason', 'fitStatus', 'segments'],
-};
+}, ['reason', 'fitStatus', 'segments']);
 
 const supportsGeminiStructuredOutput = (config: TextApiConfig): boolean => (
   config.provider === 'gemini'
@@ -139,7 +122,7 @@ const semanticSceneStagingExample = {
 /** The model owns all narrative decisions and its self-review in this one
  * generation. Shared pacing prose never becomes a local acceptance gate. */
 const SEMANTIC_SEQUENCE_COMMON_RULE = [
-  `输出结构契约优先于所有叙事说明：根对象必须包含 reason（字符串）、fitStatus（comfortable/balanced/compressed/insufficient 之一）和 segments（数组）。每个成功段必须包含 title、content、summary、narrativePurpose、entryState、exitState、transitionHint、boundaryReason、continuityPack（均为字符串）以及 semanticSource（对象）；semanticSource必须包含sourceEvidence、events、dialogues（均为数组，即使为空也要写出）。sourceEvidence元素只写逐字原文摘录text，不写字符位置。events元素至少有id和description。dialogues元素只写id、speaker、text及已有可选归属字段：引号内或明确逐字原话的text逐字保留；话题转述的text可是在获准生成阶段整理的自然完整句，不写成摘要短语。凡被识别为真实发话的事件，dialogues.text必须是完整、可朗读的句子，不能写“人物发声”“低声应门”“声音从门后传来”“回应声”这类声源或表演提示；这些提示分别写入事件说明、channel或delivery，不能替代text。像“应门”这种已有明确沟通目的的提示，依据同一场景的说话人、听者和事实写出最短自然回应（本项目示例为“进来。”）；没有词语的笑、哭、咳、喘保留为非语言人声，不伪装成dialogues。固定模式确实无法完成时仍返回reason、fitStatus=insufficient和segments=[]。`,
+  `输出结构契约优先于所有叙事说明：根对象必须包含 reason（字符串）、fitStatus（comfortable/balanced/compressed/insufficient 之一）和 segments（数组）。每个成功段必须包含 title、content、summary、narrativePurpose、entryState、exitState、transitionHint、boundaryReason、continuityPack（均为字符串）以及 semanticSource（对象）；semanticSource必须包含sourceEvidence、events、dialogues（均为数组，即使为空也要写出）。sourceEvidence元素只写逐字原文摘录text，不写字符位置。events元素至少有id和description。dialogues元素只写id、speaker、text及已有可选归属字段：引号内或明确逐字原话的text逐字保留；话题转述的text可是在获准生成阶段整理的自然完整句，不写成摘要短语。凡被识别为真实发话的事件，dialogues.text必须是完整、可朗读的句子，不能写“人物发声”“低声应门”“声音从门后传来”“回应声”这类声源或表演提示；这些提示分别写入事件说明、channel或delivery，不能替代text。像“应门”这种已有明确沟通目的的提示，依据同一场景的说话人、听者和事实写出最短自然回应（本项目示例为“进来。”）；没有词语的笑、哭、咳、喘保留为非语言人声，不伪装成dialogues。`,
   '你是原文语义分段规划器。本次从完整原文直接制定按段拍摄计划，不存在新全片总稿，也不先生成全片H3、英文提示词或全片镜头表。只交付规定的语义分段JSON。',
   '先完整阅读story、creativeDirection、pacing和characterContinuity，理解全部剧情后再决定语义边界和每段实际推进的内容。本阶段时长权限以请求的durationAdjustmentPolicy为准：单段D=segmentDurationSec，每段足额D秒，总长N×D，无短尾段。实际段数N只取完整segments数组的元素数量，范围1–900且总长不超过3600秒，这是技术容量而不是建议段数；不再另外输出segmentCount，避免先报段数后展开正文造成重复数字矛盾。',
   STORY_CAUSALITY_RULE,
@@ -304,7 +287,7 @@ export const requestSemanticSequencePlan = async (
     const raw = await requestTextModel(requestConfig, `${SEMANTIC_SEQUENCE_PLANNING_TAG}\n${planningRule}`,
       envelope('semantic_sequence_input', inputPayload), signal, { disableThinking: true, jsonObject: true,
         ...(supportsGeminiStructuredOutput(requestConfig) ? {
-          jsonSchema: { name: 'semantic_sequence_plan', schema: SEMANTIC_SEQUENCE_RESPONSE_SCHEMA, strict: false },
+          jsonSchema: { name: 'semantic_sequence_plan', schema: SEMANTIC_SEQUENCE_RESPONSE_SCHEMA, strict: true },
         } : {}),
         finalInstruction: semanticSequenceWindowInstruction(snapshot) });
     assertCurrent();

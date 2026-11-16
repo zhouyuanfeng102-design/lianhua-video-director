@@ -1,3 +1,4 @@
+import { createVideoReconcileSelector } from './videoDirectorState';
 import { useEffect, useRef } from 'react';
 import type { AppState } from './types';
 import type { VideoGenerationController } from './videoGenerationTypes';
@@ -15,6 +16,8 @@ export const useVideoGenerationController = ({ state, setState, getCurrentState,
   ready?: boolean;
   notify?: (message: string, kind?: 'normal' | 'error') => void;
 }): VideoGenerationController => {
+  const reconcileSelector = useRef(createVideoReconcileSelector());
+  const reconcileInputs = reconcileSelector.current(state);
   const current = useRef({ state, setState, getCurrentState, ready, notify });
   current.current = { state, setState, getCurrentState, ready, notify };
   const storeRef = useRef<VideoRuntimeStore | null>(null);
@@ -55,8 +58,7 @@ export const useVideoGenerationController = ({ state, setState, getCurrentState,
       runtimeStore.clear();
     };
   }, [ready, runtimeStore]);
-  useEffect(() => { if (ready) engine.current?.reconcile(); }, [ready, state.project, state.projects,
-    state.settings.videoExecutionMode, state.settings.videoExecutionConcurrency]);
+  useEffect(() => { if (ready) engine.current?.reconcile(); }, [ready, reconcileInputs]);
   const get = () => {
     if (!current.current.ready) throw new Error('正式项目数据尚未加载完成，视频任务尚未启动。');
     if (!engine.current) throw new Error('视频任务控制器正在启动。');
