@@ -3,6 +3,7 @@ import type { ComfyVideoWorkflowPreset, VideoGenerationSource } from './videoGen
 import { isLaoliVideoBuiltinProtocol } from './genericVideoApi';
 import { getVideoApiModelParameterCapabilities } from './videoApiCapabilities';
 import type { VideoApiParameterControl } from './videoApiCapabilityTypes';
+import { effectiveComfyVideoParameterBindings } from './comfyuiVideo';
 
 /** Display-only API schema metadata; RunningHub keeps its existing wire values. */
 export type VideoOutputParameterControl = VideoApiParameterControl;
@@ -35,13 +36,13 @@ export const videoOutputParameterChoices = (key: VideoOutputParameterKey, contro
 export const isVideoOutputParameterKey = (key: string): key is VideoOutputParameterKey =>
   (videoOutputParameterKeys as readonly string[]).includes(key);
 
-/** Capabilities come from explicit mappings, never node names or current override values. */
+/** Capabilities come from mappings or a proven seconds-input graph, never titles or override values. */
 export const availableVideoParameterKeys = (
   source: VideoGenerationSource,
   api?: Pick<VideoTaskApiConfig, 'provider' | 'runningHubMappedFields' | 'requestTemplate'> & Partial<Pick<VideoTaskApiConfig, 'baseUrl' | 'endpoint' | 'rhWebFields'>>,
-  workflow?: Pick<ComfyVideoWorkflowPreset, 'mapping'>,
+  workflow?: Pick<ComfyVideoWorkflowPreset, 'mapping'> & Partial<Pick<ComfyVideoWorkflowPreset, 'workflowJson'>>,
 ): string[] => {
-  if (source === 'comfyui') return Object.keys(workflow?.mapping.parameters || {});
+  if (source === 'comfyui') return workflow ? Object.keys(effectiveComfyVideoParameterBindings(workflow)) : [];
   if (source === 'runninghub-web' || api?.provider === 'rh_web') {
     const fields = api?.rhWebFields || [];
     return [...new Set(fields.flatMap((field) => field.bind === 'duration' || field.bind === 'aspect_ratio' || field.bind === 'megapixels' || field.bind === 'idea' ? [field.bind] : []))];

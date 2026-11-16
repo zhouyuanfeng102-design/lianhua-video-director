@@ -36,7 +36,7 @@ check('six reference numbers follow H3 input links rather than numeric LoadImage
   assert.deepEqual(resolveRunningHubH3PictureNumbers(api, [0, 1, 2, 3, 4, 5]), [5, 6, 4, 2, 3, 1]);
   const local = { workflowJson: JSON.stringify(graph()), mapping };
   assert.deepEqual(resolveComfyH3PictureNumbers(local, [0, 1, 2, 3, 4, 5]), [5, 6, 4, 2, 3, 1]);
-  assert.deepEqual(resolveComfyH3PictureNumbers({ ...local, workflowJson: JSON.stringify({ prompt: graph() }) }, [0]), [5]);
+  assert.deepEqual(resolveComfyH3PictureNumbers({ ...local, workflowJson: JSON.stringify({ prompt: graph() }) }, [0]), [1]);
 });
 
 check('ImageToVideo Picture order follows first_frame then last_frame, including retained defaults', () => {
@@ -73,14 +73,14 @@ check('AI App 图片槽顺序覆盖同类 RunningHub 配置，不依赖单个云
   assert.deepEqual(resolveRunningHubH3PictureNumbers({ runningHubH3ReferenceImages: undefined, runningHubMappedFields: mappedFields }, [5, 0]), [6, 1]);
 });
 
-check('cloud empty slots compress numbers; local retained defaults still consume pictures', () => {
+check('cloud and current local optional slots compress numbers by actual consumer order', () => {
   const api = compile(workflow());
   assert.deepEqual(resolveRunningHubH3PictureNumbers(api, [0, 2, 5]), [3, 2, 1]);
   assert.deepEqual(resolveRunningHubH3PictureNumbers(api, [5, 0]), [1, 2]);
-  assert.deepEqual(resolveComfyH3PictureNumbers({ workflowJson: JSON.stringify(graph()), mapping }, [0, 2, 5]), [5, 4, 1]);
+  assert.deepEqual(resolveComfyH3PictureNumbers({ workflowJson: JSON.stringify(graph()), mapping }, [0, 2, 5]), [3, 2, 1]);
   const localGraph = graph();
   (localGraph as Record<string, { inputs: Record<string, unknown> }>)['49'].inputs.image = 'None';
-  assert.deepEqual(resolveComfyH3PictureNumbers({ workflowJson: JSON.stringify(localGraph), mapping }, [0, 2, 5]), [4, 3, 1]);
+  assert.deepEqual(resolveComfyH3PictureNumbers({ workflowJson: JSON.stringify(localGraph), mapping }, [0, 2, 5]), [3, 2, 1]);
 });
 
 check('upload slot identities stay fixed while prompt picture numbers follow the consumer', () => {

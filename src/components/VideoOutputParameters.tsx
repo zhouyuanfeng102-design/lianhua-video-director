@@ -105,7 +105,7 @@ export function VideoOutputParameters({ scope, source, parameterText, availableK
   };
   const notes = <>
     {scope === 'batch' && <p className="vop-help">每段统一覆盖时长，不是全片总时长；留空保持原参数。</p>}
-    <details className="vop-help vop-help-details"><summary>参数填写说明</summary><p>{upstreamParameters ? '读取到的限制和默认值来自当前连接所选模型的接口说明；未提供限制的项目可选常用值或自定义，常用值是否支持由上游判断。留空保留已有参数或使用接口默认；切换模型不会改写已保存值。' : '时长单位为秒，不自动换算帧数；画面比例按工作流提供的完整选项值提交；分辨率按接口原格式填写，不自动计算宽高。采样步数仅覆盖已绑定字段，留空沿用工作流默认值。'}</p></details>
+    <details className="vop-help vop-help-details"><summary>参数填写说明</summary><p>{upstreamParameters ? '读取到的限制和默认值来自当前连接所选模型的接口说明；未提供限制的项目可选常用值或自定义，常用值是否支持由上游判断。留空保留已有参数或使用接口默认；切换模型不会改写已保存值。' : '时长单位为秒；ComfyUI 写入已绑定或按明确连线识别的秒数控件，保留工作流原帧数换算。画面比例按工作流提供的完整选项值提交；分辨率按接口原格式填写，不自动计算宽高。采样步数仅覆盖已绑定字段，留空沿用工作流默认值。'}</p></details>
     {requiresMapping && missing.length > 0 && <div className="vop-unavailable"><span>{source === 'api' ? '接口模板尚未提供' : '尚未绑定'}{missing.join('、')}。</span>{onOpenSettings && <button className="btn small" type="button" disabled={disabled} onClick={onOpenSettings}>配置生成参数</button>}</div>}
   </>;
   return <section className={`video-output-parameters${scope === 'batch' ? ' vop-batch' : ''}`} aria-label={`${prefix}视频生成参数`}>

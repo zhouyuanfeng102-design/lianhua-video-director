@@ -1,5 +1,5 @@
 import { applyOwnedProjectUpdate } from './appEffects';
-import { bindComfyVideoWorkflow, comfyVideoExecutionStartedAt, mapComfyVideoProgress, parseComfyVideoWorkflow, resolveComfyVideoOutputs } from './comfyuiVideo';
+import { bindComfyVideoWorkflow, comfyVideoExecutionStartedAt, freezeComfyVideoWorkflow, mapComfyVideoProgress, parseComfyVideoWorkflow, resolveComfyVideoOutputs } from './comfyuiVideo';
 import { ComfyMissingTaskTracker, ComfyQueuePresenceCache } from './comfyPolling';
 import { assertNoEmbeddedVideoCredentials, buildVideoApiBody, defaultMiniMaxH3VideoApi, defaultMiniMaxVideoApi, defaultRunningHubVideoApi, isRunningHubUploadedFile, parseVideoApiResult, redactVideoSecrets, runningHubVideoResults, videoApiSubmitEndpoint } from './videoGenerationApi';
 import { compileRunningHubVideoApi, resolveConfiguredVideoApi } from './runningHubVideo';
@@ -1610,7 +1610,8 @@ export class VideoGenerationEngine {
     const comfy: ComfyVideoConfig = reuse?.connection.comfyui
       ? { ...reuse.connection.comfyui, apiKey: await this.key(reusedTask!), workflows: reuse.connection.workflow ? [reuse.connection.workflow] : [] }
       : state.settings.comfyuiVideo || defaultComfyVideoConfig;
-    const workflow = reuse?.connection.workflow || resolveComfyVideoWorkflow(comfy, draft.workflowId);
+    const selectedWorkflow = reuse?.connection.workflow || resolveComfyVideoWorkflow(comfy, draft.workflowId);
+    const workflow = selectedWorkflow ? freezeComfyVideoWorkflow(selectedWorkflow, Boolean(reuse?.connection.workflow)) : undefined;
     if (!reuse && draft.backend === 'comfyui' && workflow) {
       draft.workflowId = workflow.id;
       validationDraft.workflowId = workflow.id;
@@ -2122,7 +2123,8 @@ export class VideoGenerationEngine {
     const config: VideoTaskApiConfig | undefined = reuse?.connection.api ? migrateRunningHubVideoApiImageProtocol({ ...reuse.connection.api, apiKey: await this.recoverCredential(reusedTask!) })
       : draft.backend === 'api' ? resolveConfiguredVideoApi(state.settings, draft) : undefined;
     const comfy = reuse?.connection.comfyui ? { ...reuse.connection.comfyui, apiKey: await this.key(reusedTask!), workflows: reuse.connection.workflow ? [reuse.connection.workflow] : [] } : state.settings.comfyuiVideo || defaultComfyVideoConfig;
-    const workflow = reuse?.connection.workflow || resolveComfyVideoWorkflow(comfy, draft.workflowId);
+    const selectedWorkflow = reuse?.connection.workflow || resolveComfyVideoWorkflow(comfy, draft.workflowId);
+    const workflow = selectedWorkflow ? freezeComfyVideoWorkflow(selectedWorkflow, Boolean(reuse?.connection.workflow)) : undefined;
     if (!reuse && draft.backend === 'comfyui' && workflow) draft.workflowId = workflow.id;
     draft.references = videoReferenceUsage(draft.references, { backend: draft.backend, workflow, api: config,
       slotRoles: draft.referenceSlotRoles ?? (draft.origin === 'custom' && draft.promptMode === 'raw' ? [] : undefined) });
@@ -2258,7 +2260,8 @@ export class VideoGenerationEngine {
       if (canonicalText(snapshotAudios.map(({ bindingId, assetId, slotIndex, target, retainMode, notes }) => ({ bindingId, assetId, slotIndex, target, retainMode, notes })))
         !== canonicalText(draft.audioReferences || [])) throw new Error('任务的参考音频快照与原绑定不一致，已停止提交。');
       const comfy = task.videoJob!.snapshot.connection.comfyui;
-      const workflow = task.videoJob!.snapshot.connection.workflow;
+      const savedWorkflow = task.videoJob!.snapshot.connection.workflow;
+      const workflow = savedWorkflow ? freezeComfyVideoWorkflow(savedWorkflow, true) : undefined;
       // Queued descendants may also have lost their old scoped keys. Restore
       // only during their authorized first-submission preparation, using the
       // same frozen connection check as an explicit retry.

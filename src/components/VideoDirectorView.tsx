@@ -14,7 +14,7 @@ import { TaskErrorDetails } from './TaskErrorDetails';
 import { activeChapter, chapterPlans, chapterWorkspace } from '../chapters';
 import { ReferenceImageName } from './ReferenceImageName';
 import { canRecoverRunningHubResult, runningHubRemoteSucceeded } from '../videoResultRecovery';
-import { canRecoverComfyPreviewResult } from '../comfyuiVideo';
+import { canRecoverComfyPreviewResult, freezeComfyVideoWorkflow } from '../comfyuiVideo';
 import { videoConfiguredApiState, videoDraftSource, videoSourceDraftPatch, videoParameterConnectionKey } from '../videoGenerationSource';
 import { resolveComfyVideoWorkflow, restoreComfyVideoWorkflowId } from '../videoWorkflowSelection';
 import { isRunningHubVideoWorkflowReady } from '../runningHubVideo';
@@ -30,7 +30,7 @@ import { videoReferenceByteLimit } from '../videoReferenceCompression';
 import { VideoExecutionControls, type VideoExecutionPreferences } from './VideoExecutionControls';
 import { useVideoTaskRuntime, type VideoRuntimeStore } from '../videoRuntimeStore';
 import type { AppSettings, Project, ReferenceAsset, ReferenceRole, VideoGenerationTask } from '../types';
-import type { ComfyVideoWorkflowPreset, CustomVideoDraft, VideoBatchStartInput, VideoGenerationController, VideoGenerationDraft, VideoGenerationRuntime, VideoGenerationStage, VideoImageReference, VideoPromptSource, VideoPromptFormat } from '../videoGenerationTypes';
+import type { ComfyVideoWorkflowPreset, CustomVideoDraft, VideoBatchStartInput, VideoGenerationController, VideoGenerationDraft, VideoGenerationRuntime, VideoGenerationSnapshot, VideoGenerationStage, VideoImageReference, VideoPromptSource, VideoPromptFormat } from '../videoGenerationTypes';
 import { findReusableVideoTask, frozenVideoReferenceAsset } from '../videoProvenance';
 import { useCurrentVideoDraftImages, videoDraftReferenceAsset } from '../videoDirectorReferences';
 import {
@@ -895,6 +895,7 @@ function VideoBatchPanel({ project: ownerProject, chapterId, savedBatch, onBatch
   const projectSelector = useRef(createVideoDirectorProjectSelector());
   const project = projectSelector.current(ownerProject);
   const batchRowsCache = useRef(createVideoBatchRowCache());
+  const frozenConnections = useRef(new WeakMap<VideoGenerationSnapshot['connection'], VideoGenerationSnapshot['connection']>());
   const plans = useMemo(() => [...(chapterId ? chapterPlans(project, chapterId) : project.sequencePlans)].filter((plan) => plan.segments.length).sort((left, right) => right.updatedAt - left.updatedAt), [project.sequencePlans, project.storyboards, project.sourceDocuments, chapterId]);
   const retryEntries = useMemo(() => videoBatchRetryEntries(project, retryTaskIds).filter((entry) => plans.some((plan) => plan.id === entry.planId)), [project, retryTaskIds, plans]);
   const retryPrimary = retryEntries[0];
@@ -990,9 +991,9 @@ function VideoBatchPanel({ project: ownerProject, chapterId, savedBatch, onBatch
       ? (retryPrimary.draft.workflowId || '') === workflowId
       : (retryPrimary.draft.apiProfileId || '') === apiProfileId));
   const retryConnection = retryConnectionActive ? retryPrimary?.task.videoJob?.snapshot.connection : undefined;
-  const workflow = retryConnection?.backend === 'comfyui' && retryConnection.workflow
-    ? retryConnection.workflow
-    : resolveComfyVideoWorkflow(settings.comfyuiVideo, workflowId);
+  const workflow = useMemo(() => retryConnection?.backend === 'comfyui' && retryConnection.workflow
+    ? freezeComfyVideoWorkflow(retryConnection.workflow, true)
+    : resolveComfyVideoWorkflow(settings.comfyuiVideo, workflowId), [retryConnection, settings.comfyuiVideo, workflowId]);
   useEffect(() => {
     if (backend !== 'comfyui' || interactionLocked || retryConnection?.backend === 'comfyui') return;
     const restored = restoreComfyVideoWorkflowId(settings.comfyuiVideo, workflowId) || '';
@@ -1156,10 +1157,16 @@ function VideoBatchPanel({ project: ownerProject, chapterId, savedBatch, onBatch
   }));
   const frozenConnectionForDraft = (draft: VideoGenerationDraft) => {
     const snapshot = draft.reuseTaskId ? findReusableVideoTask(project, draft.reuseTaskId)?.videoJob?.snapshot : undefined;
-    return snapshot?.projectId === project.id && snapshot.connection.backend === draft.backend
+    const connection = snapshot?.projectId === project.id && snapshot.connection.backend === draft.backend
       && snapshot.draft.workflowId === draft.workflowId && snapshot.draft.apiProfileId === draft.apiProfileId
       && snapshot.draft.runningHubWorkflowId === draft.runningHubWorkflowId
       && snapshot.draft.runningHubWebAppId === draft.runningHubWebAppId ? snapshot.connection : undefined;
+    if (!connection || connection.backend !== 'comfyui' || !connection.workflow) return connection;
+    const cached = frozenConnections.current.get(connection);
+    if (cached) return cached;
+    const frozen = { ...connection, workflow: freezeComfyVideoWorkflow(connection.workflow, true) };
+    frozenConnections.current.set(connection, frozen);
+    return frozen;
   };
   const outputSummaryForDraft = (draft: VideoGenerationDraft) => {
     const frozen = frozenConnectionForDraft(draft);
@@ -1840,7 +1847,9 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
   const images = useMemo(() => project.assets.filter(isVideoDirectorImage), [project.assets]);
   const reusedSnapshot = draft.reuseTaskId ? findReusableVideoTask(project, draft.reuseTaskId)?.videoJob?.snapshot : undefined;
   const reusedConnection = reusedSnapshot?.connection.backend === draft.backend && reusedSnapshot.draft.runningHubWorkflowId === draft.runningHubWorkflowId && reusedSnapshot.draft.runningHubWebAppId === draft.runningHubWebAppId ? reusedSnapshot.connection : undefined;
-  const activeWorkflow = reusedConnection?.workflow || resolveComfyVideoWorkflow(settings.comfyuiVideo, draft.workflowId);
+  const activeWorkflow = useMemo(() => reusedConnection?.workflow
+    ? freezeComfyVideoWorkflow(reusedConnection.workflow, true)
+    : resolveComfyVideoWorkflow(settings.comfyuiVideo, draft.workflowId), [reusedConnection, settings.comfyuiVideo, draft.workflowId]);
   const sourceKind = videoDraftSource(draft);
   // Read capabilities independently of task overrides so invalid/unmapped values never hide their editing controls.
   const apiState = useMemo(() => videoConfiguredApiState(settings, { ...draft, parameters: {} }, reusedConnection?.api), [settings, draft, reusedConnection]);
@@ -2123,7 +2132,7 @@ function ChapterVideoDirectorView({ project, chapterId, chapterDraft, onChapterD
           const boundaryRole = mappedBoundaryRole(referenceUsageContext, slotIndex);
           const assetRoleWarning = assetRoleMismatchNotice(asset, effectiveReferences[index]?.role);
           return <li className="vd-reference-row" key={reference.assetId}><span className="vd-reference-order">{slotIndex + 1}</span><button type="button" className="vd-reference-thumb" onClick={() => asset && setPreviewAsset(asset)} aria-label={`预览 ${asset?.name || '缺失图片'}`}>{asset && assetPreviewUrl(asset) ? <img src={assetPreviewUrl(asset)} alt={asset.name} loading="lazy" /> : <span>图片缺失</span>}</button><div className="vd-reference-info"><ReferenceImageName name={asset?.name || reference.assetId} /><small className="vd-image-slot-badge">{referenceSlotLabels[index]}</small>{(!asset || asset.missing) && <span className="vd-error">{reusedSnapshot ? '原任务图片快照缺失，请明确重新选择图片' : '原文件缺失，请替换此图'}</span>}{boundaryRole && boundaryRole !== effectiveReferences[index].role && <small className="vd-reference-usage-warning">提示：旧工作流把此槽标为{imageRoleLabel(boundaryRole)}，当前分段用途为{imageRoleLabel(effectiveReferences[index].role)}；仅提示，不阻止生成。</small>}{assetRoleWarning && <small className="vd-reference-usage-warning">{assetRoleWarning}</small>}{slot && <small>工作流槽 {slotIndex + 1}：{slot.nodeId}.{slot.inputName}</small>}</div><div className="vd-reference-actions"><button type="button" className="btn small" aria-label={`移除图片 ${slotIndex + 1}`} onClick={() => patchDraft({ ...removeVideoReference(draft, reference.assetId, effectiveReferences[index]?.role), reuseTaskId: undefined })}>移除</button></div></li>;
-        })}</ol> : <div className="vd-empty">{activeApi?.provider === 'runninghub' ? '尚未选图。所有映射图片槽将明确清空；云端工作流需支持无图生成，不会沿用旧图。' : '尚未选图。支持纯文本生成的接口可以不选；ComfyUI 工作流未替换的图片槽保留原值。'}</div>}
+        })}</ol> : <div className="vd-empty">{activeApi?.provider === 'runninghub' ? '尚未选图。所有映射图片槽将明确清空；云端工作流需支持无图生成，不会沿用旧图。' : '尚未选图。支持纯文本生成的接口可以不选；本地 H3 可选参考图按本次选图发送，首尾帧及其他输入沿用工作流配置。'}</div>}
         <VideoReferenceVacancies selection={draft} usageContext={referenceUsageContext} />
         <p className="field-hint">在“从图片资产库选择”的“槽位用途”栏中按本段设置用途；不修改原分镜或素材分类。用途不匹配只提示，不阻止生成。</p>
         <VideoAudioReferenceEditor project={project} draft={draft} api={activeApi} scope="本段" disabled={submitting || batchSubmitting} frozenAudios={reusedSnapshot?.audios} onChange={patchDraft} onImportAudio={importAudio} />

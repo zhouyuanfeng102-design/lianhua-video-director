@@ -15,6 +15,17 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "4.7.1",
+    releasedAt: "2026-11-16",
+    title: "ComfyUI 视频时长与少量参考图修复",
+    highlights: [
+      "沿明确的秒数输入和 H3 换算连线识别视频时长，保留工作流原有的帧数公式。",
+      "已有工作流缺少时长映射时复用明确识别结果，已有手工映射继续生效。",
+      "本次未选的 H3 可选参考图不再保留默认素材占位，实际请求与 Picture 编号使用相同顺序。",
+      "保留仍被其他节点使用的图片分支；原工作流、已保存提示词和历史任务冻结快照不改写。",
+    ],
+  },
+  {
     version: "4.7.0",
     releasedAt: "2026-11-16",
     title: "ComfyUI 视频画布与工作流选择修复",

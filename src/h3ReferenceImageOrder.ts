@@ -91,7 +91,7 @@ export const readH3ReferenceImageOrders = (graph: unknown): H3ReferenceImageOrde
         .filter((inputName) => inputName in node.inputs)
         .map((inputName): [string, unknown] => [inputName, node.inputs[inputName]]);
     } else if (node.classType === 'MiniMaxH3ReferenceToVideo') {
-      // DynamicCombo's flattened inputs retain insertion order, as does execute(ref_images).values().
+      // Autogrow's flattened inputs retain insertion order, as does execute(ref_images).values().
       entries = Object.entries(node.inputs).flatMap(([inputName, value]): Array<[string, unknown]> => {
         if (/^ref_images\.ref_image_\d+$/u.test(inputName)) return [[inputName, value]];
         if (inputName === 'ref_images' && record(value)) return Object.entries(value).map(([name, image]) => [`ref_images.${name}`, image]);
@@ -119,6 +119,29 @@ export const compileH3ReferenceImageOrders = (
     }),
   }));
 };
+
+/** Local H3 Autogrow inputs are optional. Only mapped, proven reference
+ * sources follow the current selection; fixed materials and I2V frames retain
+ * the workflow's values. The same plan drives request fields and Picture N. */
+export const compileComfyH3ReferenceImageOrders = (
+  graph: unknown,
+  mapping: {
+    prompt: readonly H3ImageFieldBinding[];
+    images: readonly H3ImageFieldBinding[];
+    h3ReferenceSelection?: 'selected' | 'workflow-defaults';
+  },
+): H3CompiledReferenceImageOrder[] => readH3ReferenceImageOrders(graph).flatMap((order) => {
+  const rawConsumer = record(graph) ? graph[order.consumerNodeId] : undefined;
+  const consumer = record(rawConsumer) ? rawConsumer : undefined;
+  const inputs = consumer && record(consumer.inputs) ? consumer.inputs : undefined;
+  // A scalar selector denotes a different dynamic schema; it is not the
+  // official optional Autogrow shape and cannot be shortened by omission.
+  const optional = consumer?.class_type === 'MiniMaxH3ReferenceToVideo' && inputs
+    && (inputs.ref_images === undefined || record(inputs.ref_images))
+    && mapping.h3ReferenceSelection !== 'workflow-defaults';
+  return compileH3ReferenceImageOrders([order], mapping,
+    (_source, slotIndex, present) => optional && slotIndex !== undefined ? false : present);
+});
 
 export const resolveH3PictureNumbers = (orders: readonly H3CompiledReferenceImageOrder[] | undefined, selectedSlots: readonly number[]): number[] | undefined => {
   if (!selectedSlots.length) return [];
@@ -149,13 +172,14 @@ export const resolveH3PictureNumbers = (orders: readonly H3CompiledReferenceImag
 };
 
 export const resolveComfyH3PictureNumbers = (
-  workflow: { workflowJson: string; mapping: { prompt: readonly H3ImageFieldBinding[]; images: readonly H3ImageFieldBinding[] } },
+  workflow: { workflowJson: string; mapping: {
+    prompt: readonly H3ImageFieldBinding[];
+    images: readonly H3ImageFieldBinding[];
+    h3ReferenceSelection?: 'selected' | 'workflow-defaults';
+  } },
   selectedSlots: readonly number[],
 ): number[] | undefined => {
   let graph: unknown; try { graph = JSON.parse(workflow.workflowJson); } catch { return undefined; }
   if (record(graph) && record(graph.prompt)) graph = graph.prompt;
-  const orders = readH3ReferenceImageOrders(graph);
-  // Local Comfy binding preserves defaults in unselected inputs.
-  return resolveH3PictureNumbers(compileH3ReferenceImageOrders(orders, workflow.mapping,
-    (_source, _slotIndex, present) => present), selectedSlots);
+  return resolveH3PictureNumbers(compileComfyH3ReferenceImageOrders(graph, workflow.mapping), selectedSlots);
 };

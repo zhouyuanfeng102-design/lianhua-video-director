@@ -2,7 +2,8 @@ import type { ComfyVideoInputBinding, ComfyVideoMapping, ComfyVideoWorkflowPrese
 import type { VideoGenerationTask } from './types';
 import { assertVideoReferenceSlots, videoReferenceSlotIndex } from './videoReferenceSlots';
 import { convertComfyUICanvasWorkflow, isComfyUICanvasWorkflow } from './comfyuiCanvas';
-import { readH3ReferenceImageOrders } from './h3ReferenceImageOrder';
+import { compileComfyH3ReferenceImageOrders, readH3ReferenceImageOrders } from './h3ReferenceImageOrder';
+import { inferComfyVideoDurationBinding, mergeComfyVideoDurationBinding } from './comfyuiVideoDuration';
 
 type Node = { class_type: string; inputs: Record<string, unknown>; _meta?: { title?: string } };
 export type ComfyVideoNodeMap = Record<string, Node>;
@@ -60,10 +61,7 @@ const ancestors = (nodes: ComfyVideoNodeMap, outputId: string): Set<string> => {
     const id = pending.pop()!;
     if (found.has(id)) continue;
     found.add(id);
-    Object.values(nodes[id]?.inputs || {}).forEach((value) => {
-      const parent = connection(value);
-      if (parent) pending.push(parent);
-    });
+    Object.values(nodes[id]?.inputs || {}).forEach((value) => eachConnection(value, (parent) => pending.push(parent)));
   }
   return found;
 };
@@ -71,6 +69,52 @@ const ancestors = (nodes: ComfyVideoNodeMap, outputId: string): Set<string> => {
 const isPreviewOutputNode = (node: Node): boolean => /saveanimated(?:webp|png)/iu.test(node.class_type)
   || /videocombine/iu.test(node.class_type) && /^(?:image\/|gif$|webp$|apng$)/iu.test(String(node.inputs.format || ''));
 const isVideoOutputNode = (node: Node): boolean => /(?:videocombine|savevideo|videosave)/iu.test(node.class_type) && !isPreviewOutputNode(node);
+
+const preferredVideoOutput = (nodes: ComfyVideoNodeMap): [string, Node] | undefined => {
+  const outputs = Object.entries(nodes).filter(([, node]) => isVideoOutputNode(node));
+  const audioOutputs = outputs.filter(([, node]) => connection(node.inputs.audio));
+  return outputs.find(([id, node]) => id === '328' && /videocombine/iu.test(node.class_type))
+    || (audioOutputs.length === 1 ? audioOutputs[0] : undefined)
+    || (outputs.length === 1 ? outputs[0] : undefined);
+};
+
+// Repeated UI renders use the same graph text. Cache only the inferred input,
+// not whole graphs or mutable presets; editing text/output invalidates the key.
+const durationBindings = new Map<string, Map<string, ComfyVideoInputBinding | undefined>>();
+export const effectiveComfyVideoParameterBindings = (
+  workflow: Pick<ComfyVideoWorkflowPreset, 'mapping'> & Partial<Pick<ComfyVideoWorkflowPreset, 'workflowJson'>>,
+): Record<string, ComfyVideoInputBinding> => {
+  const explicit = workflow.mapping.parameters;
+  if (explicit?.duration || !workflow.workflowJson) return explicit || {};
+  const text = workflow.workflowJson;
+  const outputId = workflow.mapping.outputNodeId || '';
+  let byOutput = durationBindings.get(text);
+  if (!byOutput) {
+    if (durationBindings.size >= 8) durationBindings.delete(durationBindings.keys().next().value!);
+    byOutput = new Map(); durationBindings.set(text, byOutput);
+  }
+  if (!byOutput.has(outputId)) {
+    let inferred: ComfyVideoInputBinding | undefined;
+    try {
+      const nodes = parseComfyVideoWorkflow(text);
+      const output = outputId || preferredVideoOutput(nodes)?.[0];
+      inferred = inferComfyVideoDurationBinding(nodes, output ? ancestors(nodes, output) : undefined);
+    } catch { /* Incomplete editor drafts keep their explicit mappings. */ }
+    byOutput.set(outputId, inferred);
+  }
+  return mergeComfyVideoDurationBinding(explicit, byOutput.get(outputId));
+};
+
+/** Record the policy on new snapshots. Restoring an older snapshot retains its
+ * original image defaults and numbering without rewriting the saved task. */
+export const freezeComfyVideoWorkflow = (
+  workflow: ComfyVideoWorkflowPreset,
+  legacySnapshot = false,
+): ComfyVideoWorkflowPreset => {
+  const copy = structuredClone(workflow);
+  copy.mapping.h3ReferenceSelection ??= legacySnapshot ? 'workflow-defaults' : 'selected';
+  return copy;
+};
 
 type ConditioningRole = 'positive' | 'negative';
 const conditioningRole = (input: string): ConditioningRole | undefined => {
@@ -125,11 +169,7 @@ const conditioningUses = (nodes: ComfyVideoNodeMap): Map<string, Set<Conditionin
 /** Video-only importer: never substitutes image generation seeds, frame counts or dimensions. */
 export const importComfyVideoWorkflow = (text: string): { workflowJson: string; mapping: ComfyVideoMapping } => {
   const nodes = parseComfyVideoWorkflow(text);
-  const outputs = Object.entries(nodes).filter(([, node]) => isVideoOutputNode(node));
-  const audioOutputs = outputs.filter(([, node]) => connection(node.inputs.audio));
-  const preferred = outputs.find(([id, node]) => id === '328' && /videocombine/iu.test(node.class_type))
-    || (audioOutputs.length === 1 ? audioOutputs[0] : undefined)
-    || (outputs.length === 1 ? outputs[0] : undefined);
+  const preferred = preferredVideoOutput(nodes);
   const included = preferred ? ancestors(nodes, preferred[0]) : new Set(Object.keys(nodes));
   const uses = conditioningUses(nodes);
   const prompt: ComfyVideoInputBinding[] = [];
@@ -179,12 +219,90 @@ export const importComfyVideoWorkflow = (text: string): { workflowJson: string; 
       if (inputName) { parameters[name] = { nodeId, inputName }; break; }
     }
   }
+  const duration = inferComfyVideoDurationBinding(nodes, included);
+  if (duration) parameters.duration = duration;
   const document: unknown = JSON.parse(text);
   const raw = record(document) && record(document.prompt) ? document.prompt : document;
   // Store the converted executable graph once. Existing API JSON stays byte
   // for byte intact, including literals not bound by this importer.
   const workflowJson = isComfyUICanvasWorkflow(raw) ? JSON.stringify(nodes, null, 2) : text;
   return { workflowJson, mapping: { prompt, images, parameters, outputNodeId: preferred?.[0] } };
+};
+
+const eachConnection = (value: unknown, visit: (nodeId: string) => void): void => {
+  const parent = connection(value);
+  if (parent) { visit(parent); return; }
+  if (record(value)) Object.values(value).forEach((part) => eachConnection(part, visit));
+};
+
+const omitUnusedH3ReferenceInputs = (
+  nodes: ComfyVideoNodeMap,
+  mapping: ComfyVideoMapping,
+  selectedSlots: readonly number[],
+): void => {
+  const selected = new Set(selectedSlots);
+  const detached = new Set<string>();
+  for (const order of compileComfyH3ReferenceImageOrders(nodes, mapping)) {
+    const inputs = nodes[order.consumerNodeId].inputs;
+    for (const image of order.images) {
+      if (image.slotIndex === undefined || selected.has(image.slotIndex) || image.presentWhenUnselected) continue;
+      // Only the proven optional ReferenceToVideo fields are shortened. I2V
+      // frames with an empty default also have presentWhenUnselected=false.
+      if (nodes[order.consumerNodeId].class_type !== 'MiniMaxH3ReferenceToVideo'
+        || mapping.h3ReferenceSelection === 'workflow-defaults'
+        || inputs.ref_images !== undefined && !record(inputs.ref_images)) continue;
+      if (Object.prototype.hasOwnProperty.call(inputs, image.inputName)) {
+        eachConnection(inputs[image.inputName], (id) => detached.add(id));
+        delete inputs[image.inputName];
+      } else if (record(inputs.ref_images)) {
+        const field = image.inputName.slice('ref_images.'.length);
+        eachConnection(inputs.ref_images[field], (id) => detached.add(id));
+        delete inputs.ref_images[field];
+      }
+    }
+  }
+  // A workflow can contain optional audio placeholders without any user audio
+  // mapping. "None" is not an audio file: omit only these explicit empty
+  // sources, while retaining every nonempty fixed reference and unknown path.
+  if (mapping.h3ReferenceSelection !== 'workflow-defaults') {
+    for (const node of Object.values(nodes)) {
+      if (node.class_type !== 'MiniMaxH3ReferenceToVideo'
+        || node.inputs.ref_audios !== undefined && !record(node.inputs.ref_audios)) continue;
+      const fields: Array<[Record<string, unknown>, string]> = Object.keys(node.inputs)
+        .filter((name) => /^ref_audios\.ref_audio_\d+$/u.test(name))
+        .map((name): [Record<string, unknown>, string] => [node.inputs, name]);
+      if (record(node.inputs.ref_audios)) {
+        fields.push(...Object.keys(node.inputs.ref_audios).filter((name) => /^ref_audio_\d+$/u.test(name))
+          .map((name): [Record<string, unknown>, string] => [node.inputs.ref_audios as Record<string, unknown>, name]));
+      }
+      for (const [inputs, name] of fields) {
+        const value = inputs[name];
+        const sourceId = connection(value);
+        const source = sourceId ? nodes[sourceId] : undefined;
+        if (!sourceId || !Array.isArray(value) || value[1] !== 0 || source?.class_type !== 'LoadAudio'
+          || typeof source.inputs.audio !== 'string' || !/^(?:none|null)?$/iu.test(source.inputs.audio.trim())) continue;
+        delete inputs[name]; detached.add(sourceId);
+      }
+    }
+  }
+  // Remove only newly detached media operations. Count consumers across the
+  // whole graph so MASK users and additional outputs keep their dependencies.
+  const detachableOperations = new Set(['LoadImage', 'LoadAudio', 'ImageScale', 'ImageScaleBy', 'ImageCrop', 'ImagePadForOutpaint',
+    'ImageInvert', 'ImageFlip', 'Reroute']);
+  const consumers = new Map<string, number>();
+  Object.values(nodes).forEach((node) => Object.values(node.inputs).forEach((value) =>
+    eachConnection(value, (id) => consumers.set(id, (consumers.get(id) || 0) + 1))));
+  const pending = [...detached];
+  while (pending.length) {
+    const nodeId = pending.pop()!;
+    const node = nodes[nodeId];
+    if (!node || consumers.get(nodeId) || !detachableOperations.has(node.class_type)) continue;
+    delete nodes[nodeId];
+    Object.values(node.inputs).forEach((value) => eachConnection(value, (parent) => {
+      consumers.set(parent, (consumers.get(parent) || 0) - 1);
+      pending.push(parent);
+    }));
+  }
 };
 
 export const bindComfyVideoWorkflow = (
@@ -211,19 +329,21 @@ export const bindComfyVideoWorkflow = (
   };
   preset.mapping.prompt.forEach((binding) => set(binding, prompt));
   // Uploads remain dense for resumable task journals. Only this boundary maps
-  // each uploaded value to its stable physical workflow slot; empty slots keep
-  // the workflow's existing values, as before.
+  // each uploaded value to its stable physical workflow slot.
   uploadedImages.forEach((name, index) => set(preset.mapping.images[references ? videoReferenceSlotIndex(references[index], index) : index], name));
   uploadedVideos.forEach((name, index) => {
     const binding = preset.mapping.videos?.[videoReferences?.[index]?.slotIndex ?? index];
     if (binding) set(binding, name);
   });
+  const parameterBindings = effectiveComfyVideoParameterBindings(preset);
   Object.entries(parameters).forEach(([name, value]) => {
     if (value === undefined || value === null || value === '') return;
-    const binding = preset.mapping.parameters?.[name];
+    const binding = parameterBindings[name];
     if (!binding) throw new Error(`参数“${name}”尚未绑定工作流输入；没有自动改变工作流参数。`);
     set(binding, value);
   });
+  omitUnusedH3ReferenceInputs(nodes, preset.mapping,
+    uploadedImages.map((_, index) => references ? videoReferenceSlotIndex(references[index], index) : index));
   return nodes;
 };
 

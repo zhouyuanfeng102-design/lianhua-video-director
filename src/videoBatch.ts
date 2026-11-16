@@ -246,11 +246,16 @@ const parsedWorkflow = (workflowJson: string | undefined): unknown => {
 
 const semanticWorkflow = (workflow: unknown): unknown => {
   if (!record(workflow)) return workflow;
+  // Request-local compatibility metadata does not make an existing completed
+  // or queued selection new merely because the software was upgraded.
+  const mapping = record(workflow.mapping)
+    ? Object.fromEntries(Object.entries(workflow.mapping).filter(([key]) => key !== 'h3ReferenceSelection'))
+    : workflow.mapping;
   return {
     workflow: workflow.workflow !== undefined
       ? workflow.workflow
       : parsedWorkflow(typeof workflow.workflowJson === 'string' ? workflow.workflowJson : undefined),
-    mapping: workflow.mapping,
+    mapping,
   };
 };
 

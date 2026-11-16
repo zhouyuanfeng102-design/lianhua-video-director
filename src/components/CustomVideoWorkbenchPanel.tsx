@@ -19,6 +19,7 @@ import { AssetVideoThumbnail } from './AssetVideoThumbnail';
 import { isRunningHubWebAppReady } from '../runningHubWeb';
 import { isRunningHubH3AutoPromptInput } from '../runningHubPromptPictures';
 import { videoDraftReferenceAsset } from '../videoDirectorReferences';
+import { resolveComfyH3PictureNumbers } from '../h3ReferenceImageOrder';
 import '../customVideoWorkbench.css';
 
 const imageRoles: Array<{ value: ReferenceRole; label: string }> = [
@@ -81,6 +82,9 @@ export function CustomVideoWorkbenchPanel({ project, settings, controller, draft
   const workflow = resolveComfyVideoWorkflow(settings.comfyuiVideo, workflowId);
   const parameterPresentation = videoOutputParameterPresentation(api, draft.parameters);
   const parameterKeys = availableVideoParameterKeys(source, api, workflow);
+  const comfyPictureNumbers = useMemo(() => source === 'comfyui' && workflow
+    ? resolveComfyH3PictureNumbers(workflow, draft.references.map(videoReferenceSlotIndex)) : undefined,
+  [source, workflow, draft.references]);
   const imageAssets = project.assets.filter((asset) => !asset.missing && asset.mediaType !== 'video' && asset.mediaType !== 'audio'
     && asset.type !== 'video' && asset.type !== 'audio' && Boolean(assetPreviewUrl(asset)));
   const customTasks = project.generationTasks.filter(isVideoGenerationTask).filter((task) => !task.historyOnly && task.videoJob?.snapshot.draft.origin === 'custom')
@@ -347,14 +351,14 @@ export function CustomVideoWorkbenchPanel({ project, settings, controller, draft
       {api?.provider === 'rh_web' && api.rhWebFields?.some((field) => field.bind === 'idea') && <p className="custom-video-note">已识别的“自动提示词”将在本次请求中关闭；其他工作流内部处理仍由应用决定。</p>}
 
       <div className="custom-video-image-strip">
-        {source === 'comfyui' && <p className="custom-video-note">本次选择只替换对应图片槽；未选择的槽沿用工作流原值。</p>}
+        {source === 'comfyui' && <p className="custom-video-note">H3 可选参考图按本次选图发送并编号；未选映射槽不读取旧图。首尾帧及其他工作流输入沿用各自配置。</p>}
         <div className="custom-video-image-list">
           {draft.references.map((reference, index) => {
             const asset = project.assets.find((item) => item.id === reference.assetId);
             return <div className="custom-video-image-item" key={`${reference.assetId}:${index}`}>
               {asset && assetPreviewUrl(asset) ? <img src={assetPreviewUrl(asset)} alt={asset.name} loading="lazy" /> : <span className="custom-video-image-missing">图片不可用</span>}
               <span className="custom-video-image-name" title={asset?.name || reference.assetId}>{asset?.name || '图片已移除'}</span>
-              <label className="field"><span>输入槽</span><select aria-label={`图片 ${index + 1} 输入槽`} value={videoReferenceSlotIndex(reference, index)} onChange={(event) => {
+              <label className="field"><span>输入槽{comfyPictureNumbers?.[index] !== undefined ? ` · Picture ${comfyPictureNumbers[index]}` : ''}</span><select aria-label={`图片 ${index + 1} 输入槽`} value={videoReferenceSlotIndex(reference, index)} onChange={(event) => {
                 const slotIndex = Number(event.target.value);
                 const previousSlot = videoReferenceSlotIndex(reference, index);
                 patchReferences(draft.references.map((item, position) => position === index ? { ...item, slotIndex, ...(h3Keyframe ? { role: slotIndex === 0 ? 'first-frame' as const : 'last-frame' as const } : {}) }

@@ -127,6 +127,8 @@ const imageRulesResearch = path.join('docs', 'research', 'google-grok-image-rule
 if (fs.existsSync(path.join(root, imageRulesResearch))) files.push(imageRulesResearch);
 const comfyVideoResearch = path.join('docs', 'research', 'comfyui-video-canvas-and-selection-fix-2026-11-16.md');
 if (fs.existsSync(path.join(root, comfyVideoResearch))) files.push(comfyVideoResearch);
+const comfyParameterResearch = path.join('docs', 'research', 'comfyui-duration-and-unused-reference-root-cause-2026-11-16.md');
+if (fs.existsSync(path.join(root, comfyParameterResearch))) files.push(comfyParameterResearch);
 const releaseNotesDirectory = path.join(root, 'docs', 'releases');
 if (fs.existsSync(releaseNotesDirectory)) {
   for (const entry of fs.readdirSync(releaseNotesDirectory, { withFileTypes: true })) {

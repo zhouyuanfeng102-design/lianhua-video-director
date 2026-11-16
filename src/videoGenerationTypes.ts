@@ -178,6 +178,9 @@ export interface ComfyVideoInputBinding { nodeId: string; inputName: string }
 export interface ComfyVideoMapping {
   prompt: ComfyVideoInputBinding[];
   images: Array<ComfyVideoInputBinding & { role?: ReferenceRole }>;
+  /** New task snapshots record selection semantics; old snapshots retain their
+   * original default-image numbering when explicitly restored for execution. */
+  h3ReferenceSelection?: 'selected' | 'workflow-defaults';
   videos?: ComfyVideoInputBinding[];
   parameters?: Record<string, ComfyVideoInputBinding>;
   outputNodeId?: string;
