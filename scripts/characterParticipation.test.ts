@@ -164,4 +164,32 @@ assert.equal(repaired.officialPromptZh, missingIdentityZh, 'the AI-authored body
 assert.equal(repaired.h3IdentityBindings, undefined, 'missing associations are not invented');
 assert.deepEqual(repaired.h3CharacterParticipation, stampCharacterParticipation(missingIdentityZh, participation));
 assert.match((repaired.h3DeliveryWarnings || []).join(' '), /身份绑定.*正文.*关联待完善/u);
+
+const cast = ['玉小刚', '朱竹清', '宁荣荣', '小舞'].map((name) => character(name, name));
+const gaze = shotPrompt('[Shot 1] 玉小刚在训练场外沿缓步走过，双手背在身后，目光先落在朱竹清身上停一瞬，再依次在宁荣荣、小舞身上各停一瞬，脚步不停，继续往廊下走去。');
+assert.deepEqual(resolvePromptCharacterParticipation(gaze, cast).characters.map((entry) => [entry.name, entry.presence]),
+  [['玉小刚', 'visible'], ['朱竹清', 'visible'], ['宁荣荣', 'visible'], ['小舞', 'visible']]);
+const remembered = shotPrompt('[Shot 1] 玉小刚想起宁荣荣曾经走过这里。');
+assert.equal(resolvePromptCharacterParticipation(remembered, cast).characters.find((entry) => entry.name === '宁荣荣')?.presence, 'mentioned');
+const flashback = shotPrompt('[Shot 1] 玉小刚站在空位前。\n[Shot 2] 画面闪回。宁荣荣站在旧廊下，小舞从她身边走过。');
+const flashbackCast = resolvePromptCharacterParticipation(flashback, cast);
+assert.equal(flashbackCast.characters.find((entry) => entry.name === '宁荣荣')?.presence, 'visible');
+assert.deepEqual(flashbackCast.characters.find((entry) => entry.name === '宁荣荣')?.visibleShotIndexes, [2]);
+assert.equal(flashbackCast.characters.find((entry) => entry.name === '小舞')?.presence, 'visible');
+assert.equal(resolvePromptCharacterParticipation(shotPrompt('[Shot 1] 不要出现闪回，宁荣荣站在门口。'), cast).characters.find((entry) => entry.name === '宁荣荣')?.presence, 'mentioned');
+assert.equal(resolvePromptCharacterParticipation(shotPrompt('[Shot 1] 宁荣荣在画外走过。'), cast).characters[0]?.presence, 'offscreen');
+const partial = stampCharacterParticipation(gaze, { version: 1, characters: [
+  { characterId: '玉小刚', name: '玉小刚', presence: 'visible', shotIndex: 1, evidence: '玉小刚在训练场外沿缓步走过', speaking: false },
+  { characterId: '朱竹清', name: '朱竹清', presence: 'visible', shotIndex: 1, evidence: '目光先落在朱竹清身上停一瞬', speaking: false },
+] });
+const supplemented = resolvePromptCharacterParticipation(gaze, cast, { participation: partial });
+assert.equal(supplemented.usedFallback, false);
+assert.deepEqual(supplemented.characters.map((entry) => [entry.name, entry.presence]),
+  [['玉小刚', 'visible'], ['朱竹清', 'visible'], ['宁荣荣', 'visible'], ['小舞', 'visible']]);
+const rememberedSnapshot = stampCharacterParticipation(remembered, { version: 1, characters: [
+  { characterId: '玉小刚', name: '玉小刚', presence: 'visible', shotIndex: 1, evidence: '玉小刚想起宁荣荣曾经走过这里', speaking: false },
+  { characterId: '宁荣荣', name: '宁荣荣', presence: 'mentioned', shotIndex: 1, evidence: '玉小刚想起宁荣荣曾经走过这里', speaking: false },
+] });
+assert.equal(resolvePromptCharacterParticipation(remembered, cast, { participation: rememberedSnapshot }).characters.find((entry) => entry.name === '宁荣荣')?.presence,
+  'mentioned', 'a saved recollection is not promoted by the verb inside that same thought');
 console.log('Character participation tests passed (actual legacy excerpts, unambiguous aliases, screen scope, later-shot identities and single delivery persistence).');

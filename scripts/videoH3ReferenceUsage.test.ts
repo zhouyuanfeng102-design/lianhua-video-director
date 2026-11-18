@@ -85,6 +85,9 @@ test('空manifest五图的用途与人物身份到达实际RunningHub提示词�
     assert.match(result.draft.prompt, language === 'zh'
       ? /锁住的衣服是这张图里已经穿的那一套/u
       : /locks features and the clothes already in that picture/u);
+    assert.match(result.draft.prompt, language === 'zh'
+      ? /尾巴、兽耳、翅膀、角、爪只留在已绑定的那一个姓名身上/u
+      : /tail, animal ears, wings, horns, or claws in a character picture remain on the one named person/u);
     if (language === 'en') assert.match(result.draft.prompt, /Fabric that is pulled or slid remains those same clothes/u);
     assert.match(result.draft.prompt, language === 'zh'
       ? /不把参考图的正脸贴到后脑上/u

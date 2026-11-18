@@ -133,9 +133,24 @@ const escaped = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/gu,
 const namePattern = (name: string): RegExp => /^[\x00-\x7f]+$/u.test(name)
   ? new RegExp(`(?<![A-Za-z0-9])${escaped(name)}(?![A-Za-z0-9])`, 'iu') : new RegExp(escaped(name), 'u');
 const offscreenPattern = /画外|镜外|未入镜|不入镜|画面外|off[- ]screen|out of (?:the )?(?:frame|shot)/iu;
-const mentionPattern = /提(?:及|到|起)|谈论|想到|想起|回忆|听说|传闻|假如|如果|关于|以为|想象|名为|mention|remember|think(?:s|ing)? (?:about|of)|rumou?r|if\b/iu;
+/** A thought, quote lead-in or hypothesis. A bare “回忆” is not enough: a depicted flashback still shows a body. */
+const mentionPattern = /提(?:及|到|起)|谈论|想到|想起|回忆起|记得|听说|传闻|假如|如果|关于|以为|想象|名为|mention|remember|think(?:s|ing)? (?:about|of)|rumou?r|if\b/iu;
+const depictedMemoryPattern = /闪回|回忆画面|镜头切到当年|切到当年|淡入(?:当年|过去)|画面回到当年|画面里出现当年|flashback|memory (?:shot|sequence)|cut(?:s|ting)? to (?:the )?past/iu;
+const withheldPicturePattern = /(?:不要|别|勿)[^。！？;；\n]{0,8}(?:闪回|回忆画面)|回忆(?:里|中)没有|(?:仅|只)(?:被)?提(?:及|到)|未(?:曾)?出(?:场|镜)|不(?:会)?出(?:场|镜)|不入画|不在场(?!边|景|地|内)|mentioned only|only mentioned|does not appear|not present|absent from|no flashback/iu;
 const visualBefore = /(?:可见|看到|看见|远景|近景|特写|画面(?:中|内)|景深(?:处|内)|画幅|入画|站着的|站立的|静立的|visible|in (?:the )?(?:foreground|background|frame)|close[- ]up)[^。！？;；\n]{0,45}$/iu;
-const visualAfter = /^[^。！？;；\n]{0,36}(?:站(?:在|立|着)|坐(?:在|着)|静立|伫立|走(?:向|到|出|入)|奔跑|冲(?:向|锋)|挥(?:动|舞|枪|剑)|抬(?:头|手)|转身|面向|身穿|穿着|举(?:起|着)|飞(?:起|出)|跃(?:起|向)|倒(?:下|地)|跪(?:下|地)|后退|俯视|凝视|注视|微笑|皱眉|闭眼|睁眼|握(?:着|住)|抚摸|拥抱|亲吻|入画|出现在画面|stands?\b|standing\b|sits?\b|sitting\b|walks?\b|runs?\b|wears?\b|wearing\b|faces?\b|facing\b|holds?\b|holding\b|raises?\b|turns?\b|strikes?\b|charges?\b|attacks?\b|looks?\b|thrusts?\b|swings?\b|slashes?\b)/iu;
+const visualAfter = /^[^。！？;；\n]{0,36}(?:站(?:在|立|着)|坐(?:在|着)|静立|伫立|走(?:向|到|出|入)|奔跑|冲(?:向|锋)|挥(?:动|舞|枪|剑)|抬(?:头|手)|转身|面向|身穿|穿着|举(?:起|着)|飞(?:起|出)|跃(?:起|向)|倒(?:下|地)|跪(?:下|地)|后退|俯视|凝视|注视|微笑|皱眉|闭眼|睁眼|握(?:着|住)|抚摸|拥抱|亲吻|入画|出现在画面|胸口朝|头留在|脚下|走过|走来|走开|走着|绕(?:圈|着)|stands?\b|standing\b|sits?\b|sitting\b|walks?\b|runs?\b|wears?\b|wearing\b|faces?\b|facing\b|holds?\b|holding\b|raises?\b|turns?\b|strikes?\b|charges?\b|attacks?\b|looks?\b|thrusts?\b|swings?\b|slashes?\b)/iu;
+/** The name is one of the people whose body the gaze or the shared predicate lands on. */
+const gazedBody = (clause: string, nameIndex: number, nameLength: number): boolean => {
+  for (const hit of clause.matchAll(/(?:落在|停在|看向|望向|(?<![落停])在)([^。！？;；\n落在]{0,24})身上/gu)) {
+    // A coordinated list shares one “身上”. A verb between the preposition and the body belongs to another clause.
+    if (/走|站|坐|说|身边|背|目光|手|脚|绕/u.test(hit[1])) continue;
+    const lead = hit[0].startsWith('在') ? 1 : 2;
+    const start = (hit.index ?? 0) + lead;
+    const end = start + hit[1].length;
+    if (nameIndex >= start && nameIndex < end && nameIndex + nameLength <= end) return true;
+  }
+  return false;
+};
 
 interface CharacterParticipationIndex {
   catalog: CharacterIdentitySource[];
@@ -189,12 +204,27 @@ const resolvePromptCharacterParticipationIndexed = (
     });
   };
   const saved = normalizeCharacterParticipationSnapshot(options.participation);
-  if (saved && saved.promptFingerprint === sourceContentHash(prompt)) {
+  const savedMatches = Boolean(saved && saved.promptFingerprint === sourceContentHash(prompt));
+  if (saved && savedMatches) {
     for (const entry of saved.characters) add(entry.characterId, entry.presence, entry.shotIndex, entry.evidence, 'metadata');
-    return { characters: [...results.values()], ambiguousNames: [], usedFallback: false };
   }
   const index = sharedIndex || characterParticipationIndex(catalog);
   const ambiguousNames = index.ambiguousAliases.filter((alias) => index.patterns.get(alias)!.test(prompt));
+  const prose = new Map<string, ResolvedCharacterParticipation>();
+  const addProse = (id: string, presence: CharacterPresence, shotIndex: number, evidence: string) => {
+    const character = byId.get(id);
+    if (!character) return;
+    const prior = prose.get(id);
+    prose.set(id, prior ? {
+      ...prior, ...(rank[presence] > rank[prior.presence] ? { presence } : {}),
+      shotIndexes: unique([...prior.shotIndexes, shotIndex]), evidence: unique([...prior.evidence, evidence]),
+      visibleShotIndexes: unique([...prior.visibleShotIndexes, ...(presence === 'visible' ? [shotIndex] : [])]),
+      visibleEvidence: unique([...prior.visibleEvidence, ...(presence === 'visible' ? [evidence] : [])]),
+    } : { characterId: id, name: character.name, presence, shotIndexes: [shotIndex], evidence: [evidence], source: 'text',
+      visibleShotIndexes: presence === 'visible' ? [shotIndex] : [], visibleEvidence: presence === 'visible' ? [evidence] : [],
+    });
+  };
+  const accept = savedMatches ? addProse : (id: string, presence: CharacterPresence, shotIndex: number, evidence: string) => add(id, presence, shotIndex, evidence, 'text');
   for (const shot of promptShots(prompt)) {
     const noAudio = shot.text.replace(/<sound>[\s\S]*?<\/sound>/giu, '');
     const narrative = noAudio.replace(/<d>[\s\S]*?<\/d>/giu, '').replace(/[“「『][\s\S]*?[”」』]|"[^"\n]*"/gu, '');
@@ -218,16 +248,33 @@ const resolvePromptCharacterParticipationIndexed = (
             && /^[，,\s]*被其[^。！？;；\n]{0,16}(?:枪|剑|刀|拳|掌)[^。！？;；\n]{0,12}(?:击|刺|斩|扫|抹|穿|挡)/u.test(after);
           const actionTarget = /(?:扑向|冲向|攻击|刺向|斩向|击中|打中|救下|拉住|拥抱|亲吻)[^。！？;；\n]{0,8}$/u.test(before)
             || /向\s*$/u.test(before) && /^[^。！？;；\n]{0,8}(?:冲锋|攻击|扑去|开火)/u.test(after);
-          const presence: CharacterPresence = offscreenPattern.test(nearby) ? 'offscreen'
-            : mentionPattern.test(before.slice(-25)) ? 'mentioned'
-              : visualBefore.test(before) || visibleContact || !actionTarget && visualAfter.test(after) ? 'visible'
-                : actionTarget ? 'offscreen' : 'mentioned';
-          add(character.id, presence, shot.index, clause.trim(), 'text');
+          const bodyShown = visualBefore.test(before) || visibleContact || gazedBody(clause, match.index, match[0].length)
+            || (!actionTarget && visualAfter.test(after));
+          const cognitive = mentionPattern.test(before.slice(-25));
+          const depicted = depictedMemoryPattern.test(clause);
+          const presence: CharacterPresence = withheldPicturePattern.test(clause) ? 'mentioned'
+            : offscreenPattern.test(nearby) ? 'offscreen'
+              : depicted && bodyShown ? 'visible'
+                : cognitive ? 'mentioned'
+                  : bodyShown ? 'visible'
+                    : actionTarget ? 'offscreen' : 'mentioned';
+          accept(character.id, presence, shot.index, clause.trim());
         }
         // Quotes still establish a mention, never on-screen participation.
-        if (!results.has(character.id) && pattern.test(noAudio)) add(character.id, 'mentioned', shot.index, alias, 'text');
+        if (!savedMatches && !results.has(character.id) && pattern.test(noAudio)) add(character.id, 'mentioned', shot.index, alias, 'text');
       }
     }
+  }
+  if (savedMatches) {
+    for (const entry of prose.values()) {
+      const prior = results.get(entry.characterId);
+      // A saved on-screen or off-screen judgment stays. A saved mention is raised
+      // only by a different clause that actually puts the body in the picture.
+      if (prior && (prior.presence !== 'mentioned' || rank[entry.presence] <= rank.mentioned)) continue;
+      if (!prior && entry.presence === 'mentioned') continue;
+      for (const shotIndex of entry.shotIndexes) add(entry.characterId, entry.presence, shotIndex, entry.evidence[0] || entry.name, 'text');
+    }
+    return { characters: [...results.values()], ambiguousNames, usedFallback: false };
   }
   for (const binding of options.identityBindings?.characters || []) {
     if (!results.has(binding.characterId) && prompt.includes(binding.referenceAnchor)) {

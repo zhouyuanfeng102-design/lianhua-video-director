@@ -74,6 +74,7 @@ const assertExecutionSource = (actual: string, source: string, _anchors: readonl
   const normalize = (value: string): string => {
     let body = actionBody(value);
     return body.replace(/ Visual identity reference for [^\r\n]*?: <Picture \d+>(?:, <Picture \d+>)*\./gu, '')
+      .replace(/(?:本段参考图用途：|Reference uses for this clip:|多视图身份参考：|Multi-view identity references:|本镜每个已写姓名的人只有一个身体|Each named person in this shot has one body)[^\r\n]*/gu, '')
       .replace(/<Subject\s+\d+>[ \t]*/gu, '').replace(/[SＳ][0-9０-９]+/gu, 'Sx').replace(/\s+/gu, ' ').trim();
   };
   assert.deepEqual(readH3PromptProtocol(actual)?.shots, readH3PromptProtocol(source)?.shots);
@@ -131,8 +132,9 @@ await test('重复身份句不再覆盖可信人物ID与本次明确选图的关
   }
   assert.ok(result.warnings.some((warning) => warning.includes('身份句重复')));
   assert.equal(result.warnings.some((warning) => warning.includes('本次未绑定该人物图片')), false);
-  assert.equal(result.draft.prompt.includes(duplicated), false, 'request-local picture labels are the only prompt edits');
-  assert.equal(result.draft.prompt.replace(/ Visual identity reference for [^\r\n]*?: <Picture \d+>(?:, <Picture \d+>)*\./gu, ''), duplicated);
+  assert.equal(result.draft.prompt.includes(duplicated), false, 'request-local picture labels and the one-body note are the only prompt edits');
+  assert.equal(result.draft.prompt.replace(/ Visual identity reference for [^\r\n]*?: <Picture \d+>(?:, <Picture \d+>)*\./gu, '')
+    .replace(/(?:本镜每个已写姓名的人只有一个身体|Each named person in this shot has one body)[^\r\n]*\r?\n/gu, ''), duplicated);
 });
 
 await test('选图确定性编译六字段主体，镜数切点对白动作声音保留且可逆幂等', () => {
@@ -243,6 +245,15 @@ await test('多人合照与同一人物多图都按明确资产归属，不构�
   assertPictureBinding(result.draft.prompt, '甲', [1, 2]);
   assertPictureBinding(result.draft.prompt, '乙', [1]);
   assert.equal((result.draft.prompt.match(/Identity:/gu) || []).length, 2);
+  const paired = structuredClone(draft);
+  paired.source = { promptFormat: 'h3', language: 'zh' };
+  paired.h3ReferenceBinding = { ...paired.h3ReferenceBinding!, sourceLanguage: 'zh' };
+  paired.references = [{ assetId: 'a-image', role: 'character' }, { assetId: 'a-second', role: 'character' }];
+  const angles = prepareVideoH3ReferenceDraft(project, paired, { backend: 'api', api });
+  assert.match(angles.draft.prompt, /多视图身份参考：<Picture 1>、<Picture 2>/u);
+  assert.match(angles.draft.prompt, /每个已写姓名的人只有一个身体/u);
+  assert.match(angles.draft.prompt, /未分开标注的设定图/u);
+  assert.match(angles.draft.prompt, /尾巴、兽耳、翅膀、角、爪只留在已绑定的那一个姓名身上/u);
 });
 
 await test('姓名和形态不猜测，显式sourceEntity证据优先并排除跨类型碰撞', () => {
@@ -622,7 +633,7 @@ await test('旧稿漏人物表项，出镜别名与选图身份唯一时仅本�
   const before = structuredClone({ project, draft });
   const result = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api: cloud() });
   const association = ' Visual identity reference for 夏提雅-女武神形态 (known as 夏提雅): <Picture 1>.';
-  assert.equal(result.draft.prompt.replace(association, ''), prompt);
+  assert.equal(result.draft.prompt.replace(association, '').replace(/(?:本镜每个已写姓名的人只有一个身体|Each named person in this shot has one body)[^\r\n]*\r?\n/gu, ''), prompt);
   assert.ok(result.draft.prompt.indexOf(association) > result.draft.prompt.indexOf('[Shot 2]'), 'never move a later appearance to Shot 1');
   assert.equal(getH3PromptProtocolIssue(prompt), undefined, 'the authored fixture has valid shot cuts');
   assert.equal(getH3PromptProtocolIssue(result.draft.prompt, prompt, ['<Picture 1>']), undefined, 'only the explicitly selected picture extends the protocol');
@@ -655,7 +666,7 @@ await test('紧凑镜号与带制表符镜号也把后镜人物参考图关联�
     const association = ' Visual identity reference for 夏提雅-女武神形态 (known as 夏提雅): <Picture 1>.';
     assert.equal(result.characterStates.find((entry) => entry.characterId === 'hero')?.status, 'bound');
     assert.deepEqual(result.characterStates.find((entry) => entry.characterId === 'hero')?.slots, [1]);
-    assert.equal(result.draft.prompt.replace(association, ''), source);
+    assert.equal(result.draft.prompt.replace(association, '').replace(/(?:本镜每个已写姓名的人只有一个身体|Each named person in this shot has one body)[^\r\n]*\r?\n/gu, ''), source);
     assert.ok(result.draft.prompt.indexOf(association) > result.draft.prompt.indexOf(`[Shot${separator}2] At 00:07.500`));
     assert.ok(result.draft.prompt.indexOf(association) < result.draft.prompt.indexOf('overall_soundscape:'));
     const body = buildVideoApiBody(cloud(), result.draft, ['hero-upload.png']);

@@ -288,6 +288,13 @@ export const buildSequencePromptHandoff = (
 /** Only source/result prompt content and fixed segment coordinates count.
  * English translation, saved image results and job progress cannot stale a
  * Chinese handoff. Canonical and reviewed official prose both remain bound. */
+export function sequencePromptHandoffEvidence(context: SequencePromptHandoffContext) {
+  // Keep the legacy prose in the source stamp input for saved drafts. The
+  // model receives the timing values and the current request-time rule.
+  const { firstShotTimingInstruction: _legacyProse, ...openingTiming } = context.openingTiming;
+  return { ...context, openingTiming };
+}
+
 const resultFingerprint = (board: Storyboard, format: 'h3' | 'seedance' = 'h3'): string => sourceContentHash(JSON.stringify({
   id: board.id,
   planId: board.sequencePlanId,

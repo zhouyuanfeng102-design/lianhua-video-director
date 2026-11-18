@@ -1,8 +1,7 @@
 import assert from 'node:assert/strict';
-import { assertH3DescriptionLanguage } from './fixtures/h3LanguageContract';
-import { generateSingleSegmentPrompt, type GenerateSingleSegmentPromptInput, type SingleSegmentPromptStage } from './fixtures/h3PipelineMock';
-import { regenerateSequenceReferencePrompt } from './fixtures/h3PipelineMock';
-import { buildSequencePromptHandoff, getSequencePromptHandoffStatus, type SequencePromptHandoffContext } from '../src/sequencePromptHandoff';
+import { generateSingleSegmentPrompt, type GenerateSingleSegmentPromptInput, type SingleSegmentPromptStage } from '../src/singleSegmentPrompt';
+import { regenerateSequenceReferencePrompt } from '../src/sequenceReferencePrompt';
+import { buildSequencePromptHandoff, getSequencePromptHandoffStatus, sequencePromptHandoffEvidence, type SequencePromptHandoffContext } from '../src/sequencePromptHandoff';
 import { applyOfficialH3Prompt, hasCurrentOfficialH3Prompt } from '../src/officialPrompt';
 import { getH3PromptProtocolIssue, readH3PromptProtocol } from '../src/h3PromptProtocol';
 import { sourceContentHash } from '../src/sourceIntegrity';
@@ -14,8 +13,9 @@ const block = (user: string, tag: string): Record<string, any> => {
   assert.ok(matched, `request contains ${tag}`);
   return JSON.parse(matched[1]);
 };
-const handoffEvidence = (user: string): SequencePromptHandoffContext => {
-  for (const tag of ['sequence_text_handoff_data', 'video_conversion_data', 'video_conversion_structural_repair_data', 'video_staging_review_data']) {
+const handoffEvidence = (user: string): ReturnType<typeof sequencePromptHandoffEvidence> => {
+  if (user.startsWith('{')) return JSON.parse(user).stagingContext.sequenceHandoff;
+  for (const tag of ['sequence_text_handoff_data', 'video_conversion_data', 'video_conversion_structural_repair_data', 'video_staging_review_data', 'h3_staging_delivery_repair_data']) {
     if (user.includes(`<${tag}>`)) return block(user, tag).sequenceHandoff;
   }
   if (user.includes('<review_data>')) return block(user, 'review_data').stagingContext.sequenceHandoff;
@@ -24,7 +24,7 @@ const handoffEvidence = (user: string): SequencePromptHandoffContext => {
 };
 const assertOneParentPrompt = (user: string, expected: SequencePromptHandoffContext): void => {
   const actual = handoffEvidence(user);
-  assert.deepEqual(actual, expected);
+  assert.deepEqual(actual, sequencePromptHandoffEvidence(expected));
   const timing = actual.openingTiming;
   assert.equal(timing.previousPromptEvidence.access, 'read-only-text-provenance');
   assert.equal(timing.previousPromptEvidence.usage, 'infer-terminal-action-state-only-not-replay-duration');
@@ -42,10 +42,14 @@ const assertOneParentPrompt = (user: string, expected: SequencePromptHandoffCont
   assert.equal(timing.previousDialogueReplay, 'not-allowed');
   assert.equal(timing.additionalShotOrCut, 'not-allowed');
   assert.equal(timing.overlapIncludedInSegmentDuration, true);
-  assert.match(timing.firstShotTimingInstruction, /本段0\.00–0\.50秒.+从0\.50秒起/u);
-  const quoted = JSON.stringify(expected.previousFinalPrompt).replace(/</gu, '\\u003c').replace(/>/gu, '\\u003e');
-  assert.equal(user.split(quoted).length - 1, 1, 'one complete escaped parent prompt per request, without redundant outer copies');
+  assert.equal(Object.hasOwn(timing, 'firstShotTimingInstruction'), false, 'legacy action overlap prose stays out of every model request');
+  const quoted = JSON.stringify(expected.previousFinalPrompt);
+  assert.equal(user.replace(/\\u003c/gu, '<').replace(/\\u003e/gu, '>').split(quoted).length - 1, 1, 'one complete parent prompt per request, without redundant outer copies');
 };
+const delivery = (prompt: string): string => JSON.stringify({ h3Prompt: prompt, identityBindings: { version: 1, characters: [] } });
+const translateSlots = (user: string, translate = (text: string) => text): string => JSON.stringify({
+  slots: (JSON.parse(user).slots as { id: string; sourceText: string }[]).map(({ id, sourceText }) => ({ id, text: translate(sourceText) })),
+});
 const converter: ConverterPreset = {
   id: 'text-handoff-converter', name: '测试转换器', workflow: 'all', inputMode: 'all', scope: 'video',
   systemPrompt: '按原剧情生成镜头。', outputRules: '保留镜数和时间。', enabled: true, version: 'test', updatedAt: 1,
@@ -56,7 +60,18 @@ const content = [
   '徒弟查看药草，说：“叶片是完整的。”两人沿山道走向石门。',
   '两人穿过石门，徒弟把药草收入袋中。',
 ];
-const opening = '开场约0–0.5秒，师父继续递交药草，徒弟伸手接取，清楚表现同一交接动作，再收手查看。';
+const opening = '本段0.00–0.50秒，师父在左、徒弟在右，两人的手仍接触着同一株药草。从0.50秒起，徒弟收手查看叶片。';
+const translateOpening = (text: string): string => text
+  .replace('师父在左、徒弟在右，两人的手仍接触着同一株药草', 'the master remains on the left and the apprentice on the right, both still touching the same herb')
+  .replace('徒弟收手查看叶片', 'the apprentice draws the herb closer to inspect its leaves');
+const authoredPrompt = (index: number): string => [
+  'integrated_multimodal_description:',
+  `[Shot 1] ${index === 1 ? '师徒走到山道路边。' : opening}`,
+  `[Shot 2] At 00:05.000, ${index === 2 ? '第6秒 (S1)说：<d>[Chinese] 叶片是完整的。</d>' : '两人面向石门。'}`,
+  `[Shot 3] At 00:10.000, AI_FINAL_END_${index}：末镜仍表现交接中的可见动作。`,
+  'overall_soundscape: N/A',
+  'non_diegetic_music: N/A',
+].join('\n');
 const canonical = (index: number) => [0, 1, 2].map((shotIndex) => [
   `【${shotIndex * 5}s-${(shotIndex + 1) * 5}s】 主体：@师父、@徒弟（沉着）[朝向：山路石门] 正在 [${index === 2 && shotIndex === 0 ? opening : `本段${index}原动作${shotIndex + 1}`} ]（推进原剧情）`,
   '空间：师父在左，徒弟在右，山道路边', '光影：晨光', '镜头：山道东侧中景',
@@ -111,7 +126,6 @@ for (const index of [1, 2, 3]) {
   const sequenceHandoff = handoffFor(index);
   const calls: SingleSegmentPromptStage[] = [];
   let chinese = '';
-  let translations = 0;
   const result = await generateSingleSegmentPrompt({
     board: inputBoard, context, converter, sequenceHandoff, reviewWithAi: true, clean, now: () => 100 + index,
     request: async (system, user, stage) => {
@@ -123,13 +137,14 @@ for (const index of [1, 2, 3]) {
       } else {
         const data = handoffEvidence(user);
         assertOneParentPrompt(user, sequenceHandoff!);
-        assert.deepEqual(data, sequenceHandoff);
         assert.ok(data && data.previousLastShot);
         assert.equal(data.previousFinalPrompt, results[index - 2].officialPromptZh);
         assert.ok(data.previousLastShot.prompt.includes(`AI_FINAL_END_${index - 1}`));
         assert.ok(!results[index - 2].finalPrompt.includes(`AI_FINAL_END_${index - 1}`));
         assert.ok(system.includes(VIDEO_SEQUENCE_TEXT_HANDOFF_RULE));
         assert.equal(system.split(VIDEO_SEQUENCE_TEXT_HANDOFF_RULE).length - 1, 1);
+        assert.match(system, /动作已结束就从结果姿态开场；动作尚未结束就从最后一刻的肢体位置、接触点和运动方向自然接出/u);
+        assert.doesNotMatch(system, /视觉动作重合|首镜短动作重合/u);
         assert.equal(data.openingOverlapSec, 0.5);
       }
       if (stage === 'convert') {
@@ -149,24 +164,25 @@ for (const index of [1, 2, 3]) {
       }
       if (stage === 'review') {
         const data = block(user, 'video_staging_review_data');
-        assert.deepEqual(data.sequenceHandoff, sequenceHandoff);
-        chinese = data.candidatePrompt.replace('overall_soundscape:', `AI_FINAL_END_${index}:末镜仍表现交接中的可见动作。\noverall_soundscape:`);
-        if (index > 1) chinese = chinese.replace('[Shot 1]', `[Shot 1] ${opening}`);
-        return chinese;
+        assert.deepEqual(data.sequenceHandoff, sequenceHandoff && sequencePromptHandoffEvidence(sequenceHandoff));
+        assert.equal(data.candidatePrompt, '');
+        chinese = authoredPrompt(index);
+        return delivery(chinese);
       }
-      translations += 1;
       if (index > 1) assert.ok(system.includes(VIDEO_SEQUENCE_TEXT_HANDOFF_TRANSLATION_RULE));
-      if (translations === 2) assert.deepEqual(block(user, 'review_data').stagingContext.sequenceHandoff, sequenceHandoff);
-      return chinese.replaceAll(opening, 'For the opening 0–0.5 seconds, show the master handing over the herbs and the apprentice receiving them before moving on.');
+      return translateSlots(user, translateOpening);
     },
   });
-  assert.deepEqual(calls, ['convert', 'review', 'translate', 'translate'], 'reuse existing review; no fixed extra AI round');
-  assert.equal(result.officialPromptZh, chinese, 'the complete AI-authored overlap is accepted without local deduplication');
+  assert.deepEqual(calls, ['convert', 'review', 'translate'], 'reuse existing review; no extra AI round');
+  assert.equal(result.officialPromptZh, chinese, 'the AI-authored opening state is preserved in the result');
   assert.deepEqual(readH3PromptProtocol(result.officialPromptZh!), readH3PromptProtocol(result.officialPromptEn!));
   assert.equal(hasCurrentOfficialH3Prompt(result, context), true);
   assert.deepEqual(result.shots.map((shot) => [shot.id, shot.startSec, shot.endSec]), inputBoard.shots.map((shot) => [shot.id, shot.startSec, shot.endSec]));
   assert.equal(result.durationSec, 15);
-  if (index === 2) assert.ok(result.officialPromptEn?.includes('叶片是完整的。'));
+  if (index === 2) {
+    assert.match(result.officialPromptEn || '', /0\.00[–-]0\.50[^]*the master remains on the left[^]*0\.50[^]*the apprentice draws the herb closer/u, result.officialPromptEnError || result.officialPromptEn);
+    assert.ok(result.officialPromptEn?.includes('叶片是完整的。'));
+  }
   assert.equal(result.officialPromptEnSource, result.officialPromptZh);
   project.storyboards[index - 1] = result;
   assert.equal(getSequencePromptHandoffStatus(result, project).kind, index === 1 ? 'first' : 'current');
@@ -184,7 +200,7 @@ assert.notEqual(JSON.stringify(project), savedInput, 'only the explicit test com
   const overlongFirstShot = '[Shot 1] 本段0.00–5.00秒完整重演上段10.00–15.00秒的末镜，重新递出药草并接取，复述上段已说完的话；空间：山道路边，师父在左、徒弟在右；镜头：东侧中景。\n\n';
   const overlong = source.officialPromptZh!.slice(0, firstStart) + overlongFirstShot + source.officialPromptZh!.slice(secondStart);
   const board = { ...source, officialPromptZh: overlong, targetOutput: { ...source.targetOutput!, prompt: overlong } };
-  const boundedFirstShot = '[Shot 1] 本段0.00–0.50秒只接续末端交接：师父在左松开递来的药草，徒弟在右接稳；从0.50秒起立即推进本段原剧情，徒弟收手查看药草，首镜余下时间持续查看而不再回放递交；空间：山道路边，左右站位与上段末端相同；光影：晨光；镜头：东侧中景，保留完整首镜至5.00秒。\n\n';
+  const boundedFirstShot = `[Shot 1] ${opening} 空间：山道路边。光影：晨光。镜头：东侧中景。\n\n`;
   const repaired = source.officialPromptZh!.slice(0, firstStart) + boundedFirstShot + source.officialPromptZh!.slice(secondStart);
   const sequenceHandoff = handoffFor(2)!;
   const stages: SingleSegmentPromptStage[] = [];
@@ -192,17 +208,18 @@ assert.notEqual(JSON.stringify(project), savedInput, 'only the explicit test com
     board, context, purpose: 'continuity-repair', sequenceHandoff, clean,
     request: async (system, user, stage) => {
       stages.push(stage);
-      assertH3DescriptionLanguage(system, stage === 'review' ? '中文' : '英文');
       assertOneParentPrompt(user, sequenceHandoff);
       if (stage === 'review') {
         assert.equal(block(user, 'video_staging_review_data').candidatePrompt, overlong);
         assert.equal(sequenceHandoff.previousLastShot!.endSec - sequenceHandoff.previousLastShot!.startSec, 5);
         assert.equal(sequenceHandoff.previousTailWindow.endSec - sequenceHandoff.previousTailWindow.startSec, 2);
+        return delivery(repaired);
       }
-      return repaired;
+      assert.ok(system.includes(VIDEO_SEQUENCE_TEXT_HANDOFF_TRANSLATION_RULE));
+      return translateSlots(user);
     },
   });
-  assert.deepEqual(stages, ['review', 'translate', 'translate'], 'timing repair uses the existing AI review; no local semantic retry');
+  assert.deepEqual(stages, ['review', 'translate'], 'timing repair uses the existing AI review; no local semantic retry');
   assert.equal(result.officialPromptZh, repaired, 'the complete model-authored response is saved verbatim');
   assert.equal(result.officialPromptEn, repaired);
   assert.equal(getH3PromptProtocolIssue(repaired, overlong), undefined, '0.50 seconds is an action boundary inside Shot 1, not an added At cut');
@@ -222,11 +239,14 @@ assert.notEqual(JSON.stringify(project), savedInput, 'only the explicit test com
     request: async (_system, user, stage) => {
       stages.push(stage);
       assertOneParentPrompt(user, handoffFor(2)!);
-      if (stage === 'review') chinese = block(user, 'video_staging_review_data').candidatePrompt.replace('[Shot 1]', `[Shot 1] ${opening}`);
-      return chinese;
+      if (stage === 'review') {
+        chinese = (block(user, 'video_staging_review_data').candidatePrompt || authoredPrompt(2));
+        return delivery(chinese);
+      }
+      return translateSlots(user);
     },
   });
-  assert.deepEqual(stages, ['review', 'translate', 'translate']);
+  assert.deepEqual(stages, ['review', 'translate']);
   assert.equal(result.finalPrompt, results[1].finalPrompt);
   assert.equal(result.officialPromptEnError, '');
   assert.equal(getSequencePromptHandoffStatus(result, { ...project, storyboards: [results[0], result, results[2]] }).kind, 'current');
@@ -250,12 +270,13 @@ assert.notEqual(JSON.stringify(project), savedInput, 'only the explicit test com
         assert.ok(data.candidatePrompt);
         assert.equal(data.revisionScope, 'adjacent-segment-continuity-only');
         assert.match(system, /其他镜头、身份定义、对白、音效及non_diegetic_music原文保持/u);
-        revised = data.candidatePrompt.replace('[Shot 1]', `[Shot 1] ${opening}`);
+        revised = data.candidatePrompt;
+        return delivery(revised);
       }
-      return revised;
+      return translateSlots(user);
     },
   });
-  assert.deepEqual(stages, ['review', 'translate', 'translate']);
+  assert.deepEqual(stages, ['review', 'translate']);
   assert.equal(result.officialPromptZh, revised);
   assert.equal(result.officialPromptEnError, '');
   assert.equal(revised.slice(revised.indexOf('[Shot 2]')), board.officialPromptZh!.slice(board.officialPromptZh!.indexOf('[Shot 2]')));
@@ -263,24 +284,22 @@ assert.notEqual(JSON.stringify(project), savedInput, 'only the explicit test com
   assert.equal(JSON.stringify(board), original);
 }
 
-// English-only retries carry the same saved handoff but never touch Chinese
-// conversion/review/provenance or overwrite a previously usable pair on error.
+// English-only translates the saved Chinese without re-reading the parent.
 {
   const board = results[1];
   const before = JSON.stringify(board);
   const stages: SingleSegmentPromptStage[] = [];
   const result = await generateSingleSegmentPrompt({
     board, context, mode: 'translate-english', sequenceHandoff: handoffFor(2), clean,
-    request: async (system, user, stage) => {
+    request: async (_system, user, stage) => {
       stages.push(stage);
-      assert.ok(system.includes(VIDEO_SEQUENCE_TEXT_HANDOFF_TRANSLATION_RULE));
-      assertOneParentPrompt(user, handoffFor(2)!);
-      if (stages.length === 1) assert.equal(block(user, 'sequence_text_handoff_data').task, 'translate-english');
-      if (stages.length === 2) assert.equal(block(user, 'review_data').stagingContext.sequenceHandoff.previousFinalPrompt, results[0].officialPromptZh);
-      return board.officialPromptEn!;
+      const data = JSON.parse(user);
+      assert.equal(data.sourcePrompt, board.officialPromptZh);
+      assert.equal(data.stagingContext.sequenceHandoff, undefined);
+      return translateSlots(user, translateOpening);
     },
   });
-  assert.deepEqual(stages, ['translate', 'translate']);
+  assert.deepEqual(stages, ['translate']);
   assert.equal(result.officialPromptEnError, '');
   for (const key of ['officialPromptZh', 'sequencePromptHandoff', 'finalPrompt', 'shots', 'targetOutput'] as const) assert.deepEqual(result[key], board[key]);
   const failed = await generateSingleSegmentPrompt({ board, context, mode: 'translate-english', sequenceHandoff: handoffFor(2), clean,
@@ -301,54 +320,18 @@ assert.notEqual(JSON.stringify(project), savedInput, 'only the explicit test com
       stages.push(stage);
       assert.ok(system.includes(VIDEO_SEQUENCE_TEXT_HANDOFF_RULE));
       assertOneParentPrompt(user, handoffFor(2)!);
-      if (user.includes('<h3_format_repair_data>')) {
-        const data = block(user, 'h3_format_repair_data');
-        assert.equal(data.sourceContext.sequenceHandoff.previousFinalPrompt, results[0].officialPromptZh);
-        assert.equal(data.formatReferencePrompt, board.officialPromptZh);
-        return board.officialPromptZh!;
+      if (user.includes('<h3_staging_delivery_repair_data>')) {
+        const data = block(user, 'h3_staging_delivery_repair_data');
+        assert.equal(data.sequenceHandoff.previousFinalPrompt, results[0].officialPromptZh);
+        assert.equal(data.candidatePrompt, board.officialPromptZh);
+        return delivery(board.officialPromptZh!);
       }
-      if (stage === 'review') return canonical(2);
-      return board.officialPromptEn!;
+      if (stage === 'review') return '{"h3Prompt":';
+      return translateSlots(user);
     },
   });
-  assert.deepEqual(stages, ['review', 'review', 'translate', 'translate']);
+  assert.deepEqual(stages, ['review', 'review', 'translate']);
   assert.equal(result.officialPromptZh, board.officialPromptZh);
-  assert.equal(result.officialPromptEnError, '');
-}
-
-// The converter's exceptional structural repair and English protocol repair
-// each carry one complete parent as well, not only the usual happy path.
-{
-  const board = results[1];
-  const sequenceHandoff = handoffFor(2)!;
-  let chinese = '';
-  let conversionCalls = 0;
-  let translationCalls = 0;
-  const stages: SingleSegmentPromptStage[] = [];
-  const result = await generateSingleSegmentPrompt({ board, context, converter, sequenceHandoff, clean,
-    request: async (_system, user, stage) => {
-      stages.push(stage);
-      assertOneParentPrompt(user, sequenceHandoff);
-      if (stage === 'convert') {
-        conversionCalls += 1;
-        if (conversionCalls === 1) return canonical(2).replace('【5s-10s】', '【6s-10s】');
-        assert.ok(user.includes('<video_conversion_structural_repair_data>'));
-        assert.deepEqual(block(user, 'video_conversion_structural_repair_data').sequenceHandoff, sequenceHandoff);
-        return canonical(2);
-      }
-      if (stage === 'review') {
-        chinese = block(user, 'video_staging_review_data').candidatePrompt;
-        return chinese;
-      }
-      translationCalls += 1;
-      if (translationCalls < 3) return '[0s-15s] incomplete English instead of H3';
-      assert.deepEqual(block(user, 'h3_format_repair_data').sourceContext.stagingContext.sequenceHandoff, sequenceHandoff);
-      return chinese;
-    },
-  });
-  assert.deepEqual(stages, ['convert', 'convert', 'review', 'translate', 'translate', 'translate']);
-  assert.equal(result.officialPromptZh, chinese);
-  assert.equal(result.officialPromptEn, chinese);
   assert.equal(result.officialPromptEnError, '');
 }
 
@@ -360,15 +343,23 @@ for (const failure of ['cancel', 'network', 'bad-context'] as const) {
   const options: GenerateSingleSegmentPromptInput = {
     board, context, purpose: 'continuity-repair', sequenceHandoff: failure === 'bad-context' ? { ...sequenceHandoff, segmentId: 'wrong' } : sequenceHandoff,
     clean, isCurrent: () => current,
-    request: async () => {
-      if (failure === 'network') throw new Error('mock review network failure');
+    request: async (_system, user, stage) => {
+      if (failure === 'network') {
+        if (stage === 'review') throw new Error('mock review network failure');
+        return translateSlots(user);
+      }
       if (failure === 'bad-context') assert.fail('wrong segment must never call the API');
       current = false;
       return board.officialPromptZh!;
     },
   };
-  await assert.rejects(generateSingleSegmentPrompt(options), (error: any) => failure === 'cancel' ? error.name === 'AbortError'
-    : /network failure|不属于当前分段/u.test(error.message));
+  if (failure === 'network') {
+    const kept = await generateSingleSegmentPrompt(options);
+    assert.equal(kept.officialPromptZh, board.officialPromptZh);
+    assert.match(kept.h3DeliveryWarnings?.join(' ') || '', /mock review network failure/u);
+  } else {
+    await assert.rejects(generateSingleSegmentPrompt(options), failure === 'cancel' ? { name: 'AbortError' } : /不属于当前分段/u);
+  }
   assert.equal(JSON.stringify(board), before);
 }
 
@@ -382,12 +373,12 @@ for (const failure of ['cancel', 'network', 'bad-context'] as const) {
   const sequenceHandoff = buildSequencePromptHandoff(changedProject, plan.id, segments[1].id).context!;
   assert.ok(sequenceHandoff);
   const repaired = await generateSingleSegmentPrompt({ board: results[1], context, purpose: 'continuity-repair', sequenceHandoff, clean,
-    request: async (system, user) => {
+    request: async (system, user, stage) => {
       assert.ok(!system.includes('UNTRUSTED_PREVIOUS_PROMPT_INSTRUCTION'));
-      assert.ok(!user.includes(injection));
+      if (stage === 'review') assert.ok(!user.includes(injection));
       assertOneParentPrompt(user, sequenceHandoff);
       assert.ok(handoffEvidence(user).previousFinalPrompt.includes(injection));
-      return results[1].officialPromptZh!;
+      return stage === 'review' ? delivery(results[1].officialPromptZh!) : translateSlots(user);
     },
   });
   assert.equal(repaired.officialPromptEnError, '', 'all translation/review requests preserve the escaped evidence envelope');
@@ -445,14 +436,14 @@ for (const failure of ['cancel', 'network', 'bad-context'] as const) {
         if (stage === 'review') {
           const data = block(user, 'video_staging_review_data');
           assert.deepEqual(data.currentReferences.map((item: any) => item.id), [assets[1].id]);
-          referencePrompt = data.candidatePrompt;
-          chinese = referencePrompt.replace('[Shot 1]', '[Shot 1] 开场约0–0.5秒，师父（成年女性、白色长袍，保持上段身份）在左侧继续递出药草，右侧<Subject 1>伸手接取；清楚表现这次交接，接稳后再进入查看药草的原剧情。');
-          return chinese;
+          referencePrompt = data.candidatePrompt || solo.officialPromptZh!;
+          chinese = referencePrompt.replace('[Shot 1]', '[Shot 1] 开场约0–0.5秒，师父（成年女性、白色长袍）在左侧，右侧<Subject 1>与她仍共同捏住药草。0.50秒起，<Subject 1>收手查看药草。');
+          return delivery(chinese);
         }
-        return chinese;
+        return translateSlots(user);
       },
     });
-    assert.deepEqual(stages, ['review', 'translate', 'translate'], 'unlabelled actor causes no extra protocol-repair call');
+    assert.deepEqual(stages, ['review', 'translate'], 'unlabelled actor causes no extra protocol-repair call');
     assert.equal(getH3PromptProtocolIssue(chinese, referencePrompt), undefined);
     assert.equal(result.officialPromptZh, chinese);
     assert.equal(result.officialPromptEnError, '');

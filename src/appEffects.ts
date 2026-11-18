@@ -58,7 +58,7 @@ import {
   VIDEO_SEQUENCE_TEXT_HANDOFF_RULE,
   stripLegacyVideoQuotaRules,
 } from './videoConversionRules';
-import type { SequencePromptHandoffContext } from './sequencePromptHandoff';
+import { sequencePromptHandoffEvidence, type SequencePromptHandoffContext } from './sequencePromptHandoff';
 import { publicVideoContinuityLock, selectedVideoPrivateFacts } from './videoPrivateScope';
 import { MAX_PLANNED_SEQUENCE_SEGMENT_DURATION_SEC } from './sequenceDurationContract';
 import {
@@ -594,7 +594,7 @@ export const convertStoryboardDraftToFinal = async (
     'characterIdentityFacts 和 globalContinuityFacts 是项目已保存的性别、物种、外观等资料，audioLedgerFacts 是已保存的声源、台词、时刻及声音备注，需结合全文理解并保持一致；资料缺失不能靠固定人类模板补写，未知声线不凭名字或画面前后顺序推断，画外说话人无需改成画面主体。',
     'shotEvidence 的 plannedSpace/plannedDirection/plannedCamera/plannedDialogue/plannedPerformance/plannedResult/plannedSound 与 previousShot/nextShot 均为已经采纳的逐镜计划原值；previousShot.plannedResult 是前镜末态，不是新事件。本次将其中已有的进入关系、接近或退避、具名动作目标、同步回应、接触或落空和退出状态写清，并从前一动作末态承接。sceneStaging保留源头的世界关系、动作阶段、运动路径与终点，不把面向敌人而倒退误写成背向敌人或越过敌人。缺少细节时不重新设计动作或摄影视点。仅按本次显式对白或衔接修复授权改动相应表达。',
     '镜头字段保真传递plannedCamera及源头已经明确的轴线侧别、观察对象和跟随轨迹，不自行新选或更换机位、景别与运镜。空间/动作正文继续承担真实距离、进退、动作强度和武器接触，使视线与武器仍针对具名对手；不能把镜头推近写成人物瞬间靠近，或把跟拍写成角色转身追着摄影机打斗。缺少摄影细节时不借补格式发明新的跟随、移焦或切镜。每镜传递源头已有末态，不仅在全局声明轴线连续。身份资料只在需要辨认人物时简述，避免每镜重复整份外貌挤掉攻防过程。',
-    ...(input.sequenceHandoff ? ['首镜 previousShot.evidenceKind=previous-segment-final-prompt 时，它提供上段最终执行稿和末镜原文，不是本段旧canonical镜头计划。优先按该最终文字场面落实开场视觉动作重合，再推进sourceStoryContent中的本段新剧情；不要把前稿的对白、标签编号或时码作为本段输出合同。'] : []),
+    ...(input.sequenceHandoff ? ['首镜 previousShot.evidenceKind=previous-segment-final-prompt 时，用上段最终文字推断切换一刻已经达到的可见状态。首镜起笔写具体站位、朝向和道具接触，随后立即写sourceStoryContent中的本段新动作或对白。'] : []),
     'referenceBindings 和每镜 referenceAssetIds 只说明已有引用关系，实际用途以提供的 currentReferences 名称、角色和责任说明为准；没有真实像素时不能声称看到了人物站位、口型或朝向，参考图缺少某人物不能证明该人物不存在。不得为适配参考图改变原故事说话人或凭空添加转身。',
     '在本次回答内完成内容自检和必要修正：检查是否误认人物、遗漏情节或对白、改变说话者、违背物种外貌或声音情绪；以完整剧情为准修正后只返回最终逐镜正文，不另行输出审核说明。不会由本地词面匹配决定内容正误。',
     'sourceLocationStatus=unlocated 只表示出处未精确定位，不代表没有剧情；sourceExcerpt/sourceStart/sourceEnd 仅供查找，plannedAction 和 localStructureDraft 是镜头计划而不是原文，不得以它们代替 sourceStoryContent 全文。',
@@ -625,7 +625,7 @@ export const convertStoryboardDraftToFinal = async (
     audioLedgerFacts,
     ...adoptedExpression,
     continuityContext,
-    ...(input.sequenceHandoff ? { sequenceHandoff: input.sequenceHandoff } : {}),
+    ...(input.sequenceHandoff ? { sequenceHandoff: sequencePromptHandoffEvidence(input.sequenceHandoff) } : {}),
     referenceBindings,
     globalContinuityFacts: publicVideoContinuityLock(input.draft.globalLock || ''),
     requiredVisualStyleAtoms,
@@ -705,7 +705,7 @@ export const convertStoryboardDraftToFinal = async (
       audioLedgerFacts,
       ...adoptedExpression,
       continuityContext,
-      ...(input.sequenceHandoff ? { sequenceHandoff: input.sequenceHandoff } : {}),
+      ...(input.sequenceHandoff ? { sequenceHandoff: sequencePromptHandoffEvidence(input.sequenceHandoff) } : {}),
       referenceBindings,
       globalContinuityFacts: publicVideoContinuityLock(input.draft.globalLock || ''),
       requiredVisualStyleAtoms,

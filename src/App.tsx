@@ -235,7 +235,7 @@ import {
   type OfficialH3ProjectContext,
 } from "./officialPrompt";
 import { regenerateSequenceReferencePrompt } from "./sequenceReferencePrompt";
-import { buildSequencePromptHandoff, getSequencePromptHandoffStatus } from "./sequencePromptHandoff";
+import { buildSequencePromptHandoff, getSequencePromptHandoffStatus, sequencePromptHandoffEvidence } from "./sequencePromptHandoff";
 import { generateSingleSegmentPrompt, getSingleSegmentReferences } from "./singleSegmentPrompt";
 import { listModelProfiles, type PromptDetailMode } from "./modelProfiles";
 import {
@@ -7763,7 +7763,7 @@ export default function App() {
             sceneContext: requestSceneContext,
             ...(semanticContext ? { sequenceSegmentContext: {
               ...semanticContext,
-              previousPromptHandoff: requestHandoff?.context,
+              previousPromptHandoff: requestHandoff?.context ? sequencePromptHandoffEvidence(requestHandoff.context) : undefined,
             } } : {}),
             requiredShotCount: requestedShotMode === "exact" ? exactShotCount : undefined,
             ...boardCreativeDirection,
@@ -8976,7 +8976,7 @@ export default function App() {
           ? `正在调用 API 按${referenceImages.length ? "当前参考图片" : "当前参考资料"}重新生成第 ${segment.index} 段；其他分段不变。`
           : stage === "review"
           ? mode === "continuity-repair"
-            ? `正在由 AI 对照第 ${segment.index - 1} 段最终末镜修复第 ${segment.index} 段开场，保留递交/接取等短动作重合；不生成视频。`
+            ? `正在由 AI 按第 ${segment.index - 1} 段末镜的可见状态修复第 ${segment.index} 段开场。`
             : mode === "dialogue-repair"
               ? `正在由 AI 修复第 ${segment.index} 段对白、声源与发话排时；保留本段 ${segment.durationSec} 秒、原台词和其他分段。`
             : `正在调用同一 API 校验并修复第 ${segment.index} 段中文提示词的声源、口型和跨镜连续性。`

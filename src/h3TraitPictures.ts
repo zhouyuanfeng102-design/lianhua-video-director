@@ -24,8 +24,8 @@ const traits: Record<string, TraitCopy> = {
     nameEn: 'the place', nameZh: '这处空间',
     dutyEn: 'architecture, fixed furnishings, and light only',
     dutyZh: '只保留建筑、固定陈设和光线',
-    stayEn: 'People appear where the shot places them. Furnishings remain in their own material and structure. Size follows the people in this shot. A platform edge against a lower back remains about waist high. A mark on a wall or base remains smaller than that person\'s head. This shot keeps its written framing.',
-    stayZh: '人物出现在本镜写明的位置。陈设留下自己的材料和结构，尺寸跟着这一镜里的人。台沿抵住后腰时，台面留在腰的高度。墙上或台座上的纹样留得比这个人的头小。这一镜保持正文写明的取景。',
+    stayEn: 'People appear where the shot places them. Furnishings remain in their own material and structure. Size follows the people in this shot. A platform edge against a lower back remains about waist high. A mark on a wall or base remains smaller than that person\'s head. This shot keeps its written framing. People already shown in this picture remain part of the setting and are not copied beside a named person.',
+    stayZh: '人物出现在本镜写明的位置。陈设留下自己的材料和结构，尺寸跟着这一镜里的人。台沿抵住后腰时，台面留在腰的高度。墙上或台座上的纹样留得比这个人的头小。这一镜保持正文写明的取景。图内已经画着的人只作场面，不在具名人物旁边再复制一个。',
   },
   prop: {
     marker: 'partially_preserved',
@@ -40,8 +40,8 @@ const traits: Record<string, TraitCopy> = {
     nameEn: 'the picture style', nameZh: '画面风格',
     dutyEn: 'color, material, and texture only',
     dutyZh: '只保留色彩、材料和质感',
-    stayEn: 'The shot keeps its written people and placement.',
-    stayZh: '人物和站位沿用本镜正文。',
+    stayEn: 'The shot keeps its written people and placement. People already shown in this picture remain part of the setting and are not copied beside a named person.',
+    stayZh: '人物和站位沿用本镜正文。图内已经画着的人只作场面，不在具名人物旁边再复制一个。',
   },
   motion: {
     marker: 'weak_reference',
@@ -72,8 +72,8 @@ const traits: Record<string, TraitCopy> = {
     nameEn: 'the appearance reference', nameZh: '外观参考',
     dutyEn: 'appearance only',
     dutyZh: '只参考外观',
-    stayEn: 'People appear where the shot places them.',
-    stayZh: '人物出现在本镜写明的位置。',
+    stayEn: 'People appear where the shot places them. People already shown in this picture remain part of the setting and are not copied beside a named person.',
+    stayZh: '人物出现在本镜写明的位置。图内已经画着的人只作场面，不在具名人物旁边再复制一个。',
   },
 };
 
