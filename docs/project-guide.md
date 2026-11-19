@@ -2,13 +2,13 @@
 
 莲华视频导演台提供 Windows 便携 EXE 与 Android 手机 APK，把一句话、小说片段、场景资料和参考图整理成可编辑的结构化视频时间轴。
 
-当前版本：**4.7.5** · 2026-11-18。更新与实际交付状态见 [发布说明-4.7.5.md](releases/发布说明-4.7.5.md)。
+当前版本：**4.8.1** · 2026-11-19。更新与实际交付状态见 [发布说明-4.8.1.md](releases/发布说明-4.8.1.md)。
 
 ## 下载 Windows / Android
 
 **[下载 Windows EXE / Android APK](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)**
 
-打开下载页，在 Assets（附件）中选择对应客户端：Windows x64 使用 `lianhua-video-director-4.7.5-windows-x64-portable.exe`；Android 使用 `lianhua-video-director-4.7.5-android.apk`。普通使用者无需安装开发环境。外部 AI 服务需在软件内填写自己的账号和 API 配置。更新前请保存项目并保留原有数据。安卓覆盖安装、备份与跨设备项目包导入见 [安卓安装说明](android-install.md)，开发与签名见 [安卓构建说明](android-build.md)。
+打开下载页，在 Assets（附件）中选择对应客户端：Windows x64 使用 `lianhua-video-director-4.8.1-windows-x64-portable.exe`；Android 使用 `lianhua-video-director-4.8.1-android.apk`。普通使用者无需安装开发环境。外部 AI 服务需在软件内填写自己的账号和 API 配置。更新前请保存项目并保留原有数据。安卓覆盖安装、备份与跨设备项目包导入见 [安卓安装说明](android-install.md)，开发与签名见 [安卓构建说明](android-build.md)。
 
 页面自动生成的 Source code ZIP/TAR 是开发源码；使用软件请下载 EXE 或 APK。手机使用底部导航与纵向内容，不再将整套桌面界面缩小显示；具体平台能力和已执行检查以同版能力与验证记录为准。
 
@@ -79,7 +79,7 @@ npm run desktop
 
 也可以直接双击目录里的 `启动莲华视频导演台.bat`；开发调试使用 `启动开发模式.bat`。
 
-当前开发版（4.7.5）：人物图上的尾巴、兽耳、翅膀、角和爪只留在已绑定的那一个姓名身上；其他已写姓名的人保持正文为他写的头、躯干和附肢。已保存成片和提示词不改写。构建命令为 `npm run pack:all`，交付命令为 `npm run deliver:4.7.5`，便携包为 `lianhua-video-director-4.7.5-windows-x64-portable.exe`，安卓包为 `lianhua-video-director-4.7.5-android.apk`。详见 [发布说明-4.7.5.md](releases/发布说明-4.7.5.md)。
+当前开发版（4.8.1）：导入 Qwen Image 工作流时，正面提示词顺着展示节点和开关找到当前接通的字符串；系统提示词不替换。构建命令为 `npm run pack:all`，交付命令为 `npm run deliver:4.8.1`，便携包为 `lianhua-video-director-4.8.1-windows-x64-portable.exe`，安卓包为 `lianhua-video-director-4.8.1-android.apk`。详见 [发布说明-4.8.1.md](releases/发布说明-4.8.1.md)。
 
 历史版本（3.7.5）：同一人已有两份形态时，不再另存一条没有外观的原名卡。便携包为 `莲华视频导演台-3.7.5-便携版.exe`，交付命令为 `npm run deliver:3.7.5`；详见 [发布说明-3.7.5.md](releases/发布说明-3.7.5.md)。
 
@@ -1439,18 +1439,18 @@ npm run desktop
 - 0.1.13 补齐九宫格实际图片状态映射、图像构图模式、SD WebUI 图生图、提示词校验、分镜拆分/合并/边界编辑、资产编辑、规则预设与墨色江湖兼容导入，并新增 E 盘自动项目快照
 - 交付版可以直接运行便携 EXE；首次使用建议在“恢复与备份”中选择另一个健康磁盘作为备份目录。
 
-当前版本对应便携包为 `莲华视频导演台-3.9.7-便携版.exe`，安卓包为 `莲华视频导演台-3.9.7-安卓版.apk`。请先保存项目再更新；保存失败时先导出备份。常规交付构建双端，再执行版本对应的交付命令：
+当前版本对应便携包为 `lianhua-video-director-4.8.1-windows-x64-portable.exe`，安卓包为 `lianhua-video-director-4.8.1-android.apk`。请先保存项目再更新；保存失败时先导出备份。常规交付构建双端，再执行版本对应的交付命令：
 
 ```powershell
 npm run pack:all
-npm run deliver:3.9.7
+npm run deliver:4.8.1
 ```
 
 交付脚本在项目的 `交付` 目录生成同版本 EXE、APK、恢复源码 ZIP、更新说明、安卓安装说明和 SHA-256 清单，并提供版本启动器。缺少任一客户端时默认交付失败。仅某一端独立 UI 改动时，构建和交付可明确使用 `--ui-only=windows` 或 `--ui-only=android`；共享业务改动继续双端交付。现有历史文件与用户数据不删除、不重编号、不覆盖或自动重跑；0.5.160及更早历史版本保留原编号。构建和验证结果以本次实际记录为准。
 
 版本递增政策自0.6.0起固定为十进位进位，小版本位和补丁位均为0–9；主版本位继续递增。可用只读命令 `npm run next-version` 查看当前版本的下一版，或用 `npm run next-version -- 0.7.1` 检查指定版本；命令只输出建议，不改文件、不构建、不发布。不要使用普通 `npm version patch` 代替此规则，以免在 `0.6.9` 后得到不符合规则的`0.6.10`。
 
-发布前应同步`package.json`、锁文件、应用内更新日志、当前说明和启动器；当前版提供`deliver:3.9.7`，并保留更早交付入口。交付脚本拒绝不符合新规则的版本、默认拒绝同版覆盖，并始终拒绝低于已有交付的版本；原有明确重建当前版开关不允许降级。历史0.5.160仍按原数值分段比较，早于0.6.0，不作进位重解释。恢复源码包含根目录`AGENTS.md`中的用户版本政策和共享版本检查脚本，以及不含私钥和构建缓存的 Android 工程。
+发布前应同步`package.json`、锁文件、应用内更新日志、当前说明和启动器；当前版提供`deliver:4.8.1`，并保留更早交付入口。交付脚本拒绝不符合新规则的版本、默认拒绝同版覆盖，并始终拒绝低于已有交付的版本；原有明确重建当前版开关不允许降级。历史0.5.160仍按原数值分段比较，早于0.6.0，不作进位重解释。恢复源码包含根目录`AGENTS.md`中的用户版本政策和共享版本检查脚本，以及不含私钥和构建缓存的 Android 工程。
 
 ## 数据与资产位置
 

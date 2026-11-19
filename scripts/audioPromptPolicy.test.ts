@@ -112,7 +112,7 @@ for (const rule of [H3_FINAL_BODY_FORMAT_RULE, H3_PERFORMANCE_DELIVERY_RULE]) {
 assert.match(H3_PERFORMANCE_DELIVERY_RULE, /按原剧情和已有角色关系把实际听者写入listenerCharacterIds/u);
 assert.match(H3_PERFORMANCE_DELIVERY_RULE, /speakerAction（人在画面里时只写身体/u);
 assert.match(H3_PERFORMANCE_DELIVERY_RULE, /人不在这一镜时只写人留在画面外/u);
-assert.match(H3_PERFORMANCE_DELIVERY_RULE, /人在画面里照面说话时，在speakerAction里写胸口和眼睛留在听者身上，摄影机在两人连线的侧面/u);
+assert.match(H3_PERFORMANCE_DELIVERY_RULE, /人在画面里照面说话时，在speakerAction里写胸口和眼睛留在这一句的听者身上。旁边其他人留在原位，不成为这一句的朝向对象，摄影机在两人连线的侧面/u);
 assert.match(H3_PERFORMANCE_DELIVERY_RULE, /channel为off-screen、voiceover或inner-voice时.*speakerAction不写胸口、眼睛或画面里的嘴/u);
 assert.match(H3_PERFORMANCE_DELIVERY_RULE, /每个vocal只归属实际发生的事件和镜头及其时间范围/u);
 

@@ -100,7 +100,9 @@ const hasDirectScalarInput = (inputs: JsonObject, inputName: string): boolean =>
 const isPromptEncoderNode = (node: unknown): boolean => {
   if (!isPlainObject(node)) return false;
   const classType = String(node.class_type || '').toLowerCase();
-  return classType.includes('cliptextencode') || classType.includes('t5gemmatextencoder');
+  if (classType.includes('cliptextencode') || classType.includes('t5gemmatextencoder')) return true;
+  const inputs = nodeInputs(node);
+  return Boolean(inputs && normalizedClassType(node).includes('textencode') && ('prompt' in inputs || 'text' in inputs));
 };
 
 const isPromptTextNode = (node: unknown): boolean => {
@@ -276,6 +278,18 @@ const encoderPromptBindings = (workflow: JsonObject, encoderId: string): PromptT
     const type = normalizedClassType(source);
     if (type === 'previewany') return read(sourceId, 'source');
     if (type === 'llamacppinstructadv') return read(sourceId, 'custom_prompt');
+    if (type === 'easyshowanything') {
+      const showInputs = nodeInputs(source);
+      if (showInputs && Array.isArray(showInputs.anything)) return read(sourceId, 'anything');
+      if (showInputs && typeof showInputs.text === 'string') return read(sourceId, 'text');
+      return [];
+    }
+    if (type === 'comfyswitchnode') {
+      const switchInputs = nodeInputs(source);
+      if (!switchInputs || typeof switchInputs.switch !== 'boolean') return [];
+      return read(sourceId, switchInputs.switch ? 'on_true' : 'on_false');
+    }
+    if (type === 'textgenerate') return read(sourceId, 'prompt');
     const fields = STRING_SOURCE_FIELDS[type];
     const sourceInputs = nodeInputs(source);
     if (!fields || !sourceInputs) return [];
@@ -283,7 +297,7 @@ const encoderPromptBindings = (workflow: JsonObject, encoderId: string): PromptT
     // Ambiguous custom string widgets need an explicit authored placeholder.
     return present.length === 1 ? read(sourceId, present[0]) : [];
   };
-  return ['text', 'text_g', 'text_l'].flatMap((field) => read(encoderId, field));
+  return ['text', 'text_g', 'text_l', 'prompt'].flatMap((field) => read(encoderId, field));
 };
 
 /**
@@ -366,7 +380,7 @@ export const importComfyUIApiWorkflow = (
       collectUpstreamTextNodes(workflow, positiveRoot, encoderNodeIds, { conditioningOnly: true })
         .forEach((nodeId) => positiveEncoderIds.add(nodeId));
     }
-    if (negativeRoot) {
+    if (negativeRoot && negativeRoot !== positiveRoot) {
       collectUpstreamTextNodes(workflow, negativeRoot, encoderNodeIds, { stopAtZeroOut: true, conditioningOnly: true })
         .forEach((nodeId) => negativeEncoderIds.add(nodeId));
     }
@@ -409,6 +423,21 @@ export const importComfyUIApiWorkflow = (
     .forEach((binding) => addBinding(binding, positiveNodeIds));
   if (!hasExplicitNegative) [...negativeEncoderIds].flatMap((id) => encoderPromptBindings(workflow, id))
     .forEach((binding) => addBinding(binding, negativeNodeIds));
+  // One Qwen-style encoder emits both conditionings. Its prompt chain stays
+  // positive; the literal negative_prompt on that same node is the negative.
+  if (!hasExplicitNegative) {
+    Object.values(workflow).forEach((node) => {
+      const inputs = nodeInputs(node);
+      if (!inputs) return;
+      const positiveRoot = readConnectionNodeId(inputs.positive);
+      const negativeRoot = readConnectionNodeId(inputs.negative);
+      if (!positiveRoot || positiveRoot !== negativeRoot || !isPromptEncoderNode(workflow[positiveRoot])) return;
+      const encoderInputs = nodeInputs(workflow[positiveRoot]);
+      if (encoderInputs && typeof encoderInputs.negative_prompt === 'string') {
+        addBinding({ nodeId: positiveRoot, inputName: 'negative_prompt' }, negativeNodeIds);
+      }
+    });
+  }
 
   let positiveCount = 0;
   let negativeCount = 0;

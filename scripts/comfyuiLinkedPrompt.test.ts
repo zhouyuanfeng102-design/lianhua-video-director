@@ -139,6 +139,32 @@ test('safe primitive strings and direct LLM custom text bind only the actual enc
   assert.deepEqual(imported['115'], graph['115'], 'a disconnected string widget is left alone');
 });
 
+test('Qwen Image prompt follows the active switch and leaves the system prompt untouched', () => {
+  const graph: Graph = {
+    userPrompt: node('PrimitiveStringMultiline', { value: '用户提示词' }),
+    system: node('PrimitiveStringMultiline', { value: 'SYSTEM_RULES_ONLY' }),
+    generator: node('TextGenerate', { prompt: ['userPrompt', 0], system_prompt: ['system', 0], clip: ['clip', 0] }),
+    route: node('ComfySwitchNode', { switch: false, on_false: ['userPrompt', 0], on_true: ['generator', 0] }),
+    preview: node('easy showAnything', { text: '用户提示词', anything: ['route', 0] }),
+    encoder: node('TextEncodeQwenImage21', { prompt: ['preview', 0], negative_prompt: '', clip: ['clip', 0], vae: ['vae', 0] }),
+    guider: node('CFGGuider', { cfg: 1, model: ['model', 0], positive: ['encoder', 0], negative: ['encoder', 1] }),
+    clip: node('CLIPLoader', { clip_name: 'MODEL_ONLY' }),
+    vae: node('VAELoader', { vae_name: 'VAE_ONLY' }),
+    model: node('UNETLoader', { unet_name: 'MODEL_ONLY' }),
+  };
+  graph.userPrompt._meta = { title: '这里写提示词' };
+  graph.system._meta = { title: 'Text (System Prompt)' };
+  const imported = importComfyUIApiWorkflow(JSON.stringify(graph));
+  const parsed = JSON.parse(imported.workflowJson) as Graph;
+  assert.equal(imported.positiveCount, 1);
+  assert.equal(imported.negativeCount, 1);
+  assert.equal(parsed.userPrompt.inputs.value, '__PROMPT__');
+  assert.equal(parsed.encoder.inputs.negative_prompt, '__NEGATIVE_PROMPT__');
+  assert.equal(parsed.system.inputs.value, 'SYSTEM_RULES_ONLY');
+  assert.equal(parsed.preview.inputs.text, '用户提示词');
+  assert.equal(parsed.generator.inputs.system_prompt[0], 'system');
+});
+
 test('unknown string routes, system-only LLM inputs and wrong output ports fail closed instead of binding model/system text', () => {
   for (const change of [
     (graph: Graph) => { graph['115'].class_type = 'UnrecognizedStringNode'; },

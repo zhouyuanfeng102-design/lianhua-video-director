@@ -397,6 +397,10 @@ for (const mode of ['regenerate', 'reference-refresh', 'translate-english'] as c
         assert.ok(system.includes(AUDIO_H3_DELIVERY_RULE), 'active regeneration receives current dialogue/audio delivery rules');
         assert.equal(system.includes(AUDIO_EXISTING_SCOPE_RULE), false, 'active regeneration may re-evaluate sound design');
       }
+      if (mode === 'regenerate' && stage === 'convert') {
+        assert.match(system, /按当前规则重新编写本段/u);
+        assert.doesNotMatch(system, /已清楚可拍的原句直接保留/u);
+      }
       if (mode === 'reference-refresh' && stage !== 'translate') {
         assert.ok(system.includes(AUDIO_EXISTING_SCOPE_RULE), 'reference-only refresh preserves the saved sound plan');
         assert.equal(system.includes(AUDIO_H3_DELIVERY_RULE), false, 'reference-only refresh does not redesign sound');

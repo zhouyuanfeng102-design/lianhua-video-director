@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { requestStoryExpansion, requestStoryPreparationWithReview } from '../src/services/llm';
-import { frameNsfwTextRequest, LIANHUA_NSFW_CREATIVE_GUIDANCE, NSFW_PROSE_JOINED_MOTION_RULE } from '../src/nsfwPromptRules';
+import { frameNsfwTextRequest, LIANHUA_NSFW_CREATIVE_GUIDANCE, MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, NSFW_PROSE_JOINED_MOTION_RULE } from '../src/nsfwPromptRules';
 import {
   defaultStoryExpansionPresets,
   LEGACY_STORY_EXPANSION_GENERAL_V1_5_0,
@@ -41,6 +41,7 @@ assert.match(NSFW_PROSE_JOINED_MOTION_RULE, /甲的手握住乙的肉棒/u);
 assert.match(NSFW_PROSE_JOINED_MOTION_RULE, /两套句子不并列/u);
 assert.match(NSFW_PROSE_JOINED_MOTION_RULE, /起伏时胸口和髋朝向对方，头留在这侧胸口上/u);
 assert.match(NSFW_PROSE_JOINED_MOTION_RULE, /不是成人情节时不使用这句/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /扭腰不把根搬到她的骨盆上，也不另加一根/u);
 assert.match(NSFW_PROSE_JOINED_MOTION_RULE, /拳脚、摔倒、撞门/u);
 
 const expandFramed = frameNsfwTextRequest({

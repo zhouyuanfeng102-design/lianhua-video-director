@@ -18,9 +18,27 @@ import {
   LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_1, stripLegacyVideoActingCameraRules,
 } from '../src/videoActingCameraRules';
 import { VIDEO_SPATIAL_CONTINUITY_RULE } from '../src/videoConversionRules';
+import { H3_IDENTITY_BINDINGS_RULE, H3_PERFORMANCE_DELIVERY_RULE } from '../src/h3IdentityBindings';
 import { VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT,
   VIDEO_PROMPT_ENGLISH_AI_REVIEW_SYSTEM_PROMPT,
   VIDEO_PROMPT_ENGLISH_DOCUMENT_TRANSLATION_SYSTEM_PROMPT } from '../src/promptTranslation';
+
+const onePlace = '每个已在场的姓名在这一镜只写这一处';
+const ownAppendage = '尾巴、兽耳、翅膀、角、爪只写在拥有它们的那个姓名的同一句里';
+for (const rule of [SCENE_STAGING_GENERATION_RULE, H3_IDENTITY_BINDINGS_RULE, H3_PERFORMANCE_DELIVERY_RULE, VIDEO_SPATIAL_CONTINUITY_RULE, VIDEO_ACTING_CAMERA_RULES, VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT]) {
+  assert.equal(rule.includes('正脸参考图只锁五官和衣服'), false);
+}
+for (const rule of [SCENE_STAGING_GENERATION_RULE, H3_IDENTITY_BINDINGS_RULE, H3_PERFORMANCE_DELIVERY_RULE]) {
+  assert.equal(rule.includes(onePlace), true);
+  assert.equal(rule.includes(ownAppendage), true);
+}
+assert.equal(SCENE_STAGING_GENERATION_RULE.includes(onePlace), true);
+assert.equal(SCENE_STAGING_GENERATION_RULE.includes(ownAppendage), true);
+assert.equal(VIDEO_SPATIAL_CONTINUITY_RULE.includes('这些附肢只留在已绑定的那一个姓名身上'), true);
+assert.equal(VIDEO_SPATIAL_CONTINUITY_RULE.includes('注意力、目光和脚下只改观察，不换人'), true);
+assert.equal(VIDEO_ACTING_CAMERA_RULES.includes('注意力、目光和脚下只改观察，不换人'), true);
+assert.equal(VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('The others remain where this shot already placed them, still in the frame'), true);
+assert.equal(VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('A tail, animal ears, wings, horns, or claws remain on the named person who has them'), true);
 
 // These checks cover generation authority, ordering and request compatibility.
 // They do not claim that a video model executes a pose or a spatial relation.
@@ -63,7 +81,7 @@ assert.match(VIDEO_NATURAL_PERFORMANCE_RULE, /完整身份不强制露脸/u);
 assert.match(VIDEO_INTERACTION_RULES, new RegExp(HEAD_ON_CHEST_RULE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'u'));
 assert.match(VIDEO_INTERACTION_TRANSLATION_RULE, /head stays on the chest that faces them/u);
 assert.match(HEAD_ON_CHEST_RULE, /胸口、腹部、髋和双膝指向同一方向/u);
-assert.match(HEAD_ON_CHEST_RULE, /每人的眼睛落在对方的眼睛上/u);
+assert.match(HEAD_ON_CHEST_RULE, /每人的眼睛落在这一句听者的眼睛上/u);
 assert.match(VIDEO_INTERACTION_TRANSLATION_RULE, /her chest, abdomen, pelvis and knees face the same direction, and her knees point toward him/u);
 assert.match(VIDEO_INTERACTION_TRANSLATION_RULE, /her eyes are on his eyes, and his eyes are on her eyes/u);
 assert.match(VIDEO_AI_SHOT_COVERAGE_RULE, /摄影机站在两人连线的侧面/u);

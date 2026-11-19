@@ -254,6 +254,7 @@ await test('多人合照与同一人物多图都按明确资产归属，不构�
   assert.match(angles.draft.prompt, /每个已写姓名的人只有一个身体/u);
   assert.match(angles.draft.prompt, /未分开标注的设定图/u);
   assert.match(angles.draft.prompt, /尾巴、兽耳、翅膀、角、爪只留在已绑定的那一个姓名身上/u);
+  assert.match(angles.draft.prompt, /生殖器资料图只提供已绑定那个人自己的器官形状/u);
 });
 
 await test('姓名和形态不猜测，显式sourceEntity证据优先并排除跨类型碰撞', () => {

@@ -85,7 +85,7 @@ export interface GenerateSingleSegmentPromptInput {
   converter?: ConverterPreset;
   ruleSet?: RuleSet;
   sourceStoryContent?: string;
-  purpose?: 'initial' | 'reference-refresh' | 'continuity-repair' | 'dialogue-repair' | 'character-dossier-refresh' | 'action-retiming';
+  purpose?: 'initial' | 'reference-refresh' | 'continuity-repair' | 'dialogue-repair' | 'character-dossier-refresh' | 'action-retiming' | 'segment-regenerate';
   /** Explicit new/active regeneration may re-cast voices while reusing a
    * confirmed shot plan. Reference, continuity and translation remain scoped. */
   voiceFactScope?: 'source-grounded-new-draft' | 'preserve-confirmed-source';
@@ -347,10 +347,11 @@ export async function generateSingleSegmentPrompt(
   const reviewWithAi = input.reviewWithAi === true || Boolean(input.sequenceHandoff)
     || input.purpose === 'continuity-repair' || input.purpose === 'dialogue-repair' || actionRetiming || dossierRefresh || regeneratesDossier;
   const initialDelivery = (!input.purpose || input.purpose === 'initial') && !input.skipConversion && !input.masterSource;
+  const segmentRegenerate = input.purpose === 'segment-regenerate';
   const voiceFactScope = input.mode === 'translate-english' || input.purpose === 'reference-refresh'
     || input.purpose === 'continuity-repair' || dossierRefresh
     ? 'preserve-confirmed-source'
-    : input.voiceFactScope || (initialDelivery || input.purpose === 'dialogue-repair'
+    : input.voiceFactScope || (initialDelivery || segmentRegenerate || input.purpose === 'dialogue-repair'
       ? 'source-grounded-new-draft' : 'preserve-confirmed-source');
   // Only an explicit scheduling operation can change an adopted time plan.
   // Retiming reuses this delivery call and keeps all actions and shot identities.
@@ -394,7 +395,7 @@ export async function generateSingleSegmentPrompt(
       ...Object.values(shot.visiblePrivatePartsByCharacter || {}).flat(),
     ]),
   );
-  const authorsNsfwActionDetail = (!input.purpose || input.purpose === 'initial')
+  const authorsNsfwActionDetail = (!input.purpose || input.purpose === 'initial' || input.purpose === 'segment-regenerate')
     && (!input.skipConversion || input.voiceFactScope === 'source-grounded-new-draft');
   const nsfwVideoActionRuleForRequest = (
     stage: SingleSegmentPromptStage,

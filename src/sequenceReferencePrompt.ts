@@ -106,6 +106,6 @@ export async function regenerateSequenceReferencePrompt(
     sourceStoryContent: segmentSource,
     // An explicit regeneration must receive current content/audio policy.
     // Only a genuine reference-only refresh is locked to the saved mix.
-    purpose: input.mode === 'reference-refresh' ? 'reference-refresh' : 'initial',
+    purpose: input.mode === 'reference-refresh' ? 'reference-refresh' : input.mode === 'regenerate' ? 'segment-regenerate' : 'initial',
   });
 }

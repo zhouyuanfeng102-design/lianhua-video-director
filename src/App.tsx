@@ -8857,8 +8857,6 @@ export default function App() {
     mode: "regenerate" | "translate-english" | "continuity-repair" | "dialogue-repair" = "regenerate",
     format: 'h3' | 'seedance' = generationPromptFormatRef.current,
   ): Promise<boolean> => {
-    if (mode === 'regenerate' && (format === 'h3' ? sourceBoard.officialPromptZh : sourceBoard.seedance25Output?.promptZh)?.trim())
-      return Boolean(await refreshDerivedTargetPrompt(sourceBoard, 'action-retiming', plan, segment, format));
     if (format === 'seedance' || mode === 'regenerate' && !sourceBoard.officialPromptZh && hasCurrentTextApiConversion(sourceBoard))
       return Boolean(await refreshDerivedTargetPrompt(sourceBoard, mode, plan, segment, format));
     if (sequencePromptRefreshRef.current || busy || hasActiveStoryboardBuild()) return false;

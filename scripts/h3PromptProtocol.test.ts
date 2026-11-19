@@ -30,6 +30,8 @@ for (const tag of ['<d>[Chinese]', '<d>[English]']) assert.ok(H3_DIALOGUE_FORMAT
 assert.doesNotMatch(H3_DIALOGUE_FORMAT_RULE, /<d>\[中文\]|不改成\[Chinese\]|语言标签写成\[中文\]/u,
   'new dialogue instructions cannot reintroduce the translated language label');
 assert.match(H3_DIALOGUE_FORMAT_RULE, /保留原话、标点、说话人和顺序，不翻译台词/u);
+assert.match(H3_DIALOGUE_FORMAT_RULE, /不把原话改成他说了什么这种叙述/u);
+assert.match(H3_DIALOGUE_FORMAT_RULE, /<d>\[Chinese\]逐字中文原话<\/d>/u);
 assert.match(H3_DIALOGUE_FORMAT_RULE, /清楚、自然、可辨识的普通话/u);
 assert.match(H3_DIALOGUE_FORMAT_RULE, /已确认时间窗.*自然语速逐字说完/u);
 assert.match(H3_DIALOGUE_FORMAT_RULE, /不得用喘息、呻吟、临时音节或含混发声代替台词/u);
@@ -458,6 +460,10 @@ for (const required of [
   '后腰抵着的边留在腰的高度',
   'A platform edge against the lower back remains about waist high',
   'A mark on a wall or base remains smaller than the head of that person',
+  '每个已在场的姓名在这一镜只写这一处',
+  '尾巴、兽耳、翅膀、角、爪只写在拥有它们的那个姓名的同一句里',
+  '上一镜已经在这一处空间里、这一段没有写离开的人，仍用各自的姓名留在原来的那一处',
+  '脚下、目光和注意力只写在做这个动作的人身上',
   '手里的衣领是这一套的衣领',
   'The collar in his hand remains the collar of the garment already on her',
 ]) {
