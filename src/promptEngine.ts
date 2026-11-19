@@ -3054,6 +3054,41 @@ const morphologyPromptText = (
     : '',
 ].filter(Boolean);
 
+/** The workbench visual style is copied as written. Private age cleanup must not rewrite it. */
+export const privateVisualStyleClause = (style: unknown): string => {
+  const text = String(style || '').replace(/[\r\n]+/gu, ' ').trim();
+  return text ? `视觉风格：${text}` : '';
+};
+
+const PRIVATE_VISUAL_STYLE_STOP = /；(?:当前私密资料|固定)/u;
+
+export const privateVisualStyleClauseFromSource = (source: string): string => {
+  const marker = '视觉风格：';
+  const start = source.indexOf(marker);
+  if (start < 0) return '';
+  const rest = source.slice(start + marker.length);
+  const stop = rest.search(PRIVATE_VISUAL_STYLE_STOP);
+  const text = (stop < 0 ? rest : rest.slice(0, stop)).trim();
+  return text ? `${marker}${text}` : '';
+};
+
+/** Put the original style clause back after private-source cleanup. */
+export const restorePrivateVisualStyle = (sanitized: string, original: string): string => {
+  const clause = privateVisualStyleClauseFromSource(original);
+  if (!clause) return sanitized;
+  const marker = '视觉风格：';
+  const start = sanitized.indexOf(marker);
+  let body = sanitized;
+  if (start >= 0) {
+    const rest = sanitized.slice(start + marker.length);
+    const stop = rest.search(PRIVATE_VISUAL_STYLE_STOP);
+    const end = stop < 0 ? sanitized.length : start + marker.length + stop;
+    body = `${sanitized.slice(0, start)}${sanitized.slice(end)}`;
+  }
+  body = body.replace(/；{2,}/gu, '；').replace(/^[；\s]+|[；\s]+$/gu, '').trim();
+  return body ? `${body}；${clause}` : clause;
+};
+
 export const buildImagePrompt = (
   kind: 'character' | 'location' | 'prop' | 'grid',
   fields: Record<string, string>,
@@ -3146,6 +3181,7 @@ export const buildImagePrompt = (
           : []),
         sanitizePrivateImageFact(fields.height) ? `身高/高度比例：${sanitizePrivateImageFact(fields.height)}` : '',
         sanitizePrivateImageFact(fields.appearance) ? `身份外观：${sanitizePrivateImageFact(fields.appearance)}` : '',
+        privateVisualStyleClause(fields.style),
       ].filter(Boolean).join('；');
       const panelFacts = parts
         .map((part, index) => {
@@ -3173,7 +3209,7 @@ export const buildImagePrompt = (
         : []),
       !closeUpVariant && sanitizePrivateImageFact(fields.height) ? `身高/高度比例：${sanitizePrivateImageFact(fields.height)}` : '',
       !closeUpVariant && sanitizePrivateImageFact(fields.appearance) ? `身份外观：${sanitizePrivateImageFact(fields.appearance)}` : '',
-      variant === 'private-five-view' && sanitizePrivateImageFact(fields.style) ? `视觉风格：${sanitizePrivateImageFact(fields.style)}` : '',
+      privateVisualStyleClause(fields.style),
     ].filter(Boolean).join('；');
     const composition = variant === 'private-five-view'
       ? '横向3:2私密五视图资料板，左侧上下两个头肩特写与右侧三个全身视图组成同一人物的五个参考区域；只有右侧三个全身视图保持同尺度、同水平基线，左侧头肩特写独立放大'

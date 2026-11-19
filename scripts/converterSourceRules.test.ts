@@ -153,6 +153,7 @@ console.log('converterSourceRules: exact full source, optional authored provenan
     const result = await convertStoryboardDraftToFinal({ draft, characters: [actor], converter, clean, request: async (system, user) => {
       calls += 1;
       assert.match(system, /亲吻、拥抱、触碰和隔着衣物的动作本身不是脱衣/u);
+      assert.match(system, /腰头敞开，这件布褪到该部位下面/u);
       const data = jsonBlock(user, 'video_conversion_data');
       assert.doesNotMatch(user, /OLD_DOSSIER_SENTINEL|UNSELECTED_FIELD_SENTINEL|AGGREGATE_DOSSIER_SENTINEL/u);
       assert.equal(data.characterIdentityFacts[0].outfit, actor.outfit);

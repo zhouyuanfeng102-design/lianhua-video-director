@@ -46,7 +46,7 @@ import {
   privateImageVariantConverterRule,
   privateImageVariantRepairRule,
 } from '../src/imageGeneration';
-import { buildImagePrompt } from '../src/promptEngine';
+import { buildImagePrompt, restorePrivateVisualStyle } from '../src/promptEngine';
 import { IMAGE_STORY_SPATIAL_STATE_RULE } from '../src/spatialContinuityRules';
 
 const tests: Array<{ name: string; run: () => void | Promise<void> }> = [];
@@ -2455,6 +2455,33 @@ test('every private output target and repair retains its fixed framing under K s
     assert.match(fourInOne, /私密组合资料板[\s\S]*三合一[\s\S]*两个辅助部位窗[\s\S]*四合一[\s\S]*三个辅助部位窗/u);
     assert.match(fourInOne, /每个槽位只绘制一次指定内容/u);
   }
+});
+
+test('private image sources carry the current visual style on every target', () => {
+  const style = '《Fate》魔法少女动画重制版电影CG；清晰明亮';
+  const fields = {
+    name: '测试角色', gender: '女', morphology: 'human', appearance: '固定外观', style,
+    nsfwFullBody: '稳定身体轮廓', nsfwBreasts: '固定肤色和纹理',
+    nsfwVulva: '固定肤色和纹理', nsfwAnus: '固定肤色和纹理',
+  };
+  const spec = { width: 2048, height: 1536, aspectRatio: '4:3', resolution: '2K' };
+  const closeUp = buildImagePrompt('character', fields, 'private-close-up', 'breasts', spec);
+  assert.match(closeUp, /视觉风格：《Fate》魔法少女动画重制版电影CG；清晰明亮/u);
+  assert.doesNotMatch(closeUp, /名称：测试角色|身份外观：固定外观/u);
+  for (const [variant, part] of [
+    ['private-full-body', 'full-body'],
+    ['private-five-view', 'full-body'],
+    ['private-turnaround', 'full-body'],
+    ['private-four-in-one', 'full-body'],
+  ] as const) {
+    assert.match(buildImagePrompt('character', fields, variant, part, spec), /视觉风格：《Fate》魔法少女动画重制版电影CG；清晰明亮/u);
+  }
+  const bare = buildImagePrompt('character', { ...fields, style: '' }, 'private-close-up', 'breasts', spec);
+  assert.doesNotMatch(bare, /视觉风格/u);
+  const damaged = closeUp.replace('魔法少女', '魔法');
+  const restored = restorePrivateVisualStyle(damaged, closeUp);
+  assert.match(restored, /视觉风格：《Fate》魔法少女动画重制版电影CG；清晰明亮/u);
+  assert.equal(restored.split('视觉风格：').length, 2);
 });
 
 test('resolution contracts retain natural language, SD and NAI protocols without rewriting user quality tags', () => {

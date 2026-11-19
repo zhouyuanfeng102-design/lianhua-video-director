@@ -91,6 +91,7 @@ import {
   frameNsfwTextRequest,
 } from '../nsfwPromptRules';
 import { hasNsfwDetailSignal } from '../promptConstraints';
+import { restorePrivateVisualStyle } from '../promptEngine';
 import { orderSemanticPromptContext, orderTextPromptData } from '../textPromptLayout';
 import { IMAGE_PROMPT_LANDSCAPE_SCOPE_CONTRACT, isLandscapeImageRequest } from '../imageLocationScope';
 import { availableVideoPrivateParts, VIDEO_PRIVATE_PARTS } from '../videoPrivateScope';
@@ -5728,9 +5729,10 @@ export const requestImagePromptConverter = async (
           : '',
         IMAGE_PROMPT_NAMED_IDENTITY_CONTRACT,
       ].filter(Boolean).join('\n');
+  const boundedSource = source.slice(0, 18000);
   const modelFacingSource = kind === 'character-private'
-    ? sanitizePrivateModelText(source).slice(0, 18000)
-    : source.slice(0, 18000);
+    ? restorePrivateVisualStyle(sanitizePrivateModelText(boundedSource), boundedSource)
+    : boundedSource;
   const visualSourcePayload = narrative
     // Current H3, selected-frame staging and its identity evidence must reach
     // the same AI intact, including an AI format-repair retry. Never drop the

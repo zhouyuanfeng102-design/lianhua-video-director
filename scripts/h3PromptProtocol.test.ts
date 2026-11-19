@@ -465,6 +465,7 @@ for (const required of [
   '上一镜已经在这一处空间里、这一段没有写离开的人，仍用各自的姓名留在原来的那一处',
   '脚下、目光和注意力只写在做这个动作的人身上',
   '手里的衣领是这一套的衣领',
+  '腰头敞开，这件布褪到该部位下面',
   'The collar in his hand remains the collar of the garment already on her',
 ]) {
   assert.equal(H3_FINAL_BODY_FORMAT_RULE.includes(required), true,
