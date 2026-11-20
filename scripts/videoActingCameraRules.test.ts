@@ -97,6 +97,15 @@ assert.match(VIDEO_CAMERA_SELECTION_RULE, /拍正面和嘴清楚可见不表示�
 assert.match(VIDEO_CAMERA_SELECTION_RULE, /She keeps stepping toward the destination\. Her chest and the foot she steps with face that destination\. The camera moves backward in front of her at her pace\. Her face stays toward the person ahead/u);
 assert.match(VIDEO_CAMERA_SELECTION_RULE, /They remain in one file along the path\. The leader remains ahead, his chest and stepping foot facing the destination\. The next person remains behind that leader, chest toward that leader's back\. A later side view or a view of a face changes only the camera\. The order along the path stays the same/u);
 assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /She keeps stepping toward the destination\. Her chest and the foot she steps with face that destination/u);
+assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /这次路程还没走完/u);
+assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /走来、下楼、进门、见面或把东西交到对方面前已经在前面的镜头发生过/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /The walk in stays finished/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /Her sole meets the walkable surface/u);
+assert.match(HEAD_ON_CHEST_RULE, /Her eyes, palm, and chest stay toward the named person, object, or place/u);
+assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /The solid piece keeps its volume/u);
+assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /Her waist and hips stay in the open space inside the railing/u);
+assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /She follows the open path already in the shot/u);
+assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /This named person remains one body/u);
 assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /The order along the path stays the same/u);
 assert.match(VIDEO_CAMERA_SELECTION_RULE, /后面每一镜开头用同一句再写一次先后/u);
 assert.match(VIDEO_CAMERA_SELECTION_RULE, /The other action uses his remaining hand, and that forearm runs from his other arm to that palm/u);
