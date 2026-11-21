@@ -1669,7 +1669,8 @@ export class VideoGenerationEngine {
     // Preflight the *future* frame slot as well. A text-only template/workflow
     // must fail before segment 1 can create a billable remote task.
     const validationImages = assets.map((asset, assetIndex) => asset ? `image-validation-${assetIndex}-${asset.fileName || asset.name}` : 'future-tail-validation.png');
-    const boundValidation = this.prepareReferenceDraft(project, validationDraft, { backend: draft.backend, workflow, api: config });
+    const boundValidation = this.prepareReferenceDraft(project, validationDraft, { backend: draft.backend, workflow, api: config,
+      previousTailIndex: requestedTail?.selectionMode === 'ai-assisted' ? undefined : requestedTail?.placement.index });
     if (boundValidation.issue) throw new Error(boundValidation.issue);
     Object.assign(validationDraft, boundValidation.draft);
     if (!reuse) Object.assign(validationDraft, prepareVideoAudioDraft(project, validationDraft, config));
@@ -1774,7 +1775,8 @@ export class VideoGenerationEngine {
     }
     draft.references = videoReferenceUsage(draft.references, { backend: draft.backend, workflow: prepared.workflow, api: prepared.config,
       slotRoles: draft.referenceSlotRoles ?? (draft.origin === 'custom' && draft.promptMode === 'raw' ? [] : undefined) });
-    const boundDraft = this.prepareReferenceDraft(project, draft, { backend: draft.backend, workflow: prepared.workflow, api: prepared.config });
+    const boundDraft = this.prepareReferenceDraft(project, draft, { backend: draft.backend, workflow: prepared.workflow, api: prepared.config,
+      previousTailIndex: previousTail?.selectionMode === 'ai-assisted' ? undefined : previousTail?.referenceIndex });
     if (boundDraft.issue) throw new Error(boundDraft.issue);
     Object.assign(draft, boundDraft.draft);
     if (draft.source?.promptFormat) draft.source = { ...draft.source, promptFingerprint: sourceContentHash(draft.prompt) };

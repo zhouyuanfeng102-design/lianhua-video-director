@@ -417,7 +417,7 @@ const walkDraft = renderShotPrompt({
   ...shot('小舞沿木走廊走向门口'),
   sound: '',
 }, 5, []);
-assert.match(walkDraft, /动作层-\[很轻的鞋底脚步声，停在对白下面\]/u);
+assert.match(walkDraft, /动作层-\[很轻的鞋底脚步声\]/u);
 assert.doesNotMatch(walkDraft, /接触碰撞声|pressing/u);
 
 console.log('NSFW video action prompt rule injection checks passed');

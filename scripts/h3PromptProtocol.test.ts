@@ -464,7 +464,7 @@ for (const required of [
   '同一个姓名在这一镜只有一个身体',
   'A platform edge against the lower back remains about waist high',
   'A mark on a wall or base remains smaller than the head of that person',
-  '每个已在场的姓名在这一镜只写这一处',
+  '同一时刻每人只占一处',
   '尾巴、兽耳、翅膀、角、爪只写在拥有它们的那个姓名的同一句里',
   '上一镜已经在这一处空间里、这一段没有写离开的人，仍用各自的姓名留在原来的那一处',
   '走来、下楼、进门、见面或把东西交到对方面前已经在前面的镜头发生过',

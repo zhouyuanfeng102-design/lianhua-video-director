@@ -7,7 +7,7 @@ import ts from 'typescript';
 import { ReferenceImageName } from '../src/components/ReferenceImageName';
 import type { StoryboardImageToImagePanelProps } from '../src/components/StoryboardImageToImagePanel';
 import { assetPreviewUrl } from '../src/media';
-import { isUsableStoryboardReferenceAsset } from '../src/storyboardImages';
+import { hasUsableStoryboardReferencePixels } from '../src/storyboardImages';
 import type { ReferenceAsset, Storyboard, StoryboardImageToImageSettings } from '../src/types';
 
 // Load the actual component with only its stylesheet ignored by the Node test.
@@ -24,7 +24,7 @@ const loadPanel = (fakeHooks: boolean, initialHookValues: readonly unknown[] = [
   new Function('require', 'module', 'exports', compiled)((name: string) => {
     if (name.endsWith('.css')) return {};
     if (name === '../media') return { assetPreviewUrl };
-    if (name === '../storyboardImages') return { isUsableStoryboardReferenceAsset };
+    if (name === '../storyboardImages') return { hasUsableStoryboardReferencePixels };
     if (name === './ReferenceImageName') return { ReferenceImageName };
     if (name === 'react' && fakeHooks) return {
       useId: () => 'panel-test',
@@ -71,16 +71,15 @@ const html = renderToStaticMarkup(createElement(Panel, baseProps));
 assert.ok(html.includes(longName), 'the complete reference name, including segment/shot suffix, stays visible');
 assert.ok(html.includes('第 2 段'));
 assert.ok(html.includes('已选 2 张'));
-assert.ok(html.includes('本段参考图'));
-assert.ok(html.includes('默认或自定义数量的每张图片都使用当前所选原图'));
-assert.ok(html.includes('“提示词结果”使用原来的生图按钮'));
-assert.ok(html.includes('不影响 H3 提示词及视频槽位'));
+assert.ok(html.includes('分镜生图参考图'));
+assert.ok(html.includes('所选原图按原顺序用于分镜和首尾帧'));
 assert.ok(html.includes('支持多张，不必选满'));
 assert.doesNotMatch(html, /选择目标分镜|应用参考图|全选分镜|清空勾选|清除绑定|所选分镜|镜头2目的|storyboard-i2i-generate/,
   'the reference column must not introduce shot selection, per-shot binding or a second generation action');
 assert.equal((html.match(/<button\b/gu) || []).length, 2, 'only upload and clear-selection actions belong to the healthy reference panel');
 assert.ok(html.includes('type="file"') && html.includes('multiple=""'), 'local upload supports multiple original files');
-assert.ok(!html.includes('不应出现在普通选择器') && !html.includes('文件缺失') && !html.includes('不是图片'), 'ordinary picker preserves existing reference scope and media restrictions');
+assert.ok(html.includes('不应出现在普通选择器'), 'readable private images already in the asset library stay selectable');
+assert.ok(!html.includes('文件缺失') && !html.includes('不是图片'), 'missing files and non-images stay out of the picker');
 
 type Element = ReactElement<Record<string, unknown>>;
 const elements = (node: ReactNode): Element[] => {
@@ -163,7 +162,7 @@ await Promise.resolve();
 assert.deepEqual(uploaded, files, 'multi-upload forwards each untouched source file');
 assert.equal(uploadEvent.currentTarget.value, '', 'the same file can be selected again after upload');
 
-assert.match(source, /assets\.filter\(isUsableStoryboardReferenceAsset\)/);
+assert.match(source, /assets\.filter\(hasUsableStoryboardReferencePixels\)/);
 assert.doesNotMatch(source, /finalPrompt\s*:|officialPromptZh\s*:|globalReferenceAssetIds\s*:|inputMode\s*:/, 'image binding UI does not write video prompt/input fields');
 assert.doesNotMatch(source, /onGenerate|selectedShotIds|referenceAssetIdsByShotId/, 'this panel only edits current reference IDs, never a second shot/generation workflow');
 assert.match(css, /\.storyboard-i2i-panel\s*\{[^}]*min-height:\s*0;[^}]*overflow:\s*hidden;/);

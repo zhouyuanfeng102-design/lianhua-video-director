@@ -112,6 +112,23 @@ test('空manifest五图的用途与人物身份到达实际RunningHub提示词�
   }
 });
 
+test('场景参考只跟随已关联的镜头，场景范围未知时仅保留图的职责', () => {
+  for (const language of ['zh', 'en'] as const) {
+    const input = fixture(language);
+    const hall = language === 'en' ? 'The fixed layout of <Subject 3> remains in place.' : '本镜沿用<Subject 3>的固定布局。';
+    const unlocated = prepare(input).draft.prompt;
+    assert.ok(!unlocated.includes(hall));
+    assert.match(unlocated, /<Subject 3>[:：]\s*partially_preserved - /u);
+    input.board.shots = [1, 2, 3].map((index) => ({ index, referenceAssetIds: index === 2 ? [] : ['hall'] })) as Storyboard['shots'];
+    const located = prepare(input).draft.prompt;
+    const body = located.split('detailed_description:')[1];
+    assert.ok(body.split('[Shot 2]')[0].includes(hall));
+    assert.ok(!body.split('[Shot 2]')[1].split('[Shot 3]')[0].includes(hall));
+    assert.ok(body.includes(`[Shot 3] At 00:10.000\n${hall}`));
+    assert.match(located, /<Subject 3>[^\n]*\[Shot 1\](?:, |、)\[Shot 3\][^\n]*partially_preserved/u);
+  }
+});
+
 test('取消只清空实际输入槽，Picture编号按模型仍接收的图片顺序更新', () => {
   const input = fixture(); const initial = prepare(input).draft;
   const removed = prepare(input, { ...initial, ...removeVideoReference(initial, 'opening') }).draft;
@@ -278,6 +295,36 @@ test('明确分镜首尾绑定与真正尾帧续接仍保留边界用途', () =>
   Object.assign(tail, { type: 'last-frame', role: 'last-frame', imageVariant: 'last-frame', sourceVideoAssetId: 'previous-video', sourceTimeSec: 15 });
   delete input.board.firstFrameAssetId;
   assert.match(prepare(input).draft.prompt, /<Picture 1> opening composition reference/u);
+});
+
+test('实际前段末帧与批次预留在首镜具有相同职责，普通参考和历史重提沿用原稿', () => {
+  for (const language of ['zh', 'en'] as const) {
+    const input = fixture(language);
+    const { project, board, draft } = input;
+    const tail = project.assets[0];
+    const video = { ...tail, id: 'previous-video', type: 'video' as const, relativePath: 'video/previous.mp4',
+      sourceStoryboardId: 'previous-board' };
+    project.assets.push(video);
+    Object.assign(tail, { type: 'last-frame', sourceVideoAssetId: video.id });
+    Object.assign(board, { sequencePlanId: 'sequence', segmentId: 'current' });
+    project.sequencePlans = [{ id: 'sequence', segments: [
+      { index: 2, id: 'previous', storyboardId: video.sourceStoryboardId },
+      { index: 3, id: 'current', storyboardId: board.id },
+    ] }] as typeof project.sequencePlans;
+    const saved = prepare(input).draft;
+    const opening = language === 'en' ? '[Shot 1]\nAt 0.00 seconds, continue from <Picture 1>'
+      : '[Shot 1]\n本段0.00秒承接<Picture 1>';
+    assert.ok(saved.prompt.includes(opening));
+    assert.ok(nodesFor(saved).get('150') === saved.prompt);
+    assert.equal(prepare(input, saved).draft.prompt, saved.prompt);
+    const waiting = { ...draft, references: draft.references.map((ref, index) =>
+      index === 0 ? { ...ref, assetId: 'reserved-pending-frame' } : ref) };
+    const pending = prepareVideoH3ReferenceDraft(project, waiting, { backend: 'api', api, previousTailIndex: 0 }).draft;
+    assert.equal(pending.prompt, saved.prompt);
+    assert.equal(prepare(input, { ...draft, reuseTaskId: 'frozen' }).draft.prompt, draft.prompt);
+    tail.sourceVideoAssetId = 'unrelated-video';
+    assert.equal(prepare(input).draft.prompt.includes(opening), false);
+  }
 });
 
 console.log(`${groups} H3 reference-use groups passed (synthetic fixtures and local request serialization only).`);

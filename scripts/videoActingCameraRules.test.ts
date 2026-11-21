@@ -17,15 +17,22 @@ import {
   LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_1_0, LEGACY_VIDEO_ACTING_CAMERA_RULES_V2_0_1,
   LEGACY_VIDEO_ACTING_CAMERA_RULES_V1_8_1, stripLegacyVideoActingCameraRules,
 } from '../src/videoActingCameraRules';
-import { VIDEO_SPATIAL_CONTINUITY_RULE } from '../src/videoConversionRules';
+import {
+  LEGACY_VIDEO_SPATIAL_CONTINUITY_RULE_V4_8_9, VIDEO_SPATIAL_CONTINUITY_RULE, stripLegacyVideoQuotaRules,
+} from '../src/videoConversionRules';
 import { H3_IDENTITY_BINDINGS_RULE, H3_PERFORMANCE_DELIVERY_RULE } from '../src/h3IdentityBindings';
 import { VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT,
   VIDEO_PROMPT_ENGLISH_AI_REVIEW_SYSTEM_PROMPT,
   VIDEO_PROMPT_ENGLISH_DOCUMENT_TRANSLATION_SYSTEM_PROMPT } from '../src/promptTranslation';
 
-const onePlace = '每个已在场的姓名在这一镜只写这一处';
+const onePlace = '同一时刻每人只占一处';
 const ownAppendage = '尾巴、兽耳、翅膀、角、爪只写在拥有它们的那个姓名的同一句里';
+const customDirection = '这个蒙太奇按原稿先展示抵达，再倒叙回忆行走的过程。';
+assert.equal(stripLegacyVideoQuotaRules(`${LEGACY_VIDEO_SPATIAL_CONTINUITY_RULE_V4_8_9}\n${customDirection}`),
+  `${VIDEO_SPATIAL_CONTINUITY_RULE}\n${customDirection}`);
 for (const rule of [SCENE_STAGING_GENERATION_RULE, H3_IDENTITY_BINDINGS_RULE, H3_PERFORMANCE_DELIVERY_RULE, VIDEO_SPATIAL_CONTINUITY_RULE, VIDEO_ACTING_CAMERA_RULES, VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT]) {
+  assert.ok(rule.includes('动作完成后才呈现结果'));
+  assert.ok(!rule.includes('两种状态写成较后的那一种'));
   assert.equal(rule.includes('正脸参考图只锁五官和衣服'), false);
 }
 for (const rule of [SCENE_STAGING_GENERATION_RULE, H3_IDENTITY_BINDINGS_RULE, H3_PERFORMANCE_DELIVERY_RULE]) {

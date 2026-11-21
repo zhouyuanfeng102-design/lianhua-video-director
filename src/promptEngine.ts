@@ -2693,7 +2693,7 @@ const soundForTimeline = (
   const contactLabel = intimateBodyContact ? '贴近的皮肤贴合与湿滑摩擦声' : '接触碰撞声';
   const locomotion = /走|跑|追|踏/u.test(text);
   const heavyLocomotion = /跑|追|跺|摔/u.test(text);
-  const stepLabel = heavyLocomotion ? '很重的脚步声' : '很轻的鞋底脚步声，停在对白下面';
+  const stepLabel = heavyLocomotion ? '很重的脚步声' : '很轻的鞋底脚步声';
   const forcefulContact = /击|撞|砸|爆|格挡|拍打|重拍/u.test(text);
   const action = timedSound || propEffect || (/破土|地层|路面(?:开裂|爆裂)/u.test(text)
     ? '地表破裂与碎片摩擦声'

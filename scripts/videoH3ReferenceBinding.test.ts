@@ -602,7 +602,7 @@ await test('批量未来尾帧在入队时即冻结最终Picture绑定，等待�
     const identitiesOnly = { ...draft, references: [{ assetId: 'a-image', role: 'character' as const }, { assetId: 'b-image', role: 'character' as const }] };
     const first = { ...identitiesOnly, source: { sequencePlanId: 'plan', segmentId: 's1', storyboardId: 'board1', segmentIndex: 1 } };
     const second = { ...identitiesOnly, source: { sequencePlanId: 'plan', segmentId: 's2', storyboardId: 'board2', segmentIndex: 2 } };
-    const expected = prepareVideoH3ReferenceDraft(project, { ...second, references: videoBatchTailReferences(second.references, { mode: 'prepend', index: 0, role: 'first-frame' }, 'future-tail-preview') }, { backend: 'api', api }).draft.prompt;
+    const expected = prepareVideoH3ReferenceDraft(project, { ...second, references: videoBatchTailReferences(second.references, { mode: 'prepend', index: 0, role: 'first-frame' }, 'future-tail-preview') }, { backend: 'api', api, previousTailIndex: 0 }).draft.prompt;
     const batch = await engine.startBatch({ projectId: project.id, label: '冻结引用', items: [
       { itemKey: 'b1:zh', draft: first }, { itemKey: 'b2:zh', draft: second, previousTail: { predecessorItemKey: 'b1:zh', placement: { mode: 'prepend', index: 0, role: 'first-frame' } } },
     ] });
@@ -983,8 +983,8 @@ await test('可信中英文无字段标题H3原稿按锚点关联首尾加四人
     const repurposed = prepareVideoH3ReferenceDraft(project, { ...result.draft, references: result.draft.references.map((reference) =>
       reference.assetId === 'a-image' ? { ...reference, role: 'scene' as const, characterIds: undefined } : reference) }, context);
     assert.match(repurposed.draft.prompt, language === 'zh'
-      ? /<Picture 3> partially_preserved，只保留建筑、固定陈设和光线，人物出现在本镜写明的位置。陈设留下自己的材料和结构，尺寸跟着这一镜里的人。台沿抵住后腰时，台面留在腰的高度/u
-      : /<Picture 3> partially_preserved, architecture, fixed furnishings, and light only, people appear where the shot places them\. Furnishings remain in their own material and structure\. Size follows the people in this shot\. A platform edge against a lower back remains about waist high/u);
+      ? /<Picture 3> partially_preserved，只保留建筑、固定陈设和光线，建筑与固定陈设保持原有位置、材料、结构和相对人物的尺度/u
+      : /<Picture 3> partially_preserved, architecture, fixed furnishings, and light only, the architecture and fixed furnishings retain their positions, materials, structure and scale relative to the people/u);
     assert.doesNotMatch(repurposed.draft.prompt, /场景空间与光照参考|environment layout and lighting reference|<Subject \d+>/u);
     assert.deepEqual(multiViewPictureNumbers(repurposed.draft.prompt), [4, 5], 'a scene use does not inherit the asset owner as an extra visible character');
     assert.equal(withoutHeaderlessPictureBindings(repurposed.draft.prompt), draft.prompt);

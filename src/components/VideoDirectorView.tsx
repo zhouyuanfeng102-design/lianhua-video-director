@@ -1210,7 +1210,8 @@ function VideoBatchPanel({ project: ownerProject, chapterId, savedBatch, onBatch
           || !draft.reuseTaskId && reviewFrozenFormats && retryEntriesBySegment.has(row.segmentId)
           || draft.prompt !== candidate.draft.prompt
           || JSON.stringify(draft.references) !== JSON.stringify(candidate.draft.references);
-        const bound = needsImageBinding ? prepareVideoH3ReferenceDraft(project, bindingInput, usageContextForDraft(draft)).draft : bindingInput;
+        const bound = needsImageBinding ? prepareVideoH3ReferenceDraft(project, bindingInput, { ...usageContextForDraft(draft),
+          previousTailIndex: automatic?.selectionMode === 'ai-assisted' ? undefined : automatic?.placement.index }).draft : bindingInput;
         draft = automatic ? { ...bound, references: draft.references } : bound;
         const audioApi = usageContextForDraft(draft).api;
         draft = draft.reuseTaskId ? renderVideoAudioDraft(project, draft, audioApi) : prepareVideoAudioDraft(project, draft, audioApi);

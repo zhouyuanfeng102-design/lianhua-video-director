@@ -82,6 +82,29 @@ await test('empty bodies and unreadable JSON still require technical repair', ()
   }
 });
 
+await test('an H3 body delivered without the h3Prompt key is kept', () => {
+  const sections = {
+    subject_definitions: '<Subject 1> is 甲.',
+    detailed_description: '[Shot 1]\n甲走近乙。',
+    overall_soundscape: '安静。',
+    non_diegetic_music: 'N/A',
+    identityBindings: bindings,
+  };
+  const delivery = readH3DeliveryEnvelope(JSON.stringify(sections), options);
+  assert.equal(delivery.h3Prompt, [
+    'subject_definitions:\n<Subject 1> is 甲.',
+    'detailed_description:\n[Shot 1]\n甲走近乙。',
+    'overall_soundscape:\n安静。',
+    'non_diegetic_music:\nN/A',
+  ].join('\n\n'));
+  assert.equal(delivery.identityBindings?.characters[0].characterId, 'a');
+  assert.equal(delivery.deliveryWarnings, undefined);
+  const nested = readH3DeliveryEnvelope(JSON.stringify({ result: { h3Prompt: body }, identityBindings: bindings }), options);
+  assert.equal(nested.h3Prompt, body);
+  assert.equal(nested.identityBindings?.characters[0].characterId, 'a');
+  assert.throws(() => readH3DeliveryEnvelope(JSON.stringify(sections)));
+});
+
 await test('protocol acceptance does not spend another AI request or change the authored body', async () => {
   let calls = 0;
   assert.equal(await repairH3PromptProtocolWithAi({ ...options, candidatePrompt: body,

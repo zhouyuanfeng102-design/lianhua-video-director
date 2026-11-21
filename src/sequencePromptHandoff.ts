@@ -292,7 +292,21 @@ export function sequencePromptHandoffEvidence(context: SequencePromptHandoffCont
   // Keep the legacy prose in the source stamp input for saved drafts. The
   // model receives the timing values and the current request-time rule.
   const { firstShotTimingInstruction: _legacyProse, ...openingTiming } = context.openingTiming;
-  return { ...context, openingTiming };
+  if (context.promptFormat === 'seedance') return { ...context, openingTiming };
+  // The source stamp above stays tied to the saved story. This layout is for
+  // the next H3 authoring request, where the actual first image may still be pending.
+  return { ...context, openingTiming, firstShotPerformance: {
+    appliesTo: 'continuous-action',
+    visualDescription: '开场时刻的景别、机位与已经存在的人物和道具关系',
+    events: [
+      { kind: 'visual', startSec: openingTiming.currentOpeningWindow.startSec,
+        endSec: openingTiming.currentOpeningWindow.endSec, source: 'previousLastShot',
+        action: '从末态接出，只写此时可见的姿态或尚在进行的动作' },
+      { startSec: openingTiming.currentStoryStartsAtSec, source: 'segmentContent',
+        action: '从第一项尚未发生的新动作或原定对白开始；后续每项变化在各自的时段展开' },
+    ],
+    adjustment: '若既定排程需要调整开场窗口，两事件共用同一个交接时刻。原文换场或跳时按新时空开场。',
+  } };
 }
 
 const resultFingerprint = (board: Storyboard, format: 'h3' | 'seedance' = 'h3'): string => sourceContentHash(JSON.stringify({

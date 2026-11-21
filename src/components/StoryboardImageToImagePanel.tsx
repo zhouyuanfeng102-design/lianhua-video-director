@@ -1,6 +1,6 @@
 import { useId, useMemo, useRef, useState } from 'react';
 import { assetPreviewUrl } from '../media';
-import { isUsableStoryboardReferenceAsset } from '../storyboardImages';
+import { hasUsableStoryboardReferencePixels } from '../storyboardImages';
 import type { ReferenceAsset, Storyboard, StoryboardImageToImageSettings } from '../types';
 import { ReferenceImageName } from './ReferenceImageName';
 import '../storyboardImageToImage.css';
@@ -30,7 +30,7 @@ export function StoryboardImageToImagePanel({
   const [search, setSearch] = useState('');
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
-  const usableAssets = useMemo(() => assets.filter(isUsableStoryboardReferenceAsset), [assets]);
+  const usableAssets = useMemo(() => assets.filter(hasUsableStoryboardReferencePixels), [assets]);
   const usableAssetsById = useMemo(() => new Map(usableAssets.map((asset) => [asset.id, asset])), [usableAssets]);
   const query = search.trim().toLocaleLowerCase('zh-CN');
   const visibleAssets = useMemo(() => query

@@ -112,7 +112,7 @@ for (const rule of [H3_FINAL_BODY_FORMAT_RULE, H3_PERFORMANCE_DELIVERY_RULE]) {
 assert.match(H3_PERFORMANCE_DELIVERY_RULE, /按原剧情和已有角色关系把实际听者写入listenerCharacterIds/u);
 assert.match(H3_PERFORMANCE_DELIVERY_RULE, /speakerAction（人在画面里时只写身体/u);
 assert.match(H3_PERFORMANCE_DELIVERY_RULE, /人不在这一镜时只写人留在画面外/u);
-assert.match(H3_PERFORMANCE_DELIVERY_RULE, /人在画面里照面说话时，在speakerAction里写胸口和眼睛留在这一句的听者身上。旁边其他人留在原位，不成为这一句的朝向对象，摄影机在两人连线的侧面/u);
+assert.match(H3_PERFORMANCE_DELIVERY_RULE, /人在画面里照面说话时，在speakerAction里写胸口和眼睛留在这一句的听者身上。旁边其他人留在原位，不成为这一句的朝向对象。.*?摄影机在两人连线的侧面。/u);
 assert.match(H3_PERFORMANCE_DELIVERY_RULE, /channel为off-screen、voiceover或inner-voice时.*speakerAction不写胸口、眼睛或画面里的嘴/u);
 assert.match(H3_PERFORMANCE_DELIVERY_RULE, /每个vocal只归属实际发生的事件和镜头及其时间范围/u);
 
@@ -161,7 +161,8 @@ assert.match(DIALOGUE_DELIVERY_RULE, /有明确说话人和话题但仅为转述
 assert.match(NO_DIALOGUE_PERFORMANCE_RULE, /不写不可辨低声、不构成可辨台词/u);
 assert.match(NATURAL_ACTION_AUDIO_RULE, /铜铃、风铃、门环、耳环、杯盏和金属饰只有原文写明它自己响的那一下才出声/u);
 assert.match(NATURAL_ACTION_AUDIO_RULE, /普通走路、迈过门槛、沿走廊走写成很轻的鞋底声/u);
-assert.match(AUDIO_TRANSLATION_SCOPE_RULE, /soft footsteps of the sole on that floor, quiet and under the lowered voices/u);
+assert.match(AUDIO_TRANSLATION_SCOPE_RULE, /soft footsteps on the floor/u);
+assert.doesNotMatch(`${NATURAL_ACTION_AUDIO_RULE}\n${AUDIO_TRANSLATION_SCOPE_RULE}`, /under the lowered voices|停在对白和呼吸下面/u);
 assert.match(NO_DIALOGUE_PERFORMANCE_RULE, /无对白不等于整轨静音.*笑声、咳嗽、哭泣等非语言声及必要动作声/u);
 assert.match(NO_DIALOGUE_PERFORMANCE_RULE, /不等于嘴唇永久闭合或表情冻结.*微笑、亲吻、进食等非说话动作/u);
 assert.match(NO_DIALOGUE_PERFORMANCE_RULE, /只覆盖原定无对白区间.*不删其它镜头或其它时刻的真实台词/u);

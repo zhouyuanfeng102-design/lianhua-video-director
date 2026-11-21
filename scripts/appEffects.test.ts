@@ -3258,8 +3258,8 @@ assert.match(
 const promptDirectorReferenceSelector = readFileSync(new URL('../src/components/StoryboardImageToImagePanel.tsx', import.meta.url), 'utf8');
 assert.match(
   promptDirectorReferenceSelector,
-  /assets\.filter\(isUsableStoryboardReferenceAsset\)/u,
-  'the independent storyboard image picker uses readable ordinary references, with private image routing unchanged',
+  /assets\.filter\(hasUsableStoryboardReferencePixels\)/u,
+  'the storyboard image picker lists readable asset-library images, including private profiles',
 );
 assert.doesNotMatch(
   promptDirectorReferenceSelector,

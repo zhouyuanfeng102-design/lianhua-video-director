@@ -1,4 +1,4 @@
-import type { Character, H3IdentityBindings, H3PerformancePlan, Location, Project, ReferenceAsset, ReferenceRole, VideoTaskApiConfig } from './types';
+import type { Character, H3IdentityBindings, H3PerformancePlan, Location, Project, ReferenceAsset, ReferenceRole, Scene, Storyboard, VideoTaskApiConfig } from './types';
 import type { VideoGenerationDraft, VideoImageReference } from './videoGenerationTypes';
 import type { VideoReferenceUsageContext } from './videoReferenceUsage';
 import { videoMiddleFrameOrdinal, videoReferenceSlotIndex } from './videoReferenceSlots';
@@ -15,10 +15,11 @@ import { sourceContentHash } from './sourceContentHash';
 import { videoH3MediaModeContract, videoH3MediaModeIssue } from './videoH3MediaMode';
 import { assetReferenceLocationOwners } from './assetCharacterBinding';
 import { renderH3ReferenceExecution, type H3ReferenceExecutionCharacter } from './h3ReferenceExecution';
-import { h3CompositionAnchorRole, h3PictureCitedInSubject, h3TraitPictureLines } from './h3TraitPictures';
+import { h3CompositionAnchorRole, h3PictureCitedInSubject, h3ReferenceProseRanges, h3TraitPictureLines, renderH3SceneReferenceRetention, renderH3SceneReferenceShots } from './h3TraitPictures';
 import { videoMotionReferenceNumbers } from './videoMotionReferences';
 import { resolveRunningHubH3PictureNumbers } from './runningHubH3ReferenceImages';
 import { resolveComfyH3PictureNumbers } from './h3ReferenceImageOrder';
+import { lookupPreviousSegmentVideos } from './videoTailReference';
 export { collectVideoPictureReferenceNumbers } from './videoPictureReferences';
 export { videoReferenceCharacterOwners, videoReferenceCharacterBindingWarning } from './videoReferenceCharacters';
 
@@ -58,6 +59,8 @@ export interface PreparedVideoH3ReferenceDraft {
 }
 
 export type VideoH3ReferenceContext = Omit<VideoReferenceUsageContext, 'api'> & {
+  /** Batch reservation for the actual last frame, before its pixels exist. */
+  previousTailIndex?: number;
   api?: VideoReferenceUsageContext['api'] & Pick<VideoTaskApiConfig, 'runningHubMappedFields' | 'runningHubH3ReferenceImages' | 'requestTemplate' | 'rhtvMode'>
     & Partial<Pick<VideoTaskApiConfig, 'baseUrl' | 'endpoint'>>;
 };
@@ -262,26 +265,6 @@ export const videoH3ReferenceCharacterIds = (project: Project, draft: VideoGener
   }));
 };
 
-/** Both request-local reference paths already have a trusted authored source.
- * Read its real section/shot offsets by the same rules, including legacy
- * bodies without headings. Masking preserves offsets and excludes literal
- * dialogue, sound payloads and quoted examples from structural boundaries. */
-const videoH3ReferenceProseRanges = (prompt: string) => {
-  const masked = maskReferenceLiterals(prompt);
-  const description = /^(?:integrated_multimodal_description|detailed_description):/mu.exec(masked);
-  const sectionStart = description ? description.index + description[0].length : 0;
-  const nextSection = /^(?:overall_soundscape|non_diegetic_music):/mu.exec(masked.slice(sectionStart));
-  const sectionEnd = nextSection ? sectionStart + nextSection.index : prompt.length;
-  const markers = [...masked.slice(sectionStart, sectionEnd).matchAll(/\[Shot[ \t]*([1-9]\d*)\]/gu)];
-  const shots = markers.map((marker, index) => ({
-    index: Number(marker[1]),
-    start: sectionStart + marker.index!,
-    bodyStart: sectionStart + marker.index! + marker[0].length,
-    end: sectionStart + (markers[index + 1]?.index ?? sectionEnd - sectionStart),
-  }));
-  return { masked, sectionStart, shots };
-};
-
 /** Add only a request-local identity association inside a proven visual shot.
  * It never creates Subject/voice IDs or moves a later character to Shot 1. */
 const participationReferenceEdit = (
@@ -291,7 +274,7 @@ const participationReferenceEdit = (
   shotIndexes: readonly number[],
   numbers: readonly number[],
 ): VideoPictureReferenceEdit | undefined => {
-  const { masked, shots } = videoH3ReferenceProseRanges(prompt);
+  const { masked, shots } = h3ReferenceProseRanges(prompt);
   const shot = shots.find((entry) => shotIndexes.includes(entry.index));
   if (!shot) return undefined;
   const { bodyStart: start, end } = shot;
@@ -321,16 +304,90 @@ const participationReferenceEdit = (
 interface VideoH3ReferenceUse {
   role: ReferenceRole;
   description?: readonly [string, string];
+  previousTail?: boolean;
+  shotIndexes?: readonly number[];
 }
+
+/** Resolve location plates from saved associations. Generated staging IDs name a scene within the plan, not a project location. */
+const scenePictureShotIndexes = (project: Project, board: Storyboard, references: readonly VideoImageReference[]): Map<string, number[]> => {
+  const selected = new Map(references.filter((ref) => ref.role === 'scene').map((ref) => [ref.assetId, [] as number[]]));
+  if (!selected.size || !board.shots?.length) return selected;
+  const assets = new Map(project.assets.filter((asset) => !asset.missing).map((asset) => [asset.id, asset]));
+  const locationCache = new Map<string, string[]>();
+  const locationsForAsset = (id: string): string[] => {
+    let ids = locationCache.get(id);
+    if (!ids) {
+      const asset = assets.get(id);
+      ids = asset ? videoReferenceLocationOwners(project, asset).map((owner) => owner.id) : [];
+      locationCache.set(id, ids);
+    }
+    return ids;
+  };
+  const commonLocation = (scenes: readonly (Scene | undefined)[]): string | undefined => {
+    const locations = scenes.map((scene) => unique([...(scene?.locationIds || []), scene?.locationId].filter((id): id is string => Boolean(id))));
+    const first = locations[0]?.[0];
+    return locations.every((ids) => ids.length === 1 && ids[0] === first) ? first : undefined;
+  };
+  const plan = project.sequencePlans?.find((entry) => entry.id === board.sequencePlanId);
+  const segment = plan?.segments.find((entry) => entry.id === board.segmentId);
+  const chapter = board.chapterId || plan?.chapterId;
+  const scenes = (project.scenes || []).filter((scene) => !scene.sourceStale && (!chapter || scene.chapterId === chapter));
+  const snapshots = board.sourceSceneSnapshots || [];
+  const sourceIds = board.sourceSceneIds?.length ? board.sourceSceneIds : segment?.sourceSceneIds;
+  const sourceScenes = (sourceIds?.length ? sourceIds : [board.sceneId]).map((id) => snapshots.find((scene) => scene.id === id) || scenes.find((scene) => scene.id === id));
+  const exactScene = (excerpt?: string) => {
+    if (!excerpt?.trim()) return undefined;
+    const matches = scenes.filter((scene) => scene.content.includes(excerpt.trim()));
+    return matches.length === 1 ? matches[0] : undefined;
+  };
+  let sharedLocation = commonLocation(sourceScenes);
+  // Older semantic segment boards contain a synthetic scene without a location. Their original evidence can still locate a single setting.
+  if (!sharedLocation && !sourceIds?.length && !sourceScenes.some((scene) => scene?.locationId || scene?.locationIds?.length)) {
+    sharedLocation = commonLocation(segment?.semanticSource?.sourceEvidence.map((entry) => exactScene(entry.text)) || []);
+  }
+  const stagedScenes = new Set([...(board.sceneStaging || []), ...board.shots.flatMap((shot) => shot.sceneStaging || [])].map((entry) => entry.sceneId));
+  for (const shot of board.shots) {
+    const ids = shot.referenceAssetIds || [];
+    const explicit = ids.filter((id) => selected.has(id));
+    if (explicit.length) {
+      for (const id of new Set(explicit)) selected.get(id)!.push(shot.index);
+      continue;
+    }
+    const linkedLocations = unique(ids.flatMap(locationsForAsset));
+    const excerptScene = linkedLocations.length ? undefined : exactScene(shot.sourceExcerpt);
+    const location = linkedLocations.length ? (linkedLocations.length === 1 ? linkedLocations[0] : undefined)
+      : excerptScene ? commonLocation([excerptScene]) : stagedScenes.size <= 1 ? sharedLocation : undefined;
+    if (!location) continue;
+    const candidates = [...selected.keys()].filter((id) => {
+      const owners = locationsForAsset(id);
+      return owners.length === 1 && owners[0] === location;
+    });
+    if (candidates.length === 1) selected.get(candidates[0])!.push(shot.index);
+  }
+  return selected;
+};
 
 /** Custom storyboard pictures capture an existing action phase. Their picker
  * positions do not turn a 3.5s / 13.5s pose into the opening / ending state.
  * Actual boundary assets, explicit board boundaries and continuation tails
  * keep their selected first/last use. Only request-local prose changes. */
-const videoH3ReferenceUses = (project: Project, draft: VideoGenerationDraft): VideoH3ReferenceUse[] => {
+const videoH3ReferenceUses = (project: Project, draft: VideoGenerationDraft, reservedTailIndex?: number): VideoH3ReferenceUse[] => {
   const board = project.storyboards.find((entry) => entry.id === draft.source?.storyboardId);
-  return draft.references.map((reference): VideoH3ReferenceUse => {
+  const sequencePlanId = draft.source?.sequencePlanId || board?.sequencePlanId;
+  const segmentId = draft.source?.segmentId || board?.segmentId;
+  const sceneShots = board ? scenePictureShotIndexes(project, board, draft.references) : undefined;
+  let previousVideos: ReturnType<typeof lookupPreviousSegmentVideos> | undefined;
+  return draft.references.map((reference, index): VideoH3ReferenceUse => {
     const asset = project.assets.find((entry) => entry.id === reference.assetId);
+    let previousTail = index === reservedTailIndex;
+    if (reservedTailIndex === undefined && asset?.sourceVideoAssetId && !asset.sourceClipId && asset.type === 'last-frame'
+      && ['first-frame', 'general', 'composition', 'unknown'].includes(reference.role) && sequencePlanId && segmentId) {
+      previousVideos ??= lookupPreviousSegmentVideos(project, { sequencePlanId, segmentId });
+      previousTail = previousVideos.versions.some(({ asset: video }) => video.id === asset.sourceVideoAssetId);
+    }
+    if (previousTail) return { role: reference.role, previousTail: true,
+      description: ['是上一段成片的末帧，给出本段开场的可见状态', 'is the preceding clip’s final frame and supplies the visible opening state'] };
+    if (reference.role === 'scene') return { role: 'scene', shotIndexes: sceneShots?.get(reference.assetId) };
     if (reference.role === 'private-part') {
       const owners = asset ? videoReferenceCharacterOwners(project, asset, reference) : [];
       const owner = owners.length === 1 ? owners[0] : undefined;
@@ -383,7 +440,7 @@ const videoH3ReferenceUsageEdit = (
   };
   const selectedUses = references.flatMap((reference, index) => {
     const number = numbers[index];
-    if (!number || authoredPictureNumbers.has(number)) return [];
+    if (!number || authoredPictureNumbers.has(number) || referenceUses[index]?.previousTail) return [];
     const ordinal = reference.role === 'middle-frame'
       ? videoMiddleFrameOrdinal(references, videoReferenceSlotIndex(reference, index), rememberedRoles) : undefined;
     const described = referenceUses[index]?.description;
@@ -400,11 +457,12 @@ const videoH3ReferenceUsageEdit = (
   const castPlate = references.some((reference, index) => Boolean(numbers[index])
     && ['character', 'subject', 'scene', 'style', 'general'].includes(reference.role));
   if (!selectedUses.length && !multiViewNumbers.length && !castPlate) return undefined;
-  const { sectionStart, shots } = videoH3ReferenceProseRanges(prompt);
+  const { sectionStart, shots } = h3ReferenceProseRanges(prompt);
   // Insert before the real shot header, never inside its At time prefix or
   // a masked dialogue/quote. Unsectioned source prose needs no new envelope.
   const start = shots.find((shot) => shot.index === 1)?.start ?? sectionStart;
   const multiViewPictures = unique(multiViewNumbers).map((number) => `<Picture ${number}>`).join(language === 'zh' ? '、' : ', ');
+  const hasTail = referenceUses.some((use) => use.previousTail);
   const text = [
     selectedUses.length ? language === 'zh'
       ? `本段参考图用途：${selectedUses.join('；')}。人物朝向与动作时序按正文推进，静态姿态不延长动作。正面身份图锁住五官、衣服，以及这张图上的尾巴、兽耳、翅膀、角和爪。这些附肢只留在已绑定的那一个姓名身上。生殖器资料图只提供已绑定那个人自己的器官形状，不成为另一个人身上的第二根，也不成为相接处单独摆着的一段。锁住的衣服是这张图里已经穿的那一套。扯开或滑落的是这一套。这一镜已经看见通常被衣服盖住的部位时，盖住它的仍是这一套的那一件，腰头敞开，布褪到该部位下面。留着这件时，这件仍然扣好，形状留在布下面。不把参考图的正脸贴到后脑上。同一个姓名在这一镜只有一个身体。参考图只提供这一个身体的脸和衣服，不在房间里再站出一个参考图里的人。`
@@ -413,8 +471,8 @@ const videoH3ReferenceUsageEdit = (
       ? `多视图身份参考：${multiViewPictures} 各自展示其已关联的同一个人物的多个角度，仅参考身份与外观；图内不同视角不是同时入画的多个人，实际人数、站位、朝向与动作沿用本镜正文。正面参考不把正脸贴到后脑。`
       : `Multi-view identity references: ${multiViewPictures} each show multiple angles of their respective single bound character, for identity and appearance only; the views are not multiple people entering the frame. Character count, placement, facing and action follow the current shot. A front view does not place that face on the back of the head.` : '',
     language === 'zh'
-      ? '本镜每个已写姓名的人只有一个身体，只站在这一镜正文写的那一个位置。同一人物的多张图、图内多个角度、未分开标注的设定图、多视图、开场构图、场景图和通用参考只提供这个人的外观或场面，不在画面里再复制一个身体。每张人物图上的尾巴、兽耳、翅膀、角、爪只留在已绑定的那一个姓名身上。生殖器资料图只提供已绑定那个人自己的器官形状，不成为另一个人身上的第二根，也不成为相接处单独摆着的一段。其他已写姓名的人保持正文为他写的头、躯干和附肢。摄影机模拟某人的视角时，这个人不再作为第二个身体画进同一镜；机位在他身旁，或他留在画外作为视点。'
-      : 'Each named person in this shot has one body, standing only where this shot places them. Several pictures of one person, several angles inside one picture, an unlabeled character sheet, a multi-view sheet, an opening frame, a scene plate, or a general reference supply that person\'s appearance or the setting only and do not add another body. A tail, animal ears, wings, horns, or claws in a character picture remain on the one named person bound to that picture. A genital reference supplies only that bound person\'s own organ shape. It does not become a second organ on another person or a separate piece at the join. Every other named person keeps the head, torso, and limbs written for them. When the camera uses that person\'s viewpoint, that person is not drawn as a second body in the same shot; the camera stays beside them, or they remain off-screen as the viewpoint. This named person remains one body. Later sentences change that same body. The reference image keeps the face and clothes of that body.',
+      ? `本镜每个已写姓名的人只有一个身体，只站在这一镜正文写的那一个位置。同一人物的多张图、图内多个角度、未分开标注的设定图、多视图、${hasTail ? '场景图' : '开场构图、场景图和通用参考'}只提供这个人的外观或场面，不在画面里再复制一个身体。每张人物图上的尾巴、兽耳、翅膀、角、爪只留在已绑定的那一个姓名身上。生殖器资料图只提供已绑定那个人自己的器官形状，不成为另一个人身上的第二根，也不成为相接处单独摆着的一段。其他已写姓名的人保持正文为他写的头、躯干和附肢。摄影机模拟某人的视角时，这个人不再作为第二个身体画进同一镜；机位在他身旁，或他留在画外作为视点。`
+      : `Each named person in this shot has one body, standing only where this shot places them. Several pictures of one person, several angles inside one picture, an unlabeled character sheet, a multi-view sheet, ${hasTail ? 'or a scene plate' : 'an opening frame, a scene plate, or a general reference'} supply that person\'s appearance or the setting only and do not add another body. A tail, animal ears, wings, horns, or claws in a character picture remain on the one named person bound to that picture. A genital reference supplies only that bound person\'s own organ shape. It does not become a second organ on another person or a separate piece at the join. Every other named person keeps the head, torso, and limbs written for them. When the camera uses that person\'s viewpoint, that person is not drawn as a second body in the same shot; the camera stays beside them, or they remain off-screen as the viewpoint. This named person remains one body. Later sentences change that same body. The reference image keeps the face and clothes of that body.`,
   ].filter(Boolean).join('\n');
   return { start, end: start, text: `${text}\n` };
 };
@@ -666,7 +724,9 @@ const prepareVideoH3ReferenceDraftInternal = (
       return { ...event, ...(referenceAnchor !== undefined ? { referenceAnchor } : {}) };
     }) } : {}) };
   const executionMode = videoH3MediaModeContract(draft, context).mode;
-  const referenceUses = videoH3ReferenceUses(referenceProject, draft);
+  const referenceUses = videoH3ReferenceUses(referenceProject, draft, context.previousTailIndex);
+  const pictureUses = plan.numbers ? referenceUses.map((use, index) => ({ number: plan.numbers![index], role: use.role,
+    shotIndexes: use.shotIndexes, ...(use.description ? { text: use.description[language === 'en' ? 1 : 0] } : {}) })) : undefined;
   const blockingIdentityIssues = identityIssues.filter((issue) => !characterPictures.has(issue.characterId)
     || !recoverableIdentityIssue(identities.find((identity) => identity.characterId === issue.characterId)!, identityIssues.filter((candidate) => candidate.characterId === issue.characterId)));
   const execution = !pictureSourceIssues.length && plan.numbers && !blockingIdentityIssues.length
@@ -676,13 +736,20 @@ const prepareVideoH3ReferenceDraftInternal = (
     ? renderH3ReferenceExecution({ prompt, identities: executionIdentities, characterPictures,
       mode: executionMode === 'full-reference' ? 'full-reference' : 'integrated',
       language: binding.sourceLanguage || draft.source?.language,
-      pictureUses: referenceUses.map((use, index) => ({ number: plan.numbers![index], role: use.role,
-        ...(use.description ? { text: use.description[language === 'en' ? 1 : 0] } : {}) })) }) : undefined;
+      pictureUses }) : undefined;
   if (execution) prompt = execution.prompt;
   // Serialize uses after any existing execution rendering, so a saved
   // performance plan cannot discard this request's image responsibilities.
   // Missing old manifest entries still cannot authorize a competing mapping.
   if (!pictureSourceIssues.length && plan.numbers && language) {
+    if (!execution && pictureUses?.some((use) => use.role === 'scene')) {
+      const definitions = /^subject_definitions:([\s\S]*?)^summary:/mu.exec(prompt)?.[1] || '';
+      if (definitions) prompt = prompt.replace(/^retention_analysis:([\s\S]*?)^detailed_description:/mu, (section, source: string) => {
+        const updated = renderH3SceneReferenceRetention(source.trim(), definitions, pictureUses, language === 'en');
+        return updated === source.trim() ? section : `retention_analysis:\n${updated}\n\ndetailed_description:`;
+      });
+      prompt = renderH3SceneReferenceShots(prompt, definitions, pictureUses, language === 'en');
+    }
     const authoredPictureNumbers = new Set([...pictureNumbers.values()].flatMap((numbers) => numbers || []));
     const sheetVariants = new Set(['five-view', 'three-view', 'turnaround', 'private-five-view', 'private-turnaround']);
     const picturesByCharacter = new Map<string, number[]>();
@@ -707,6 +774,22 @@ const prepareVideoH3ReferenceDraftInternal = (
     const usage = videoH3ReferenceUsageEdit(prompt, draft.references, plan.numbers, language,
       authoredPictureNumbers, draft.referenceSlotRoles, multiViewNumbers, referenceUses);
     if (usage) prompt = prompt.slice(0, usage.start) + usage.text + prompt.slice(usage.end);
+  }
+  const tailIndex = referenceUses.findIndex((use) => use.previousTail);
+  if (tailIndex >= 0 && language && !pictureSourceIssues.length) {
+    const { shots } = h3ReferenceProseRanges(prompt);
+    const firstShot = shots.find((shot) => shot.index === 1);
+    if (firstShot) {
+      const number = plan.numbers?.[tailIndex];
+      const picture = number ? `<Picture ${number}>` : (language === 'en' ? 'the preceding clip’s final frame' : '上一段成片末帧');
+      const opening = language === 'en'
+        ? `At 0.00 seconds, continue from ${picture}, preserving its visible framing, body positions and facing, points of contact, and held objects. The first new action unfolds from that state through its written stages.`
+        : `本段0.00秒承接${picture}，保持画面中可见的取景、人物站位与朝向、接触关系和持物状态。从这一刻依次展开本段第一项新动作。`;
+      // Keep any time marker attached to its shot header.
+      const timeMarker = /^[ \t]+At[ \t]+\d{2}:\d{2}\.\d+/u.exec(prompt.slice(firstShot.bodyStart));
+      const at = firstShot.bodyStart + (timeMarker?.[0].length || 0);
+      prompt = `${prompt.slice(0, at)}\n${opening}\n${prompt.slice(at).trimStart()}`;
+    }
   }
   return { draft: { ...draft, prompt,
     ...(!draft.reuseTaskId && !draft.h3ReferenceBinding && draft.source && draft.source.language === undefined

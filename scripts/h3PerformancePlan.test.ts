@@ -68,6 +68,16 @@ test('segment 4 converts the declared shot clock once and never voices the sourc
   assert.match(rendered.prompt, /贝里尤洛走到两人面前/u);
   assert.doesNotMatch(rendered.prompt, /亚乌拉的胸口和眼睛留在贝里尤洛与夏提雅身上/u);
   assert.match(rendered.prompt, /沉默地环视王都方向/u);
+  const quietAction = rendered.events.find((event) => event.eventId === 'look')!.referenceAnchor!;
+  assert.match(quietAction, /贝里尤洛与夏提雅与亚乌拉在这个动作中保持无言/u);
+  const englishVisual = renderH3PerformancePlan({ plan: { version: 1, timeBase: 'clip', shots: [{
+    shotIndex: 1, startSec: 0, visualDescription: 'The two walk beside each other.', events: [{
+      kind: 'visual', eventId: 'walk', startSec: 0, endSec: 3, silentCharacterIds: ['wolf', 'aura'],
+      description: 'They exchange a quiet laugh.', soundDescription: 'Soft footsteps brush the floor.',
+    }],
+  }], overallSoundscape: '', nonDiegeticMusic: 'N/A' }, characters, language: 'en' });
+  assert.match(englishVisual.body, /quiet laugh\. 贝里尤洛 and 亚乌拉 remain wordless during this action\. Soft footsteps/u);
+  assert.doesNotMatch(englishVisual.body, /<d>|\(S\d+\)/u);
   assert.doesNotMatch(rendered.prompt, /矮人|骷髅|与龙僵持/u);
   assert.match(rendered.prompt, /衣料的轻微摩擦声/u);
   assert.ok(rendered.prompt.includes(`overall_soundscape:\n${H3_EXISTING_SOUND_SUMMARY_ZH}`));
@@ -618,11 +628,13 @@ test('identity stays on the shot where the person is visible, and a location pla
   assert.match(integrated.prompt, /\[Shot 2\] At 00:06\.000\n人物身份: 千仞雪/u);
   const referenced = renderH3PerformancePlan({
     plan, characters: [{ characterId: 'qian', name: '千仞雪', referenceAnchor: '千仞雪' }], language: 'en', mode: 'full-reference',
-    pictureUses: [{ number: 2, role: 'scene' }, { number: 1, role: 'first-frame' }, { number: 3, role: 'prop' }],
+    pictureUses: [{ number: 2, role: 'scene', shotIndexes: [2] }, { number: 1, role: 'first-frame' }, { number: 3, role: 'prop' }],
   });
   assert.match(referenced.prompt, /<Picture 1> is the opening composition reference/u);
   assert.match(referenced.prompt, /<Subject \d+> is the place, referenced from <Picture 2>/u);
-  assert.match(referenced.prompt, /partially_preserved - architecture, fixed furnishings, and light only\. People appear where the shot places them\. Furnishings remain in their own material and structure\. Size follows the people in this shot\. A platform edge against a lower back remains about waist high\. A mark on a wall or base remains smaller than that person's head/u);
+  assert.match(referenced.prompt, /<Subject 2> \(appears in \[Shot 2\]\): partially_preserved - architecture, fixed furnishings, and light only/u);
+  assert.match(referenced.body, /\[Shot 2\] At 00:06\.000\nThe fixed layout of <Subject 2> remains in place/u);
+  assert.doesNotMatch(referenced.body.split('[Shot 2]')[0], /<Subject 2>/u);
   assert.match(referenced.prompt, /<Subject \d+> is the prop, referenced from <Picture 3>/u);
   assert.match(referenced.prompt, /A mark that fills its reference picture remains only the drawing of that mark/u);
   assert.doesNotMatch(referenced.prompt, /environment layout and lighting reference/u);

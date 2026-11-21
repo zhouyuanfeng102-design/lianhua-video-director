@@ -1,3 +1,5 @@
+import { maskVideoPictureReferenceLiterals } from './videoPictureReferences';
+
 /** Standalone `<Picture N>` is an H3 composition anchor: a first frame, keyframe,
  * last frame, or an explicit composition/camera plate. Scene, prop, costume
  * and style plates are trait references. They are cited inside `<Subject N>`
@@ -24,8 +26,8 @@ const traits: Record<string, TraitCopy> = {
     nameEn: 'the place', nameZh: '这处空间',
     dutyEn: 'architecture, fixed furnishings, and light only',
     dutyZh: '只保留建筑、固定陈设和光线',
-    stayEn: 'People appear where the shot places them. Furnishings remain in their own material and structure. Size follows the people in this shot. A platform edge against a lower back remains about waist high. A mark on a wall or base remains smaller than that person\'s head. This shot keeps its written framing. People already shown in this picture remain part of the setting and are not copied beside a named person.',
-    stayZh: '人物出现在本镜写明的位置。陈设留下自己的材料和结构，尺寸跟着这一镜里的人。台沿抵住后腰时，台面留在腰的高度。墙上或台座上的纹样留得比这个人的头小。这一镜保持正文写明的取景。图内已经画着的人只作场面，不在具名人物旁边再复制一个。',
+    stayEn: 'The architecture and fixed furnishings retain their positions, materials, structure and scale relative to the people. People appear where the shot places them. Figures already depicted in the plate remain part of the setting. The shot keeps its written framing.',
+    stayZh: '建筑与固定陈设保持原有位置、材料、结构和相对人物的尺度。人物出现在本镜写明的位置。参考图中原有的人像保留为场景的一部分。本镜保持正文写明的取景。',
   },
   prop: {
     marker: 'partially_preserved',
@@ -79,7 +81,7 @@ const traits: Record<string, TraitCopy> = {
 
 export interface H3TraitPictureLines {
   definition: (subject: string, picture: number) => string;
-  retention: (subject: string) => string;
+  retention: (subject: string, shotIndexes?: readonly number[]) => string;
   /** Used only when the prompt has no subject section. It stays inside the
    * existing reference-uses sentence and does not name a composition to copy. */
   inline: (picture: number) => string;
@@ -95,9 +97,11 @@ export const h3TraitPictureLines = (role: string, en: boolean): H3TraitPictureLi
     definition: (subject, picture) => en
       ? `${subject} is ${name}, referenced from <Picture ${picture}>: ${duty}.`
       : `${subject} 是${name}，视觉参考为 <Picture ${picture}>：${duty}。`,
-    retention: (subject) => en
-      ? `${subject} (appears in [Shot 1]): ${trait.marker} - ${duty}. ${stay}`
-      : `${subject}（出现在 [Shot 1]）：${trait.marker} - ${duty}。${stay}`,
+    retention: (subject, shotIndexes) => {
+      const shots = (role === 'scene' ? shotIndexes || [] : [1]).map((index) => `[Shot ${index}]`).join(en ? ', ' : '、');
+      const scope = shots ? (en ? ` (appears in ${shots})` : `（出现在 ${shots}）`) : '';
+      return en ? `${subject}${scope}: ${trait.marker} - ${duty}. ${stay}` : `${subject}${scope}：${trait.marker} - ${duty}。${stay}`;
+    },
     inline: (picture) => {
       const clause = stay.replace(/[.。]$/u, '');
       const continued = en ? clause.charAt(0).toLowerCase() + clause.slice(1) : clause;
@@ -110,3 +114,79 @@ export const h3TraitPictureLines = (role: string, en: boolean): H3TraitPictureLi
 
 export const h3PictureCitedInSubject = (prompt: string, picture: number): boolean =>
   new RegExp(`<Subject\\s+\\d+>[^\\n]{0,500}<Picture\\s+${picture}>(?![0-9])`, 'u').test(prompt);
+
+/** Offsets exclude headings, sound, dialogue and quoted examples. Plain legacy shot bodies have no section envelope. */
+export const h3ReferenceProseRanges = (prompt: string) => {
+  const masked = maskVideoPictureReferenceLiterals(prompt);
+  const description = /^(?:integrated_multimodal_description|detailed_description):/mu.exec(masked);
+  const sectionStart = description ? description.index + description[0].length : 0;
+  const nextSection = /^(?:overall_soundscape|non_diegetic_music):/mu.exec(masked.slice(sectionStart));
+  const sectionEnd = nextSection ? sectionStart + nextSection.index : prompt.length;
+  const markers = [...masked.slice(sectionStart, sectionEnd).matchAll(/\[Shot[ \t]*([1-9]\d*)\]/gu)];
+  const shots = markers.map((marker, index) => ({
+    index: Number(marker[1]), start: sectionStart + marker.index!, bodyStart: sectionStart + marker.index! + marker[0].length,
+    end: sectionStart + (markers[index + 1]?.index ?? sectionEnd - sectionStart),
+  }));
+  return { masked, sectionStart, shots };
+};
+
+export interface H3PictureUse {
+  number: number;
+  role: string;
+  text?: string;
+  shotIndexes?: readonly number[];
+}
+
+const sceneSubject = (definitions: string, number: number): string | undefined => {
+  const pattern = new RegExp(`^[ \\t]*(<Subject\\s+\\d+>)[^\\r\\n]*?<Picture\\s+${number}>`, 'gmu');
+  const matches = [...definitions.matchAll(pattern)];
+  return matches.length === 1 ? matches[0][1] : undefined;
+};
+
+/** Keep individually authored duties. Older request-local exports can contain the former generated first-shot sentence. */
+export const renderH3SceneReferenceRetention = (source: string, definitions: string, uses: readonly H3PictureUse[] | undefined, en: boolean): string => {
+  const scenes = uses?.filter((use) => use.role === 'scene');
+  if (!scenes?.length) return source;
+  const lines = source.trim() ? source.trim().split(/\r?\n/u) : [];
+  const declarations = maskVideoPictureReferenceLiterals(definitions);
+  const trait = h3TraitPictureLines('scene', en)!;
+  for (const use of scenes) {
+    const subject = sceneSubject(declarations, use.number);
+    if (!subject) continue;
+    const at = lines.findIndex((line) => line.trimStart().startsWith(subject));
+    const line = trait.retention(subject, use.shotIndexes);
+    if (at < 0) { lines.push(line); continue; }
+    const existing = lines[at];
+    const generated = en ? existing.includes(`partially_preserved - ${traits.scene.dutyEn}. ${traits.scene.stayEn}`)
+      || existing.includes('partially_preserved - architecture, fixed furnishings, and light only. People appear where the shot places them. Furnishings remain in their own material and structure.')
+      : existing.includes(`partially_preserved - ${traits.scene.dutyZh}。${traits.scene.stayZh}`)
+        || existing.includes('partially_preserved - 只保留建筑、固定陈设和光线。人物出现在本镜写明的位置。陈设留下自己的材料和结构，尺寸跟着这一镜里的人。');
+    if (generated) {
+      lines[at] = line;
+    } else if (use.shotIndexes?.length) {
+      // A custom retention entry owns its wording. Synchronize only the official appearance prefix.
+      const scopePrefix = /^(\s*<Subject\s+\d+>)(?:\s*\((?:appears in\s+\[Shot\s+\d+\])(?:\s*,\s*\[Shot\s+\d+\])*\)|\s*（出现在\s*\[Shot\s+\d+\](?:\s*[、，,]\s*\[Shot\s+\d+\])*）)?(?=\s*[:：]\s*(?:partially_preserved|fully_preserved|attribute_transfer|weak_reference)\b)/u;
+      const scope = line.slice(subject.length).split(/[:：]/u, 1)[0];
+      lines[at] = existing.replace(scopePrefix, (_prefix, label: string) => label + scope);
+    }
+  }
+  return lines.join('\n');
+};
+
+/** Point each situated shot to its declared space, keeping its cut time attached to the shot marker. */
+export const renderH3SceneReferenceShots = (body: string, definitions: string, uses: readonly H3PictureUse[] = [], en: boolean): string => {
+  const scenes = uses.filter((use) => use.role === 'scene' && use.shotIndexes?.length);
+  if (!scenes.length) return body;
+  const declarations = maskVideoPictureReferenceLiterals(definitions);
+  const references = scenes.map((use) => ({ shots: use.shotIndexes!, token: sceneSubject(declarations, use.number) || `<Picture ${use.number}>` }));
+  const { masked, shots } = h3ReferenceProseRanges(body);
+  for (const shot of shots.reverse()) {
+    const content = masked.slice(shot.bodyStart, shot.end);
+    const tokens = [...new Set(references.filter((ref) => ref.shots.includes(shot.index) && !content.includes(ref.token)).map((ref) => ref.token))];
+    if (!tokens.length) continue;
+    const at = shot.bodyStart + (/^[ \t]+At[ \t]+\d{2}:\d{2}\.\d+/u.exec(content)?.[0].length || 0);
+    const sentence = en ? `The fixed layout of ${tokens.join(' and ')} remains in place.` : `本镜沿用${tokens.join('与')}的固定布局。`;
+    body = `${body.slice(0, at)}\n${sentence}\n${body.slice(at).trimStart()}`;
+  }
+  return body;
+};

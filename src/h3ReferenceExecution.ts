@@ -2,7 +2,7 @@ import type { H3IdentityBindings, ReferenceRole } from './types';
 import { buildPromptTranslationDocument } from './promptTranslationDocument';
 import { maskVideoPictureReferenceLiterals } from './videoPictureReferences';
 import { h3KeepsScore, renderH3PerformancePlan } from './h3PerformancePlan';
-import { h3TraitPictureLines } from './h3TraitPictures';
+import { h3TraitPictureLines, renderH3SceneReferenceRetention, renderH3SceneReferenceShots, type H3PictureUse } from './h3TraitPictures';
 import { H3_EXISTING_SOUND_SUMMARY_EN, H3_EXISTING_SOUND_SUMMARY_ZH } from './h3DeliverySections';
 
 type Identity = H3IdentityBindings['characters'][number];
@@ -26,7 +26,7 @@ export interface H3ReferenceExecutionInput {
   prompt: string;
   identities: H3IdentityBindings;
   characterPictures: ReadonlyMap<string, readonly number[]>;
-  pictureUses?: ReadonlyArray<{ number: number; role: ReferenceRole; text?: string }>;
+  pictureUses?: ReadonlyArray<H3PictureUse & { role: ReferenceRole }>;
   language?: 'zh' | 'en';
   mode?: 'integrated' | 'full-reference';
 }
@@ -429,12 +429,13 @@ export const renderH3ReferenceExecution = (input: H3ReferenceExecutionInput): H3
     if (trait) {
       const subject = nextTraitSubject();
       definitionBody += `\n${trait.definition(subject, use.number)}`;
-      traitRetention.push(trait.retention(subject));
+      if (use.role !== 'scene') traitRetention.push(trait.retention(subject));
       continue;
     }
     if (!purpose && !use.text) continue;
     definitionBody += use.text ? `\n<Picture ${use.number}> ${use.text}` : `\n<Picture ${use.number}> is the ${purpose}.`;
   }
+  body = renderH3SceneReferenceShots(body, definitionBody, input.pictureUses, en);
   const summary = sections.find((section) => section.name === 'summary');
   const retention = sections.find((section) => section.name === 'retention_analysis');
   const labels = characters.map((entry) => entry.subjectToken).join(', ');
@@ -442,7 +443,8 @@ export const renderH3ReferenceExecution = (input: H3ReferenceExecutionInput): H3
   const summaryBody = /^\[reference generation(?:[^\]]*)\]/u.test(authoredSummary) ? authoredSummary : `[reference generation] ${authoredSummary}`;
   const partRetention = (input.pictureUses || []).flatMap((use) => use.role === 'private-part' && use.text
     ? [`<Picture ${use.number}>: ${use.text}`] : []);
-  const retentionBody = [renderRetention(retention?.body || '', characters), ...partRetention, ...traitRetention].filter(Boolean).join('\n');
+  const retentionBody = renderH3SceneReferenceRetention([renderRetention(retention?.body || '', characters), ...partRetention, ...traitRetention]
+    .filter(Boolean).join('\n'), definitionBody, input.pictureUses, en);
   const bodyTail = /[\r\n]$/u.test(body) ? body : `${body}\n`;
   // Missing legacy sound sections do not mean the shot's existing sounds are
   // muted. Summarize their existing scope without introducing a global bed.

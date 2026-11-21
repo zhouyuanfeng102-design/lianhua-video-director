@@ -37,6 +37,11 @@ const assertOneParentPrompt = (user: string, expected: SequencePromptHandoffCont
   });
   assert.equal(timing.currentStoryStartsAtSec, 0.5);
   assert.equal(timing.currentStoryStartsNoLaterThanSec, 0.8);
+  assert.equal(actual.firstShotPerformance?.appliesTo, 'continuous-action');
+  const openingEvents = actual.firstShotPerformance!.events;
+  assert.deepEqual(openingEvents.map((event) => event.source), ['previousLastShot', 'segmentContent']);
+  assert.equal(openingEvents[0].startSec, 0);
+  assert.equal(openingEvents[0].endSec, openingEvents[1].startSec);
   assert.equal(timing.remainderOfFirstShot, 'advance-current-story-without-extending-replay');
   assert.equal(timing.previousWholeShotReplay, 'not-allowed');
   assert.equal(timing.previousDialogueReplay, 'not-allowed');
