@@ -2755,7 +2755,7 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
 .asset-upload-controls > .btn svg { width: 13px; height: 13px; }
 .assets-toolbar { padding: 4px 6px; }
 .assets-toolbar input { width: min(168px, 22vw); }
-.assets-toolbar-row { min-width: 0; flex-wrap: nowrap; align-items: center; gap: 6px; }
+.assets-toolbar-row { min-width: 0; flex-wrap: wrap; align-items: center; gap: 6px; }
 .assets-toolbar-filters { min-width: 0; flex: 1 1 auto; flex-wrap: nowrap; align-items: center; gap: 4px; }
 .assets-toolbar-filters > svg { flex: 0 0 14px; }
 .assets-toolbar-filters > input {
@@ -2769,8 +2769,8 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
   font-size: calc(11px * var(--ui-font-scale, 1));
   text-overflow: ellipsis;
 }
-.assets-toolbar-actions { min-width: 0; max-width: 100%; flex: 0 1 auto; flex-wrap: wrap; justify-content: flex-end; margin-left: auto; gap: 6px; }
-.assets-toolbar-actions .compact-pager { max-width: 100%; }
+.assets-toolbar-actions { min-width: max-content; max-width: 100%; flex: 0 0 auto; flex-wrap: nowrap; justify-content: flex-end; margin-left: auto; gap: 6px; }
+.assets-toolbar-actions .compact-pager { max-width: none; flex: 0 0 auto; }
 .asset-page-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); grid-template-rows: none; grid-auto-rows: max-content; align-content: start; min-height: 0; }
 .asset-page-grid .asset-card { min-height: 0; align-self: start; }
 .asset-page-grid .asset-thumb { height: clamp(140px, 19vh, 210px); }
@@ -3029,7 +3029,7 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
 .sequence-text-handoff-details pre { max-height: 180px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.6; }
 
 /* Compact library controls leave room for two useful image rows; extra assets use the pager. */
-.assets-fit-view .assets-toolbar-row { display: flex; flex-wrap: nowrap; align-items: center; gap: 6px; }
+.assets-fit-view .assets-toolbar-row { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .assets-fit-view .assets-toolbar-filters {
   display: flex;
   flex-wrap: nowrap;
@@ -3041,7 +3041,7 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
   width: auto; min-width: 0; height: 26px; min-height: 26px;
   padding: 2px 6px; font-size: calc(11px * var(--ui-font-scale, 1));
 }
-.assets-fit-view .assets-toolbar-actions { gap: 4px; flex-wrap: nowrap; }
+.assets-fit-view .assets-toolbar-actions { gap: 4px; flex: 0 0 auto; min-width: max-content; flex-wrap: nowrap; }
 .assets-fit-view .assets-toolbar-actions .btn { gap: 4px; padding: 4px 6px; }
 .assets-fit-view .assets-toolbar-actions .btn svg { width: 13px; height: 13px; }
 .assets-fit-view .asset-page-grid {

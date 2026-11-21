@@ -15,6 +15,16 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "4.9.4",
+    releasedAt: "2026-11-21",
+    title: "资产库翻页不再被挤出窗口",
+    highlights: [
+      "图片资产库一行放不下时，生成视频、检查文件和翻页整组换到下一行。",
+      "上一页、页码和下一页保持完整，后面的图片可以继续翻到。",
+      "已有图片、提示词和成片不改。",
+    ],
+  },
+  {
     version: "4.9.3",
     releasedAt: "2026-11-21",
     title: "分镜生图可选资产库私密图",
