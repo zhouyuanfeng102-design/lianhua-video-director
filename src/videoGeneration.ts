@@ -815,7 +815,11 @@ export class VideoGenerationEngine {
     if (predecessors.length !== task.batchIndex - 1) return false;
     if (task.batchIndex > 1 && job.snapshot.batchPredecessorTaskId !== predecessors[predecessors.length - 1]?.id) return false;
     if (task.batchIndex === 1 && job.snapshot.batchPredecessorTaskId) return false;
-    return predecessors.every((predecessor) => Boolean(this.completedLocalAsset(predecessor, job.snapshot.projectId)));
+    // A tail uses only its declared predecessor file. An earlier segment that
+    // is still rendering does not keep this segment from extracting that file.
+    if (!job.snapshot.previousTail) return true;
+    const source = predecessors.find((predecessor) => predecessor.id === job.snapshot.previousTail?.predecessorTaskId);
+    return Boolean(source && this.completedLocalAsset(source, job.snapshot.projectId));
   }
 
   private completedLocalAsset(task: VideoGenerationTask, projectId: string): ReferenceAsset | undefined {

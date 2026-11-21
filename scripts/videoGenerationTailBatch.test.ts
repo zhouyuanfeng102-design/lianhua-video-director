@@ -230,10 +230,30 @@ for (const failure of ['download', 'checkpoint'] as const) {
   const h = makeHarness(); const wait = deferred(); const original = h.desktop.extractWorkbenchFrames!;
   h.desktop.extractWorkbenchFrames = async (input) => { const result = await original(input); await wait.promise; return result; };
   const input = chainInput(h.holder().project.id); input.concurrency = 4; delete input.items[2].previousTail;
+  h.mutate((state) => ({ ...state, settings: { ...state.settings, videoExecutionMode: 'concurrent', videoExecutionConcurrency: 4 } }));
   await h.engine.startBatch(input); await waitFor(() => h.extractions.length === 1, '第二段未抽帧');
-  h.engine.reconcile(); await settle(); assert.equal(posts(h).length, 1, '链中后续手动参考图段不能越过未完成段');
+  h.engine.reconcile(); await settle();
+  assert.equal(posts(h).length, 2, '没有尾帧依赖的后段应占用空闲并发，不必等前面整段落盘');
+  assert.equal(Boolean(tasks(h)[2].remoteTaskId), true, '第三段已提交');
+  assert.equal(tasks(h)[1].remoteTaskId, undefined, '正在等尾帧的第二段仍不能提交');
   wait.resolve(); await waitFor(() => posts(h).length === 3, '手动后段未继续');
   assert.equal(h.extractions.length, 1); assert.equal(tasks(h)[2].videoJob?.snapshot.batchPredecessorTaskId, tasks(h)[1].id);
+  h.engine.dispose();
+}
+
+{
+  const h = makeHarness(); const wait = deferred(); const original = h.desktop.extractWorkbenchFrames!;
+  h.desktop.extractWorkbenchFrames = async (input) => { const result = await original(input); await wait.promise; return result; };
+  const input = chainInput(h.holder().project.id); input.concurrency = 4; delete input.items[2].previousTail;
+  input.items.push({ itemKey: 'board-4:zh', draft: draft(4), previousTail: { predecessorItemKey: 'board-3:zh', placement: { mode: 'append', index: 0, role: 'first-frame' } } });
+  h.mutate((state) => ({ ...state, settings: { ...state.settings, videoExecutionMode: 'concurrent', videoExecutionConcurrency: 4 } }));
+  await h.engine.startBatch(input);
+  await waitFor(() => h.extractions.length >= 2, '上一段已经落盘的尾帧任务没有开始抽帧');
+  assert.equal(tasks(h)[1].remoteTaskId, undefined, '更早一段仍在抽帧时不能被当成这一段的尾帧来源');
+  assert.equal(Boolean(tasks(h)[2].resultAssetId), true, '没有尾帧依赖的中间段应已经保存');
+  assert.equal(tasks(h)[3].videoJob?.tailPreparation?.phase, 'extracting', '只等自己的上一段，不等更早的未完成段');
+  wait.resolve();
+  await waitFor(() => Boolean(tasks(h)[3].remoteTaskId), '尾帧抽完后没有提交');
   h.engine.dispose();
 }
 
