@@ -516,12 +516,17 @@ export const selectStoryboardImageReferences = (
     const directKey = asset.sourceEntityKind && asset.sourceEntityId
       ? ownerKey(asset.sourceEntityKind, asset.sourceEntityId)
       : undefined;
+    const binding = asset.referenceEntityBinding;
+    const bindingKey = binding?.kind && binding.entityId ? ownerKey(binding.kind, binding.entityId) : undefined;
     const boundOwners = boundOwnersByAssetId.get(asset.id) || [];
     // Provenance is authoritative. An unowned/shared composition is not a
     // character just because its name happens to contain a character's name.
+    // A current scene/prop/character binding still counts when the image was
+    // never copied into that entity's assetIds.
     const owner = directKey
       ? ownersByKey.get(directKey) || { key: directKey, assetIds: [] }
-      : boundOwners.length === 1 ? boundOwners[0] : undefined;
+      : (bindingKey ? ownersByKey.get(bindingKey) : undefined)
+        || (boundOwners.length === 1 ? boundOwners[0] : undefined);
     if (!owner) return undefined;
     const privatePart = nsfwPrivatePartForAsset(asset);
     const category = !isNsfwPrivateProfileAsset(asset)
@@ -1296,10 +1301,12 @@ const storyboardImageContinuityContext = (
   ): string[] => [
     ...entities.flatMap((item) => item.assetIds || []),
     ...context.assets
-      .filter((asset) => (
-        asset.sourceEntityKind === kind
-        && entities.some((item) => item.id === asset.sourceEntityId)
-      ))
+      .filter((asset) => {
+        const entityIds = new Set(entities.map((item) => item.id));
+        const binding = asset.referenceEntityBinding;
+        return (asset.sourceEntityKind === kind && entityIds.has(asset.sourceEntityId || ''))
+          || (binding?.kind === kind && entityIds.has(binding.entityId));
+      })
       .map((asset) => asset.id),
   ];
   const entityAssetIds = [

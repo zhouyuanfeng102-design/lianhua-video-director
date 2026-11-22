@@ -56,7 +56,7 @@ import { VIDEO_ACTING_CAMERA_RULES } from '../videoActingCameraRules';
 import { SPOKEN_CUE_CONTENT_RULE, VIDEO_STORY_PERFORMANCE_SEPARATION_RULE } from '../videoInteractionRules';
 import { VIDEO_SCENE_CONTEXT_RULE, type VideoSceneContext } from '../videoSceneContext';
 import { VIDEO_ACTION_CHOREOGRAPHY_RULE, VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE, VIDEO_ACTION_EVENT_REVIEW_RULE } from '../videoActionChoreographyRules';
-import { MOVEMENT_SUPPORT_PATH_RULE, SPATIAL_COORDINATE_RULE, SPATIAL_CONTINUITY_REVIEW_RULE } from '../spatialContinuityRules';
+import { MOVEMENT_SUPPORT_PATH_RULE, NAMED_APPROACH_CAMERA_RULE, SPATIAL_COORDINATE_RULE, SPATIAL_CONTINUITY_REVIEW_RULE } from '../spatialContinuityRules';
 import { normalizeSceneStagingList, SCENE_STAGING_OUTPUT_SHAPE, type SceneStaging } from '../sceneStaging';
 import { NOVEL_ACTION_SOURCE_RULE, NOVEL_ACTION_CONTINUITY_RULE, NOVEL_ACTION_FRAME_RULE } from '../novelActionDirection';
 import { STORY_VISIBLE_TIME_TRANSITION_RULE } from '../storySceneParticipationRules';
@@ -3887,7 +3887,7 @@ const parseShotRecommendationResponse = (
 const STORYBOARD_STABLE_SUBJECT_CONTRACT = [
   '每镜 subject 填写一个明确、稳定、可跨镜复用的人物名、身份称谓、群体名或具体可见环境/物体主体名；共同主体可用原有群体称谓或原姓名组合，不能丢掉实际参与者。只写名称本身，不加 @，不把动作或整句叙述塞进 subject。',
   'subject 不限制姓名字数，不因单字、英文空格、姓氏、群体词或夜晚/区域等环境词拒绝实际名称；例如“于吉”“雨”“Alexander Montgomery”“清泉市夜晚”都是可用的具体主体。不得为了缩短名称擅自改名。',
-  '本段正文已经把人写在这个空间里时，第 1 镜的 subject 写这些人，房间只作为 space。startState 不写“未入画”。人已经靠着家具时，接触高度写在 space 和 action 里，不写进 subject 名称：后腰抵着的边留在腰的高度，垫子留在台面上，头后面仍是远处的墙。这一镜的路是场景里已经能走的那一条：平地、踏步、坡道、门口，或绕开楼梯、栏杆、墙、桌和另一个人的空处。每一步的鞋底落在这条路上的下一点。身体跟着这条路升高、降低或拐弯。直线穿过这些实体不是这条路。同一个姓名在这一镜只有一个身体。后面的走路、到达、挥手、近景和参考图都改这一个身体。参考图只提供这一个身体的脸和衣服。按时间顺序写同一人先后的姿态。开场呈现进入这一镜时的位置、朝向和接触，随后写动作怎样改变它们，动作完成后才呈现结果。平地且路上没有实体时，才朝目的地迈步。这一镜里已经在的楼梯、栏杆、墙、门框、桌和另一个人，都留住自己的体积。迈出的鞋底落在可走的那一层表面上，踏步、地面或平台。身体从这些实体旁边的空处走。近处的实体挡住身体被挡住的那一段。手扶栏杆时，手掌留在栏杆朝人的这一面。栏杆、扶手和墙留在身体旁边。按原文把起始支撑面与开口、目标支撑面的连接写入worldRelations，实际经过的顺序写入motionPath和本镜action，停点写入motionEndpoint与result。手扶时，手掌留在栏杆朝人的这一面，栏杆上沿留在手的高度，腰和髋留在栏杆内侧的空处。原文写了坐上或跨上栏杆时，身体才留在栏杆上。近景只写出真正挨着身体的那一截家具。陈设留下自己的材料和结构，尺寸跟着这一镜里的人。墙上或台座上的纹样留得比这个人的头小。参考图的取景，以及它在那张图里看起来多大，不是它在这一镜里的尺寸。只有这一拍空间里确实没有人，建立镜头的 subject 才是地点或物体，例如“清泉市夜晚”“06号防区阵地”；“出场人物：无”不表示 subject 应填“无/none”。后一段才进门的人留在后一段，不塞进这一拍。也不要把“主体名”等示例占位词照抄为名称。',
+  '本段正文已经把人写在这个空间里时，第 1 镜的 subject 写这些人，房间只作为 space。startState 不写“未入画”。人已经靠着家具时，接触高度写在 space 和 action 里，不写进 subject 名称：后腰抵着的边留在腰的高度，垫子留在台面上，头后面仍是远处的墙。这一镜的路是场景里已经能走的那一条：平地、踏步、坡道、门口，或绕开楼梯、栏杆、墙、桌和另一个人的空处。每一步的鞋底落在这条路上的下一点。身体跟着这条路升高、降低或拐弯。直线穿过这些实体不是这条路。同一个姓名在这一镜只有一个身体。同一镜有两个以上的人时，分别写出每个人的姓名，每个人身份句里已经写明的发型和发饰留在这个姓名身上。英译沿用源稿汉字姓名，动作和运镜按人分开写。后面的走路、到达、挥手、近景和参考图都改这一个身体。参考图只提供这一个身体的脸和衣服。按时间顺序写同一人先后的姿态。开场呈现进入这一镜时的位置、朝向和接触，随后写动作怎样改变它们，动作完成后才呈现结果。平地且路上没有实体时，才朝目的地迈步。这一镜里已经在的楼梯、栏杆、墙、门框、桌和另一个人，都留住自己的体积。迈出的鞋底落在可走的那一层表面上，踏步、地面或平台。身体从这些实体旁边的空处走。近处的实体挡住身体被挡住的那一段。手扶栏杆时，手掌留在栏杆朝人的这一面。栏杆、扶手和墙留在身体旁边。按原文把起始支撑面与开口、目标支撑面的连接写入worldRelations，实际经过的顺序写入motionPath和本镜action，停点写入motionEndpoint与result。手扶时，手掌留在栏杆朝人的这一面，栏杆上沿留在手的高度，腰和髋留在栏杆内侧的空处。原文写了坐上或跨上栏杆时，身体才留在栏杆上。近景只写出真正挨着身体的那一截家具。陈设留下自己的材料和结构，尺寸跟着这一镜里的人。墙上或台座上的纹样留得比这个人的头小。参考图的取景，以及它在那张图里看起来多大，不是它在这一镜里的尺寸。只有这一拍空间里确实没有人，建立镜头的 subject 才是地点或物体，例如“清泉市夜晚”“06号防区阵地”；“出场人物：无”不表示 subject 应填“无/none”。后一段才进门的人留在后一段，不塞进这一拍。也不要把“主体名”等示例占位词照抄为名称。',
   `当 sourceStory 的非对白叙事用“我、我们、咱们”充当行动者，并且从未给出该行动者可复用的明确姓名时，必须把这个第一人称行动者固定命名为“${DEFAULT_FIRST_PERSON_SUBJECT}”；同一人物后续每镜继续使用这个完全相同的名称。`,
   `这种情况下 action、camera、result 等非对白字段也使用“${DEFAULT_FIRST_PERSON_SUBJECT}”指代该人物；人物原台词内部的“我、我们、咱们”仍按原文保留。`,
   '原文已有稳定姓名或身份称谓时直接沿用，例如“雪衣道侣”“玄衣道侣”“摊主”；不得改写成“我、我们、你、他、她、它、主角、人物、角色、第一人称主角、叙述者”等代词、泛称或自造近义标签。',
@@ -3915,8 +3915,8 @@ const STORYBOARD_SCENE_STAGING_OUTPUT_RULE = [
   NOVEL_ACTION_CONTINUITY_RULE,
   NOVEL_ACTION_FRAME_RULE,
   STORY_VISIBLE_TIME_TRANSITION_RULE,
-  `在本次同一响应内返回可选顶层sceneStaging数组，元素结构为${SCENE_STAGING_OUTPUT_SHAPE}。先根据完整sourceStory确定连续场面与全部行动的同一份时间安排，再写shots及sceneStaging；输入已有场面时沿用相符的sceneId和阶段id，但旧phase的范围和时窗不限制完整正文。worldRelations/participants/phases只记录本次实际采用的关系与事件，身体面向、目光对象、动作对象与移动路径/终点分开。元数据是模型选择，不是原文证据，不包含摄影或身份展示任务。`,
-  '将同一场面选择写入已有字段：space承载世界关系，direction承载身体/视线/动作对象，action/result承载全部真实行动与末态；action/performance及phase.action用自然时间安排关键行动组的时窗、完成点、同时关系和持续作用，不将镜长均分给准备、接触、收尾，也不把同时动作逐项排队。普通微动作不用逐关节或毫秒刻度。camera观察已安排的事件，身份细节服从可见范围。shots可附本镜sceneStaging子集，沿用sceneId与phase id；镜尾未完可直接续接，原文真实收手、整理、等待仍完整保留，不因速度删动作、减次数或改短固定视频。场面记录与正文表达同一过程，不把内部字段名写入视频正文。',
+  `在本次同一响应内返回可选顶层sceneStaging数组，元素结构为${SCENE_STAGING_OUTPUT_SHAPE}。先根据完整sourceStory确定连续场面与全部行动的同一份时间安排，再写shots及sceneStaging；输入已有场面时沿用相符的sceneId和阶段id，但旧phase的范围和时窗不限制完整正文。worldRelations/participants/phases只记录本次实际采用的关系与事件，身体面向、目光对象、动作对象与移动路径/终点分开。同行者之间的前后或侧后关系、全组共同目的地、停点及逐事件视线目标必须具名写出。元数据是模型选择，不是原文证据，不包含摄影或身份展示任务。`,
+  `将同一场面选择写入已有字段：space承载世界关系，direction承载身体/视线/动作对象，action/result承载全部真实行动与末态；action/performance及phase.action用自然时间安排关键行动组的时窗、完成点、同时关系和持续作用，不将镜长均分给准备、接触、收尾，也不把同时动作逐项排队。普通微动作不用逐关节或毫秒刻度。camera只能观察已安排的事件。${NAMED_APPROACH_CAMERA_RULE}shots可附本镜sceneStaging子集，沿用sceneId与phase id；镜尾未完可直接续接，原文真实收手、整理、等待仍完整保留，不因速度删动作、减次数或改短固定视频。场面记录与正文表达同一过程，不把内部字段名写入视频正文。`,
 ].join('\n');
 
 const storyboardPlanningBoundaries = (

@@ -150,10 +150,13 @@ assert.match(VIDEO_CAMERA_SELECTION_RULE, /His arms remain around her back, outs
 assert.match(VIDEO_CAMERA_SELECTION_RULE, /The scar remains on her right cheek, below the outer corner of that eye/u);
 assert.match(VIDEO_CAMERA_SELECTION_RULE, /That hand stays beside her waist, palm toward the path\. Five fingers remain separated on that palm/u);
 assert.match(VIDEO_CAMERA_SELECTION_RULE, /One shot carries the change from the first frame to the last frame/u);
-assert.match(VIDEO_CAMERA_SELECTION_RULE, /Her eyes meet his eyes/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /Her eyes stay on Tang San\. Tang San looks toward the doorway/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /The camera holds from behind and to the side of Xiao Wu, looking along the path\. Tang San remains ahead of her, in the depth of the frame\. Her chest and eyes stay toward Tang San/u);
+assert.match(SCENE_STAGING_GENERATION_RULE, /The camera holds a medium close shot from just behind Tang San's shoulder\. Xiao Wu remains several steps ahead of the camera, her chest and eyes toward Tang San/u);
 assert.match(VIDEO_CAMERA_SELECTION_RULE, /Her eyes look toward Tang San, off to her right\. Her face stays three-quarters toward him/u);
 assert.match(VIDEO_CAMERA_SELECTION_RULE, /Xiao Wu remains on screen-left, facing screen-right\. Tang San remains on screen-right, facing screen-left/u);
-assert.match(VIDEO_CAMERA_SELECTION_RULE, /In the reverse shot she faces the lens\. The table runs toward the lens\. The wall that was behind her stays behind her/u);
+assert.match(VIDEO_CAMERA_SELECTION_RULE, /The camera holds on her from behind Tang San's shoulder\. She keeps her eyes on Tang San/u);
+assert.equal(VIDEO_CAMERA_SELECTION_RULE.includes('In the reverse shot she faces the lens'), false);
 assert.match(VIDEO_CAMERA_SELECTION_RULE, /The ring remains on his right hand\. His glasses remain on his face/u);
 assert.match(VIDEO_CAMERA_SELECTION_RULE, /The cup remains in her right hand at the start of this shot\. It stays in that hand until she sets it down/u);
 assert.match(VIDEO_CAMERA_SELECTION_RULE, /His hand turns the cover\. The wrist turns, the fingers lift, and the fingertips meet the cover\. The cover stays between his thumb and fingers/u);
@@ -176,7 +179,7 @@ assert.match(VIDEO_CAMERA_SELECTION_RULE, /While this rock continues, her back s
 assert.match(VIDEO_CAMERA_SELECTION_RULE, /Her head turns from side to side\. Tears stay across her cheeks/u);
 assert.match(VIDEO_CAMERA_SELECTION_RULE, /This shot names her and this reaction\. Her face, hair, and clothes stay as in the reference/u);
 assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /The camera holds a medium view of her face, his torso, and Tang San/u);
-assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /Her eyes meet his eyes/u);
+assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /Her eyes stay on Tang San\. Tang San looks toward the doorway/u);
 assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /The cup remains in her right hand at the start of this shot/u);
 assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /His beard remains outside the collar, from his chin to his chest/u);
 assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /The action stays at real-time speed/u);
@@ -217,7 +220,8 @@ assert.ok(VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('让摄影�
   && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('Her shoulders turn with her head until her chin stays in front of her shoulder. Her chest stays with that turn')
   && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('The action stays at real-time speed')
   && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('One shot carries the change from the first frame to the last frame')
-  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('Her eyes meet his eyes')
+  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('Her eyes stay on Tang San. Tang San looks toward the doorway')
+  && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('The camera holds from behind and to the side of the walkers, looking along the path')
   && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('The cup remains in her right hand at the start of this shot. It stays in that hand until she sets it down')
   && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('She finishes the reach in the middle of the shot. The last moment holds that pose')
   && VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT.includes('Exactly three people remain. Xiao Wu remains on the platform. The Grand Elder remains the one person leaning over her. Tang San remains one body, standing away from the platform')

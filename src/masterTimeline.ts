@@ -575,6 +575,7 @@ export function applyConvertedPromptToShots(
   prompt: string,
   expectedDurationSec: number,
   requiredSegmentDurationSec?: number,
+  options?: { syncPresentationFields?: boolean },
 ): VideoShot[] {
   const entries = parseMasterTimelinePrompt(prompt, expectedDurationSec, requiredSegmentDurationSec);
   if (entries.length !== shots.length) {
@@ -590,12 +591,31 @@ export function applyConvertedPromptToShots(
     if (!action) {
       throw new Error(`第 ${index + 1} 镜主体字段缺少有效的“正在 [动作链]”结构。`);
     }
+    const body = entry.prompt.replace(LEADING_TIMESTAMP_HEADER, '');
+    const fields = topLevelCanonicalFieldLocations(body);
+    const fieldValue = (fieldName: string): string | undefined => {
+      const fieldIndex = fields.findIndex(({ field }) => field === fieldName);
+      if (fieldIndex < 0) return undefined;
+      const value = body.slice(
+        fields[fieldIndex].start + fieldName.length,
+        fields[fieldIndex + 1]?.start,
+      ).replace(/[；;]\s*$/u, '').trim();
+      return value || undefined;
+    };
+    const camera = fieldValue('镜头：');
+    const space = options?.syncPresentationFields ? fieldValue('空间：') : undefined;
+    const direction = options?.syncPresentationFields ? fieldValue('方向：') : undefined;
+    const performance = options?.syncPresentationFields ? fieldValue('表演：') : undefined;
     return {
       ...shot,
       startSec: entry.startSec,
       endSec: entry.endSec,
       subject,
       action,
+      ...(camera ? { camera } : {}),
+      ...(space ? { space } : {}),
+      ...(direction ? { direction } : {}),
+      ...(performance ? { performance } : {}),
       prompt: entry.prompt,
     };
   });

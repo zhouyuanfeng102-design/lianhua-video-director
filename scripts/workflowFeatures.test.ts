@@ -1363,13 +1363,13 @@ assert.match(
 );
 assert.match(
   buildStoryboardSource,
-  /if\s*\(\s*!segmentForGeneration\s*&&\s*!override\?\.keepDirector\s*\)\s*setView\("storyboard"\)/su,
-  'sequence generation must stay in the director while the legacy path opens the storyboard',
+  /if\s*\(\s*viewRef\.current\s*===\s*"director"\s*&&\s*!segmentForGeneration\s*&&\s*!override\?\.keepDirector\s*\)\s*setView\(requestPromptFormat\s*===\s*'seedance'\s*\?\s*'director'\s*:\s*"storyboard"\)/su,
+  'the legacy path opens the storyboard only while the user is still on the director',
 );
 assert.match(
   buildStoryboardSource,
-  /if\s*\(\s*segmentForGeneration\s*\|\|\s*override\?\.keepDirector\s*\)\s*setView\("director"\)/su,
-  'a completed sequence segment must explicitly remain in the director workspace',
+  /if\s*\(\s*viewRef\.current\s*===\s*"director"\s*&&\s*\(\s*segmentForGeneration\s*\|\|\s*override\?\.keepDirector\s*\)\s*\)\s*setView\("director"\)/su,
+  'a completed sequence segment stays on the director only when the user has not left',
 );
 assert.match(buildStoryboardSource, /return complete;/u, 'successful generation must return the completed board');
 const commitAcceptedStart = buildStoryboardSource.indexOf('let commitAccepted = false');

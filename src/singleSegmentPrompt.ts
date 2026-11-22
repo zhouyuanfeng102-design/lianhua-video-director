@@ -145,12 +145,13 @@ const savedStagingFacts = (
   sourceStoryContent: string,
   canonicalPrompt: string,
   characters: OfficialH3ProjectContext['characters'] = [],
+  expressionOptions: Parameters<typeof adoptedVideoExpressionForBoard>[1] = {},
 ) => ({
   sourceStoryContent,
   canonicalPrompt,
   durationSec: board.durationSec,
   audioMode: board.audioMode,
-  ...adoptedVideoExpressionForBoard(board),
+  ...adoptedVideoExpressionForBoard(board, expressionOptions),
   segmentScope: {
     sequencePlanId: board.sequencePlanId, segmentId: board.segmentId,
     segmentIndex: board.segmentIndex, segmentCount: board.segmentCount,
@@ -462,7 +463,7 @@ export async function generateSingleSegmentPrompt(
         : segmentRegenerate && !formatOnly && !serializationRepair ? REGENERATED_VIDEO_EXPRESSION_RULE : ADOPTED_VIDEO_EXPRESSION_RULE;
       if (!scopedSystem.includes(creativeScopeRule)) scopedSystem += `\n\n${creativeScopeRule}`;
       const actingCameraRule = stage === 'translate' ? VIDEO_ACTING_CAMERA_TRANSLATION_RULE
-        : stage === 'review' && canReplanStaging && !formatOnly && !serializationRepair
+        : stage === 'review' && (canReplanStaging || segmentRegenerate) && !formatOnly && !serializationRepair
           ? VIDEO_ACTING_CAMERA_RULES : VIDEO_ACTING_CAMERA_PRESERVATION_RULES;
       if (!scopedSystem.includes(actingCameraRule)) scopedSystem += `\n\n${actingCameraRule}`;
       const causalityRule = stage === 'translate' ? STORY_CAUSALITY_TRANSLATION_RULE : STORY_CAUSALITY_RULE;
@@ -597,9 +598,11 @@ export async function generateSingleSegmentPrompt(
     // with the body, including clips without reference pictures or speech.
     const needsIdentityEnvelope = true;
     const reviewData = orderTextPromptData({
-      ...savedStagingFacts(official, sourceStoryContent, official.finalPrompt, input.context.characters),
+      ...savedStagingFacts(official, sourceStoryContent, official.finalPrompt, input.context.characters,
+        { includeSceneStaging: !segmentRegenerate }),
       sceneContext,
-      taskAuthority: canReplanStaging ? 'current-segment-staging-replan' : 'preserve-confirmed-schedule',
+      taskAuthority: segmentRegenerate ? 'current-segment-regenerate'
+        : canReplanStaging ? 'current-segment-staging-replan' : 'preserve-confirmed-schedule',
       ...(actionRetiming ? { revisionScope: 'current-segment-action-retiming',
         retainedShotIds: official.shots.map((shot) => shot.id), retainedShotCount: official.shots.length } : {}),
       candidateTimeCoordinate: input.purpose === 'continuity-repair' || input.purpose === 'reference-refresh' || dossierRefresh
@@ -681,10 +684,12 @@ export async function generateSingleSegmentPrompt(
       actionRetiming
         ? 'canonicalPrompt、candidatePrompt与sceneStaging共同给出本次必须保全的已有动作和身份；旧时窗只作为待重排来源。sourceStoryContent用于追溯本段原动作与完整原对白，不搬入其它段剧情。保留空间、人物朝向、运动目标与摄影机位，在本次明确权限内同步调整动作完成点、合法并行、镜尾承接和镜界。'
         : segmentRegenerate
-          ? 'canonicalPrompt是本轮根据本段原文重写的动作依据。按其中的支撑面、路径、到达与停稳顺序生成events；旧sceneStaging和shots中的旧路线不覆盖本轮正文。镜头的景别、机位与静止或运动方式沿用adoptedVisualExpression。'
+          ? 'canonicalPrompt是本轮根据本段原文重写的执行依据。按其中的支撑面、路径、到达与停稳顺序生成events；旧sceneStaging和shots中的旧路线不覆盖本轮正文。沿用本轮转换后shots.camera中的景别、机位与静止或运动方式，它已同步canonicalPrompt里按新站位和视线修正的摄影；不得从旧sceneStaging或先前镜头资料恢复与它冲突的机位。'
           : 'canonicalPrompt是本次已经采纳的逐镜执行正文，sceneStaging与shots记录源头的场面及摄影选择；sourceStoryContent用于追溯剧情与完整原对白，不授予重新编排空间、动作和摄影的权限。已有稿有限更新优先保留candidatePrompt。把既有说话人、可见口型、听者、人物位置、朝向、运动目标、机位和镜尾承接保真写入相应镜头。',
       '把中文执行稿已经展开的同一动作链逐镜写入H3现有正文：双方进入关系、实际进退、具名攻击目标、对方同步回应、接触或落空、速度变化和双方末态一起表达；不要序列化成一个人摆姿势、对手在背后静止或只剩运镜词。canonicalPrompt和H3保持同一攻防顺序、动作强度、场地与连续状态，首尾画面来自这条事件链。普通新稿、已确认稿、参考更新、格式修复与英译只传递已有展开，不另编打法、改机位或改变切点；两稿排程同步重写仅限本次明确授权的dialogue-repair或action-retiming。',
-      `adoptedVisualExpression只保留源头已落实的摄影与光影，${segmentRegenerate ? '本轮canonicalPrompt提供已重写的路径与末态' : 'sceneStaging保留已经采纳的世界关系与动作阶段'}；${canReplanStaging ? `本次显式${actionRetiming ? '动作节奏重排' : '对白排程修复'}按taskAuthority同步修正，两份交付一致，exact镜数不变` : '保持源头镜数、顺序、切点、时长边界和摄影安排'}。characterIdentityFacts仅供辨认当镜已经参与的人物，anchor不是要求复现资料姿态或补展示镜的命令。英文阶段以本次最终中文为准。`,
+      `adoptedVisualExpression只保留源头已落实的摄影与光影，${segmentRegenerate ? '本轮canonicalPrompt及同步后的shots.camera提供本次更新的摄影、路径与末态；不恢复与其冲突的旧机位' : 'sceneStaging保留已经采纳的世界关系与动作阶段'}；${segmentRegenerate
+        ? '保持源头镜数、顺序、切点和时长边界；摄影只在旧机位与本轮站位或视线冲突时同步调整，其余兼容选择保持'
+        : canReplanStaging ? `本次显式${actionRetiming ? '动作节奏重排' : '对白排程修复'}按taskAuthority同步修正，两份交付一致，exact镜数不变` : '保持源头镜数、顺序、切点、时长边界和摄影安排'}。characterIdentityFacts仅供辨认当镜已经参与的人物，anchor不是要求复现资料姿态或补展示镜的命令。英文阶段以本次最终中文为准。`,
       ...(canReplanStaging ? [H3_STAGING_DELIVERY_RULE, H3_IDENTITY_BINDINGS_RULE] : [
         `源头分镜已给出的每句完整发话起止、具名说话人及口部动作先后是本次转换依据。不要把“亲吻结束后开口”改写成“亲吻同时清晰说话”，也不要在人物介绍、动作正文和结果摘要重复执行同一次亲吻。保留已确认发话区间，不因镜头构图、参考图更新或翻译擅自转交台词、缩短长句时间、移入相邻段或增加镜头；${input.sequenceSegmentContext ? '跨段事件与时长重新分配只属于重新AI语义分段，当前阶段不得重分段。' : '全片事件与时长重新分配只属于重新生成总稿的源头规划。'}`,
       ]),
@@ -807,7 +812,13 @@ export async function generateSingleSegmentPrompt(
 
   const synchronizeIntermediateShots = (candidate: Storyboard, canonicalPrompt: string): Storyboard['shots'] => {
     try {
-      const shots = applyConvertedPromptToShots(candidate.shots, canonicalPrompt, candidate.durationSec);
+      const shots = applyConvertedPromptToShots(
+        candidate.shots,
+        canonicalPrompt,
+        candidate.durationSec,
+        undefined,
+        { syncPresentationFields: segmentRegenerate },
+      );
       if (shots.length !== candidate.shots.length || shots.some((shot, index) => (
         shot.startSec !== candidate.shots[index].startSec || shot.endSec !== candidate.shots[index].endSec
       ))) throw new Error('已确认总稿切片的正文与固定镜头边界不一致，结果未保存。');
@@ -861,7 +872,8 @@ export async function generateSingleSegmentPrompt(
         reviewWithAi,
         onReview: input.onAiTranslationReview,
         ...(reviewWithAi ? { stagingContext: {
-          ...savedStagingFacts(official, sourceStoryContent, official.finalPrompt, savedOnly ? [] : input.context.characters),
+          ...savedStagingFacts(official, sourceStoryContent, official.finalPrompt, savedOnly ? [] : input.context.characters,
+            { includeSceneStaging: !segmentRegenerate }),
           savedIdentityBindings: official.h3IdentityBindings,
           savedSourceCharacters: savedFacts.sourceCharacters,
           ...(!savedOnly ? { sceneContext } : {}),

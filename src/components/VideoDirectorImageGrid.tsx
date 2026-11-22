@@ -47,8 +47,10 @@ export const VideoDirectorImageGrid = memo(function VideoDirectorImageGrid({ ass
     const schedule = () => { if (!frame) frame = requestAnimationFrame(update); };
     root.scrollTop = scrollPosition.current;
     update();
+    // The grid's own height changes when a card is selected. Watching that
+    // box feeds the new height back into the window and shifts the header.
     const resize = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(schedule);
-    resize?.observe(root); resize?.observe(grid);
+    resize?.observe(root);
     root.addEventListener('scroll', schedule, { passive: true });
     window.addEventListener('resize', schedule);
     return () => { resize?.disconnect(); root.removeEventListener('scroll', schedule); window.removeEventListener('resize', schedule); if (frame) cancelAnimationFrame(frame); };

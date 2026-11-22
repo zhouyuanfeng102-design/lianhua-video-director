@@ -8,15 +8,19 @@ main:has(> .workspace.view-video) > .chapter-toolbar { padding: 0 8px; gap: 3px 
 main:has(> .workspace.view-video) > .chapter-toolbar > label { gap: 5px; }
 main:has(> .workspace.view-video) > .chapter-toolbar :is(select, .btn) { height: 22px; min-height: 22px; padding: 2px 6px; font-size: var(--vd-header-font); line-height: 1.2; }
 main:has(> .workspace.view-video) > .chapter-toolbar svg { width: 13px; height: 13px; flex-shrink: 0; }
-.workspace.view-video { padding-top: 2px; }
-.workspace.view-video .video-director-view > .section-heading { gap: 3px 8px; margin-bottom: 2px; align-items: center; }
+.workspace.view-video { padding-top: 2px; overflow-anchor: none; }
+@media (min-width: 1180px) {
+  body:has(.video-director-view) .topbar,
+  body:has(.video-director-view) .top-actions { flex-wrap: nowrap; }
+}
+.workspace.view-video .video-director-view > .section-heading { gap: 3px 8px; margin-bottom: 2px; align-items: center; flex-wrap: nowrap; }
 .workspace.view-video .video-director-view > .section-heading h1 { font-size: clamp(13px, calc(.95vw * var(--ui-font-scale, 1)), 17px); line-height: 1.2; }
 .workspace.view-video .video-director-view > .section-heading p { margin-top: 1px; font-size: 9px; line-height: 1.2; }
 .workspace.view-video .video-director-view > .section-heading .btn,
 .workspace.view-video .video-director-view > .vd-generation-mode .btn { min-height: 22px; padding: 2px 6px; font-size: var(--vd-header-font); line-height: 1.2; }
 .workspace.view-video .video-director-view > .vd-generation-mode { margin-bottom: 2px; }
 .workspace.view-video .video-director-view > .vd-chapter-context { margin: 1px 0 2px; font-size: clamp(9px, calc(.5vw * var(--ui-font-scale, 1)), 10px); line-height: 1.1; }
-.workspace.view-video .video-director-view > .video-execution-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; padding: 2px 8px; margin-bottom: 4px; font-size: var(--vd-header-font); }
+.workspace.view-video .video-director-view > .video-execution-controls { display: flex; flex-wrap: nowrap; align-items: center; gap: 2px 12px; padding: 2px 8px; margin-bottom: 4px; font-size: var(--vd-header-font); min-height: 28px; }
 .workspace.view-video .video-execution-fields { gap: 3px 10px; }
 .workspace.view-video .video-execution-fields :is(select, input) { height: 22px; min-height: 22px; padding: 2px 5px; line-height: 1.2; }
 .workspace.view-video .video-execution-controls p { flex: 1 1 250px; margin: 0; font-size: clamp(9px, calc(.5vw * var(--ui-font-scale, 1)), 10px); line-height: 1.2; }
@@ -124,7 +128,7 @@ main:has(> .workspace.view-video) > .chapter-toolbar svg { width: 13px; height: 
 .video-director-view > .section-heading > .vd-generation-mode { margin: 0; }
 .video-director-view > .section-heading > .vd-toolbar { margin-left: auto; }
 .video-director-view[data-mode="batch"] { height: 100%; min-height: 0; display: flex; flex-direction: column; gap: 0; }
-.video-director-view[data-mode="batch"] > .section-heading { flex: 0 0 auto; justify-content: flex-start; align-items: center; gap: 8px 12px; margin-bottom: 6px; }
+.video-director-view[data-mode="batch"] > .section-heading { flex: 0 0 auto; justify-content: flex-start; align-items: center; flex-wrap: nowrap; gap: 8px 12px; margin-bottom: 6px; }
 .video-director-view[data-mode="batch"] > .section-heading p { display: none; }
 .video-director-view[data-mode="batch"] .vd-generation-mode { margin: 0; }
 .video-director-view[data-mode="batch"] > .section-heading > .vd-toolbar { margin-left: auto; gap: 6px; }
@@ -178,7 +182,7 @@ main:has(> .workspace.view-video) > .chapter-toolbar svg { width: 13px; height: 
   .vd-batch-panel:has(.vd-batch-advanced[open]) > .vd-batch-columns { min-height: 140px; }
   .vd-batch-panel:has(.vd-batch-advanced[open]) .vd-batch-preview-body { flex: 1 1 auto; min-height: 0; }
 }
-.vd-batch-list { min-width: 0; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 5px; padding: 1px 3px 1px 1px; scrollbar-width: thin; container: vd-batch-list / inline-size; }
+.vd-batch-list { min-width: 0; min-height: 0; overflow: auto; overflow-anchor: none; scrollbar-gutter: stable; display: flex; flex-direction: column; gap: 5px; padding: 1px 3px 1px 1px; scrollbar-width: thin; container: vd-batch-list / inline-size; }
 .vd-batch-row { --vd-card-font: clamp(9px, min(calc(.6vw * var(--ui-font-scale, 1)), 1.2vh), 10px); flex: 0 0 auto; display: grid; grid-template-columns: 14px minmax(0, 1fr) auto; align-items: start; gap: 2px 4px; padding: 2px 5px; border: 1px solid var(--line); border-radius: 7px; background: var(--panel); font-size: var(--vd-card-font); }
 .vd-batch-row.selected { border-color: var(--pink); }
 .vd-batch-row.previewing { border-color: var(--violet); box-shadow: inset 2px 0 0 var(--violet); }
@@ -186,7 +190,7 @@ main:has(> .workspace.view-video) > .chapter-toolbar svg { width: 13px; height: 
 .vd-batch-check input { width: 14px; height: 14px; min-height: 14px; margin: 0; accent-color: var(--pink); }
 .vd-batch-row-main { min-width: 0; min-height: 20px; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 2px 6px; }
 .vd-batch-row-main strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: calc(var(--vd-card-font) + 2px); line-height: 1.2; }
-.vd-batch-row-status { max-width: 150px; color: var(--muted); font-size: inherit; line-height: 1.2; overflow-wrap: anywhere; }
+.vd-batch-row-status { max-width: 150px; color: var(--muted); font-size: inherit; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .vd-batch-row-main .vd-error { grid-column: 1 / -1; font-size: inherit; margin: 0; }
 .vd-batch-row-quick-actions { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 3px; }
 .vd-batch-row .vd-batch-row-quick-actions .btn, .vd-batch-row .vd-batch-row-editor .btn { min-height: 20px; padding: 1px 4px; font-size: inherit; line-height: 1.2; }
@@ -288,7 +292,7 @@ main:has(> .workspace.view-video) > .chapter-toolbar svg { width: 13px; height: 
 .vd-batch-image-dialog > .vd-modal-footer, .vd-reference-picker-dialog > .vd-modal-footer { flex-wrap: nowrap; }
 .vd-batch-image-dialog > .vd-modal-footer > span, .vd-reference-picker-dialog > .vd-modal-footer > span { min-width: 0; overflow-wrap: anywhere; }
 .vd-batch-image-dialog > .vd-modal-footer > .btn, .vd-reference-picker-dialog > .vd-modal-footer > .btn { flex: 0 0 auto; }
-.vd-batch-dialog-body { flex: 1 1 auto; min-height: 0; min-width: 0; overflow: auto; scrollbar-width: thin; }
+.vd-batch-dialog-body { flex: 1 1 auto; min-height: 0; min-width: 0; overflow: auto; overflow-anchor: none; scrollbar-gutter: stable; scrollbar-width: thin; }
 .vd-batch-dialog-body > p { margin: 0 0 7px; line-height: 1.4; }
 .vd-batch-image-grid { max-height: none; overflow: visible; }
 .vd-batch-bindings-list { margin: 0; }
@@ -318,9 +322,9 @@ main:has(> .workspace.view-video) > .chapter-toolbar svg { width: 13px; height: 
   line-height: 1.3; overflow-wrap: anywhere;
 }
 :is(.vd-batch-image-dialog, .vd-reference-picker-dialog) .vd-segment-character-hint {
-  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center;
-  gap: 3px 6px; padding: 2px 6px; max-height: min(13dvh, 112px);
-  font-size: var(--vd-picker-small-font); line-height: 1.2;
+  display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; align-content: start;
+  gap: 3px 6px; padding: 2px 6px; height: 78px; max-height: 78px; overflow: auto;
+  scrollbar-gutter: stable; font-size: var(--vd-picker-small-font); line-height: 1.2;
 }
 :is(.vd-batch-image-dialog, .vd-reference-picker-dialog) .vd-segment-character-hint-title { grid-column: 1; white-space: normal; }
 :is(.vd-batch-image-dialog, .vd-reference-picker-dialog) .vd-segment-character-hint-list {
@@ -518,6 +522,9 @@ main:has(> .workspace.view-video) > .chapter-toolbar svg { width: 13px; height: 
   .vd-batch-preview-footer { flex-direction: row; align-items: center; flex-wrap: wrap; }
 }
 @media (max-width: 850px) {
+  .workspace.view-video .video-director-view > .section-heading,
+  .video-director-view[data-mode="batch"] > .section-heading,
+  .workspace.view-video .video-director-view > .video-execution-controls { flex-wrap: wrap; }
   .video-director-view[data-mode="batch"] > .section-heading > .vd-toolbar { flex-basis: 100%; margin-left: 0; }
   .vd-batch-configuration { grid-template-columns: minmax(0, 1fr) minmax(120px, .5fr); }
   .vd-batch-configuration .field { grid-template-columns: minmax(0, 1fr); gap: 3px; }

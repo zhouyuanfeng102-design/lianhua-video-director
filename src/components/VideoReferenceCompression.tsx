@@ -53,6 +53,7 @@ export function useVideoReferenceCompression({ assets, selection, onChange, acti
     if (!active) return;
     let current = true;
     void (async () => {
+      const next: Record<string, number> = {};
       for (const reference of selection.references) {
         const asset = assets.find((entry) => entry.id === reference.assetId);
         if (!asset) continue;
@@ -64,8 +65,9 @@ export function useVideoReferenceCompression({ assets, selection, onChange, acti
             size = info.sizeBytes;
           } catch { /* Unknown sizes remain explicitly unknown. */ }
         }
-        if (current && size && Number.isSafeInteger(size)) setSizes((previous) => ({ ...previous, [asset.id]: size! }));
+        if (size && Number.isSafeInteger(size)) next[asset.id] = size;
       }
+      if (current) setSizes((previous) => ({ ...previous, ...next }));
     })();
     return () => { current = false; };
   }, [active, scope, selectedKey]);

@@ -361,6 +361,23 @@ export const renderH3PerformancePlan = (input: RenderH3PerformancePlanInput): Re
       if (action) output.push(sentence(action, language));
     }
     output.push(...reactions(event));
+    const speakerFaceHidden = /脸朝下|后脑朝向镜头|后脑对着镜头|back of the head/u.test(shot.visualDescription || '');
+    if (event.kind === 'speech' && !unseen && !speakerFaceHidden) {
+      const speaking = new Set(event.speakerCharacterIds);
+      const roster = plan.characters?.length
+        ? plan.characters.filter((entry) => entry.presence !== 'offscreen').map((entry) => entry.characterId)
+        : input.characters.filter((entry) => descriptions.get(entry.characterId)?.presence !== 'offscreen').map((entry) => entry.characterId);
+      const others = unique(roster).filter((id) => !speaking.has(id) && (entries.has(id) || descriptions.get(id)?.name));
+      if (others.length) {
+        const speakerMouth = names(event.speakerCharacterIds);
+        output.push(en
+          ? `The mouth shapes of this line remain on the mouth of ${speakerMouth}.`
+          : `这一句的口型留在${speakerMouth}的嘴上。`);
+        for (const id of others) {
+          output.push(en ? `${label(id)}'s mouth remains closed.` : `${label(id)}的嘴保持闭合。`);
+        }
+      }
+    }
     const rendered = joinSpoken(output);
     events.push({ eventId: event.eventId, kind: 'dialogue', ...(event.kind === 'speech' ? { dialogueId: event.dialogueId } : {}),
       ...(event.speakerCharacterIds.length === 1 ? { speakerCharacterId: event.speakerCharacterIds[0] } : {}),

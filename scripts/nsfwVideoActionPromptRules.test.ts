@@ -397,7 +397,10 @@ assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /The sweat remains
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /Her nipples remain on the front of her breasts/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /His scrotum remains under the penis at his groin, between his thighs/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /On the way back the glans remains inside her vagina and still points along the vaginal canal/u);
-assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /不从 the neck, jaw, mouth, nose, eyes, or fingers 离开/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /semen remains where the source already places it/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /含入不再写 her labia/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /环抱后再伸到腿间，伸过去的是环抱的其中一条手臂/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /含入不译 labia/u);
 assert.doesNotMatch(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /年龄门禁|未满|未成年/u);
 assert.doesNotMatch(MOSE_JIANGHU_NSFW_VIDEO_SOUND_RULE, /年龄门禁|未满|未成年/u);
 

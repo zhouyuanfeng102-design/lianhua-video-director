@@ -2075,6 +2075,8 @@ export default function App() {
     () => !hasDesktopStateStorage(),
   );
   const [view, setView] = useState<ViewKey>("dashboard");
+  const viewRef = useRef(view);
+  viewRef.current = view;
   // Derive both selections from the same initial state. Calling loadState()
   // twice would create two different demo IDs on a fresh install.
   const [activeSceneId, setActiveSceneId] = useState<string>(
@@ -8317,8 +8319,8 @@ export default function App() {
       if (activeChapter(stateRef.current.project)?.id === requestChapterId) {
         if (!segmentForGeneration && matchedConverter.id !== converterId) setConverterId(matchedConverter.id);
         setActiveStoryboardId(complete.id);
-        if (segmentForGeneration || override?.keepDirector) setView("director");
-        if (!segmentForGeneration && !override?.keepDirector) setView(requestPromptFormat === 'seedance' ? 'director' : "storyboard");
+        if (viewRef.current === "director" && (segmentForGeneration || override?.keepDirector)) setView("director");
+        if (viewRef.current === "director" && !segmentForGeneration && !override?.keepDirector) setView(requestPromptFormat === 'seedance' ? 'director' : "storyboard");
       } else {
         setBackgroundState((current) => ({ ...current, project: withChapterWorkspace(current.project, {
           directorControls: { ...chapterWorkspace(current.project, requestChapterId).directorControls, activeStoryboardId: complete.id,
@@ -10648,7 +10650,11 @@ export default function App() {
                   setRecoveryOpen(true);
                 }}
               >
-                {saveStatus === "saving" ? "保存中" : saveStatus === "error" ? "保存失败" : "本地恢复"}
+                <span className="top-action-label">
+                  <span>{saveStatus === "saving" ? "保存中" : saveStatus === "error" ? "保存失败" : "本地恢复"}</span>
+                  <span aria-hidden="true">本地恢复</span>
+                  <span aria-hidden="true">保存失败</span>
+                </span>
               </Button>
             )}
             <Button
@@ -11260,6 +11266,7 @@ export default function App() {
                 value={newProjectName}
                 onChange={(event) => setNewProjectName(event.target.value)}
                 placeholder="例如：青山剑影 · 第一场"
+                aria-label="项目名称"
                 autoFocus
               />
             </Field>
@@ -11270,6 +11277,7 @@ export default function App() {
                   setNewProjectDescription(event.target.value)
                 }
                 placeholder="这个项目准备制作什么类型的视频提示词？"
+                aria-label="项目说明"
               />
             </Field>
             <div

@@ -129,6 +129,8 @@ const comfyVideoResearch = path.join('docs', 'research', 'comfyui-video-canvas-a
 if (fs.existsSync(path.join(root, comfyVideoResearch))) files.push(comfyVideoResearch);
 const comfyParameterResearch = path.join('docs', 'research', 'comfyui-duration-and-unused-reference-root-cause-2026-11-16.md');
 if (fs.existsSync(path.join(root, comfyParameterResearch))) files.push(comfyParameterResearch);
+const h3EyelineResearch = path.join('docs', 'research', 'h3-eyeline-and-blocking-2026-11-21.md');
+if (fs.existsSync(path.join(root, h3EyelineResearch))) files.push(h3EyelineResearch);
 const releaseNotesDirectory = path.join(root, 'docs', 'releases');
 if (fs.existsSync(releaseNotesDirectory)) {
   for (const entry of fs.readdirSync(releaseNotesDirectory, { withFileTypes: true })) {

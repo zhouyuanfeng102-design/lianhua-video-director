@@ -46,6 +46,7 @@ button:disabled { cursor: not-allowed; opacity: .48; }
 
 .app-shell {
   --ui-font-scale: 1;
+  position: relative;
   display: flex;
   height: 100vh;
   min-height: 100vh;
@@ -53,6 +54,23 @@ button:disabled { cursor: not-allowed; opacity: .48; }
   font-size: calc(13px * var(--ui-font-scale, 1));
 }
 .app-shell.app-fit { min-height: 0; flex: none; }
+/* A fixed layer inside the zoomed shell paints in the right place, but its
+   text fields keep the unscaled hit target. Clicks land beside the name box.
+   Absolute layers use the same zoomed box as the rest of the window. */
+.app-shell.app-fit :is(
+  .modal-backdrop,
+  .save-close-overlay,
+  .chapter-backdrop,
+  .sr-review-backdrop,
+  .cda-backdrop,
+  .asset-video-backdrop,
+  .model-picker-backdrop,
+  .vd-modal-backdrop,
+  .vgs-modal-backdrop,
+  .vwb-modal-backdrop,
+  .vwm-backdrop,
+  .custom-video-picker-backdrop
+) { position: absolute; }
 .sidebar {
   width: 190px;
   padding: 8px;
@@ -337,6 +355,9 @@ button:disabled { cursor: not-allowed; opacity: .48; }
   background: color-mix(in srgb, var(--top-action-surface) 84%, var(--top-action-accent));
 }
 .btn.top-action-recovery { --top-action-accent: var(--violet); --top-action-surface: #f0effc; }
+.top-action-label { display: inline-grid; }
+.top-action-label > span { grid-area: 1 / 1; }
+.top-action-label > [aria-hidden="true"] { visibility: hidden; }
 .btn.top-action-library { --top-action-accent: var(--blue); --top-action-surface: #edf4ff; }
 .btn.top-action-import { --top-action-accent: var(--teal); --top-action-surface: #eaf7f4; }
 .btn.top-action-export { --top-action-accent: var(--amber); --top-action-surface: #fff6df; }

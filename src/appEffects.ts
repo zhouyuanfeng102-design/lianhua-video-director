@@ -43,7 +43,7 @@ import {
   MOSE_JIANGHU_NSFW_WRITING_RULES,
 } from './nsfwPromptRules';
 import { hasNsfwDetailSignal } from './promptConstraints';
-import { MOVEMENT_SUPPORT_PATH_RULE } from './spatialContinuityRules';
+import { MOVEMENT_SUPPORT_PATH_RULE, NAMED_APPROACH_CAMERA_RULE } from './spatialContinuityRules';
 import { ADOPTED_VIDEO_EXPRESSION_RULE, REGENERATED_VIDEO_EXPRESSION_RULE, adoptedVideoExpressionForBoard, VIDEO_CREATIVE_DIRECTION_DATA_RULE, videoCreativeDirectionForBoard } from './videoCreativeDirection';
 import { VIDEO_ACTING_CAMERA_RULES, VIDEO_ACTING_CAMERA_PRESERVATION_RULES, stripLegacyVideoActingCameraRules } from './videoActingCameraRules';
 import { VIDEO_ACTION_CHOREOGRAPHY_RULE, VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE,
@@ -451,7 +451,7 @@ export const convertStoryboardDraftToFinal = async (
     plannedAction: shot.action,
     plannedSpace: shot.space,
     plannedDirection: shot.direction,
-    plannedCamera: shot.camera,
+    ...(!segmentRegenerate ? { plannedCamera: shot.camera } : {}),
     plannedDialogue: shot.dialogue,
     plannedPerformance: shot.performance,
     plannedResult: shot.result,
@@ -472,7 +472,7 @@ export const convertStoryboardDraftToFinal = async (
     plannedSubject: shot.plannedSubject,
     plannedSpace: shot.plannedSpace,
     plannedDirection: shot.plannedDirection,
-    plannedCamera: shot.plannedCamera,
+    ...(!segmentRegenerate ? { plannedCamera: shot.plannedCamera } : {}),
     plannedDialogue: shot.plannedDialogue,
     plannedResult: shot.plannedResult,
   });
@@ -505,7 +505,7 @@ export const convertStoryboardDraftToFinal = async (
       sourceStart: shot.sourceStart,
       sourceEnd: shot.sourceEnd,
       sourceLocationStatus: shot.sourceLocationStatus || 'unlocated',
-      localStructureDraft: entry.prompt,
+      ...(!segmentRegenerate ? { localStructureDraft: entry.prompt } : {}),
     };
   });
   const characterIdentityFacts = (input.characters || []).map((character) => ({
@@ -546,7 +546,10 @@ export const convertStoryboardDraftToFinal = async (
   // Voice notes and speaker/timing assignments only travel when they were
   // actually saved. The local converter never invents voice characteristics.
   const audioLedgerFacts = input.draft.audioLedger || [];
-  const adoptedExpression = adoptedVideoExpressionForBoard(input.draft);
+  const adoptedExpression = adoptedVideoExpressionForBoard(input.draft, {
+    includeCamera: !segmentRegenerate,
+    includeSceneStaging: !segmentRegenerate,
+  });
 
   const coreTask = [
     VIDEO_CONVERSION_STORY_RULE,
@@ -565,9 +568,9 @@ export const convertStoryboardDraftToFinal = async (
   const sharedRules = [DEFAULT_VIDEO_CONVERSION_SYSTEM, DEFAULT_VIDEO_CONVERSION_OUTPUT,
     VIDEO_ACTION_CHOREOGRAPHY_RULE, VIDEO_ACTION_CHOREOGRAPHY_PRESERVATION_RULE, VIDEO_ACTION_CHOREOGRAPHY_TRANSLATION_RULE,
     STORY_CAUSALITY_RULE,
-    VIDEO_CREATIVE_DIRECTION_DATA_RULE, ADOPTED_VIDEO_EXPRESSION_RULE,
-    VIDEO_ACTING_CAMERA_RULES,
-    VIDEO_ACTING_CAMERA_PRESERVATION_RULES,
+    VIDEO_CREATIVE_DIRECTION_DATA_RULE,
+    ...(segmentRegenerate ? [REGENERATED_VIDEO_EXPRESSION_RULE] : [ADOPTED_VIDEO_EXPRESSION_RULE]),
+    ...(segmentRegenerate ? [VIDEO_ACTING_CAMERA_RULES] : [VIDEO_ACTING_CAMERA_PRESERVATION_RULES]),
     VIDEO_CONVERSION_STORY_RULE, VIDEO_DIALOGUE_RULE, VIDEO_LOCAL_TIME_RULE, VIDEO_SCENE_STYLE_RULE, VIDEO_CONTINUOUS_SCENE_STYLE_RULE,
     VIDEO_DIALOGUE_STAGING_RULE, LEGACY_DIALOGUE_VOICE_IDENTITY_RULE_V1_8_9, VIDEO_SPATIAL_CONTINUITY_RULE,
     VIDEO_STAGING_REVIEW_RULE, VIDEO_STAGING_TRANSCRIPTION_RULE, VIDEO_PROMPT_FOCUS_RULE, VIDEO_WARDROBE_SCOPE_RULE,
@@ -587,20 +590,22 @@ export const convertStoryboardDraftToFinal = async (
     '以下为当前输出约定；旧预设中的裁句、固定字秒/动作阶段配额和强制换词要求不适用。',
     STORY_CAUSALITY_RULE,
     segmentRegenerate ? REGENERATED_VIDEO_EXPRESSION_RULE : ADOPTED_VIDEO_EXPRESSION_RULE,
-    VIDEO_ACTING_CAMERA_PRESERVATION_RULES,
+    ...(segmentRegenerate ? [VIDEO_ACTING_CAMERA_RULES] : [VIDEO_ACTING_CAMERA_PRESERVATION_RULES]),
     VIDEO_DIALOGUE_RULE, DIALOGUE_DELIVERY_RULE, DIALOGUE_LANGUAGE_RULE, VIDEO_CONTINUOUS_SCENE_STYLE_RULE,
     audioContractRule, VIDEO_LOCAL_TIME_RULE, VIDEO_CONVERSION_FORMAT_RULE,
     VIDEO_DIALOGUE_STAGING_RULE, VIDEO_SPATIAL_CONTINUITY_RULE,
     VIDEO_STAGING_TRANSCRIPTION_RULE, VIDEO_PROMPT_FOCUS_RULE, VIDEO_WARDROBE_SCOPE_RULE,
     scopedNsfwVideoActionRule,
     ...(input.sequenceHandoff ? [VIDEO_SEQUENCE_TEXT_HANDOFF_RULE] : []),
-    '源头分镜是本次摄影与排程的唯一决策依据：保持给定镜数、时间边界、景别、机位、运镜、观察对象及注意交接，不重新规划全片，不因导演风格或运镜选择为空另选摄影。先阅读 sourceStoryContent 全文，再由你自行识别人物本名、别名、代词指向、画面主体、画外说话人及完整对白。plannedSubject 是先前计划，不是允许名单；若名称或代词与原剧情不符，由你依据全文澄清身份，不借身份澄清改换镜头，不能因名称不在项目人物表中拒绝结果。',
+    segmentRegenerate
+      ? `按sourceStoryContent及本轮sceneStaging/shotEvidence共同重写本段，保持给定镜数和时间边界。逐镜先明确同行者之间的队形、人物所处地标、朝向的目的地和本镜停点，以及每个人随事件变化的视线目标。${NAMED_APPROACH_CAMERA_RULE}原plannedCamera与这句不一致时，按这句改写该镜摄影位置、可见面与前后景，其余兼容的景别与运镜方式继续沿用。`
+      : '源头分镜是本次摄影与排程的唯一决策依据：保持给定镜数、时间边界、景别、机位、运镜、观察对象及注意交接，不重新规划全片，不因导演风格或运镜选择为空另选摄影。先阅读 sourceStoryContent 全文，再由你自行识别人物本名、别名、代词指向、画面主体、画外说话人及完整对白。plannedSubject 是先前计划，不是允许名单；若名称或代词与原剧情不符，由你依据全文澄清身份，不借身份澄清改换镜头，不能因名称不在项目人物表中拒绝结果。',
     'characterIdentityFacts 和 globalContinuityFacts 是项目已保存的性别、物种、外观等资料，audioLedgerFacts 是已保存的声源、台词、时刻及声音备注，需结合全文理解并保持一致；资料缺失不能靠固定人类模板补写，未知声线不凭名字或画面前后顺序推断，画外说话人无需改成画面主体。',
     segmentRegenerate
       ? MOVEMENT_SUPPORT_PATH_RULE
       : 'shotEvidence 的 plannedSpace/plannedDirection/plannedCamera/plannedDialogue/plannedPerformance/plannedResult/plannedSound 与 previousShot/nextShot 均为已经采纳的逐镜计划原值；previousShot.plannedResult 是前镜末态，不是新事件。本次将其中已有的进入关系、接近或退避、具名动作目标、同步回应、接触或落空和退出状态写清，并从前一动作末态承接。sceneStaging保留源头的世界关系、动作阶段、运动路径与终点，不把面向敌人而倒退误写成背向敌人或越过敌人。缺少细节时不重新设计动作或摄影视点。仅按本次显式对白或衔接修复授权改动相应表达。',
     segmentRegenerate
-      ? '将原文支持的路径写进本镜空间、动作和结果。逐镜转写plannedCamera中的取景和机位，在该画幅内表达实际进度。脚在画外、固定扶手入画时，可以用肩相对扶手的升降交代进度。到达原文指定的停点时，若有同层等候的人，可用两人的相对高度交代已经到达。'
+      ? '将原文支持的路径写进本镜空间、动作和结果。依本轮canonicalPrompt表达的机位、取景与观看关系拍摄人物实际进度；当其修正了与人物站位或目光冲突的plannedCamera时，使用修正后的机位。脚在画外、固定扶手入画时，可以用肩相对扶手的升降交代进度。到达原文指定的停点时，若有同层等候的人，可用两人的相对高度交代已经到达。'
       : '镜头字段保真传递plannedCamera及源头已经明确的轴线侧别、观察对象和跟随轨迹，不自行新选或更换机位、景别与运镜。空间/动作正文继续承担真实距离、进退、动作强度和武器接触，使视线与武器仍针对具名对手；不能把镜头推近写成人物瞬间靠近，或把跟拍写成角色转身追着摄影机打斗。缺少摄影细节时不借补格式发明新的跟随、移焦或切镜。每镜传递源头已有末态，不仅在全局声明轴线连续。身份资料只在需要辨认人物时简述，避免每镜重复整份外貌挤掉攻防过程。',
     ...(input.sequenceHandoff ? ['首镜 previousShot.evidenceKind=previous-segment-final-prompt 时，用上段最终文字推断切换一刻已经达到的可见状态。首镜起笔写具体站位、朝向和道具接触，随后立即写sourceStoryContent中的本段新动作或对白。'] : []),
     'referenceBindings 和每镜 referenceAssetIds 只说明已有引用关系，实际用途以提供的 currentReferences 名称、角色和责任说明为准；没有真实像素时不能声称看到了人物站位、口型或朝向，参考图缺少某人物不能证明该人物不存在。不得为适配参考图改变原故事说话人或凭空添加转身。',
@@ -674,7 +679,13 @@ export const convertStoryboardDraftToFinal = async (
     // Read only the structural subject/action slots needed by downstream
     // consumers. Do not grade identity, wording, dialogue coverage, species,
     // gender or style, and never rewrite the model's visible prompt here.
-    applyConvertedPromptToShots(input.draft.shots, candidatePrompt, input.draft.durationSec);
+    applyConvertedPromptToShots(
+      input.draft.shots,
+      candidatePrompt,
+      input.draft.durationSec,
+      undefined,
+      { syncPresentationFields: segmentRegenerate },
+    );
   };
 
   for (let repairAttempt = 0; !input.acceptAiAuthoredContent; repairAttempt += 1) {
@@ -751,7 +762,13 @@ export const convertStoryboardDraftToFinal = async (
   const generatedAt = (input.now || Date.now)();
   let synchronizedShots = input.draft.shots;
   try {
-    synchronizedShots = applyConvertedPromptToShots(input.draft.shots, convertedPrompt, input.draft.durationSec)
+    synchronizedShots = applyConvertedPromptToShots(
+      input.draft.shots,
+      convertedPrompt,
+      input.draft.durationSec,
+      undefined,
+      { syncPresentationFields: segmentRegenerate },
+    )
       .map((shot) => ({ ...shot, authoredBy: 'text-api' as const }));
   } catch (error) {
     if (!input.acceptAiAuthoredContent) throw error;

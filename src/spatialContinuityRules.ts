@@ -27,9 +27,42 @@ export const scopeBuiltinWalkingExamples = (template: string): string => templat
   .replace('鞋底落在踏步或地面上。手扶时，', '鞋底沿各阶段实际支撑面移动，上楼时经梯口踏上平台。原文写扶栏时，')
   .replace('英文写成 Her sole meets the stair tread or the floor. The railing stays beside her. Her palm meets the side toward her, and the rail top stays at her hand.', '原文写手扶栏杆时，英文写成 The railing stays beside her. Her palm rests on the near side of the rail.')
   .replace('平地且路上没有实体时，英文写成 She keeps stepping', '已选沿平地迎面后退跟拍时，英文写成 She keeps stepping')
+  .replace(
+    'The camera moves backward in front of her at her pace. Her face stays toward the person ahead。没有前方的人时，脸留在行进方向。',
+    'The camera moves backward in front of her at her pace. Her face stays toward the person ahead, and that person remains ahead of her, behind the camera。没有前方的人时，脸留在行进方向。',
+  )
+  .replace(
+    '原文是固定镜头时写成 The camera holds this frame. It stays at this distance。',
+    '这一镜没有人朝另一位在场的人走、停或看时，固定镜头写成 The camera holds this frame. It stays at this distance。',
+  )
   .replace('迈出的那只脚的鞋底落到这一镜的地面上', '只有这一阶段走平地且脚入画时，迈出的那只脚的鞋底落到这一镜的地面上');
 
-export const SCENE_STAGING_GENERATION_RULE = scopeBuiltinWalkingExamples(LEGACY_SCENE_STAGING_GENERATION_RULE_V4_9_0);
+export const scopeBuiltinEyelineExamples = (template: string): string => template
+  .replace(
+    '两人相对时，眼睛互相看着。英文写成 Her eyes meet his eyes。',
+    '逐事件写清每个人此刻的具名视线目标和目标变化时点。只有两人此刻确实彼此注视时，才写目光相交；看向同伴、镜头或画外目标时各自保留原有目标。英文写成 Her eyes stay on Tang San. Tang San looks toward the doorway。',
+  )
+  .replace(
+    '反打时她面向镜头，桌子朝镜头伸，原来在她身后的墙仍在她身后。英文写成 In the reverse shot she faces the lens. The table runs toward the lens. The wall that was behind her stays behind her。',
+    '反打改变摄影机的观察侧别，不自动改变人物朝向或视线目标；按本拍已成立的具名关系从对话对象肩旁观察人物。剧情明确直视镜头、主观视点或回看摄影机时才把视线落在镜头。英文写成 The camera holds on her from behind Tang San\'s shoulder. She keeps her eyes on Tang San。',
+  )
+  .replace(
+    '两人相对时英译写成 Her eyes meet his eyes。',
+    '逐事件保留每个人此刻的具名视线目标和目标变化时点。仅当本拍明确是彼此注视时写目光相交；看向同伴、镜头或画外目标时分别保留该目标。英文写成 Her eyes stay on Tang San. Tang San looks toward the doorway。',
+  )
+  .replace(
+    '反打英译写成 In the reverse shot she faces the lens. The table runs toward the lens. The wall that was behind her stays behind her。',
+    '反打改变摄影机的观察侧别，不自动改变人物朝向或视线目标；按已成立关系从对话对象肩旁观察。只有原文明确直视镜头、主观视点或回看摄影机时才让人物看向镜头。英文写成 The camera holds on her from behind Tang San\'s shoulder. She keeps her eyes on Tang San。',
+  );
+
+/** Positive H3 sentence for a walker who looks at a person also visible in the shot. */
+export const NAMED_APPROACH_CAMERA_RULE = '有人朝另一位在场的人走、停或看，并且这一镜要看见那个人时，摄影机在行走者侧后方，顺着他们的胸口看。那个人留在他们前方、留在画面纵深。行走者的胸口和眼睛朝向他。英文写成 The camera holds from behind and to the side of Xiao Wu, looking along the path. Tang San remains ahead of her, in the depth of the frame. Her chest and eyes stay toward Tang San。要看清脸上的反应时，摄影机在被看的人肩后，行走者留在镜头前方。英文写成 The camera holds a medium close shot from just behind Tang San\'s shoulder. Xiao Wu remains several steps ahead of the camera, her chest and eyes toward Tang San。下一镜仍是这个前后。可以推近，或换到他的肩后。切镜只换观察位置。姓名换成这一镜的人。The camera holds this frame 只用于这一镜没有这种对看。摄影机在行走者前方后退，只用于被看的人留在镜头后方、不进入画面纵深。';
+
+export const SCENE_STAGING_GENERATION_RULE = [
+  scopeBuiltinEyelineExamples(scopeBuiltinWalkingExamples(LEGACY_SCENE_STAGING_GENERATION_RULE_V4_9_0)),
+  "安排摄影前，分别确定同行者彼此的队形、沿路径的共同目的地、停点，以及每个人随事件推进的具名视线目标。‘某人侧后半步’描述同行者之间的位置，不能代替他们与目的地人物的关系。切镜从前镜退出状态承接。",
+  NAMED_APPROACH_CAMERA_RULE,
+].join('\n\n');
 
 export const SPATIAL_COORDINATE_RULE = "分别表达主体自身左右、由固定地标与主体关系确定的世界位置，以及当前摄影机投影出的screen-left/screen-right与前后景。先采用该事件的世界站位和身体朝向，再根据已定机位写出必要投影；某主体身体的前方不等于摄影机前景，运动方向不等于最终落点。接触部位绑定身体所属者，机位改变可以改变画面左右，但不互换真实身体侧别。只写当前行动与辨认需要的定位，不按名单或上传顺序推定站位，不强加固定坐标或米数。";
 

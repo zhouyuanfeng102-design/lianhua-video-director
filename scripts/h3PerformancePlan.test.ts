@@ -112,6 +112,10 @@ test('segment 5 renders the complete command with its owner, lip action and sile
   assert.match(command, /<d>\[Chinese\] 没错，我们的君王是为了支配你们而来的，下跪低头吧。<\/d>/u);
   assert.doesNotMatch(command, /夏提雅 keeps the chest and eyes toward 贝里尤洛/u);
   assert.match(command, /贝里尤洛 listens without speaking, with no speaking lip movement/u);
+  assert.match(command, /The mouth shapes of this line remain on the mouth of 夏提雅\./u);
+  assert.match(command, /贝里尤洛's mouth remains closed\./u);
+  assert.match(command, /亚乌拉's mouth remains closed\./u);
+  assert.doesNotMatch(command, /夏提雅's mouth remains closed/u);
   assert.match(command, /亚乌拉 remains silent: watches the exchange/u);
   assert.doesNotMatch(command, /贝里尤洛 \(S1\) speaks on-screen|夏提雅 remains silent|to 夏提雅 \(S2\) seconds/u);
   assert.equal(rendered.characters.find((entry) => entry.characterId === 'aura')?.speakerToken, undefined);
