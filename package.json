@@ -1,6 +1,6 @@
 {
   "name": "lianhua-video-director",
-  "version": "5.0.7",
+  "version": "5.0.9",
   "productName": "莲华视频导演台",
   "private": true,
   "description": "莲华视频导演台：从小说到连续视频分镜与提示词",
@@ -13,6 +13,8 @@
   "type": "module",
   "main": "electron/main.cjs",
   "scripts": {
+    "deliver:5.0.9": "node scripts/createDelivery.mjs",
+    "deliver:5.0.8": "node scripts/createDelivery.mjs",
     "deliver:5.0.7": "node scripts/createDelivery.mjs",
     "deliver:5.0.6": "node scripts/createDelivery.mjs",
     "deliver:5.0.5": "node scripts/createDelivery.mjs",
@@ -429,7 +431,7 @@
     "test:typecheck": "tsc --noEmit --noUnusedLocals --noUnusedParameters --skipLibCheck false && tsc -p tsconfig.tests.json --skipLibCheck false",
     "test:master-timeline": "tsx scripts/masterTimeline.test.ts",
     "test:segmentation": "tsx scripts/storySegmentation.test.ts && tsx scripts/aiSequenceProvenance.test.ts && npm run test:story-pacing && npm run test:ai-segmentation-review && npm run test:semantic-sequence",
-    "test:semantic-sequence": "tsx scripts/semanticSequencePlan.test.ts && tsx scripts/semanticSequencePlanner.test.ts && tsx scripts/semanticSequenceCompatibility.test.ts && tsx scripts/semanticSequenceTiming.test.ts && tsx scripts/semanticSequenceIntegration.test.ts && tsx scripts/semanticSequenceApp.test.ts && npm run test:chapter-source-plan-recovery",
+    "test:semantic-sequence": "tsx scripts/semanticSequencePlan.test.ts && tsx scripts/semanticSequencePlanner.test.ts && tsx scripts/semanticSpanRewrite.test.ts && tsx scripts/semanticSequenceCompatibility.test.ts && tsx scripts/semanticSequenceTiming.test.ts && tsx scripts/semanticSequenceIntegration.test.ts && tsx scripts/semanticSequenceApp.test.ts && npm run test:chapter-source-plan-recovery",
     "test:semantic-sequence-ui": "node scripts/semanticSequenceUiQa.mjs",
     "test:story-pacing": "tsx scripts/storyPacing.test.ts && tsx scripts/storyPacingCache.test.ts",
     "test:source-integrity": "tsx scripts/sourceIntegrity.test.ts",

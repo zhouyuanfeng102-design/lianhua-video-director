@@ -350,7 +350,7 @@ import {
   type StoryPreparationMode,
 } from "./services/llm";
 import { canonicalCharacterVariantName, characterVariantDisplayName } from "./characterVariants";
-import { requestSemanticSequencePlan, type SemanticSequencePlannerProgress } from "./services/semanticSequencePlanner";
+import { requestSemanticSequencePlan, requestSemanticSpanRewrite, type SemanticSequencePlannerProgress, type SemanticSpanOperation } from "./services/semanticSequencePlanner";
 import { createSemanticPlanningStatus, recordSemanticPlanningDiagnostic, type SemanticPlanningStatus } from "./semanticSequenceProgress";
 import { SemanticPlanningProgressView } from "./components/SemanticPlanningProgressView";
 import { isSemanticSequencePlan, normalizeSemanticSequenceRequestedTotalDuration, semanticSegmentSourceContext, semanticSequenceSourceFingerprint, semanticSequenceCharacters } from "./semanticSequencePlan";
@@ -589,7 +589,9 @@ import {
   linkSegmentStoryboard,
   lockSequenceSegment,
   mergeSequenceSegments,
+  orderedSemanticSelection,
   reorderSequenceSegment,
+  replaceSemanticSegmentSpan,
   reconcileSequenceSegmentsToShotProvenance,
   restoreSequenceSegmentSourceContent,
   sequencePlanReviewFingerprint,
@@ -2275,6 +2277,8 @@ export default function App() {
     useState(() => initialSequencePlan?.compressedRiskAcknowledgedFingerprint || "");
   const [planningBusy, setPlanningBusy] =
     useState<PlanningBusyState>(false);
+  const [spanRewriteBusy, setSpanRewriteBusy] = useState<SemanticSpanOperation | null>(null);
+  const spanRewriteAbortRef = useRef<AbortController | null>(null);
   const [semanticPlanningProgress, setSemanticPlanningProgress] = useState<SemanticPlanningStatus | null>(null);
   const semanticPlanningProgressRef = useRef<SemanticPlanningStatus | null>(null);
   // Keep the last full-film generation failure visible in the planning step.
@@ -4213,6 +4217,119 @@ export default function App() {
     }
   };
 
+  const rewriteSemanticSegmentSpan = async (
+    operation: SemanticSpanOperation,
+    selectedIds: readonly string[],
+  ): Promise<string | undefined> => {
+    if (spanRewriteAbortRef.current || planningBusy || sequencePlanningAbortRef.current || busy || sequenceBatchRunning) return undefined;
+    const plan = activeSequencePlan;
+    if (!plan || !isSemanticSequencePlan(plan)) {
+      notify("请先完成 AI 剧情分段。", "error");
+      return undefined;
+    }
+    const selection = orderedSemanticSelection(plan.segments, selectedIds);
+    const count = selection.ids.length;
+    if (!selection.contiguous || selection.startIndex < 0) {
+      notify("请把中间的段也点上。", "error");
+      return undefined;
+    }
+    if (operation === "merge" && count < 2) return undefined;
+    if (operation === "split" && count !== 1) return undefined;
+    const chosen = selection.ids.map((id) => plan.segments.find((segment) => segment.id === id)!);
+    if (chosen.some((segment) => segment.locked)) {
+      notify("已锁定的段要先解锁。", "error");
+      return undefined;
+    }
+    const produced = operation === "merge" ? 1 : 2;
+    const nextCount = plan.segments.length - count + produced;
+    const nextTotal = Math.round(nextCount * plan.segmentDurationSec * 100) / 100;
+    if (nextCount > 900 || nextTotal > 3600) {
+      notify("再分一段会超过全片容量。", "error");
+      return undefined;
+    }
+    if (!canUseFinalPromptConverter(stateRef.current.settings.textApi)) {
+      notify("合并和小分段需要已启用且配置完整的文本 API。", "error");
+      return undefined;
+    }
+    const controller = new AbortController();
+    spanRewriteAbortRef.current = controller;
+    setSpanRewriteBusy(operation);
+    const planId = plan.id;
+    const contentFingerprint = sourceContentHash(JSON.stringify(chosen.map((segment) => [
+      segment.id, segment.content, segment.entryState, segment.exitState,
+    ])));
+    const isCurrent = () => {
+      if (controller.signal.aborted || spanRewriteAbortRef.current !== controller) return false;
+      const live = stateRef.current.project.sequencePlans.find((item) => item.id === planId);
+      if (!live) return false;
+      const liveChosen = selection.ids.map((id) => live.segments.find((segment) => segment.id === id));
+      if (liveChosen.some((segment) => !segment)) return false;
+      return sourceContentHash(JSON.stringify(liveChosen.map((segment) => [
+        segment!.id, segment!.content, segment!.entryState, segment!.exitState,
+      ]))) === contentFingerprint;
+    };
+    try {
+      const snapshot = stateRef.current;
+      const requestChapterId = activeChapter(snapshot.project)?.id;
+      const drafts = await requestSemanticSpanRewrite(textApiForProject(snapshot.settings.textApi, snapshot.project, {
+        chapterId: requestChapterId, segmentIndex: chosen[0].index,
+      }), {
+        operation,
+        segmentDurationSec: plan.segmentDurationSec,
+        rangeEntry: chosen[0].entryState,
+        rangeExit: chosen[chosen.length - 1].exitState,
+        ...(plan.segments[selection.startIndex - 1] ? { previousExitState: plan.segments[selection.startIndex - 1].exitState } : {}),
+        ...(plan.segments[selection.startIndex + count] ? { nextEntryState: plan.segments[selection.startIndex + count].entryState } : {}),
+        segments: chosen.map((segment) => ({
+          title: segment.title,
+          content: segment.content,
+          summary: segment.summary,
+          narrativePurpose: segment.narrativePurpose,
+          entryState: segment.entryState,
+          exitState: segment.exitState,
+          transitionHint: segment.transitionHint,
+          boundaryReason: segment.boundaryReason || "",
+          continuityPack: segment.continuityPack || "",
+          semanticSource: segment.semanticSource || { sourceEvidence: [], events: [], dialogues: [] },
+        })),
+      }, controller.signal, { isCurrent });
+      if (!isCurrent()) {
+        if (!controller.signal.aborted) notify("选中的段已变化，原分段保持不变。");
+        return undefined;
+      }
+      const live = stateRef.current.project.sequencePlans.find((item) => item.id === planId)!;
+      const replaced = replaceSemanticSegmentSpan(
+        live, selection.startIndex, count, drafts, drafts.map(() => createId("segment")),
+      );
+      persistSequencePlan(replaced);
+      setTotalDuration(replaced.totalDurationSec);
+      setTotalDurationTouched(true);
+      const firstId = replaced.segments[selection.startIndex]?.id || "";
+      if (firstId) {
+        setActiveSegmentId(firstId);
+        setActiveStoryboardId("");
+      }
+      notify(operation === "merge"
+        ? `已合并为 1 段，全片 ${replaced.segments.length} 段、${replaced.totalDurationSec} 秒。`
+        : `已分成 2 段，全片 ${replaced.segments.length} 段、${replaced.totalDurationSec} 秒。`);
+      return firstId || undefined;
+    } catch (error) {
+      if (controller.signal.aborted || spanRewriteAbortRef.current !== controller) return undefined;
+      if (!isCurrent()) {
+        notify("选中的段已变化，原分段保持不变。");
+        return undefined;
+      }
+      reportRuntimeError("sequence-semantic-planning", error);
+      notify(error instanceof Error ? error.message : "分段改写失败，原分段保持不变。", "error");
+      return undefined;
+    } finally {
+      if (spanRewriteAbortRef.current === controller) {
+        spanRewriteAbortRef.current = null;
+        setSpanRewriteBusy(null);
+      }
+    }
+  };
+
   const moveActiveSequenceSegment = (offset: -1 | 1) => {
     if (!activeSequenceSegment) return;
     if (activeSequencePlan?.segmentationSource === "ai") {
@@ -4331,7 +4448,7 @@ export default function App() {
   // New long stories go directly from the original story to a semantic plan.
   // No master storyboard, full-film conversion or English request is created.
   const generateSemanticSequencePlan = async () => {
-    if (planningBusy || sequencePlanningAbortRef.current || busy || sequenceBatchRunning) return;
+    if (planningBusy || spanRewriteBusy || sequencePlanningAbortRef.current || spanRewriteAbortRef.current || busy || sequenceBatchRunning) return;
     if (!directorSettingsConfirmed) {
       setSequenceSettingsOpen(true);
       notify(directorSettingsConfirmationIssue, "error");
@@ -10193,6 +10310,8 @@ export default function App() {
     exportSequencePromptsAsText,
     exportSequencePromptsAsJson,
     planningBusy,
+    spanRewriteBusy,
+    rewriteSemanticSegmentSpan,
     semanticPlanningProgress,
     sequenceMasterGenerationIssue,
     durationEstimate: currentDurationEstimate,
@@ -11510,6 +11629,8 @@ interface AppContext {
   exportSequencePromptsAsText: (plan: VideoSequencePlan, format: VideoPromptFormat, language: "zh" | "en") => void;
   exportSequencePromptsAsJson: (plan: VideoSequencePlan) => void;
   planningBusy: PlanningBusyState;
+  spanRewriteBusy: SemanticSpanOperation | null;
+  rewriteSemanticSegmentSpan: (operation: SemanticSpanOperation, selectedIds: readonly string[]) => Promise<string | undefined>;
   semanticPlanningProgress: SemanticPlanningStatus | null;
   sequenceMasterGenerationIssue: string;
   durationEstimate: SourcedStoryDurationEstimate | null;
@@ -12482,6 +12603,7 @@ function SequenceFilmstrip({
   project,
   reads,
   activeSegmentId,
+  selectedSegmentIds,
   onSelect,
   generationPromptFormat,
 }: {
@@ -12489,6 +12611,7 @@ function SequenceFilmstrip({
   project: Project;
   reads: PromptDirectorReadCache;
   activeSegmentId: string;
+  selectedSegmentIds?: readonly string[];
   onSelect: (segmentId: string) => void;
   generationPromptFormat?: "h3" | "seedance";
 }) {
@@ -12514,7 +12637,7 @@ function SequenceFilmstrip({
           type="button"
           role="tab"
           aria-selected={segment.id === activeSegmentId}
-          className={`sequence-segment-chip ${segment.id === activeSegmentId ? "active" : ""}`}
+          className={`sequence-segment-chip ${segment.id === activeSegmentId ? "active" : ""} ${selectedSegmentIds?.includes(segment.id) ? "selected" : ""}`}
           onClick={() => onSelect(segment.id)}
         >
           <span className="sequence-segment-index">
@@ -12563,6 +12686,8 @@ function SequencePlannerPanel(ctx: AppContext) {
     setPlanningCustomSegmentDuration,
     resolvedPlanningSegmentDuration,
     planningBusy,
+    spanRewriteBusy,
+    rewriteSemanticSegmentSpan,
     semanticPlanningProgress,
     sequenceMasterGenerationIssue,
     durationEstimate,
@@ -12602,6 +12727,12 @@ function SequencePlannerPanel(ctx: AppContext) {
     confirmSequencePlan,
     notify,
   } = ctx;
+  const [spanSelectedIds, setSpanSelectedIds] = useState<string[]>([]);
+  const spanSegmentKey = activeSequencePlan?.segments.map((segment) => segment.id).join("\0") ?? "";
+  useEffect(() => {
+    const live = new Set(spanSegmentKey ? spanSegmentKey.split("\0") : []);
+    setSpanSelectedIds((current) => current.filter((id) => live.has(id)));
+  }, [spanSegmentKey]);
   const generationPromptFormatLabel = generationPromptFormat === "seedance" ? "Seedance" : "MiniMax H3";
   const fitLabels: Record<string, string> = {
     comfortable: "宽松",
@@ -12611,6 +12742,23 @@ function SequencePlannerPanel(ctx: AppContext) {
   };
   const segmentCount = activeSequencePlan?.segments.length || 0;
   const usesSemanticPlanning = !activeSequencePlan || isSemanticSequencePlan(activeSequencePlan);
+  const spanSelection = orderedSemanticSelection(activeSequencePlan?.segments || [], spanSelectedIds);
+  const spanLocked = spanSelection.ids.some((id) => activeSequencePlan?.segments.find((segment) => segment.id === id)?.locked);
+  const spanBusy = Boolean(spanRewriteBusy || planningBusy || ctx.busy || ctx.sequenceBatchRunning);
+  const spanNextCount = (activeSequencePlan?.segments.length || 0) + 1;
+  const spanNextTotal = spanNextCount * (activeSequencePlan?.segmentDurationSec || 0);
+  const spanSplitFits = spanNextCount <= 900 && spanNextTotal <= 3600;
+  const toggleSpanSegment = (segmentId: string) => {
+    chooseSequenceSegment(segmentId);
+    setSpanSelectedIds((current) => current.includes(segmentId)
+      ? current.filter((id) => id !== segmentId)
+      : [...current, segmentId]);
+  };
+  const runSpanRewrite = (operation: SemanticSpanOperation) => {
+    void rewriteSemanticSegmentSpan(operation, spanSelection.ids).then((firstId) => {
+      if (firstId) setSpanSelectedIds([firstId]);
+    });
+  };
   const visibleSemanticProgress = semanticPlanningProgress?.projectId === state.project.id
     && semanticPlanningProgress.chapterId === activeChapter(state.project)?.id ? semanticPlanningProgress : null;
   const planningStage = activeSequencePlan?.planningStage
@@ -13248,7 +13396,8 @@ function SequencePlannerPanel(ctx: AppContext) {
             project={state.project}
             reads={ctx.promptDirectorReads}
             activeSegmentId={activeSegmentId}
-            onSelect={chooseSequenceSegment}
+            selectedSegmentIds={isSemanticSequencePlan(activeSequencePlan) ? spanSelectedIds : undefined}
+            onSelect={isSemanticSequencePlan(activeSequencePlan) ? toggleSpanSegment : chooseSequenceSegment}
             generationPromptFormat={generationPromptFormat}
           />
           <div className="sequence-segment-editor">
@@ -13265,6 +13414,51 @@ function SequencePlannerPanel(ctx: AppContext) {
                 <span className="compact-note">
                   全片 {formatTime(activeSequenceSegment.globalStartSec)}—{formatTime(activeSequenceSegment.globalEndSec)}；生成时重置为 0—{formatTime(activeSequenceSegment.durationSec)}
                 </span>
+                {isSemanticSequencePlan(activeSequencePlan) && (
+                  <span className="sequence-span-actions">
+                    <span className="compact-note">
+                      {spanSelection.ids.length === 0
+                        ? "点分段卡片选择"
+                        : !spanSelection.contiguous
+                          ? "请把中间的段也点上"
+                          : spanSelection.ids.length === 1
+                            ? `已选第 ${activeSequencePlan.segments[spanSelection.startIndex].index} 段`
+                            : `已选第 ${activeSequencePlan.segments[spanSelection.startIndex].index}–${activeSequencePlan.segments[spanSelection.startIndex + spanSelection.ids.length - 1].index} 段`}
+                    </span>
+                    <Button
+                      small
+                      variant="ghost"
+                      icon={<Link2 size={13} />}
+                      disabled={spanBusy || spanLocked || !spanSelection.contiguous || spanSelection.ids.length < 2}
+                      title={spanLocked ? "已锁定的段要先解锁" : undefined}
+                      onClick={() => runSpanRewrite("merge")}
+                    >
+                      {spanRewriteBusy === "merge"
+                        ? "合并中…"
+                        : spanSelection.contiguous && spanSelection.ids.length >= 2
+                          ? `合并 ${spanSelection.ids.length} 段`
+                          : "合并"}
+                    </Button>
+                    <Button
+                      small
+                      variant="ghost"
+                      icon={<Scissors size={13} />}
+                      disabled={spanBusy || spanLocked || spanSelection.ids.length !== 1 || !spanSplitFits}
+                      title={!spanSplitFits ? "再分一段会超过全片容量" : spanLocked ? "已锁定的段要先解锁" : undefined}
+                      onClick={() => runSpanRewrite("split")}
+                    >
+                      {spanRewriteBusy === "split" ? "分段中…" : "小分段"}
+                    </Button>
+                    <Button
+                      small
+                      variant="ghost"
+                      disabled={spanBusy || spanSelectedIds.length === 0}
+                      onClick={() => setSpanSelectedIds(activeSequenceSegment ? [activeSequenceSegment.id] : [])}
+                    >
+                      清除选择
+                    </Button>
+                  </span>
+                )}
               </div>
               <div className="row sequence-edit-actions">
                 <Badge tone={activeSegmentPromptAction?.action === "complete" ? "green" : activeSegmentPromptAction?.action === "refresh-official" || activeSegmentPromptAction?.action === "translate-english" ? "amber" : activeSequenceSegment.status === "failed" ? "pink" : "violet"}>

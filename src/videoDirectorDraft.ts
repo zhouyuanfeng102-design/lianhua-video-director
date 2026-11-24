@@ -558,7 +558,12 @@ export const videoExecutionElapsedMs = (
   now: number,
   terminalAt?: number,
 ): number | undefined => {
-  if (typeof runtime?.startedAt !== 'number' || !Number.isFinite(runtime.startedAt)) return undefined;
-  const end = runtime.generatedAt ?? runtime.completedAt ?? terminalAt ?? now;
-  return Math.max(0, end - runtime.startedAt);
+  const startedAt = runtime?.startedAt;
+  const generatedAt = runtime?.generatedAt;
+  const completedAt = runtime?.completedAt;
+  if (typeof startedAt !== 'number' || !Number.isFinite(startedAt)) return undefined;
+  const finished = [generatedAt, completedAt, terminalAt].find((value) => (
+    typeof value === 'number' && Number.isFinite(value) && value > startedAt
+  ));
+  return Math.max(0, (finished ?? now) - startedAt);
 };

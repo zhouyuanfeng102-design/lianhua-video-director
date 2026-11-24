@@ -15,6 +15,27 @@ export interface UpdateLogEntry {
  */
 export const updateLogEntries = [
   {
+    version: "5.0.9",
+    releasedAt: "2026-11-24",
+    title: "分段可以合并，也可以再拆成两段",
+    highlights: [
+      "AI 剧情分段里，直接点分段卡片就能连选。",
+      "剧情太少时，点合并，把连续几段收成一段，每段仍是原来的秒数。",
+      "剧情太多时，点小分段，把这一段分成两段，每段仍是原来的秒数。",
+      "只改点中的这几段。其他段的正文、已保存的提示词和成片保持原样。",
+    ],
+  },
+  {
+    version: "5.0.8",
+    releasedAt: "2026-11-23",
+    title: "生成中的执行耗时继续走",
+    highlights: [
+      "RunningHub 仍在生成时，执行耗时从真正开始的时刻继续累计。",
+      "无效的结束时间不再把耗时冻成 0分 0秒。",
+      "排队中的任务仍然不计时。",
+    ],
+  },
+  {
     version: "5.0.7",
     releasedAt: "2026-11-22",
     title: "部位长度留在本人身体上",

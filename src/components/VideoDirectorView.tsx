@@ -334,8 +334,15 @@ export function VideoTaskCard({ task, assets, runtime: fallbackRuntime, runtimeS
   const tailSelection = task.videoJob?.tailPreparation?.selection;
   const automaticallyRecovering = stage === 'submission-unknown' && task.videoJob?.snapshot.connection.backend === 'comfyui' && !state?.trackingStopped;
   const isTerminal = ['succeeded', 'failed', 'stopped'].includes(stage) || (stage === 'submission-unknown' && !automaticallyRecovering);
-  const executionElapsed = videoExecutionElapsedMs(state, now, isTerminal ? task.updatedAt : undefined);
-  const shouldTickExecution = executionElapsed !== undefined && !isTerminal && state?.generatedAt === undefined && state?.completedAt === undefined;
+  const executionClock = state?.startedAt !== undefined ? state
+    : stage === 'running' && typeof state?.submittedAt === 'number'
+      ? { ...state, startedAt: state.submittedAt } : state;
+  const executionElapsed = videoExecutionElapsedMs(executionClock, now, isTerminal ? task.updatedAt : undefined);
+  const executionOpen = typeof executionClock?.startedAt === 'number'
+    && ![executionClock.generatedAt, executionClock.completedAt].some((value) => (
+      typeof value === 'number' && Number.isFinite(value) && value > executionClock.startedAt!
+    ));
+  const shouldTickExecution = executionElapsed !== undefined && executionOpen && !isTerminal;
   const snapshot = task.videoJob?.snapshot;
   const cloudSucceeded = runningHubRemoteSucceeded(task);
   const resultSelectionRequired = Boolean(task.videoJob?.resultSelectionRequired);

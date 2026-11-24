@@ -306,6 +306,8 @@ assert.equal(videoExecutionElapsedMs(undefined, 90_000), undefined, 'missing run
 assert.equal(videoExecutionElapsedMs({ startedAt: undefined }, 90_000), undefined, 'queued time is excluded until the backend really starts');
 assert.equal(videoExecutionElapsedMs({ startedAt: 80_000 }, 90_000), 10_000, 'running time begins at the observed execution start');
 assert.equal(videoExecutionElapsedMs({ startedAt: 80_000, generatedAt: 85_000, completedAt: 88_000 }, 99_000), 5_000, 'successful generation freezes when backend output is ready, excluding save time');
+assert.equal(videoExecutionElapsedMs({ startedAt: 80_000, generatedAt: 0 }, 90_000), 10_000, 'a zero end stamp does not freeze a running task at zero');
+assert.equal(videoExecutionElapsedMs({ startedAt: 80_000, generatedAt: 80_000 }, 90_000), 10_000, 'an end stamp equal to the start does not freeze the running clock');
 assert.equal(videoExecutionElapsedMs({ startedAt: 80_000, completedAt: 86_000 }, 99_000), 6_000, 'failed execution freezes at completion');
 assert.equal(draftFromVideoTask({ ...task, videoJob: { ...task.videoJob!, legacyMetadataIncomplete: true } }), undefined);
 const wrongEnglish = { ...board, officialPromptEn: '【第2段】\n林澜：“Do not go. I have something to say.”\n', englishPrompt: '【第2段】\n林澜：“Do not go.”\n' };

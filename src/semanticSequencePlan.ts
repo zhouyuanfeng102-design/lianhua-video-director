@@ -344,6 +344,36 @@ const spliceDialogueMarkers = (content: string, dialogues: ReadonlyArray<{ id: s
   ), content)
 );
 
+const readPlannedSegment = (item: unknown, index: number, story?: string): SemanticSequenceResponseSegment => {
+  if (!record(item)) throw new SemanticSequenceTechnicalError([`第 ${index + 1} 段必须是对象`]);
+  const missing = SEGMENT_TEXT_FIELDS.filter((field) => typeof item[field] !== 'string');
+  if (missing.length) throw new SemanticSequenceTechnicalError([`第 ${index + 1} 段字符串字段无效：${missing.join('、')}`]);
+  if (!(item.content as string).trim()) throw new SemanticSequenceTechnicalError([`第 ${index + 1} 段缺少 content 正文`]);
+  const texts = copyStrings(item, SEGMENT_TEXT_FIELDS) as Omit<SemanticSequenceResponseSegment, 'semanticSource'>;
+  const semanticSource = readSemanticSource(item.semanticSource, `第 ${index + 1} 段`, story?.length, story);
+  return { ...texts, content: spliceDialogueMarkers(texts.content, semanticSource.dialogues), semanticSource };
+};
+
+/** A merge or small-split answer. Evidence must be copied from the excerpts already on the selected segments. */
+export const parseSemanticSpanRewrite = (
+  raw: string,
+  allowedEvidence: readonly string[],
+  expectedCount: 1 | 2,
+): SemanticSequenceResponseSegment[] => {
+  const value = parseJsonObject(raw);
+  if (typeof value.reason !== 'string') throw new SemanticSequenceTechnicalError(['reason 必须是字符串']);
+  if (!Array.isArray(value.segments) || value.segments.length !== expectedCount) {
+    throw new SemanticSequenceTechnicalError([`segments 必须正好是 ${expectedCount} 段`]);
+  }
+  const allowed = new Set(allowedEvidence);
+  return value.segments.map((item, index) => {
+    const segment = readPlannedSegment(item, index);
+    const unknown = segment.semanticSource.sourceEvidence.filter((evidence) => !allowed.has(evidence.text));
+    if (unknown.length) throw new SemanticSequenceTechnicalError([`第 ${index + 1} 段原文摘录不在选中段已有摘录中`]);
+    return segment;
+  });
+};
+
 const readSemanticSource = (value: unknown, label: string, sourceLength?: number, story?: string): SemanticSegmentSource => {
   const issues: string[] = [];
   if (!record(value)) throw new SemanticSequenceTechnicalError([`${label} 缺少 semanticSource 对象`]);
@@ -579,9 +609,7 @@ export const parseSemanticSequenceResponse = (raw: string, input: SemanticSequen
     for (const field of ['durationSec', 'globalStartSec', 'globalEndSec', 'index'] as const) {
       if (has(item, field) && item[field] !== windows[index][field]) throw new SemanticSequenceTechnicalError([`第 ${index + 1} 段 ${field} 与 D 固定窗口不一致`]);
     }
-    const texts = copyStrings(item, SEGMENT_TEXT_FIELDS) as Omit<SemanticSequenceResponseSegment, 'semanticSource'>;
-    const semanticSource = readSemanticSource(item.semanticSource, `第 ${index + 1} 段`, input.story.length, input.story);
-    return { ...texts, content: spliceDialogueMarkers(texts.content, semanticSource.dialogues), semanticSource };
+    return readPlannedSegment(item, index, input.story);
   });
   return { segmentCount, reason: value.reason as string, fitStatus, segments };
 };

@@ -17,6 +17,7 @@ import {
 } from './masterTimeline';
 import { stripDialogueTurns } from './semanticEvents';
 import { isSemanticSequencePlan, semanticSequenceSourceFingerprint, validateSemanticSequencePlan } from './semanticSequencePlan';
+import type { SemanticSequenceResponseSegment } from './semanticSequencePlan';
 
 const SECOND_PRECISION = 100;
 const EPSILON = 1 / (SECOND_PRECISION * 10);
@@ -1930,6 +1931,90 @@ export const mergeSequenceSegments = (
   plan.segments.splice(firstIndex, 2, merged);
   markStaleWindow(plan.segments, firstIndex, 2);
   clearSourceShotIds(plan.segments);
+  return validateAndNormalizeSequencePlan(plan);
+};
+
+/** Selected chip ids in plan order. Missing ids are dropped. */
+export const orderedSemanticSelection = (
+  segments: readonly { id: string }[],
+  selectedIds: readonly string[],
+): { ids: string[]; startIndex: number; contiguous: boolean } => {
+  const picked = new Set(selectedIds);
+  const indexes = segments.flatMap((segment, index) => picked.has(segment.id) ? [index] : []);
+  const contiguous = indexes.length > 0 && indexes.every((value, index) => value === indexes[0] + index);
+  return {
+    ids: indexes.map((index) => segments[index].id),
+    startIndex: indexes[0] ?? -1,
+    contiguous,
+  };
+};
+
+/**
+ * Replace a contiguous semantic span with one merged segment or two smaller ones.
+ * Each resulting segment keeps the plan's fixed D seconds. Unselected bodies stay.
+ */
+export const replaceSemanticSegmentSpan = (
+  input: VideoSequencePlan,
+  startIndex: number,
+  removeCount: number,
+  drafts: readonly SemanticSequenceResponseSegment[],
+  ids: readonly string[],
+): VideoSequencePlan => {
+  if (!isSemanticSequencePlan(input)) throw new Error('只有 AI 剧情分段可以合并或小分段');
+  if (!Number.isInteger(startIndex) || startIndex < 0 || !Number.isInteger(removeCount) || removeCount < 1) {
+    throw new Error('分段范围无效');
+  }
+  if (drafts.length !== 1 && drafts.length !== 2) throw new Error('合并返回 1 段，小分段返回 2 段');
+  if ((removeCount === 1) !== (drafts.length === 2)) throw new Error('合并收成 1 段，小分段分成 2 段');
+  if (removeCount < 2 && drafts.length === 1) throw new Error('合并至少需要连续的两段');
+  const plan = validateAndNormalizeSequencePlan(structuredClone(input));
+  if (startIndex + removeCount > plan.segments.length) throw new Error('分段范围超出全片');
+  const removed = plan.segments.slice(startIndex, startIndex + removeCount);
+  if (removed.some((segment) => segment.locked)) throw new Error('已锁定的段要先解锁');
+  const freshIds = ids.map((id) => id.trim());
+  if (freshIds.length !== drafts.length || freshIds.some((id) => !id) || new Set(freshIds).size !== freshIds.length) {
+    throw new Error('新视频段 ID 无效');
+  }
+  if (freshIds.some((id) => plan.segments.some((segment) => segment.id === id))) throw new Error('新视频段 ID 与现有段重复');
+  const anchored = drafts.map((draft) => ({ ...draft, semanticSource: structuredClone(draft.semanticSource) }));
+  anchored[0] = { ...anchored[0], entryState: removed[0].entryState };
+  anchored[anchored.length - 1] = { ...anchored[anchored.length - 1], exitState: removed[removed.length - 1].exitState };
+  if (anchored.length === 2) anchored[1] = { ...anchored[1], entryState: anchored[0].exitState };
+  const created: VideoSegment[] = anchored.map((draft, index) => ({
+    id: freshIds[index],
+    index: 1,
+    title: draft.title,
+    globalStartSec: 0,
+    globalEndSec: plan.segmentDurationSec,
+    durationSec: plan.segmentDurationSec,
+    content: draft.content,
+    summary: draft.summary,
+    sourceSceneIds: [...removed[0].sourceSceneIds],
+    sourceBeatIds: [],
+    semanticSource: draft.semanticSource,
+    narrativePurpose: draft.narrativePurpose,
+    entryState: draft.entryState,
+    exitState: draft.exitState,
+    transitionHint: draft.transitionHint,
+    boundaryReason: draft.boundaryReason,
+    continuityPack: draft.continuityPack,
+    status: 'planned',
+  }));
+  plan.segments.splice(startIndex, removeCount, ...created);
+  const following = plan.segments[startIndex + created.length];
+  if (following) {
+    following.status = 'stale';
+    delete following.storyboardId;
+    delete following.failureReason;
+  }
+  const totalDurationSec = roundSeconds(plan.segments.length * plan.segmentDurationSec);
+  plan.totalDurationSec = totalDurationSec;
+  if (plan.durationMode === 'fixed') {
+    plan.requestedTotalDurationSec = totalDurationSec;
+    if (plan.semanticPlanningSnapshot) {
+      plan.semanticPlanningSnapshot = { ...plan.semanticPlanningSnapshot, requestedTotalDurationSec: totalDurationSec };
+    }
+  }
   return validateAndNormalizeSequencePlan(plan);
 };
 

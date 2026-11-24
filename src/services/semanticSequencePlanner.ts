@@ -3,9 +3,9 @@ import { orderTextPromptData } from '../textPromptLayout';
 import { withTextApiUsageContext } from '../textApiUsage';
 import {
   copySemanticSequencePlanningInput, materializeSemanticSequencePlan, parseSemanticSequenceResponse,
-  SemanticSequenceTechnicalError, SEMANTIC_SEQUENCE_FIT_STATUS_RULE,
+  parseSemanticSpanRewrite, SemanticSequenceTechnicalError, SEMANTIC_SEQUENCE_FIT_STATUS_RULE,
 } from '../semanticSequencePlan';
-import type { SemanticSequencePlanningInput } from '../semanticSequencePlan';
+import type { SemanticSequencePlanningInput, SemanticSequenceResponseSegment } from '../semanticSequencePlan';
 import { STORY_PACING_RULE } from '../storyPacing';
 import { STORY_CAUSALITY_RULE } from '../storyCausalityRules';
 import { VIDEO_SCENE_CONTEXT_RULE } from '../videoSceneContext';
@@ -305,4 +305,90 @@ export const requestSemanticSequencePlan = async (
     if (!(error instanceof Error && error.name === 'AbortError')) emitProgress('failed', error instanceof Error ? error.message : 'AI 分段请求失败');
     throw error;
   }
+};
+
+export type SemanticSpanOperation = 'merge' | 'split';
+
+export interface SemanticSpanRewriteInput {
+  operation: SemanticSpanOperation;
+  segmentDurationSec: number;
+  /** Entry the first returned segment must keep. */
+  rangeEntry: string;
+  /** Exit the last returned segment must keep. */
+  rangeExit: string;
+  previousExitState?: string;
+  nextEntryState?: string;
+  segments: readonly SemanticSequenceResponseSegment[];
+}
+
+const spanSegmentSchema = (
+  SEMANTIC_SEQUENCE_RESPONSE_SCHEMA.properties as { segments: { items: Record<string, unknown> } }
+).segments.items;
+
+export const SEMANTIC_SPAN_RESPONSE_SCHEMA: Record<string, unknown> = strictSchemaObject({
+  reason: { type: 'string' },
+  segments: { type: 'array', items: spanSegmentSchema },
+}, ['reason', 'segments']);
+
+const spanRewriteRule = (input: SemanticSpanRewriteInput, expectedCount: 1 | 2): string => [
+  '你只改写用户点选的连续视频段，不重排整章，不输出全片。',
+  input.operation === 'merge'
+    ? `本次是合并：把选中的 ${input.segments.length} 段收成正好 1 段。这一段仍是 ${input.segmentDurationSec} 秒，不是把几段时长加在一起。`
+    : `本次是小分段：把选中的这 1 段分成正好 2 段。每一段仍是 ${input.segmentDurationSec} 秒。`,
+  '可见动作和已有原话都留在返回的段里，按这 1 段或 2 段的时间接起来演。不另写情节，不删掉选中段里已经写出的对白原句。',
+  '第一段 entryState 使用给定的 rangeEntry。最后一段 exitState 使用给定的 rangeExit。分成两段时，后一段 entryState 等于前一段 exitState，切口落在一句说完或一个动作做到的进度上。',
+  'sourceEvidence.text 只能逐字复制选中段已有的 sourceEvidence.text，可以少用，不能新写。dialogues 沿用选中段里的原话、说话人和 id。',
+  `返回一个 JSON 对象，只含 reason 和 segments。segments 的长度必须正好是 ${expectedCount}。每段包含 title、content、summary、narrativePurpose、entryState、exitState、transitionHint、boundaryReason、continuityPack 和 semanticSource。semanticSource 含 sourceEvidence、events、dialogues 三个数组。不要输出 durationSec、globalStartSec、globalEndSec、index 或 fitStatus。`,
+  '最终只输出 JSON 正文，从 { 开始到 } 结束。',
+].join('\n');
+
+/** One text request for the selected span. A wrong count or unknown excerpt throws and leaves the saved plan alone. */
+export const requestSemanticSpanRewrite = async (
+  config: TextApiConfig,
+  input: SemanticSpanRewriteInput,
+  signal?: AbortSignal,
+  options: { isCurrent?: () => boolean } = {},
+): Promise<SemanticSequenceResponseSegment[]> => {
+  const expectedCount: 1 | 2 = input.operation === 'merge' ? 1 : 2;
+  if (input.operation === 'merge' && input.segments.length < 2) throw new SemanticSequenceTechnicalError(['合并至少需要连续的两段']);
+  if (input.operation === 'split' && input.segments.length !== 1) throw new SemanticSequenceTechnicalError(['小分段只改一段']);
+  if (!input.segments.every((segment) => segment.content.trim())) throw new SemanticSequenceTechnicalError(['选中段缺少正文']);
+  const assertCurrent = (): void => {
+    if (signal?.aborted || (options.isCurrent && !options.isCurrent())) {
+      const error = new Error('选中的段已变化，原分段保持不变。');
+      error.name = 'AbortError';
+      throw error;
+    }
+  };
+  assertCurrent();
+  const allowedEvidence = input.segments.flatMap((segment) => segment.semanticSource.sourceEvidence.map((evidence) => evidence.text));
+  const requestConfig = withTextApiUsageContext(config, {}, 'sequence-semantic-planning');
+  const payload = orderTextPromptData({
+    operation: input.operation,
+    segmentDurationSec: input.segmentDurationSec,
+    expectedCount,
+    rangeEntry: input.rangeEntry,
+    rangeExit: input.rangeExit,
+    ...(input.previousExitState !== undefined ? { previousExitState: input.previousExitState } : {}),
+    ...(input.nextEntryState !== undefined ? { nextEntryState: input.nextEntryState } : {}),
+    selectedSegments: input.segments,
+  }, ['selectedSegments']);
+  const rules = [
+    spanRewriteRule(input, expectedCount),
+    ...(hasNsfwDetailSignal(input.segments.map((segment) => segment.content).join('\n')) ? [
+      MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE,
+      SEMANTIC_SEQUENCE_NSFW_SCOPE_RULE,
+    ] : []),
+  ].join('\n\n');
+  assertCurrent();
+  const raw = await requestTextModel(requestConfig, rules, envelope('semantic_span_input', payload), signal, {
+    disableThinking: true,
+    jsonObject: true,
+    ...(supportsGeminiStructuredOutput(requestConfig) ? {
+      jsonSchema: { name: 'semantic_span_rewrite', schema: SEMANTIC_SPAN_RESPONSE_SCHEMA, strict: true },
+    } : {}),
+    finalInstruction: `只返回 ${expectedCount} 段。第一段入口是 rangeEntry，最后一段出口是 rangeExit。`,
+  });
+  assertCurrent();
+  return parseSemanticSpanRewrite(raw, allowedEvidence, expectedCount);
 };

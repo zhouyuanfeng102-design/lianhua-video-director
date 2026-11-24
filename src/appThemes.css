@@ -229,7 +229,7 @@
   .rule-tab.active, .rules-view .list-item.selected,
   .reference-image-picker-item.selected, .project-library-item.active,
   .project-library-item.selected, .project-library-item.active.selected,
-  .sequence-segment-chip.active, .update-log-entry.current,
+  .sequence-segment-chip.active, .sequence-segment-chip.selected, .update-log-entry.current,
   .storyboard-shot-picker-item:has(input:checked),
   .director-option-card.selected, .compact-option-grid .director-option-card.selected,
   .result-language-card.zh, .result-language-card.en,

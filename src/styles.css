@@ -1550,6 +1550,10 @@ input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--pink); }
 .sequence-director-strip .sequence-segment-failure { display: none; }
 .sequence-segment-chip:hover { border-color: rgba(111,99,207,.46); background: #f9f8ff; }
 .sequence-segment-chip.active { border-color: var(--violet); background: #f0effc; box-shadow: inset 3px 0 0 var(--violet); }
+.sequence-segment-chip.selected { box-shadow: inset 0 -3px 0 #0f7a62; }
+.sequence-segment-chip.active.selected { box-shadow: inset 3px 0 0 var(--violet), inset 0 -3px 0 #0f7a62; }
+.sequence-span-actions { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.sequence-span-actions .btn { min-height: 24px; padding: 3px 5px; gap: 3px; }
 .sequence-segment-index { display: inline-flex; align-items: center; gap: 3px; color: var(--violet); font-size: calc(8px * var(--ui-font-scale, 1)); font-weight: 800; }
 .sequence-segment-chip strong,
 .sequence-segment-chip small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
