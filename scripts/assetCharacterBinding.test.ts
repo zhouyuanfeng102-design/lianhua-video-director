@@ -120,7 +120,7 @@ test('单段中英文都使用用户绑定的人物，生成请求实际带图�
     const selected = addVideoDraftAssets(draftFor(project, language), ['frame'], project.assets);
     const result = prepareVideoH3ReferenceDraft(project, selected, { backend: 'api', api });
     assert.equal(result.characterStates.find((person) => person.characterId === 'b')?.status, 'bound');
-    assert.match(result.draft.prompt, /Visual identity reference for 乙 \(S2\): <Picture 1>/u);
+    assert.match(result.draft.prompt, /乙 \(S2\)[\s\S]{0,80}<Picture 1>/u);
     const body = buildVideoApiBody(api, result.draft, ['frame.png']);
     assert.equal(body.prompt, result.draft.prompt);
     assert.equal(result.draft.references[0].assetId, 'frame');
@@ -128,11 +128,32 @@ test('单段中英文都使用用户绑定的人物，生成请求实际带图�
   }
 });
 
+test('没有资产人物编号的图不会因为槽位安到别人身上', () => {
+  const project = fixture();
+  const selected = addVideoDraftAssets(draftFor(project), ['free'], project.assets);
+  selected.references = selected.references.map((reference) => reference.assetId === 'free'
+    ? { ...reference, role: 'character', characterIds: ['b'] } : reference);
+  const result = prepareVideoH3ReferenceDraft(project, selected, { backend: 'api', api: { ...api, provider: 'runninghub' } });
+  assert.notEqual(result.characterStates.find((person) => person.characterId === 'b')?.status, 'bound');
+  assert.equal((result.characterStates.find((person) => person.characterId === 'b')?.slots || []).length, 0);
+});
+
+test('身份句已在该镜前面且图片已有人物编号时直接关联，不等图片量', () => {
+  const project = bindAssetCharacter(fixture(), 'frame', 'b');
+  const selected = addVideoDraftAssets(draftFor(project), ['frame'], project.assets);
+  const bare: VideoTaskApiConfig = { ...api, provider: 'runninghub' };
+  const result = prepareVideoH3ReferenceDraft(project, selected, { backend: 'api', api: bare });
+  assert.equal(result.characterStates.find((person) => person.characterId === 'b')?.status, 'selected');
+  assert.deepEqual(result.characterStates.find((person) => person.characterId === 'b')?.slots, [1]);
+  assert.equal(result.draft.prompt.includes('<Picture'), false);
+  assert.equal(project.storyboards[0].officialPromptZh, zh);
+});
+
 test('RunningHub稀疏物理槽仍准确关联，不把图号当人物顺序', () => {
   const project = bindAssetCharacter(fixture(), 'frame', 'b');
   const draft = { ...draftFor(project), references: [{ assetId: 'frame', role: 'character' as const, slotIndex: 2 }] };
   const result = prepareVideoH3ReferenceDraft(project, draft, { backend: 'api', api: cloud() });
-  assert.match(result.draft.prompt, /乙 \(S2\): <Picture 3>/u);
+  assert.match(result.draft.prompt, /乙 \(S2\) referenced from <Picture 3>/u);
   const body = buildVideoApiBody(cloud(), result.draft, ['frame.png']);
   const fields = body.nodeInfoList as Array<{ nodeId: string; fieldValue: string }>;
   assert.equal(fields.find((field) => field.nodeId === 'i2')?.fieldValue, 'frame.png');
@@ -156,7 +177,7 @@ test('改绑后只在请求副本移除旧人物Picture引用，原稿与对白�
   draft.h3ReferenceBinding = { ...draft.h3ReferenceBinding!, basePrompt: source, renderedPrompt: source, sourcePictures: [{ number: 1, assetId: 'old' }] };
   const result = prepareVideoH3ReferenceDraft(project, addVideoDraftAssets(draft, ['old'], project.assets), { backend: 'api', api });
   assert.ok(!result.draft.prompt.includes(`${anchorA} <Picture 1>`));
-  assert.match(result.draft.prompt, /乙 \(S2\): <Picture 1>/u);
+  assert.match(result.draft.prompt, /乙 \(S2\) referenced from <Picture 1>/u);
   assert.ok(result.draft.prompt.includes('<d>[Chinese] 保留<Picture 1>。</d>'));
   assert.equal(project.storyboards[0].officialPromptZh, zh);
 });
@@ -172,8 +193,8 @@ test('长剧情批量中英文选图沿用资产绑定，关联不需要改分�
   const rows = buildVideoBatchRows(project, plan, settings, { backend: 'api', includeStoryboardReferences: false,
     referenceOverrides: { 'board:zh': [{ assetId: 'frame', role: videoImageRole(project.assets[1]) }], 'board:en': [{ assetId: 'frame', role: 'character' }] } });
   assert.equal(rows.length, 1);
-  assert.match(rows[0].zh!.draft.prompt, /乙 \(S2\): <Picture 1>/u);
-  assert.match(rows[0].en!.draft.prompt, /乙 \(S2\): <Picture 1>/u);
+  assert.match(rows[0].zh!.draft.prompt, /乙 \(S2\) referenced from <Picture 1>/u);
+  assert.match(rows[0].en!.draft.prompt, /乙 \(S2\) referenced from <Picture 1>/u);
 });
 
 test('本地末帧＋参考图保留用户明确绑定的分镜来源图片', () => {
@@ -193,7 +214,7 @@ test('无生成来源资产曾绑定甲，改绑乙或解除也不保留旧甲�
     const selected = addVideoDraftAssets(draft, ['free'], project.assets);
     const result = prepareVideoH3ReferenceDraft(project, selected, { backend: 'api', api });
     assert.ok(!result.draft.prompt.includes(`${anchorA} <Picture 1>`));
-    if (target === 'b') assert.match(result.draft.prompt, /乙 \(S2\): <Picture 1>/u);
+    if (target === 'b') assert.match(result.draft.prompt, /乙 \(S2\) referenced from <Picture 1>/u);
     else assert.doesNotMatch(result.draft.prompt, /Visual identity reference for [^\n]*<Picture 1>/u);
   }
 });
@@ -208,7 +229,7 @@ test('改回生成来源人物也重建旧Picture，不把生成来源误认成�
   const before = structuredClone({ project, draft });
   const result = prepareVideoH3ReferenceDraft(project, addVideoDraftAssets(draft, ['old'], project.assets), { backend: 'api', api });
   assert.ok(!result.draft.prompt.includes(`${anchorB} <Picture 1>`));
-  assert.match(result.draft.prompt, /甲 \(S1\): <Picture 1>/u);
+  assert.match(result.draft.prompt, /甲 \(S1\) referenced from <Picture 1>/u);
   assert.doesNotMatch(result.draft.prompt, /Visual identity reference for 乙/u);
   assert.deepEqual({ project, draft }, before);
 });

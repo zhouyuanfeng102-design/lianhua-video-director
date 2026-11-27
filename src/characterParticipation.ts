@@ -277,9 +277,13 @@ const resolvePromptCharacterParticipationIndexed = (
     return { characters: [...results.values()], ambiguousNames, usedFallback: false };
   }
   for (const binding of options.identityBindings?.characters || []) {
-    if (!results.has(binding.characterId) && prompt.includes(binding.referenceAnchor)) {
-      add(binding.characterId, binding.speakerToken ? 'offscreen' : 'mentioned', 1, binding.referenceAnchor, 'identity');
-    }
+    const anchor = binding.referenceAnchor.trim();
+    if (!anchor) continue;
+    const located = promptShots(prompt).find((entry) => entry.text.includes(anchor));
+    if (!located) continue;
+    const prior = results.get(binding.characterId);
+    if (prior?.presence === 'visible' && prior.visibleShotIndexes.includes(located.index)) continue;
+    add(binding.characterId, 'visible', located.index, anchor, 'identity');
   }
   return { characters: [...results.values()], ambiguousNames, usedFallback: true };
 };

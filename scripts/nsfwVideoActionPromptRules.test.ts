@@ -16,6 +16,8 @@ import { generateSingleSegmentPrompt } from '../src/singleSegmentPrompt';
 import type { ConverterPreset, Storyboard, TextApiConfig, VideoShot } from '../src/types';
 
 const clean = (value: string): string => value.trim();
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /The rear opening remains behind the perineum and is not the contact/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /that same male name's groin/u);
 const converter: ConverterPreset = {
   id: 'nsfw-video-action-converter',
   name: 'NSFW视频动作测试转换器',
@@ -97,9 +99,13 @@ assert.match(convertSystem, /不写成重击、格挡、拳脚冲撞、墙体震
 assert.match(convertSystem, /很轻的、贴在耳边的、没有房间敲击回响的湿滑黏连，停在压低喘息和台词下面/u);
 assert.match(convertSystem, /音效句和 overall_soundscape 不用拍击、脆响、闷响、相撞、冲撞、撞击、重击/u);
 assert.match(convertSystem, /手指进出、揉握和研磨仍是那只手沿着原文写出的那一部位移动/u);
-assert.match(convertSystem, /进的时候龟头穿过她两腿之间的阴唇，留在阴道里面/u);
+assert.match(convertSystem, /他的肉棒连在他的腹股沟上/u);
+assert.doesNotMatch(convertSystem, /穿过她两腿之间的阴唇/u);
+assert.doesNotMatch(convertSystem, /露在体外的只有/u);
 assert.match(convertSystem, /茎身从他的腹股沟伸到她的嘴唇/u);
-assert.match(convertSystem, /嘴唇从龟头沿着肉棒含到他的腹股沟/u);
+assert.match(convertSystem, /她的嘴唇留在这根肉棒上，沿着这根肉棒移到他的腹股沟/u);
+assert.doesNotMatch(convertSystem, /龟头留在她喉咙里/u);
+assert.doesNotMatch(convertSystem, /茎身从他的腹股沟连到她的阴唇/u);
 assert.match(convertSystem, /她仰躺着，背留在身下的垫面上/u);
 assert.match(convertSystem, /抽出大半、整根送回、退回大半、每一下、顶到底、顶入/u);
 assert.match(convertSystem, /一上一下、加快、深而急、更急、加重、顶进去、顶得往前、一耸一耸/u);
@@ -160,7 +166,7 @@ assert.equal(translationSystem.includes(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATI
 assert.match(translationSystem, /具体声音来源、人物反应、动作阶段、材质声/u);
 assert.match(translationSystem, /不译成 slap, knock, thud, generic impact \/ collision \/ thud \/ striking \/ wall vibration \/ combat sound/u);
 assert.match(translationSystem, /a very quiet close-to-the-ear wet adhesion with no room slap, sitting under the breath and dialogue/u);
-assert.match(translationSystem, /The shaft slides in until her labia meet his groin/u);
+assert.match(translationSystem, /His penis remains attached at his groin/u);
 assert.match(translationSystem, /源稿仍是髋和腰贴着的缓慢小幅起伏时，英译保持那句小幅起伏/u);
 assert.match(translationSystem, /抽出大半又整根送回、每一下顶到底或被撞得发颤时，翻译保持该动作/u);
 assert.match(translationSystem, /翻译保持该动作，不在翻译阶段改写/u);
@@ -345,7 +351,9 @@ await generateOfficialSeedancePrompt({
 });
 assert.equal(seedanceSystem.includes(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE), true);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /精液从这名男性的龟头尿道口离开/u);
-assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /龟头是远离腹股沟的那一端/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /他的肉棒连在他的腹股沟上/u);
+assert.doesNotMatch(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /龟头留在阴道里面/u);
+assert.doesNotMatch(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /glans remains inside her vagina/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /骨盆前面、两腿之间、会阴之前/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /胸口、腹部、髋和双膝指向同一方向/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /跪伏、趴跪、俯撑不套用这句同向/u);
@@ -355,9 +363,11 @@ assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /her chest, abdome
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /不译成 chest, pelvis and knees face the same direction/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /She remains kneeling bent over/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /semen leaves the urethral opening at the glans/u);
-assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /The glans is the end farther from his groin/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /His penis remains attached at his groin. His hips stay against her and carry this one slow stroke/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /her vulva is on the front of her pelvis between her thighs, anterior to the perineum/u);
-assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /The shaft slides in until her labia meet his groin\. On the way back the glans remains inside her vagina/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /His hips stay against her and carry this one slow stroke/u);
+assert.doesNotMatch(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /茎身从他的腹股沟连到她的阴唇/u);
+assert.doesNotMatch(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /The shaft runs from his groin to those labia/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /The fluid remains on that named skin and runs down that surface/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /That hand remains on that named part/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /Her lips remain around the glans\. The glans points toward her lips\. The base remains at his groin/u);
@@ -368,7 +378,10 @@ assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /A wordless breath is not a ne
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /Her nipples remain on the front of her breasts/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /His penis remains erect and attached at his groin/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /原文没有写慢动作、且已经进入还连着时，髋带着这一次进出/u);
-assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /The glans passes through her labia and remains inside her vagina between her thighs, pointing along the vaginal canal\. The shaft runs from his groin through her vaginal opening to the glans inside her vagina\. Only the length between his groin and her labia remains outside her body\. Her buttocks stay behind that opening/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /His penis remains attached at his groin/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /他的肉棒连在他的腹股沟上/u);
+assert.doesNotMatch(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /穿过她两腿之间的阴唇/u);
+assert.doesNotMatch(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /露在体外的只有/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /Her clitoris remains on the front of her vulva, under the hood, between her thighs/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /Their lips meet\. Each tongue remains inside its own mouth/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /The joined contact stays in the same place in the frame/u);
@@ -381,22 +394,25 @@ assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /Her head turns from side to s
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /His hips keep the motion\. Her hips stay where this shot placed them/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /The camera holds a medium view of her face, his torso, and Tang San/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /While this motion continues, her back stays arched/u);
-assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /He enters once\. The glans passes through her labia and remains inside her vagina/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /He enters once\. His penis remains attached at his groin\. His hips stay against her and carry this one slow stroke/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /Her breasts follow that chest motion and stay on the front of her chest/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /Each person has two arms and two legs\. Xiao Wu's two legs stay on the platform, one on each side of her hips/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /The Grand Elder's one hand stays on the platform beside her hip\. His remaining hand stays on her waist/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /Each person has two arms and two legs/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /Her knees stay closer to the lens than her face\. Her face stays farther back in the frame/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /The joined contact stays in the same place in the frame/u);
-assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /He enters once\. The glans passes through her labia and remains inside her vagina/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /He enters once\. His penis remains attached at his groin\. His hips stay against her and carry this one slow stroke/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /The sweat remains on that named skin/u);
-assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /The shaft slides in until her labia meet his groin/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /His penis remains attached at his groin/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /Her clitoris remains on the front of her vulva, under the hood, between her thighs/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /Their lips meet\. Each tongue remains inside its own mouth/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /The sweat remains on that named skin/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /Her nipples remain on the front of her breasts/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /His scrotum remains under the penis at his groin, between his thighs/u);
-assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /On the way back the glans remains inside her vagina and still points along the vaginal canal/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /His hips stay against her and carry this one slow stroke/u);
+assert.doesNotMatch(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /龟头留在阴道里面/u);
+assert.doesNotMatch(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /glans remains inside her vagina/u);
+assert.doesNotMatch(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /茎身从他的腹股沟连到她的阴唇/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_TRANSLATION_RULE, /semen remains where the source already places it/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /含入不再写 her labia/u);
 assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /环抱后再伸到腿间，伸过去的是环抱的其中一条手臂/u);

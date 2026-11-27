@@ -4,15 +4,15 @@
 
 从小说与剧情出发，整理人物、场景、连续分镜和视频提示词的工作台，提供 Windows 便携版和 Android 手机 APK。
 
-当前版本：**5.0.9** · 2026-11-24 · Windows x64 / Android
+当前版本：**5.2.6** · 2026-11-27 · Windows x64 / Android
 
 ## 下载与使用
 
 ### [⬇ 下载 Windows EXE / Android APK](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest)
 
-[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-5.0.9.md) · [安卓安装说明](docs/android-install.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
+[最新版本下载页](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/latest) · [本版更新说明](docs/releases/发布说明-5.2.6.md) · [安卓安装说明](docs/android-install.md) · [反馈问题](https://github.com/zhouyuanfeng102-design/lianhua-video-director/issues)
 
-1. 电脑下载 [Windows 便携版 EXE](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/download/v5.0.9/lianhua-video-director-5.0.9-windows-x64-portable.exe)，放在可写入的文件夹里双击运行；安卓手机下载 [Android APK](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/download/v5.0.9/lianhua-video-director-5.0.9-android.apk) 后安装。普通使用者无需安装开发环境。
+1. 电脑下载 [Windows 便携版 EXE](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/download/v5.2.6/lianhua-video-director-5.2.6-windows-x64-portable.exe)，放在可写入的文件夹里双击运行；安卓手机下载 [Android APK](https://github.com/zhouyuanfeng102-design/lianhua-video-director/releases/download/v5.2.6/lianhua-video-director-5.2.6-android.apk) 后安装。普通使用者无需安装开发环境。
 2. 在“API 设置”配置需要使用的文本、图片或视频服务。
 3. 导入 TXT / Markdown 分章原文或手动新建章节，选择章节后解析剧情，再进入导演台生成、编辑和导出提示词。导入不会自动调用 API 批量解析全书。
 
@@ -20,7 +20,7 @@
 
 更新前请先保存项目并退出旧版，保留 EXE 旁的“莲华视频导演台数据”文件夹。 自 1.5.2 起项目与素材分文件保存，移动或备份时请保留整个数据文件夹；不要单独把新存档索引交给旧版打开。详见[保存与恢复说明](docs/releases/发布说明-1.5.2.md)。
 
-安卓更新直接覆盖安装同签名新版 APK，保留应用数据；卸载或清除数据前先导出带素材的 `.lhvd` 项目包。电脑和手机通过项目包互相转移，API 密钥在各设备重新配置。本版软件包、签名和检查范围见 [5.0.9 能力与验证记录](docs/releases/能力与验证记录-5.0.9.md)，Android 真机安装与覆盖升级尚未验证。
+安卓更新直接覆盖安装同签名新版 APK，保留应用数据；卸载或清除数据前先导出带素材的 `.lhvd` 项目包。电脑和手机通过项目包互相转移，API 密钥在各设备重新配置。本版软件包、签名和检查范围见 [5.2.6 能力与验证记录](docs/releases/能力与验证记录-5.2.6.md)，Android 真机安装与覆盖升级尚未验证。
 
 ## 使用与引用说明
 
@@ -45,12 +45,13 @@
 - **自定义生视频**：在视频导演台的第三个模式页签自己选图、填写原文提示词，选择视频 API、RunningHub 云端、已适配网页或 ComfyUI 工作流；草稿独立保存，结果全部入库。
 - **项目与资产管理**：管理图片、视频和音频，保存项目包、备份资料并导出提示词。
 
-## 最新更新 · v5.0.9
+## 最新更新 · v5.2.6
 
-- 在 AI 剧情分段中，可把选中的连续几段合并成一段，或将单段拆成两段。每段沿用原有时长。
-- 修复 RunningHub 视频生成中的执行计时。任务仍在生成时，耗时按实际开始时间继续累计。
+- 调整 MiniMax H3 的动作连续性与机位描述，维持人物站位、朝向和视线。
+- 人物参考图依据资产记录中的人物编号关联，在选图面板显示该人物可用的参考图。
+- Windows 本地抽尾帧与保存成片可并行处理。
 
-[查看本版完整说明](docs/releases/发布说明-5.0.9.md) · [历史版本归档](docs/releases/README.md)
+[查看本版完整说明](docs/releases/发布说明-5.2.6.md) · [历史版本归档](docs/releases/README.md)
 
 ## 从源码运行
 

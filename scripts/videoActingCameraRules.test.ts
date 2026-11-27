@@ -24,6 +24,7 @@ import { H3_IDENTITY_BINDINGS_RULE, H3_PERFORMANCE_DELIVERY_RULE } from '../src/
 import { VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT,
   VIDEO_PROMPT_ENGLISH_AI_REVIEW_SYSTEM_PROMPT,
   VIDEO_PROMPT_ENGLISH_DOCUMENT_TRANSLATION_SYSTEM_PROMPT } from '../src/promptTranslation';
+import { MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE } from '../src/nsfwPromptRules';
 
 const onePlace = '同一时刻每人只占一处';
 const ownAppendage = '尾巴、兽耳、翅膀、角、爪只写在拥有它们的那个姓名的同一句里';
@@ -83,6 +84,9 @@ assert.match(VIDEO_WORLD_SPACE_CAMERA_RULE, /越肩的肩、后脑与背部属�
 assert.match(VIDEO_WORLD_SPACE_CAMERA_RULE, /换机位时从同一世界站位重新推导投影/u);
 assert.match(VIDEO_WORLD_SPACE_CAMERA_RULE, /听者可以仅有肩背入画或处于画外[\s\S]*不得为了同框正脸把听者搬到说话者身后/u);
 assert.match(VIDEO_WORLD_SPACE_CAMERA_RULE, /原剧情或用户明确成立的分身、镜像、倒影[\s\S]*按原意保留/u);
+assert.match(VIDEO_NATURAL_PERFORMANCE_RULE, /羞、愧、怒、怕、冷、醉、挣、憋仍写在这一镜/u);
+assert.match(VIDEO_NATURAL_PERFORMANCE_RULE, /耳朵、脸和脖子保持参考图上的肤色/u);
+assert.match(VIDEO_ACTING_CAMERA_TRANSLATION_RULE, /The ears, face, and neck remain the skin color on the reference image/u);
 assert.match(VIDEO_NATURAL_PERFORMANCE_RULE, /机位和身份图不构成这个动作/u);
 assert.match(VIDEO_NATURAL_PERFORMANCE_RULE, /完整身份不强制露脸/u);
 assert.match(VIDEO_INTERACTION_RULES, new RegExp(HEAD_ON_CHEST_RULE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'u'));
@@ -113,6 +117,26 @@ assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /The solid piece keeps its volume/u)
 assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /Her waist and hips stay in the open space inside the railing/u);
 assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /She follows the open path already in the shot/u);
 assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /This named person remains one body/u);
+assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /If they are already inside, those feet stay the only feet/u);
+assert.match(VIDEO_ACTING_CAMERA_RULES, /后入时机位跟着已经写好的人来写/u);
+assert.doesNotMatch(VIDEO_ACTING_CAMERA_RULES, /看见她的髋侧、他留在她身后的躯干/u);
+assert.doesNotMatch(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /看见她的髋侧、他留在她身后的躯干/u);
+assert.doesNotMatch(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /同时看见脸、他的腹股沟/u);
+assert.doesNotMatch(VIDEO_ACTING_CAMERA_RULES, /要看见相接或阴茎时，用这一个斜侧面固定中景/u);
+assert.match(VIDEO_ACTING_CAMERA_RULES, /他留在她身后，胸口朝她的背/u);
+assert.match(VIDEO_ACTING_CAMERA_RULES, /两人胸口已经相对、他不在她身后时，同一镜要同时看见两张脸/u);
+assert.match(VIDEO_ACTING_CAMERA_RULES, /他说话的嘴留在她的后颈或耳侧，眼睛留在她的后颈/u);
+assert.match(HEAD_ON_CHEST_RULE, /他说话的嘴留在她的后颈或耳侧，眼睛留在她的后颈/u);
+assert.match(VIDEO_INTERACTION_TRANSLATION_RULE, /他留在她身后时，眼睛留在她的后颈/u);
+assert.doesNotMatch(VIDEO_ACTING_CAMERA_RULES, /This shot does not also show both of their backs/u);
+assert.doesNotMatch(VIDEO_ACTING_CAMERA_RULES, /静止镜头，看见她的髋侧和他留在她身后的躯干，看见侧脸/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /阳根留在原文写明的那名男性自己的腹股沟上/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /她的两膝和两只脚是她的，他的两条腿留在他自己的髋上/u);
+assert.match(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /这一段原文是系束带、退出或退开时，写这一段的动作/u);
+assert.doesNotMatch(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /seeing her face, his face, his groin/u);
+assert.doesNotMatch(MOSE_JIANGHU_NSFW_VIDEO_ACTION_RULE, /outside her body between/u);
+assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /A second profile of the same person does not stand opposite them/u);
+assert.match(VIDEO_PROMPT_ENGLISH_AI_TRANSLATION_SYSTEM_PROMPT, /A second profile of the same person does not stand opposite them/u);
 assert.match(VIDEO_SPATIAL_CONTINUITY_RULE, /The order along the path stays the same/u);
 assert.match(VIDEO_CAMERA_SELECTION_RULE, /后面每一镜开头用同一句再写一次先后/u);
 assert.match(VIDEO_CAMERA_SELECTION_RULE, /The other action uses his remaining hand, and that forearm runs from his other arm to that palm/u);

@@ -1,3 +1,4 @@
+import { assetReferenceCharacterOwners } from './assetCharacterBinding';
 import { characterVariantDisplayName } from './characterVariants';
 import { resolveSeedanceCharacterParticipation, resolveStoryboardCharacterParticipation } from './characterParticipation';
 import { semanticSequenceCharacters } from './semanticSequencePlan';
@@ -56,8 +57,10 @@ export const videoSegmentCharacterHints = (
   const hints = participation.characters.flatMap((entry): VideoSegmentCharacterHint[] => {
     const character = byId.get(entry.characterId);
     if (!character) return [];
-    const referenceImageCount = unique(character.assetIds || []).map((id) => assets.get(id))
-      .filter((asset) => Boolean(asset && isImageAsset(asset) && !asset.missing)).length;
+    const referenceImageCount = [...assets.values()].filter((asset) => Boolean(
+      asset && isImageAsset(asset) && !asset.missing
+      && assetReferenceCharacterOwners(project, asset).some((owner) => owner.id === character.id),
+    )).length;
     return [{ id: character.id, name: characterVariantDisplayName(character) || character.name,
       presence: entry.presence, shotIndexes: entry.shotIndexes,
       evidenceCount: entry.evidence.length, referenceImageCount }];

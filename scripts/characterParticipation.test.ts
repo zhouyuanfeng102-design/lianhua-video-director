@@ -35,6 +35,10 @@ assert.equal(resolvePromptCharacterParticipation(shotPrompt('[Shot 1] 敌人向�
 const two = resolvePromptCharacterParticipation(shotPrompt('[Shot 1] 有人提到夏提雅。\n[Shot 3] At 00:20.000, 夏提雅站在门口。'), people);
 assert.deepEqual(two.characters[0].visibleShotIndexes, [3]);
 assert.deepEqual(two.characters[0].shotIndexes, [1, 3]);
+const boundLater = resolvePromptCharacterParticipation(shotPrompt('[Shot 1] 陈安站在柱前。\n[Shot 2] At 00:09.000\n人物身份: 顾明：男性，站在靠里的立柱旁。\n顾明拨开柱子旁的帘子。'), [...people, character('ming', '顾明')], {
+  identityBindings: { version: 1, characters: [{ characterId: 'ming', name: '顾明', referenceAnchor: '人物身份: 顾明：男性，站在靠里的立柱旁。' }] },
+});
+assert.deepEqual(boundLater.characters.find((entry) => entry.characterId === 'ming')?.visibleShotIndexes, [2]);
 const compactShots = resolvePromptCharacterParticipation(shotPrompt('[Shot1] 空旷石台。\n[Shot5] At 00:20.000, 夏提雅站在门口。'), people);
 assert.deepEqual(compactShots.characters[0].visibleShotIndexes, [5], 'compact legacy markers retain the actual displayed shot number');
 const quotedShotMarkers = resolvePromptCharacterParticipation(shotPrompt(

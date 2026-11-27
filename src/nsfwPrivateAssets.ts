@@ -234,13 +234,13 @@ export const privatePartReferenceDuty = (
   const enLabel = part ? privatePartEnglish[part] : 'private part';
   if (sheet) {
     return [
-      `是${name}的私密资料板。只取正文已经写到的那一格的形状、颜色和纹理。分格版式留在资料里。${person}。正文已经呈现对应部位时，形状、颜色和纹理沿用那一格；长度留在这个人自己的身体上，从着生处连到这一截自己的末端，资料图的取景不决定它有多长。这一镜的衣着和遮挡仍按该镜原文。这张图留在部位参考，不占开场画面`,
-      `is ${enName}'s private reference sheet. Use only the panel for the part this shot already writes, and keep its shape, color and texture. The grid stays in the sheet. ${enPerson}. When the written shot shows that part, its shape, color and texture remain those in that panel. Its length remains the length of that part on this person's own body, from its attachment to its own end. The reference crop does not set that length. The clothes in that shot remain as written. This picture stays a part reference and remains out of the opening frame`,
+      `是${name}的私密资料板。只取正文已经写到的那一格，形状属于已经连在${name}自己身上的那一部位。分格版式留在资料里。${person}。`,
+      `supplies the shape of the part already attached on ${enName}, from the panel this shot already writes. The grid stays in the sheet. ${enPerson}.`,
     ];
   }
   return [
-    `是${name}的${label}，提供这一部位的形状、颜色和纹理。${person}。正文已经呈现这个部位时，形状、颜色和纹理沿用这张图；长度留在这个人自己的身体上，从着生处连到这一截自己的末端，资料图的取景不决定它有多长。这一镜的衣着和遮挡仍按该镜原文。这张图留在部位参考，不占开场画面`,
-    `is ${enName}'s ${enLabel} and supplies that part's shape, color and texture. ${enPerson}. When the written shot shows this part, its shape, color and texture remain those in this picture. Its length remains the length of that part on this person's own body, from its attachment to its own end. The reference crop does not set that length. The clothes in that shot remain as written. This picture stays a part reference and remains out of the opening frame`,
+    `是${name}的${label}，提供已经连在${name}自己身上的这一部位的形状、颜色和纹理。${person}。`,
+    `supplies the shape of ${enName}'s ${enLabel} already attached on ${enName}. ${enPerson}.`,
   ];
 };
 

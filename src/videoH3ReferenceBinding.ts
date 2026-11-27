@@ -13,7 +13,7 @@ import { videoSeedanceReferencePlan } from './videoSeedanceReferencePlan';
 import { renderVideoSeedanceSpecification } from './videoSeedanceSpecification';
 import { sourceContentHash } from './sourceContentHash';
 import { videoH3MediaModeContract, videoH3MediaModeIssue } from './videoH3MediaMode';
-import { assetReferenceLocationOwners } from './assetCharacterBinding';
+import { assetReferenceCharacterOwners, assetReferenceLocationOwners } from './assetCharacterBinding';
 import { renderH3ReferenceExecution, type H3ReferenceExecutionCharacter } from './h3ReferenceExecution';
 import { h3CompositionAnchorRole, h3PictureCitedInSubject, h3ReferenceProseRanges, h3TraitPictureLines, renderH3SceneReferenceRetention, renderH3SceneReferenceShots } from './h3TraitPictures';
 import { videoMotionReferenceNumbers } from './videoMotionReferences';
@@ -491,14 +491,14 @@ const videoH3ReferenceUsageEdit = (
   const hasTail = referenceUses.some((use) => use.previousTail);
   const text = [
     selectedUses.length ? language === 'zh'
-      ? `本段参考图用途：${selectedUses.join('；')}。人物朝向与动作时序按正文推进，静态姿态不延长动作。正面身份图锁住五官、衣服，以及这张图上的尾巴、兽耳、翅膀、角和爪。这些附肢只留在已绑定的那一个姓名身上。同一镜有两个以上的已写姓名时，每个人的发型和发饰留在这个人自己的参考图和身份句里，这一镜分别保留每个人的姓名。生殖器资料图只提供已绑定那个人自己的器官形状，不成为另一个人身上的第二根，也不成为相接处单独摆着的一段。它的长度留在这个人自己的身体上，从着生处连到这一截自己的末端，资料图的取景不决定它有多长。锁住的衣服是这张图里已经穿的那一套。扯开或滑落的是这一套。这一镜已经看见通常被衣服盖住的部位时，盖住它的仍是这一套的那一件，腰头敞开，布褪到该部位下面。留着这件时，这件仍然扣好，形状留在布下面。不把参考图的正脸贴到后脑上。同一个姓名在这一镜只有一个身体。参考图只提供这一个身体的脸和衣服，不在房间里再站出一个参考图里的人。`
+      ? `本段参考图用途：${selectedUses.join('；')}。人物朝向与动作时序按正文推进，静态姿态不延长动作。正面身份图锁住五官、衣服，以及这张图上的尾巴、兽耳、翅膀、角和爪。这些附肢只留在已绑定的那一个姓名身上。同一镜有两个以上的已写姓名时，每个人的发型和发饰留在这个人自己的参考图和身份句里，这一镜分别保留每个人的姓名。生殖器资料图提供已经连在这个绑定人物自己身上的那一部位的形状。它的长度留在这个人自己的身体上，从着生处连到这一截自己的末端，资料图的取景不决定它有多长。锁住的衣服是这张图里已经穿的那一套。扯开或滑落的是这一套。这一镜已经看见通常被衣服盖住的部位时，盖住它的仍是这一套的那一件，腰头敞开，布褪到该部位下面。留着这件时，这件仍然扣好，形状留在布下面。不把参考图的正脸贴到后脑上。同一个姓名在这一镜只有一个身体。参考图只提供这一个身体的脸和衣服，不在房间里再站出一个参考图里的人。`
       : `Reference uses for this clip: ${selectedUses.join('; ')}. Facing and action timing follow the written sequence; still poses do not prolong actions. A front identity image locks features and the clothes already in that picture, and keeps that picture's tail, animal ears, wings, horns, and claws on the one named person bound to it. When more than one named person is in the shot, each person's hair and head ornaments remain those in that person's own picture and identity line, and the shot keeps each of those names. A genital reference supplies only that bound person\'s own organ shape. It does not become a second organ on another person or a separate piece at the join. Its length remains the length of that part on this person's own body, from its attachment to its own end. The reference crop does not set that length. Fabric that is pulled or slid remains those same clothes. When this shot already shows a part those clothes usually cover, the piece over that part remains that same costume, with its fastening open and the cloth resting below that part. When that piece stays closed, the shape remains under the cloth. It does not place that front face on the back of the head.` : '',
     multiViewPictures ? language === 'zh'
       ? `多视图身份参考：${multiViewPictures} 各自展示其已关联的同一个人物的多个角度，仅参考身份与外观；图内不同视角不是同时入画的多个人，实际人数、站位、朝向与动作沿用本镜正文。正面参考不把正脸贴到后脑。`
       : `Multi-view identity references: ${multiViewPictures} each show multiple angles of their respective single bound character, for identity and appearance only; the views are not multiple people entering the frame. Character count, placement, facing and action follow the current shot. A front view does not place that face on the back of the head.` : '',
     headLocks,
     language === 'zh'
-      ? `本镜每个已写姓名的人只有一个身体，只站在这一镜正文写的那一个位置。同一人物的多张图、图内多个角度、未分开标注的设定图、多视图、${hasTail ? '场景图' : '开场构图、场景图和通用参考'}只提供这个人的外观或场面，不在画面里再复制一个身体。每张人物图上的尾巴、兽耳、翅膀、角、爪只留在已绑定的那一个姓名身上。同一镜有两个以上的已写姓名时，每个人的发型和发饰留在这个人自己的参考图和身份句里，这一镜分别保留每个人的姓名。生殖器资料图只提供已绑定那个人自己的器官形状，不成为另一个人身上的第二根，也不成为相接处单独摆着的一段。它的长度留在这个人自己的身体上，从着生处连到这一截自己的末端，资料图的取景不决定它有多长。其他已写姓名的人保持正文为他写的头、躯干和附肢。摄影机模拟某人的视角时，这个人不再作为第二个身体画进同一镜；机位在他身旁，或他留在画外作为视点。`
+      ? `本镜每个已写姓名的人只有一个身体，只站在这一镜正文写的那一个位置。同一人物的多张图、图内多个角度、未分开标注的设定图、多视图、${hasTail ? '场景图' : '开场构图、场景图和通用参考'}只提供这个人的外观或场面，不在画面里再复制一个身体。每张人物图上的尾巴、兽耳、翅膀、角、爪只留在已绑定的那一个姓名身上。同一镜有两个以上的已写姓名时，每个人的发型和发饰留在这个人自己的参考图和身份句里，这一镜分别保留每个人的姓名。生殖器资料图提供已经连在这个绑定人物自己身上的那一部位的形状。它的长度留在这个人自己的身体上，从着生处连到这一截自己的末端，资料图的取景不决定它有多长。其他已写姓名的人保持正文为他写的头、躯干和附肢。摄影机模拟某人的视角时，这个人不再作为第二个身体画进同一镜；机位在他身旁，或他留在画外作为视点。`
       : `Each named person in this shot has one body, standing only where this shot places them. Several pictures of one person, several angles inside one picture, an unlabeled character sheet, a multi-view sheet, ${hasTail ? 'or a scene plate' : 'an opening frame, a scene plate, or a general reference'} supply that person\'s appearance or the setting only and do not add another body. A tail, animal ears, wings, horns, or claws in a character picture remain on the one named person bound to that picture. When more than one named person is in the shot, each person's hair and head ornaments remain those in that person's own picture and identity line, and the shot keeps each of those names. A genital reference supplies only that bound person\'s own organ shape. It does not become a second organ on another person or a separate piece at the join. Its length remains the length of that part on this person's own body, from its attachment to its own end. The reference crop does not set that length. Every other named person keeps the head, torso, and limbs written for them. When the camera uses that person\'s viewpoint, that person is not drawn as a second body in the same shot; the camera stays beside them, or they remain off-screen as the viewpoint. This named person remains one body. Later sentences change that same body. The reference image keeps the face and clothes of that body.`,
   ].filter(Boolean).join('\n');
   return { start, end: start, text: `${text}\n` };
@@ -532,9 +532,12 @@ const prepareVideoH3ReferenceDraftInternal = (
   for (const [index, reference] of draft.references.entries()) {
     if (!['character', 'subject'].includes(reference.role) && reference.characterIds === undefined) continue;
     const assets = project.assets.filter((asset) => asset.id === reference.assetId && !asset.missing);
-    if (assets.length !== 1) continue;
-    for (const owner of videoReferenceCharacterOwners(referenceProject, assets[0], reference)) {
-      selectedSlots.set(owner.id, unique([...(selectedSlots.get(owner.id) || []), plan.numbers?.[index] || videoReferenceSlotIndex(reference, index) + 1]));
+    if (assets.length !== 1 || videoReferenceCharacterBindingWarning(reference)) continue;
+    const owned = assetReferenceCharacterOwners(referenceProject, assets[0]);
+    const allowed = reference.characterIds === undefined ? undefined : new Set(reference.characterIds);
+    for (const owner of owned) {
+      if (allowed && !allowed.has(owner.id)) continue;
+      selectedSlots.set(owner.id, unique([...(selectedSlots.get(owner.id) || []), videoReferenceSlotIndex(reference, index) + 1]));
     }
   }
   const relevantIds = unique([...participation.characters.map((entry) => entry.characterId),
@@ -543,8 +546,8 @@ const prepareVideoH3ReferenceDraftInternal = (
     const character = referenceProject.characters.find((entry) => entry.id === characterId);
     if (!character) return [];
     const slots = selectedSlots.get(characterId) || [];
-    return [{ characterId, name: character.name, status: slots.length ? 'pending' : 'unselected', slots,
-      ...(slots.length ? { reason: plan.numbers ? '尚未证明本次图片与正文人物的对应关系。' : plan.warning || '图片编号尚未确定。' } : {}) }];
+    return [{ characterId, name: character.name, status: slots.length ? (plan.numbers ? 'pending' : 'selected') : 'unselected', slots,
+      ...(slots.length && plan.numbers ? { reason: '尚未证明本次图片与正文人物的对应关系。' } : {}) }];
   });
   const markBound = (characterId: string, numbers: number[]) => {
     const item = characterStates.find((entry) => entry.characterId === characterId);
@@ -588,7 +591,9 @@ const prepareVideoH3ReferenceDraftInternal = (
     if (!['character', 'subject'].includes(reference.role) && reference.characterIds === undefined) continue;
     const assets = project.assets.filter((asset) => asset.id === reference.assetId && !asset.missing);
     const asset = assets.length === 1 ? assets[0] : undefined;
-    const owners = asset ? videoReferenceCharacterOwners(referenceProject, asset, reference) : [];
+    const owned = asset ? assetReferenceCharacterOwners(referenceProject, asset) : [];
+    const allowed = reference.characterIds === undefined ? undefined : new Set(reference.characterIds);
+    const owners = owned.filter((owner) => !allowed || allowed.has(owner.id));
     if (!owners.length) {
       warnings.push(`图片槽 ${videoReferenceSlotIndex(reference, index) + 1} 尚未明确绑定本项目人物或形态，仅提示，不阻止生成。`);
       continue;

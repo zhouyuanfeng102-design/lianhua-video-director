@@ -120,6 +120,16 @@ const boardWith = (prompt: string, patch: Partial<Storyboard> = {}): Storyboard 
   const result = videoSegmentCharacterHints(project, frozen, current, undefined, shotPrompt('[Shot 1] 夏提雅站在门口。'));
   assert.equal(result.characters[0]?.name, fullShalltear.name, 'frozen identity remains unchanged');
   assert.equal(result.characters[0]?.referenceImageCount, 1, 'current same-ID assets remain available');
+  const boundOnly = { ...project, assets: [...project.assets, {
+    id: 'portrait-only', name: '只写在图片上的人物参考', type: 'reference', mediaType: 'image', tags: [],
+    characterReferenceId: result.characters[0]?.id,
+  }] } as unknown as Project;
+  assert.equal(videoSegmentCharacterHints(boundOnly, frozen, current, undefined, shotPrompt(`[Shot 1] ${fullShalltear.name.split("·")[0]}站在门口。`)).characters[0]?.referenceImageCount, 2, 'a portrait bound on the image itself counts even when it is absent from the character asset list');
+  const provenanceOnly = { ...baseProject([{ ...fullShalltear, name: '后来改名', assetIds: [] }]), assets: [{
+    id: 'plate', name: '只写来源人物的资料图', type: 'character', role: 'character', mediaType: 'image', tags: [],
+    sourceEntityId: result.characters[0]?.id, sourceEntityKind: 'character',
+  }] } as unknown as Project;
+  assert.equal(videoSegmentCharacterHints(provenanceOnly, frozen, current, undefined, shotPrompt(`[Shot 1] ${fullShalltear.name.split("·")[0]}站在门口。`)).characters[0]?.referenceImageCount, 1, 'a library character reference counted from image provenance still shows when the character asset list is empty');
 }
 
 const seedancePrompt = (subjects: string, timeline: string, references = '无参考图片。') => [

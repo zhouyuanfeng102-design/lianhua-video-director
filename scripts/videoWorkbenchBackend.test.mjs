@@ -139,6 +139,20 @@ test('render plan quantizes frame ranges and bounds transitions / music volume',
   assert.equal(covered.pieces.some((piece) => piece.type === 'crossfade'), false);
 });
 
+test('local video jobs are not capped at two', async (t) => {
+  const { service } = withFixture(t);
+  const errors = await Promise.all([1, 2, 3].map((index) => service.extractFrames({
+    jobId: `parallel-${index}`,
+    projectId: 'project',
+    source: { assetId: `missing-${index}`, relativePath: `video/missing-${index}.mp4` },
+  }, 'owner').then(() => null, (error) => error)));
+  assert.equal(errors.length, 3);
+  for (const error of errors) {
+    assert.ok(error instanceof Error);
+    assert.equal(error.message.includes('同时最多处理 2 个本地视频任务'), false);
+  }
+});
+
 test('missing media tools report a usable error without silent success', async (t) => {
   const { assetRoot, tempRoot } = withFixture(t);
   const service = createVideoWorkbench({ assetRoot, tempRoot, env: { PATH: '' } });

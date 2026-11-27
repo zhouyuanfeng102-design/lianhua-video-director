@@ -5,7 +5,7 @@ import { assetReferenceCharacterOwners, isAssetCharacterBindingImage } from './a
 export interface VideoCharacterReferenceState {
   characterId: string;
   name: string;
-  status: 'unselected' | 'bound' | 'pending';
+  status: 'unselected' | 'bound' | 'pending' | 'selected';
   /** Actual media ordinals when proven, otherwise the selected physical slots. */
   slots: number[];
   reason?: string;

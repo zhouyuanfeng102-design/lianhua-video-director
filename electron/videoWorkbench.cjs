@@ -378,7 +378,6 @@ const createVideoWorkbench = (options) => {
     const id = validId(request?.jobId, '处理任务 ID');
     validId(request?.projectId, '项目 ID');
     if (jobs.has(id)) throw new Error('同一视频处理任务已经在运行，请勿重复提交');
-    if (jobs.size >= 2) throw new Error('同时最多处理 2 个本地视频任务，请等待当前任务结束');
     const job = { id, projectId: request.projectId, kind, ownerId, notify, cancelled: false, committed: false, child: null, stop: null, outputs: [], createdFiles: [], percent: 0, directory: null };
     jobs.set(id, job);
     emit(job, 'preparing', 0, kind === 'render' ? '检查剪辑素材与时间线…' : '检查视频并定位真实帧…');
